@@ -10584,6 +10584,11 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                     erased_mark: sema_check_context_mark(context)
                     checked: sema_check_statements(body, return_type, environment, program, scopes, erased_state, tail_store, context, diagnostics, loop_depth)
                     sema_ownership_keep_mutations(state, erased_state)
+                    // The body reads its bindings whatever a build keeps of
+                    // it, so its reads are uses for L0101/L0102: a parameter
+                    // only a deep check reads is used.
+                    loop (key, _) in erased_state.used_keys -> state.used_keys[key] = true
+                    loop row in state.references.len()..<erased_state.references.len() -> state.used_keys[erased_state.references[row].def_key] = true
                     erased_reasons := [String]{}
                     loop reason_index in erased_mark.incomplete_reasons..<context.incomplete_reasons.len() -> erased_reasons.push(context.incomplete_reasons[reason_index])
                     if {
