@@ -281,14 +281,60 @@ SemaLocalViewProvenance: struct {
     sources: [ViewSourcePath]
 }
 
+// A checked body's read of a declaration's name. A body check records one
+// for every name it resolves, so a run holds millions: each row keeps only
+// what its readers key and place a reference by, never the Symbol's
+// checked type.
 SemaNameReferenceFact: struct {
     span: Span
-    symbol: Symbol
-    kind: String
+    symbol: SemaNameReferent
+    // How the reference reads its declaration: as the kind of declaration
+    // it names (`.Import` for an import alias), or None for a read resolved
+    // by meaning alone; `sema_name_reference_kind_text` spells it for the
+    // name ledger and the semantic index.
+    kind: SymbolKind?
     // The key of the checked body whose check recorded the reference
     // (sema_function_check_pass): a local `symbol` is a row of that body's
     // own keys. "" for a reference no body check recorded.
     body: String{""}
+}
+
+// The declaration a name reference resolves to: its Symbol's identity and
+// definition span, without the checked type or visibility.
+SemaNameReferent: struct {
+    id: SymbolID
+    kind: SymbolKind
+    name: String
+    module_identity: ModuleID
+    // The owning declaration's key, "" for a declaration nothing owns.
+    owner: String
+    span: Span
+}
+
+sema_name_reference_kind_text: fn(kind: SymbolKind?) -> String Never! {
+    declared: kind ?? return "semantic"
+    if declared == {
+        .Function -> "function"
+        .Constant -> "const"
+        .Parameter -> "param"
+        .Local -> "local"
+        .Type -> "type"
+        .Trait -> "trait"
+        .Module -> "module"
+        .Field -> "field"
+        .Variant -> "variant"
+        .Import -> "import_alias"
+        .Impl | .Foreign | .Label -> "semantic"
+    }
+}
+
+// The reference at `span` to `symbol`, read as `kind`.
+sema_name_reference: fn(span: Span, symbol: Symbol, kind: SymbolKind?) -> SemaNameReferenceFact Never! {
+    SemaNameReferenceFact{span: span, symbol: sema_name_referent(symbol), kind: kind}
+}
+
+sema_name_referent: fn(symbol: Symbol) -> SemaNameReferent Never! {
+    SemaNameReferent{id: symbol.id, kind: symbol.kind, name: symbol.name, module_identity: symbol.module_identity, owner: symbol.owner ?? "", span: symbol.span}
 }
 
 SemaLoopValueKind: enum {

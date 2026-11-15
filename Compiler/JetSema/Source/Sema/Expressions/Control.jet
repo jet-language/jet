@@ -1371,7 +1371,7 @@ sema_expression_try_declared_conversion: fn(inner: TExpr, conversion: TryConvert
                 diagnostics.push(sema_error("E2402", span, "`{fn_name}` is not a checked error-conversion function", "the conversion route must retain a callable symbol and signature", "declare a function taking the source error and returning the target error"))
                 return None
             }
-            check_context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "function"})
+            check_context.name_references.push(sema_name_reference(span, symbol, Val(SymbolKind.Function)))
             // A conversion routine cannot fail: `fn(Source) -> Target Never!`.
             valid_signature: if symbol.ty == .Val(function_type) -> if function_type == {
                 .Fn(params, ret, _, _, _, _) -> params.len() == 1 && type_identity_equal(params[0], source) && ret == (Val(Type.Result{ok: target, err: Type.Named{name: "Never"}}))

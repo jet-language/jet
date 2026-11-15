@@ -540,10 +540,26 @@ sema_compiler_index_reference: fn(reference: SemaNameReferenceFact, key: String?
             TComptimeField{name: "name", value: sema_compiler_index_string(reference.symbol.name)},
             TComptimeField{name: "module", value: sema_compiler_index_string(module_path)},
             TComptimeField{name: "scope_identity", value: sema_compiler_index_option_string(None)},
-            TComptimeField{name: "target", value: TComptimeValue.Present{value: sema_compiler_index_anchor(reference.symbol, key, registration)}},
+            TComptimeField{name: "target", value: TComptimeValue.Present{value: sema_compiler_index_anchor(sema_compiler_index_referent_symbol(reference.symbol, None), key, registration)}},
             TComptimeField{name: "span", value: sema_compiler_index_span(reference.span, file)},
         },
     }
+}
+
+// The Symbol the index describes for a reference's declaration. A reference
+// keeps no checked type; `ty` is the one its definition reports.
+sema_compiler_index_referent_symbol: fn(referent: SemaNameReferent, ty: Type?) -> Symbol Never! {
+    owner: if referent.owner == "" -> String?{None} else -> Val(referent.owner)
+    Symbol{id: referent.id, kind: referent.kind, name: referent.name, module_identity: referent.module_identity, owner: owner, span: referent.span, ty: ty, visibility: 0}
+}
+
+// The checked type of the parameter `id` of `function`, which a definition
+// first met through a reference reports as a parameter's own row does.
+sema_compiler_index_parameter_type: fn(function: FnBody, id: SymbolID) -> Type? Never! {
+    loop parameter in function.params {
+        if parameter.local.symbol_id == .Val(local) && local == id -> return Val(parameter.ty)
+    }
+    None
 }
 
 sema_compiler_index_call: fn(call: SemaCallSiteFact, registration: SemaRegistrationGraph, module_path: String, file: String) -> TComptimeValue? {
@@ -2170,13 +2186,17 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
         loop reference in checked_module.name_references {
             target_index := sema_registration_module_index(registration, reference.symbol.module_identity) ?? module_index
             key := String?{None}
+            parameter_type := Type?{None}
             if !symbol_is_local(reference.symbol.id) {
                 key = Val(symbol_table_key(registration.symbols, reference.symbol.id))
             } else if sema_compiler_index_body_row(body_keys, body_rows, reference.body, reference.symbol.name, reference.span, refused) == .Val(body) {
                 key = sema_compiler_index_body_key(registration.symbols, checked_module.functions[body].tree.symbols, reference.symbol.id, reference.symbol.name, reference.span, checked_module.functions[body].key, refused)
+                if reference.symbol.kind == SymbolKind.Parameter {
+                    parameter_type = sema_compiler_index_parameter_type(checked_module.functions[body], reference.symbol.id)
+                }
             }
             if key != None {
-                sema_compiler_index_append_definition(registration, target_index, reference.symbol, key, function_views, definitions, definition_keys)
+                sema_compiler_index_append_definition(registration, target_index, sema_compiler_index_referent_symbol(reference.symbol, parameter_type), key, function_views, definitions, definition_keys)
             }
             references.push(sema_compiler_index_reference(reference, key, registration, checked_module.module_path, registered_module.source_file))
         }

@@ -7,6 +7,7 @@ use jet_foundation.[
     Expr,
     CompilerTraceSink,
     Span,
+    SymbolKind,
     TComptimeReport,
     TComptimeValue,
     Type,
@@ -361,7 +362,7 @@ sema_comptime_body_runtime_locals: fn(scopes: SemaScopeTable) -> [String] Never!
 sema_comptime_reads_pending_local: fn(scopes: SemaScopeTable, context: SemaCheckContext, reference_start: Int) -> Bool Never! {
     loop index in reference_start..<context.name_references.len() {
         reference: context.name_references[index]
-        if reference.kind != "local" -> next
+        if reference.kind != Val(SymbolKind.Local) -> next
         position: sema_scope_resolve_index(scopes, reference.symbol.name) ?? next
         if scopes.bindings[position].pending_prepared -> return true
     }

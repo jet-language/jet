@@ -6031,7 +6031,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
                             if {
                                 sema_expression_field_visible(field.symbol.visibility == 2, field.symbol.visibility == 1, nominal.symbol.module_identity, inline_module, selected_field.span, context.compiler_generated, environment, program) -> {
                                     field_type = Val(sema_inference_substitute_type(field.ty, generic_names, arguments))
-                                    context.name_references.push(SemaNameReferenceFact{span: selected_field.span, symbol: field.symbol, kind: "field"})
+                                    context.name_references.push(sema_name_reference(selected_field.span, field.symbol, Val(SymbolKind.Field)))
                                 }
                                 else -> {
                                     diagnostics.push(sema_expression_private_field_error(selected_field.name, selected_field.span))

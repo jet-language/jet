@@ -474,7 +474,7 @@ sema_expression_struct_field_finish: fn(fact: SemaStructFieldFact, checked: TExp
     if !string_view && !sema_copy_site_record_move(field_value, "the struct literal", environment, program, scopes, state, tail_store, context, diagnostics) {
         return None
     }
-    context.name_references.push(SemaNameReferenceFact{span: field_reference_span, symbol: fact.symbol, kind: "field"})
+    context.name_references.push(sema_name_reference(field_reference_span, fact.symbol, Val(SymbolKind.Field)))
     if fact.holds_view -> context.view_field_values.push(expr_span(field_value))
     reference := sema_expression_field_ref(fact.symbol, Val(owner.id), field_ty)
     reference.boxed = fact.boxed
@@ -673,7 +673,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
     }
     resolved: sema_expression_struct_type(struct_name, type_args, expected, span, environment, program, scopes, diagnostics) ?? return None
     owner := resolved.owner
-    context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})
+    context.name_references.push(sema_name_reference(span, owner, Val(SymbolKind.Type)))
     result_ty := resolved.ty
     // The struct's fields and type parameters, read at the declaration
     // without copying its methods.
@@ -832,7 +832,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
             return None
         }
         trait_symbol: sema_scope_binding_symbol(environment, scopes, trait_symbol_index ?? 0)
-        context.name_references.push(SemaNameReferenceFact{span: span, symbol: trait_symbol, kind: "trait"})
+        context.name_references.push(sema_name_reference(span, trait_symbol, Val(SymbolKind.Trait)))
         resolved_trait: sema_expr_expected_type(Type.Named{name: trait_name}, environment, program)
         target: if resolved_trait == {
             .TraitObject(_) -> resolved_trait
@@ -966,7 +966,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
     }
     if owner_symbol == .Val(core_owner) {
         if sema_expression_core_export_variants(environment, program, core_owner) == .Val(variants) {
-            context.name_references.push(SemaNameReferenceFact{span: span, symbol: core_owner, kind: "type"})
+            context.name_references.push(sema_name_reference(span, core_owner, Val(SymbolKind.Type)))
             return sema_expression_core_enum_literal(core_owner.name, core_owner.name, variants, variant, args, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
@@ -985,7 +985,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
         diagnostics.push(sema_expression_unknown_type(resolved_name, span, environment, program))
         return None
     }
-    context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})
+    context.name_references.push(sema_name_reference(span, owner, Val(SymbolKind.Type)))
     // The enum's variants, groups and type parameters, read at the
     // declaration without copying its methods.
     if sema_scope_declaration_kind(environment, program, owner.id) == None {
@@ -1023,7 +1023,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
     owner_key: sema_program_symbol_key(program, owner.id)
     variant_id: sema_symbol_id(program, context, SymbolKind.Variant, sema_scope_module_text(environment, program, owner.module_identity), owner_key, variant)
     variant_symbol: Symbol{id: variant_id, kind: SymbolKind.Variant, name: variant, module_identity: owner.module_identity, owner: Val(owner_key), span: selected_variant.name_span, ty: sema_registration_variant_type(selected_variant.payload), visibility: owner.visibility}
-    context.name_references.push(SemaNameReferenceFact{span: variant_span ?? span, symbol: variant_symbol, kind: "variant"})
+    context.name_references.push(sema_name_reference(variant_span ?? span, variant_symbol, Val(SymbolKind.Variant)))
     generic_names: loop parameter in enum_def.type_params -> parameter.name
     generic_args := type_args
     if generic_args.len() == 0 && expected == .Val(expected_ty) {

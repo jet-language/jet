@@ -650,7 +650,7 @@ sema_marker_rules_staged_argument_value: fn(values: [SemaComptimeItemValue], env
 }
 
 // `key` is the constant's key (a body's own constant has its body's key).
-sema_marker_rules_constant_for_reference: fn(symbol: Symbol, key: String, references: [SemaNameReferenceFact], reference_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> TComptimeValue? {
+sema_marker_rules_constant_for_reference: fn(symbol: SemaNameReferent, key: String, references: [SemaNameReferenceFact], reference_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> TComptimeValue? {
     found := false
     loop index in reference_start..<references.len() {
         reference := references[index]
@@ -2228,7 +2228,9 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
     address_taken := [U32:Bool]{}
     loop module_result in modules {
         loop reference in module_result.name_references {
-            if reference.kind == "function" -> address_taken[reference.symbol.id.id] = true
+            if reference.kind == Val(SymbolKind.Function) {
+                address_taken[reference.symbol.id.id] = true
+            }
         }
     }
     found := false

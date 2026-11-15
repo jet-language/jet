@@ -443,7 +443,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
         tuple_owner: type_name(base.ty)
         tuple_field_id: sema_symbol_id(program, context, SymbolKind.Field, "", tuple_owner, member)
         tuple_field_symbol: Symbol{id: tuple_field_id, kind: SymbolKind.Field, name: member, module_identity: module_none(), owner: None, span: span, ty: Val(tuple_field.ty), visibility: 0}
-        context.name_references.push(SemaNameReferenceFact{span: span, symbol: tuple_field_symbol, kind: "field"})
+        context.name_references.push(sema_name_reference(span, tuple_field_symbol, Val(SymbolKind.Field)))
         return sema_expr_expected_owned(tuple_field, expected, environment, program, diagnostics)
     }
     // A guard's held value is a compiler-known place, not
@@ -490,7 +490,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
             owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
         }
         if owner == .Val(owner_symbol) {
-            context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner_symbol, kind: "type"})
+            context.name_references.push(sema_name_reference(span, owner_symbol, Val(SymbolKind.Type)))
             // The struct's fields, read at the declaration without copying
             // its methods.
             if sema_scope_declaration_struct(environment, program, owner_symbol.id) == .Val(struct_def) {
@@ -509,7 +509,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
                         owner_key: sema_program_symbol_key(program, owner_symbol.id)
                         field_id: sema_symbol_id(program, context, SymbolKind.Field, sema_scope_module_text(environment, program, owner_symbol.module_identity), owner_key, field.name)
                         field_symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner_symbol.module_identity, owner: Val(owner_key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else if field.is_package_pub -> 1 else -> 0}
-                        context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
+                        context.name_references.push(sema_name_reference(span, field_symbol, Val(SymbolKind.Field)))
                         reference := sema_expression_field_ref(field_symbol, Val(owner_symbol.id), field_ty)
                         reference.boxed = sema_scope_environment_boxed_edge(environment, program, owner_symbol.id, member)
                         value: sema_tree_node(field_ty, TExprKind.Field{receiver: base, field: reference}, span)
@@ -1199,7 +1199,7 @@ sema_expression_module_constant_read: fn(graph: SemaRegistrationGraph, resolved:
     symbol: sema_resolved_symbol(graph, resolved)
     if source_function {
         signature: symbol.ty ?? return SemaMethodSpecialCheck{handled: false, value: None}
-        context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "function"})
+        context.name_references.push(sema_name_reference(span, symbol, Val(SymbolKind.Function)))
         if sema_expr_marked_function_value(label, symbol.id, span, expected, environment, program, diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
@@ -1213,7 +1213,7 @@ sema_expression_module_constant_read: fn(graph: SemaRegistrationGraph, resolved:
         function: sema_node(context, value_type, NodeKind.ConstRef{symbol: symbol.id}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(function, expected, environment, program, diagnostics)}
     }
-    context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "const"})
+    context.name_references.push(sema_name_reference(span, symbol, Val(SymbolKind.Constant)))
     ty: symbol.ty ?? {
         sema_check_unsupported(context, "constant `{label}` (read at offset {span.start}) has no staged compile-time value")
         return SemaMethodSpecialCheck{handled: true, value: None}

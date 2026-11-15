@@ -14,6 +14,7 @@
 use jet_foundation.[
     Expr,
     Span,
+    SymbolKind,
     Type,
     expr_span,
 ]
@@ -82,7 +83,9 @@ sema_comptime_local_value_candidate: fn(
     if sema_comptime_local_value_holds_callback_bound(context, node_start) -> return false
     loop index in reference_start..<context.name_references.len() {
         reference: context.name_references[index]
-        if reference.kind != "local" && reference.kind != "param" -> next
+        if reference.kind != Val(SymbolKind.Local) && reference.kind != Val(SymbolKind.Parameter) {
+            next
+        }
         position: sema_scope_resolve_index(scopes, reference.symbol.name) ?? return false
         if scopes.bindings[position].prepared == None -> return false
     }

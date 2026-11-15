@@ -4919,7 +4919,7 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     unresolved_index: sema_scope_resolve_index(scopes, name)
     if unresolved_index == .Val(unresolved) {
         if scopes.bindings[unresolved].symbol.kind == SymbolKind.Constant && sema_scope_binding_type(environment, scopes, unresolved) == None {
-            context.name_references.push(SemaNameReferenceFact{span: span, symbol: sema_scope_binding_symbol(environment, scopes, unresolved), kind: "const"})
+            context.name_references.push(sema_name_reference(span, sema_scope_binding_symbol(environment, scopes, unresolved), Val(SymbolKind.Constant)))
             // A comptime probe reads this reference as a dependency wait; a
             // body check after the comptime run reaches here only when the
             // constant's value never landed, which the reason names.
@@ -4936,7 +4936,7 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
                     sema_check_unsupported(context, "prepared local `{name}` (read at offset {span.start}) has no checked type")
                     return None
                 }
-                context.name_references.push(SemaNameReferenceFact{span: span, symbol: prepared_binding.symbol, kind: "local"})
+                context.name_references.push(sema_name_reference(span, prepared_binding.symbol, Val(SymbolKind.Local)))
                 if !sema_ownership_note_reference(state, name, span, scopes, SemaOwnershipReferenceKind.Read) {
                     return None
                 }
@@ -5023,18 +5023,16 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
 // The reference fact of a read of the binding at `binding_index`.
 sema_expr_note_name_reference: fn(span: Span, binding_index: Int, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: &SemaCheckContext) {
     symbol: sema_scope_binding_symbol(environment, scopes, binding_index)
-    reference_kind := "semantic"
+    // A read of a field, variant, import, impl, foreign or label binding is
+    // resolved by meaning alone.
+    reference_kind := SymbolKind?{None}
     if symbol.kind == {
-        .Function -> { reference_kind = "function" }
-        .Constant -> { reference_kind = "const" }
-        .Parameter -> { reference_kind = "param" }
-        .Local -> { reference_kind = "local" }
-        .Type -> { reference_kind = "type" }
-        .Trait -> { reference_kind = "trait" }
-        .Module -> reference_kind = "module"
+        .Function | .Constant | .Parameter | .Local | .Type | .Trait | .Module -> {
+            reference_kind = Val(symbol.kind)
+        }
         .Impl | .Field | .Variant | .Import | .Foreign | .Label -> {}
     }
-    context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: reference_kind})
+    context.name_references.push(sema_name_reference(span, symbol, reference_kind))
 }
 
 sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

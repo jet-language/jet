@@ -5930,7 +5930,7 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
         if skipped < generated_references.len() && index >= generated_references[skipped].start {
             next
         }
-        if reference.kind != "const" -> next
+        if reference.kind != Val(SymbolKind.Constant) -> next
         owner: reference.symbol.module_identity
         if !module_is_none(owner) && owner != module_identity -> next
         candidates.push(SemaModuleValueRead{key: reference.symbol.id, name: reference.symbol.name.copy(), consumer: "", span: reference.span})
@@ -6254,9 +6254,9 @@ SemaNameReferenceFilter: struct {
     called: [Bool]
 }
 
-sema_name_add_reference: fn(facts: &NameFacts, filter: &SemaNameReferenceFilter, graph: SemaRegistrationGraph, owner_names: [String:String], module_indices: &[Int], span: Span, symbol: Symbol, kind: String) Never! {
+sema_name_add_reference: fn(facts: &NameFacts, filter: &SemaNameReferenceFilter, graph: SemaRegistrationGraph, owner_names: [String:String], module_indices: &[Int], span: Span, symbol: SemaNameReferent, kind: String) Never! {
     module_index: sema_registration_cached_module_index(graph, symbol.module_identity, module_indices) ?? return
-    owner_key: symbol.owner ?? ""
+    owner_key: symbol.owner
     kind_part: name_index(name_intern(filter.parts, kind))
     owner_part: name_index(name_intern(filter.parts, owner_key))
     name_part: name_index(name_intern(filter.parts, symbol.name))
@@ -6776,14 +6776,14 @@ sema_name_part_facts: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
             }
         }
         loop reference in checked.name_references {
-            sema_name_add_reference(facts, filter, graph, owner_names, module_indices, reference.span, reference.symbol, reference.kind)
+            sema_name_add_reference(facts, filter, graph, owner_names, module_indices, reference.span, reference.symbol, sema_name_reference_kind_text(reference.kind))
         }
         loop call in checked.call_facts {
             callee: call.callee ?? next
             row: sema_name_symbol_row(symbol_index, callee)
             if row < 0 || filter.called[row] -> next
             filter.called[row] = true
-            sema_name_add_reference(facts, filter, graph, owner_names, module_indices, call.span, symbol_index.declarations[row].symbol, symbol_index.declarations[row].kind)
+            sema_name_add_reference(facts, filter, graph, owner_names, module_indices, call.span, sema_name_referent(symbol_index.declarations[row].symbol), symbol_index.declarations[row].kind)
         }
         module_index += 1
     }
@@ -6807,7 +6807,7 @@ sema_name_join_facts: fn(graph: SemaRegistrationGraph, owner_names: [String:Stri
     module_indices := [Int]{}
     filter := SemaNameReferenceFilter{parts: name_table(), seen: sema_name_reference_keys(), called: [Bool]{}}
     loop reference_index in 0..<graph.output_name_references.len() {
-        sema_name_add_reference(facts, filter, graph, owner_names, module_indices, graph.output_name_references[reference_index].span, graph.output_name_references[reference_index].symbol, graph.output_name_references[reference_index].kind)
+        sema_name_add_reference(facts, filter, graph, owner_names, module_indices, graph.output_name_references[reference_index].span, graph.output_name_references[reference_index].symbol, sema_name_reference_kind_text(graph.output_name_references[reference_index].kind))
     }
     NameFacts{
         modules: facts.modules,
@@ -10423,7 +10423,7 @@ sema_failure_solve: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRe
     address_taken := [String:Bool]{}
     loop module_result in modules {
         loop reference in module_result.name_references {
-            if reference.kind == "function" {
+            if reference.kind == Val(SymbolKind.Function) {
                 address_taken[sema_registration_symbol_key(graph, reference.symbol.id)] = true
             }
         }
@@ -10718,7 +10718,7 @@ SemaComptimeFailureClosure: struct {
 
 sema_comptime_failure_closure_add: fn(graph: SemaRegistrationGraph, closure: &SemaComptimeFailureClosure, result: SemaComptimeFunctionResult) Never! {
     loop reference in result.name_references {
-        if reference.kind == "function" {
+        if reference.kind == Val(SymbolKind.Function) {
             closure.address_taken[sema_registration_symbol_key(graph, reference.symbol.id)] = true
         }
     }

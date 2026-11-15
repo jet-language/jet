@@ -7,7 +7,7 @@
 // in declaration order (an enum its variant's position first), and a get,
 // which reads them back in that order. The hand-written halves are in
 // JetFoundation Facts/BodyCodecRows.jet.
-use jet_foundation.[BodyCodecIn, BodyCodecOut, Diagnostic, DiagnosticBuildError, DiagnosticCallRewrite, DiagnosticCause, DiagnosticCryptoMisuseReason, DiagnosticErrorContextFrame, DiagnosticErrorConversion, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorJourneyFrame, DiagnosticErrorSpan, DiagnosticFixApplicability, DiagnosticFixSafety, DiagnosticLabel, DiagnosticMoment, DiagnosticNoFixReason, DiagnosticNoFixReasonKind, DiagnosticOrigin, DiagnosticStructured, FnBody, FunctionDefaultRef, SharedLifetime, Symbol, SymbolKeys, SymbolKind, TEffectFacts, TargetDMAOperation, TargetDMAOperationFact, TargetDMAOwner, TargetHardwareUnresolvedReference, TargetHardwareUse, TargetInterruptHandlerFact, TargetRegisterAccessFact, TargetRegisterOperation, TextEdit, Type, body_codec_get_bodyexpr, body_codec_get_bool, body_codec_get_count, body_codec_get_expr, body_codec_get_fnbody, body_codec_get_functiondefaultref, body_codec_get_int, body_codec_get_list_string, body_codec_get_list_tcomptimevalue, body_codec_get_list_tgenericparam, body_codec_get_list_type, body_codec_get_moduleid, body_codec_get_opt_coremarkerapplication, body_codec_get_opt_int, body_codec_get_opt_list_effectrowentry, body_codec_get_opt_span, body_codec_get_opt_string, body_codec_get_opt_symbolid, body_codec_get_opt_type, body_codec_get_registerwidth, body_codec_get_sharedlifetime, body_codec_get_span, body_codec_get_string, body_codec_get_symbolid, body_codec_get_symbolkeys, body_codec_get_tag, body_codec_get_tcomptimevalue, body_codec_get_teffectfacts, body_codec_get_tfailurecarrier, body_codec_get_tfunckind, body_codec_get_type, body_codec_put_bodyexpr, body_codec_put_bool, body_codec_put_count, body_codec_put_expr, body_codec_put_fnbody, body_codec_put_functiondefaultref, body_codec_put_int, body_codec_put_list_string, body_codec_put_list_tcomptimevalue, body_codec_put_list_tgenericparam, body_codec_put_list_type, body_codec_put_moduleid, body_codec_put_opt_coremarkerapplication, body_codec_put_opt_int, body_codec_put_opt_list_effectrowentry, body_codec_put_opt_span, body_codec_put_opt_string, body_codec_put_opt_symbolid, body_codec_put_opt_type, body_codec_put_registerwidth, body_codec_put_sharedlifetime, body_codec_put_span, body_codec_put_string, body_codec_put_symbolid, body_codec_put_symbolkeys, body_codec_put_tag, body_codec_put_tcomptimevalue, body_codec_put_teffectfacts, body_codec_put_tfailurecarrier, body_codec_put_tfunckind, body_codec_put_type]
+use jet_foundation.[BodyCodecIn, BodyCodecOut, Diagnostic, DiagnosticBuildError, DiagnosticCallRewrite, DiagnosticCause, DiagnosticCryptoMisuseReason, DiagnosticErrorContextFrame, DiagnosticErrorConversion, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorJourneyFrame, DiagnosticErrorSpan, DiagnosticFixApplicability, DiagnosticFixSafety, DiagnosticLabel, DiagnosticMoment, DiagnosticNoFixReason, DiagnosticNoFixReasonKind, DiagnosticOrigin, DiagnosticStructured, FnBody, FunctionDefaultRef, SharedLifetime, SymbolKeys, SymbolKind, TEffectFacts, TargetDMAOperation, TargetDMAOperationFact, TargetDMAOwner, TargetHardwareUnresolvedReference, TargetHardwareUse, TargetInterruptHandlerFact, TargetRegisterAccessFact, TargetRegisterOperation, TextEdit, Type, body_codec_get_bodyexpr, body_codec_get_bool, body_codec_get_count, body_codec_get_expr, body_codec_get_fnbody, body_codec_get_functiondefaultref, body_codec_get_int, body_codec_get_list_string, body_codec_get_list_tcomptimevalue, body_codec_get_list_tgenericparam, body_codec_get_list_type, body_codec_get_moduleid, body_codec_get_opt_coremarkerapplication, body_codec_get_opt_int, body_codec_get_opt_list_effectrowentry, body_codec_get_opt_span, body_codec_get_opt_string, body_codec_get_opt_symbolid, body_codec_get_registerwidth, body_codec_get_sharedlifetime, body_codec_get_span, body_codec_get_string, body_codec_get_symbolid, body_codec_get_symbolkeys, body_codec_get_tag, body_codec_get_tcomptimevalue, body_codec_get_teffectfacts, body_codec_get_tfailurecarrier, body_codec_get_tfunckind, body_codec_get_type, body_codec_put_bodyexpr, body_codec_put_bool, body_codec_put_count, body_codec_put_expr, body_codec_put_fnbody, body_codec_put_functiondefaultref, body_codec_put_int, body_codec_put_list_string, body_codec_put_list_tcomptimevalue, body_codec_put_list_tgenericparam, body_codec_put_list_type, body_codec_put_moduleid, body_codec_put_opt_coremarkerapplication, body_codec_put_opt_int, body_codec_put_opt_list_effectrowentry, body_codec_put_opt_span, body_codec_put_opt_string, body_codec_put_opt_symbolid, body_codec_put_registerwidth, body_codec_put_sharedlifetime, body_codec_put_span, body_codec_put_string, body_codec_put_symbolid, body_codec_put_symbolkeys, body_codec_put_tag, body_codec_put_tcomptimevalue, body_codec_put_teffectfacts, body_codec_put_tfailurecarrier, body_codec_put_tfunckind, body_codec_put_type]
 
 body_codec_put_opt_semafunctionresult: fn(out: &BodyCodecOut, value: SemaFunctionResult?) Never! {
     if value == .Val(inner) {
@@ -1838,42 +1838,52 @@ body_codec_get_semacheckedtextevaluation: fn(bytes: [U8], input: &BodyCodecIn) -
     SemaCheckedTextEvaluation{module_identity: f0, key: f1, type_name: f2, source_file: f3, source_expression: f4, expression: f5, ty: f6, hardware_use: f7, reachable_function_keys: f8, dependencies: f9, span: f10, code: f11, what: f12, fix: f13}
 }
 
+body_codec_put_opt_symbolkind: fn(out: &BodyCodecOut, value: SymbolKind?) Never! {
+    if value == .Val(inner) {
+        body_codec_put_bool(out, true)
+        body_codec_put_symbolkind(out, inner)
+        return
+    }
+    body_codec_put_bool(out, false)
+}
+
+body_codec_get_opt_symbolkind: fn(bytes: [U8], input: &BodyCodecIn) -> SymbolKind? Never! {
+    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_symbolkind(bytes, input))
+    None
+}
+
 body_codec_put_semanamereferencefact: fn(out: &BodyCodecOut, value: SemaNameReferenceFact) Never! {
     body_codec_put_span(out, value.span)
-    body_codec_put_symbol(out, value.symbol)
-    body_codec_put_string(out, value.kind)
+    body_codec_put_semanamereferent(out, value.symbol)
+    body_codec_put_opt_symbolkind(out, value.kind)
     body_codec_put_string(out, value.body)
 }
 
 body_codec_get_semanamereferencefact: fn(bytes: [U8], input: &BodyCodecIn) -> SemaNameReferenceFact Never! {
     f0: body_codec_get_span(bytes, input)
-    f1: body_codec_get_symbol(bytes, input)
-    f2: body_codec_get_string(bytes, input)
+    f1: body_codec_get_semanamereferent(bytes, input)
+    f2: body_codec_get_opt_symbolkind(bytes, input)
     f3: body_codec_get_string(bytes, input)
     SemaNameReferenceFact{span: f0, symbol: f1, kind: f2, body: f3}
 }
 
-body_codec_put_symbol: fn(out: &BodyCodecOut, value: Symbol) Never! {
+body_codec_put_semanamereferent: fn(out: &BodyCodecOut, value: SemaNameReferent) Never! {
     body_codec_put_symbolid(out, value.id)
     body_codec_put_symbolkind(out, value.kind)
     body_codec_put_string(out, value.name)
     body_codec_put_moduleid(out, value.module_identity)
-    body_codec_put_opt_string(out, value.owner)
+    body_codec_put_string(out, value.owner)
     body_codec_put_span(out, value.span)
-    body_codec_put_opt_type(out, value.ty)
-    body_codec_put_int(out, value.visibility)
 }
 
-body_codec_get_symbol: fn(bytes: [U8], input: &BodyCodecIn) -> Symbol Never! {
+body_codec_get_semanamereferent: fn(bytes: [U8], input: &BodyCodecIn) -> SemaNameReferent Never! {
     f0: body_codec_get_symbolid(bytes, input)
     f1: body_codec_get_symbolkind(bytes, input)
     f2: body_codec_get_string(bytes, input)
     f3: body_codec_get_moduleid(bytes, input)
-    f4: body_codec_get_opt_string(bytes, input)
+    f4: body_codec_get_string(bytes, input)
     f5: body_codec_get_span(bytes, input)
-    f6: body_codec_get_opt_type(bytes, input)
-    f7: body_codec_get_int(bytes, input)
-    Symbol{id: f0, kind: f1, name: f2, module_identity: f3, owner: f4, span: f5, ty: f6, visibility: f7}
+    SemaNameReferent{id: f0, kind: f1, name: f2, module_identity: f3, owner: f4, span: f5}
 }
 
 body_codec_put_symbolkind: fn(out: &BodyCodecOut, value: SymbolKind) Never! {

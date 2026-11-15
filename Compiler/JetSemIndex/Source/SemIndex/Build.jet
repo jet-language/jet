@@ -55,6 +55,7 @@ use {
         sema_arithmetic_policy_facts,
         sema_compiler_index_view_map,
         sema_compiler_index_view_provenance,
+        sema_name_reference_kind_text,
         sema_state_graph_facts,
     ]
 }
@@ -407,7 +408,7 @@ semindex_scoped_ref: fn(name: String, span: Span, ctx: SemWalk) -> SemRef {
     loop reference in ctx.references {
         if reference.span.start != span.start || reference.span.end != span.end -> next
         module_path: ctx.module_paths.get(Int{reference.symbol.module_identity.id}) ?? break
-        target = Val(SemAnchor{module_path: module_path, kind: reference.kind, def_span: reference.symbol.span, semantic_identity: None})
+        target = Val(SemAnchor{module_path: module_path, kind: sema_name_reference_kind_text(reference.kind), def_span: reference.symbol.span, semantic_identity: None})
         break
     }
     SemRef{name: name, span: span, module_path: ctx.module_path, scope_identity: Val(semindex_active_scope(ctx)), target: target, fact: None}
