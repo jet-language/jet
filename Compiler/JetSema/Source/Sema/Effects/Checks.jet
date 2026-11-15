@@ -219,10 +219,13 @@ SemaMemoryEvent: struct {
 }
 
 // A call site to a user function, for arena multiplicity (Rust `MemoryCall`).
+// `target` is the callee's node once the graph's edges are final
+// (sema_effect_resolve_edges).
 SemaMemoryCall: struct {
     callee: String
     span: Span
     executions: Int?
+    target: Int{-1}
 }
 
 // A place a strict memory fact cannot see through (Rust `OpenMemoryDispatch`).
@@ -313,6 +316,8 @@ SemaEffectParamDispatch: struct {
 
 // A call into a generic function or a generic type's method, with the type
 // arguments it binds: the owner type's, then the function's own.
+// `callee_node` is the callee's node once the graph's edges are final
+// (sema_effect_resolve_edges).
 SemaEffectInstantiation: struct {
     callee: String
     owner_args: [Type]
@@ -320,6 +325,7 @@ SemaEffectInstantiation: struct {
     // `Traced<Loud>` or `apply<Loud>`: the instantiation a report names.
     label: String
     span: Span
+    callee_node: Int{-1}
 }
 
 // A call site that binds callee parameter vertex `to` to a larger type
@@ -331,11 +337,13 @@ SemaEffectExpandingSite: struct {
     site: Int
 }
 
-// An implementation a caller runs through an instantiation it writes.
+// An implementation a caller runs through an instantiation it writes, and
+// its node once the graph's edges are final (sema_effect_resolve_edges).
 SemaEffectInstanceReach: struct {
     label: String
     target: String
     span: Span
+    target_node: Int{-1}
 }
 
 // An instance reach with its target's solved row, for reports.
@@ -374,6 +382,11 @@ SemaEffectNode: struct {
     dispatches: [TEffectSpan]
     // The functions this body takes as values (TEffectFacts.value_edges).
     value_edges: [String]{[String]{}}
+    // The node each `call_edges` and `value_edges` entry names, by position,
+    // or -1 for an edge with no node. Filled once the graph's edges are final
+    // (sema_effect_resolve_edges); the graph's walks follow these.
+    call_targets: [Int]{[Int]{}}
+    value_targets: [Int]{[Int]{}}
     // The module state this body writes (TEffectFacts.module_writes).
     module_writes: [TEffectSpan]{[TEffectSpan]{}}
     // The comptime inputs this body makes (`embed_file`, `embed_bytes`,
@@ -1242,15 +1255,15 @@ sema_effect_pure_state_diagnostic: fn(nodes: [SemaEffectNode], path: [Int]) -> D
 
 // The call path from `index` to the first function reached depth-first that
 // writes module state, `index` first; empty when none does.
-sema_effect_state_writer_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, seen: &[Bool]) -> [Int] Never! {
+sema_effect_state_writer_path: fn(nodes: [SemaEffectNode], index: Int, seen: &[Bool]) -> [Int] Never! {
     if seen[index] -> return [Int]{}
     seen[index] = true
     if nodes[index].module_writes.len() > 0 -> return [Int]{index}
-    calls: nodes[index].call_edges.len()
-    loop position in 0..<(calls + nodes[index].value_edges.len()) {
-        edge: if position < calls -> nodes[index].call_edges[position] else -> nodes[index].value_edges[position - calls]
-        target: sema_effect_node_index(node_by_key, edge) ?? next
-        tail: sema_effect_state_writer_path(nodes, node_by_key, target, seen)
+    calls: nodes[index].call_targets.len()
+    loop position in 0..<(calls + nodes[index].value_targets.len()) {
+        target: if position < calls -> nodes[index].call_targets[position] else -> nodes[index].value_targets[position - calls]
+        if target < 0 -> next
+        tail: sema_effect_state_writer_path(nodes, target, seen)
         if tail.len() == 0 -> next
         path := [Int]{index}
         loop step in tail -> path.push(step)
@@ -1311,7 +1324,7 @@ sema_effect_add_context_key: fn(keys: &[TEffectContextKey], read: TEffectContext
 // the program reads it, and every key any body of the program reads. A
 // `#Memo` function's key holds each one beside its arguments (IR
 // BuildMemo.jet).
-sema_effect_context_reach: fn(nodes: [SemaEffectNode], node_by_key: NameRows, root: Int, facts: &TEffectFacts) Never! {
+sema_effect_context_reach: fn(nodes: [SemaEffectNode], root: Int, facts: &TEffectFacts) Never! {
     every: sema_context_read_fields()
     read := [String]{}
     keys := [TEffectContextKey]{}
@@ -1338,10 +1351,10 @@ sema_effect_context_reach: fn(nodes: [SemaEffectNode], node_by_key: NameRows, ro
             if !read.contains(field) -> read.push(field.copy())
         }
         loop key in nodes[index].context_keys -> sema_effect_add_context_key(keys, key.copy())
-        calls: nodes[index].call_edges.len()
-        loop position in 0..<(calls + nodes[index].value_edges.len()) {
-            edge: if position < calls -> nodes[index].call_edges[position] else -> nodes[index].value_edges[position - calls]
-            target: sema_effect_node_index(node_by_key, edge) ?? next
+        calls: nodes[index].call_targets.len()
+        loop position in 0..<(calls + nodes[index].value_targets.len()) {
+            target: if position < calls -> nodes[index].call_targets[position] else -> nodes[index].value_targets[position - calls]
+            if target < 0 -> next
             if seen[target] -> next
             seen[target] = true
             pending.push(target)
@@ -1367,7 +1380,7 @@ sema_effect_context_reach: fn(nodes: [SemaEffectNode], node_by_key: NameRows, ro
 // name is prep code. The result holds, for each function the entries reach
 // that makes an input, the call path from an entry to it, entry first
 // (E0956).
-sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], node_by_key: NameRows, modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prep_functions: [String:Bool], symbols: SymbolTable) -> [[Int]] Never! {
+sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prep_functions: [String:Bool], symbols: SymbolTable) -> [[Int]] Never! {
     paths := [[Int]]{}
     any: loop node in nodes {
         if node.comptime_inputs.len() > 0 -> break true
@@ -1384,10 +1397,10 @@ sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], node_by_key: NameRo
     }
     named := (loop _ in nodes -> false)
     loop (index, node) in nodes {
-        calls: node.call_edges.len()
-        loop position in 0..<(calls + node.value_edges.len()) {
-            edge: if position < calls -> node.call_edges[position] else -> node.value_edges[position - calls]
-            target: sema_effect_node_index(node_by_key, edge) ?? next
+        calls: node.call_targets.len()
+        loop position in 0..<(calls + node.value_targets.len()) {
+            target: if position < calls -> node.call_targets[position] else -> node.value_targets[position - calls]
+            if target < 0 -> next
             if target != index -> named[target] = true
         }
     }
@@ -1403,10 +1416,10 @@ sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], node_by_key: NameRo
     loop head < queue.len() {
         index: queue[head]
         head += 1
-        calls: nodes[index].call_edges.len()
-        loop position in 0..<(calls + nodes[index].value_edges.len()) {
-            edge: if position < calls -> nodes[index].call_edges[position] else -> nodes[index].value_edges[position - calls]
-            target: sema_effect_node_index(node_by_key, edge) ?? next
+        calls: nodes[index].call_targets.len()
+        loop position in 0..<(calls + nodes[index].value_targets.len()) {
+            target: if position < calls -> nodes[index].call_targets[position] else -> nodes[index].value_targets[position - calls]
+            if target < 0 -> next
             if parent[target] != -2 -> next
             parent[target] = index
             queue.push(target)
@@ -1456,7 +1469,7 @@ sema_effect_check_compiler_hooks: fn(table: ModuleTable, modules: [SemaGraphModu
             if sema_effect_covered(solved[node_index], launch).len() == 0 -> next
             reported[node_index] = true
             seen := (loop _ in nodes -> false)
-            path: sema_effect_launch_path(nodes, node_by_key, solved, node_index, seen)
+            path: sema_effect_launch_path(nodes, solved, node_index, seen)
             chain: loop step in path -> sema_effect_launch_step_name(table, nodes[step])
             hook_diagnostics := [Diagnostic]{sema_effect_compiler_hook_diagnostic("`{nodes[node_index].name}`", taken, chain, nodes[node_index].name_span)}
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, hook_diagnostics)
@@ -1478,7 +1491,7 @@ sema_effect_check_compiler_hooks: fn(table: ModuleTable, modules: [SemaGraphModu
                 loop edge in hook.call_edges {
                     target: sema_effect_node_index(node_by_key, edge) ?? next
                     if sema_effect_covered(solved[target], launch).len() == 0 -> next
-                    loop step in sema_effect_launch_path(nodes, node_by_key, solved, target, seen) -> chain.push(sema_effect_launch_step_name(table, nodes[step]))
+                    loop step in sema_effect_launch_path(nodes, solved, target, seen) -> chain.push(sema_effect_launch_step_name(table, nodes[step]))
                     break
                 }
             }
@@ -1507,15 +1520,15 @@ sema_effect_compiler_hook_param: fn(params: [Type]) -> String? Never! {
 // the functions it calls whose rows reach it, depth-first, up to the one
 // that launches directly or the Core function it calls to, both ends
 // included.
-sema_effect_launch_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], index: Int, seen: &[Bool]) -> [Int] Never! {
+sema_effect_launch_path: fn(nodes: [SemaEffectNode], solved: [[String]], index: Int, seen: &[Bool]) -> [Int] Never! {
     if seen[index] -> return [Int]{}
     seen[index] = true
     launch: [String]{"Exec"}
     if module_is_core(nodes[index].module_identity) || nodes[index].maximal || sema_effect_covered(nodes[index].direct, launch).len() > 0 -> return [Int]{index}
-    loop edge in nodes[index].call_edges {
-        target: sema_effect_node_index(node_by_key, edge) ?? next
+    loop target in nodes[index].call_targets {
+        if target < 0 -> next
         if sema_effect_covered(solved[target], launch).len() == 0 -> next
-        rest: sema_effect_launch_path(nodes, node_by_key, solved, target, seen)
+        rest: sema_effect_launch_path(nodes, solved, target, seen)
         if rest.len() == 0 -> next
         path := [Int]{index}
         loop step in rest -> path.push(step)
@@ -1560,7 +1573,7 @@ SemaEffectTypeCap: struct {
 // may only narrow the cap, so a declared effect outside it is E0749 too, even
 // when the body doesn't use it. Names were validated once per cap
 // (sema_effect_module_cap_names).
-sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int, solved: [String], cap: SemaEffectModuleCap, notes: [SemaEffectInstanceNote], stack: &SemaStackWalk, frames: SemaStackFrames, diagnostics: &[Diagnostic]) {
+sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_index: Int, solved: [String], cap: SemaEffectModuleCap, notes: [SemaEffectInstanceNote], stack: &SemaStackWalk, frames: SemaStackFrames, diagnostics: &[Diagnostic]) {
     node: nodes[node_index]
     loop entry in cap.cap.entries {
         if !entry.name.starts_with("!") -> next
@@ -1572,7 +1585,7 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows,
         }
         if sema_effect_memory_fact(effect_name) != None {
             span: if cap.site == None -> entry.span else -> node.name_span
-            _: sema_effect_memory_project(nodes, node_by_key, node_index, EffectRowEntry{name: effect_name, span: span}, diagnostics)
+            _: sema_effect_memory_project(nodes, node_index, EffectRowEntry{name: effect_name, span: span}, diagnostics)
             next
         }
         reached: sema_effect_covered(solved, [String]{effect_name})
@@ -1582,9 +1595,9 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows,
             next
         }
         panic_steps := [String]{}
-        if sema_effect_root(effect_name) == "Panic" -> panic_steps = sema_effect_panic_steps(nodes, node_by_key, node_index)
+        if sema_effect_root(effect_name) == "Panic" -> panic_steps = sema_effect_panic_steps(nodes, node_index)
         unsafe_reach := SemaEffectUnsafeReach?{None}
-        if sema_effect_root(effect_name) == "Unsafe" -> unsafe_reach = Val(sema_effect_unsafe_reach(nodes, node_by_key, node_index))
+        if sema_effect_root(effect_name) == "Unsafe" -> unsafe_reach = Val(sema_effect_unsafe_reach(nodes, node_index))
         diagnostics.push(sema_effect_with_instance_notes(sema_effect_module_denied_diagnostic(node, reached, effect_name, panic_steps, unsafe_reach, cap), notes, reached))
     }
     ceiling: sema_effect_cap_ceiling(cap.cap) ?? return
@@ -1984,7 +1997,7 @@ sema_effect_chain_name: fn(function: FnBody) -> String Never! {
 // functions from `index` to the first one reached depth-first that stops (a
 // maximal row, a direct Panic, or a stop sentinel), both ends included, so a
 // function that stops itself is its own one-step path. Empty when none stops.
-sema_effect_panic_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, seen: &[Bool]) -> [Int] Never! {
+sema_effect_panic_path: fn(nodes: [SemaEffectNode], index: Int, seen: &[Bool]) -> [Int] Never! {
     if seen[index] -> return [Int]{}
     seen[index] = true
     if nodes[index].maximal -> return [Int]{index}
@@ -1994,9 +2007,9 @@ sema_effect_panic_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index
     loop edge in nodes[index].call_edges {
         if edge == "__jet_panic__" -> return [Int]{index}
     }
-    loop edge in nodes[index].call_edges {
-        target: sema_effect_node_index(node_by_key, edge) ?? next
-        rest: sema_effect_panic_path(nodes, node_by_key, target, seen)
+    loop target in nodes[index].call_targets {
+        if target < 0 -> next
+        rest: sema_effect_panic_path(nodes, target, seen)
         if rest.len() == 0 -> next
         path := [Int]{index}
         loop step in rest -> path.push(step)
@@ -2008,9 +2021,9 @@ sema_effect_panic_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index
 // The steps of a reached Panic's call chain after function `node_index`: the
 // chain names along sema_effect_panic_path past its first, so a function that
 // stops itself has none. "the reachable call graph" when no stop is found.
-sema_effect_panic_steps: fn(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int) -> [String] Never! {
+sema_effect_panic_steps: fn(nodes: [SemaEffectNode], node_index: Int) -> [String] Never! {
     seen := (loop _ in nodes -> false)
-    path: sema_effect_panic_path(nodes, node_by_key, node_index, seen)
+    path: sema_effect_panic_path(nodes, node_index, seen)
     if path.len() == 0 -> return [String]{"the reachable call graph"}
     steps := [String]{}
     loop at in 1..<path.len() -> steps.push(nodes[path[at]].chain_name)
@@ -2052,13 +2065,13 @@ sema_effect_unsafe_opens: fn(node: SemaEffectNode) -> Bool Never! {
 // brings the Unsafe fact in (sema_effect_unsafe_opens), both ends included,
 // so a function that opens a gate itself is its own one-step path. Empty
 // when none does.
-sema_effect_unsafe_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, seen: &[Bool]) -> [Int] Never! {
+sema_effect_unsafe_path: fn(nodes: [SemaEffectNode], index: Int, seen: &[Bool]) -> [Int] Never! {
     if seen[index] -> return [Int]{}
     seen[index] = true
     if sema_effect_unsafe_opens(nodes[index]) -> return [Int]{index}
-    loop edge in nodes[index].call_edges {
-        target: sema_effect_node_index(node_by_key, edge) ?? next
-        rest: sema_effect_unsafe_path(nodes, node_by_key, target, seen)
+    loop target in nodes[index].call_targets {
+        if target < 0 -> next
+        rest: sema_effect_unsafe_path(nodes, target, seen)
         if rest.len() == 0 -> next
         path := [Int]{index}
         loop step in rest -> path.push(step)
@@ -2069,9 +2082,9 @@ sema_effect_unsafe_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, inde
 
 // A reached Unsafe's call chain after function `node_index` and the gate it
 // ends at; "the reachable call graph" when no opener is found.
-sema_effect_unsafe_reach: fn(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int) -> SemaEffectUnsafeReach Never! {
+sema_effect_unsafe_reach: fn(nodes: [SemaEffectNode], node_index: Int) -> SemaEffectUnsafeReach Never! {
     seen := (loop _ in nodes -> false)
-    path: sema_effect_unsafe_path(nodes, node_by_key, node_index, seen)
+    path: sema_effect_unsafe_path(nodes, node_index, seen)
     if path.len() == 0 -> return SemaEffectUnsafeReach{steps: [String]{"the reachable call graph"}, gate: ""}
     steps := [String]{}
     loop at in 1..<path.len() -> steps.push(nodes[path[at]].chain_name)
@@ -2163,6 +2176,25 @@ sema_effect_node_add_value_edge: fn(nodes: &[SemaEffectNode], node_by_key: NameR
 
 sema_effect_node_index: fn(node_by_key: NameRows, key: String) -> Int? Never! {
     name_rows_get_text(node_by_key, key)
+}
+
+// Each node's call edges, value edges and memory calls as node indices, once
+// the graph's edges are final (after sema_effect_resolve_type_params): the
+// walks over the graph follow these and never look a callee's key up again.
+sema_effect_resolve_edges: fn(nodes: &[SemaEffectNode], node_by_key: NameRows) Never! {
+    loop index in 0..<nodes.len() {
+        nodes[index].call_targets = loop edge in nodes[index].call_edges -> sema_effect_node_index(node_by_key, edge) ?? -1
+        nodes[index].value_targets = loop edge in nodes[index].value_edges -> sema_effect_node_index(node_by_key, edge) ?? -1
+        loop at in 0..<nodes[index].memory_calls.len() {
+            nodes[index].memory_calls[at].target = sema_effect_node_index(node_by_key, nodes[index].memory_calls[at].callee) ?? -1
+        }
+        loop at in 0..<nodes[index].instantiations.len() {
+            nodes[index].instantiations[at].callee_node = sema_effect_node_index(node_by_key, nodes[index].instantiations[at].callee) ?? -1
+        }
+        loop at in 0..<nodes[index].instance_reaches.len() {
+            nodes[index].instance_reaches[at].target_node = sema_effect_node_index(node_by_key, nodes[index].instance_reaches[at].target) ?? -1
+        }
+    }
 }
 
 // Each diagnostic of the batch moves into `all` (the batch is the caller's
@@ -3172,7 +3204,7 @@ sema_effect_resolve_type_params: fn(nodes: &[SemaEffectNode], calls: SemaEffectC
 // leads back to that parameter, asks for a deeper instance each time one is
 // built, so building it never ends (E0909). Only what a non-generic function
 // reaches is built, so a cycle none reaches is not reported.
-sema_effect_check_expanding_instances: fn(nodes: [SemaEffectNode], node_by_key: NameRows, inputs: [SemaEffectModuleInput], diagnostics: &[Diagnostic]) {
+sema_effect_check_expanding_instances: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], diagnostics: &[Diagnostic]) {
     reached := (loop _ in nodes -> false)
     queue := [Int]{}
     loop index in 0..<nodes.len() {
@@ -3184,15 +3216,9 @@ sema_effect_check_expanding_instances: fn(nodes: [SemaEffectNode], node_by_key: 
     loop cursor < queue.len() {
         index: queue[cursor]
         cursor += 1
-        targets := nodes[index].call_edges.copy()
-        loop edge in nodes[index].value_edges -> targets.push(edge.copy())
-        loop site in nodes[index].instantiations -> targets.push(site.callee.copy())
-        loop target in targets {
-            callee: sema_effect_node_index(node_by_key, target) ?? next
-            if reached[callee] -> next
-            reached[callee] = true
-            queue.push(callee)
-        }
+        loop target in nodes[index].call_targets -> sema_effect_queue_reached(reached, queue, target)
+        loop target in nodes[index].value_targets -> sema_effect_queue_reached(reached, queue, target)
+        loop site in nodes[index].instantiations -> sema_effect_queue_reached(reached, queue, site.callee_node)
     }
     // One vertex per type parameter of each node, from `first[node]` on.
     first := [Int]{}
@@ -3206,7 +3232,8 @@ sema_effect_check_expanding_instances: fn(nodes: [SemaEffectNode], node_by_key: 
     loop index in 0..<nodes.len() {
         if !reached[index] || nodes[index].type_params.len() == 0 -> next
         loop (site_row, site) in nodes[index].instantiations {
-            callee: sema_effect_node_index(node_by_key, site.callee) ?? next
+            callee: site.callee_node
+            if callee < 0 -> next
             loop (position, param) in nodes[callee].type_params {
                 bound: sema_effect_param_binding(nodes[callee], site, param) ?? next
                 loop (own, name) in nodes[index].type_params {
@@ -3254,11 +3281,19 @@ sema_effect_check_expanding_instances: fn(nodes: [SemaEffectNode], node_by_key: 
     }
 }
 
+// Queues node `target` the first time a walk reaches it; -1 is no node.
+sema_effect_queue_reached: fn(reached: &[Bool], queue: &[Int], target: Int) Never! {
+    if target < 0 || reached[target] -> return
+    reached[target] = true
+    queue.push(target)
+}
+
 // The instance reaches of `node` with each target's solved row.
-sema_effect_instance_notes: fn(nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], node: SemaEffectNode) -> [SemaEffectInstanceNote] Never! {
+sema_effect_instance_notes: fn(nodes: [SemaEffectNode], solved: [[String]], node: SemaEffectNode) -> [SemaEffectInstanceNote] Never! {
     notes := [SemaEffectInstanceNote]{}
     loop reach in node.instance_reaches {
-        target: sema_effect_node_index(node_by_key, reach.target) ?? next
+        target: reach.target_node
+        if target < 0 -> next
         notes.push(SemaEffectInstanceNote{label: reach.label, callee: nodes[target].chain_name, row: solved[target], span: reach.span})
     }
     notes
@@ -3794,13 +3829,12 @@ SemaEffectPending: struct {
 // Each node's callers, in caller and call-edge order: the reverse call graph
 // the fixed point and the reach walks share. A `core.db` call into the SQL
 // engine's parts is no edge: see sema_effect_sealed_edge.
-sema_effect_callers: fn(nodes: [SemaEffectNode], node_by_key: NameRows, table: ModuleTable) -> [[Int]] Never! {
+sema_effect_callers: fn(nodes: [SemaEffectNode], table: ModuleTable) -> [[Int]] Never! {
     core_db: module_find(table, "<corelib>/core.db")
     callers := (loop _ in nodes -> [Int]{})
     loop (index, node) in nodes {
-        loop edge in node.call_edges {
-            if edge == "__jet_panic__" -> next
-            target: sema_effect_node_index(node_by_key, edge) ?? next
+        loop target in node.call_targets {
+            if target < 0 -> next
             if sema_effect_sealed_edge(table, core_db, node, nodes[target]) -> next
             callers[target].push(index)
         }
@@ -3825,7 +3859,7 @@ sema_effect_sealed_edge: fn(table: ModuleTable, core_db: ModuleID?, caller: Sema
 // program, and so are the direct effects the driver's walks sum along it.
 // The summaries take the graph's nodes, which are done with: each takes its
 // node's key.
-sema_effect_core_seal_rows: fn(nodes: &&[SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]], table: ModuleTable) -> [SemaCoreSealEffects] Never! {
+sema_effect_core_seal_rows: fn(nodes: &&[SemaEffectNode], solved: [[String]], table: ModuleTable) -> [SemaCoreSealEffects] Never! {
     core_db: module_find(table, "<corelib>/core.db")
     plain: loop node in nodes -> sema_effect_seal_plain(node)
     seen := loop _ in nodes -> false
@@ -3849,12 +3883,13 @@ sema_effect_core_seal_rows: fn(nodes: &&[SemaEffectNode], calls: SemaEffectCallI
             }
             loop name in nodes[at].direct -> sema_effect_set_add(direct, name)
             if nodes[at].module_writes.len() > 0 -> writes = true
-            loop edge in nodes[at].call_edges {
+            loop (position, edge) in nodes[at].call_edges {
                 if edge == "__jet_panic__" {
                     panic = true
                     next
                 }
-                target: sema_effect_node_index(calls.node_by_key, edge) ?? next
+                target: nodes[at].call_targets[position]
+                if target < 0 -> next
                 if sema_effect_sealed_edge(table, core_db, nodes[at], nodes[target]) {
                     sealed = false
                     break
@@ -4040,15 +4075,14 @@ sema_effect_dispatch_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bo
 // The first unbounded trait dispatch reachable from `index` through the call
 // graph, the function's own calls first. `reach` skips dispatch-free callees;
 // `visited` records the rows to clear before the next root.
-sema_effect_find_dispatch: fn(nodes: [SemaEffectNode], node_by_key: NameRows, reach: [Bool], index: Int, seen: &[Bool], visited: &[Int]) -> SemaEffectDispatchSite? {
+sema_effect_find_dispatch: fn(nodes: [SemaEffectNode], reach: [Bool], index: Int, seen: &[Bool], visited: &[Int]) -> SemaEffectDispatchSite? {
     if seen[index] -> return None
     seen[index] = true
     visited.push(index)
     if nodes[index].dispatches.len() > 0 -> return Val(SemaEffectDispatchSite{dispatch: nodes[index].dispatches[0], module_index: nodes[index].module_index})
-    loop edge in nodes[index].call_edges {
-        target: sema_effect_node_index(node_by_key, edge) ?? next
-        if !reach[target] -> next
-        found: sema_effect_find_dispatch(nodes, node_by_key, reach, target, seen, visited)
+    loop target in nodes[index].call_targets {
+        if target < 0 || !reach[target] -> next
+        found: sema_effect_find_dispatch(nodes, reach, target, seen, visited)
         if found != None -> return found
     }
     None
@@ -4171,7 +4205,7 @@ sema_effect_arena_failure: fn(finding: SemaMemoryFinding) -> SemaMemoryArena Nev
 // Rust `shortest_violation` for the unbounded facts: breadth-first search
 // gives the shortest call path to the first event of `kind` ("alloc" for
 // `!Mem.Alloc`, "rc" for `!Mem.Rc`) or to an open dispatch.
-sema_effect_memory_search: fn(nodes: [SemaEffectNode], node_by_key: NameRows, root: Int, kind: String) -> SemaMemoryFinding? {
+sema_effect_memory_search: fn(nodes: [SemaEffectNode], root: Int, kind: String) -> SemaMemoryFinding? {
     queue := [Int]{root}
     paths := [[String]]{[String]{nodes[root].display_key}}
     seen := (loop _ in nodes -> false)
@@ -4188,9 +4222,8 @@ sema_effect_memory_search: fn(nodes: [SemaEffectNode], node_by_key: NameRows, ro
         // copy: the memory finding owns its open site, while the site stays in nodes[index] (the
         // caller's read-only effect graph), which later searches read.
         if nodes[index].memory_opens.len() > 0 -> return Val(SemaMemoryFinding{event: None, owner: index, open: Val(nodes[index].memory_opens[0].copy()), path: path, used: 0})
-        edges := nodes[index].call_edges
-        loop edge in edges {
-            target: sema_effect_node_index(node_by_key, edge) ?? next
+        loop target in nodes[index].call_targets {
+            if target < 0 -> next
             next_path := path.copy()
             next_path.push(nodes[target].display_key)
             queue.push(target)
@@ -4201,7 +4234,7 @@ sema_effect_memory_search: fn(nodes: [SemaEffectNode], node_by_key: NameRows, ro
 }
 
 // Rust `may_reach_arena` over the known call graph.
-sema_effect_may_reach_arena: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, visiting: &[Bool]) -> Bool {
+sema_effect_may_reach_arena: fn(nodes: [SemaEffectNode], index: Int, visiting: &[Bool]) -> Bool {
     if visiting[index] -> return true
     visiting[index] = true
     found := false
@@ -4209,9 +4242,9 @@ sema_effect_may_reach_arena: fn(nodes: [SemaEffectNode], node_by_key: NameRows, 
         if event.kind == "arena" -> found = true
     }
     if !found {
-        loop edge in nodes[index].call_edges {
-            target: sema_effect_node_index(node_by_key, edge) ?? next
-            if sema_effect_may_reach_arena(nodes, node_by_key, target, visiting) {
+        loop target in nodes[index].call_targets {
+            if target < 0 -> next
+            if sema_effect_may_reach_arena(nodes, target, visiting) {
                 found = true
                 break
             }
@@ -4233,15 +4266,15 @@ sema_effect_unsized_alloc: fn(node: SemaEffectNode, event: SemaMemoryEvent) -> B
 
 // Rust `arena_bound`: the proven arena bytes `index` can reserve, with the
 // event that witnesses the total, or the finding that stops the proof.
-sema_effect_arena_bound: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
+sema_effect_arena_bound: fn(nodes: [SemaEffectNode], index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
     if visiting[index] -> return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[index].display_key, "recursive call multiplicity is not statically bounded for arena accounting", index, path, 0))
     visiting[index] = true
-    result: sema_effect_arena_bound_inner(nodes, node_by_key, index, visiting, path)
+    result: sema_effect_arena_bound_inner(nodes, index, visiting, path)
     visiting[index] = false
     result
 }
 
-sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
+sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
     node: nodes[index]
     // copy: the arena failure owns its open site, while the site stays in `node`, a row of the
     // caller's read-only effect graph, which later searches read.
@@ -4258,28 +4291,29 @@ sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], node_by_key: NameRows
         total += bytes * executions
         witness = Val(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: 0})
     }
-    loop edge in node.call_edges {
-        target: sema_effect_node_index(node_by_key, edge) ?? next
+    loop target in node.call_targets {
+        if target < 0 -> next
         called := false
         loop call in node.memory_calls {
-            if call.callee == edge -> called = true
+            if call.target == target -> called = true
         }
         if called -> next
         reach_visiting := (loop _ in nodes -> false)
-        if sema_effect_may_reach_arena(nodes, node_by_key, target, reach_visiting) -> return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[target].display_key, "call-site multiplicity is unavailable for arena accounting", index, path, total))
+        if sema_effect_may_reach_arena(nodes, target, reach_visiting) -> return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[target].display_key, "call-site multiplicity is unavailable for arena accounting", index, path, total))
         // With no arena below it, the callee's multiplicity does not matter:
         // any heap allocation it reaches breaks the bound.
-        if sema_effect_memory_search(nodes, node_by_key, target, "alloc") == .Val(found) {
+        if sema_effect_memory_search(nodes, target, "alloc") == .Val(found) {
             full := path.copy()
             loop step in found.path -> full.push(step)
             return sema_effect_arena_failure(SemaMemoryFinding{event: found.event, owner: found.owner, open: found.open, path: full, used: total})
         }
     }
     loop call in sema_effect_memory_sorted_calls(node.memory_calls) {
-        target: sema_effect_node_index(node_by_key, call.callee) ?? next
+        target: call.target
+        if target < 0 -> next
         call_path := path.copy()
         call_path.push(nodes[target].display_key)
-        proof: sema_effect_arena_bound(nodes, node_by_key, target, visiting, call_path)
+        proof: sema_effect_arena_bound(nodes, target, visiting, call_path)
         if proof.failure != None -> return proof
         if proof.bytes == 0 -> next
         executions: call.executions ?? return sema_effect_arena_failure(sema_effect_memory_open_finding(call.span, node.source_display, "loop iteration count is not statically bounded for arena accounting", index, call_path, total))
@@ -4315,7 +4349,7 @@ sema_effect_heap_open: fn(walk: &SemaHeapWalk, index: Int, why: String, next: In
     walk.state[index] = 2
 }
 
-sema_effect_heap_visit: fn(walk: &SemaHeapWalk, nodes: [SemaEffectNode], node_by_key: NameRows, index: Int) Never! {
+sema_effect_heap_visit: fn(walk: &SemaHeapWalk, nodes: [SemaEffectNode], index: Int) Never! {
     walk.state[index] = 1
     node: nodes[index]
     if node.memory_opens.len() > 0 {
@@ -4342,13 +4376,13 @@ sema_effect_heap_visit: fn(walk: &SemaHeapWalk, nodes: [SemaEffectNode], node_by
         executions: event.executions ?? 0
         total += bytes * executions
     }
-    loop edge in node.call_edges {
-        target: sema_effect_node_index(node_by_key, edge) ?? next
+    loop target in node.call_targets {
+        if target < 0 -> next
         if walk.state[target] == 1 {
             sema_effect_heap_open(walk, index, "recursion through {nodes[target].display_key}", -1)
             return
         }
-        if walk.state[target] == 0 -> sema_effect_heap_visit(walk, nodes, node_by_key, target)
+        if walk.state[target] == 0 -> sema_effect_heap_visit(walk, nodes, target)
         if walk.bytes[target] < 0 {
             sema_effect_heap_open(walk, index, "", target)
             return
@@ -4356,7 +4390,7 @@ sema_effect_heap_visit: fn(walk: &SemaHeapWalk, nodes: [SemaEffectNode], node_by
         if walk.bytes[target] == 0 -> next
         counted := false
         loop call in node.memory_calls {
-            if call.callee == edge -> counted = true
+            if call.target == target -> counted = true
         }
         if !counted {
             sema_effect_heap_open(walk, index, "a call to {nodes[target].display_key} whose count is unknown", -1)
@@ -4364,8 +4398,9 @@ sema_effect_heap_visit: fn(walk: &SemaHeapWalk, nodes: [SemaEffectNode], node_by
         }
     }
     loop call in node.memory_calls {
-        target: sema_effect_node_index(node_by_key, call.callee) ?? next
-        if walk.state[target] == 0 -> sema_effect_heap_visit(walk, nodes, node_by_key, target)
+        target: call.target
+        if target < 0 -> next
+        if walk.state[target] == 0 -> sema_effect_heap_visit(walk, nodes, target)
         if walk.state[target] == 1 {
             sema_effect_heap_open(walk, index, "recursion through {nodes[target].display_key}", -1)
             return
@@ -4387,11 +4422,11 @@ sema_effect_heap_visit: fn(walk: &SemaHeapWalk, nodes: [SemaEffectNode], node_by
 
 // Whether a direct call reaches each node: the others are entries, whose
 // worst-case heap and stack FnBody keeps.
-sema_effect_called: fn(nodes: [SemaEffectNode], node_by_key: NameRows) -> [Bool] Never! {
+sema_effect_called: fn(nodes: [SemaEffectNode]) -> [Bool] Never! {
     called := (loop _ in nodes -> false)
     loop node in nodes {
-        loop edge in node.call_edges {
-            target: sema_effect_node_index(node_by_key, edge) ?? next
+        loop target in node.call_targets {
+            if target < 0 -> next
             called[target] = true
         }
     }
@@ -4399,7 +4434,7 @@ sema_effect_called: fn(nodes: [SemaEffectNode], node_by_key: NameRows) -> [Bool]
 }
 
 // The heap text of every node nothing calls, by node; "" for the others.
-sema_effect_heap_bounds: fn(nodes: [SemaEffectNode], node_by_key: NameRows, called: [Bool]) -> [String] Never! {
+sema_effect_heap_bounds: fn(nodes: [SemaEffectNode], called: [Bool]) -> [String] Never! {
     walk := SemaHeapWalk{state: (loop _ in nodes -> 0), bytes: (loop _ in nodes -> 0), why: (loop _ in nodes -> ""), next: (loop _ in nodes -> -1)}
     texts := [String]{}
     loop index in 0..<nodes.len() {
@@ -4407,7 +4442,7 @@ sema_effect_heap_bounds: fn(nodes: [SemaEffectNode], node_by_key: NameRows, call
             texts.push("")
             next
         }
-        if walk.state[index] == 0 -> sema_effect_heap_visit(walk, nodes, node_by_key, index)
+        if walk.state[index] == 0 -> sema_effect_heap_visit(walk, nodes, index)
         if walk.bytes[index] >= 0 {
             texts.push("{walk.bytes[index]} B")
             next
@@ -4504,12 +4539,12 @@ sema_effect_stack_bodies_empty: fn() -> SemaStackBodies Never! {
 // makes; a library's callers may pass any. `bodies` are the functions' rows
 // (sema_effect_stack_bodies); a node's later function overrides an earlier
 // one's frame, as a walk of the functions in order writes it.
-sema_effect_stack_frames: fn(nodes: [SemaEffectNode], node_by_key: NameRows, bodies: SemaStackBodies, closed: Bool{false}) -> SemaStackFrames {
+sema_effect_stack_frames: fn(nodes: [SemaEffectNode], bodies: SemaStackBodies, closed: Bool{false}) -> SemaStackFrames {
     frames := SemaStackFrames{
         own: (loop _ in nodes -> -1),
         why: (loop _ in nodes -> ""),
         depth: (loop _ in nodes -> 0),
-        edges: (loop node in nodes -> sema_effect_stack_node_targets(node, node_by_key)),
+        edges: (loop node in nodes -> sema_effect_stack_node_targets(node)),
         carried: (loop _ in nodes -> 0),
         carrier: (loop _ in nodes -> -1),
         sealed: (loop _ in nodes -> ""),
@@ -4531,7 +4566,7 @@ sema_effect_stack_frames: fn(nodes: [SemaEffectNode], node_by_key: NameRows, bod
         }
         return frames
     }
-    sema_effect_stack_seal(frames, nodes, node_by_key, arity, bodies.values)
+    sema_effect_stack_seal(frames, nodes, arity, bodies.values)
     frames
 }
 
@@ -4691,11 +4726,13 @@ sema_effect_stack_call_targets: fn(keys: [String], node_by_key: NameRows) -> [In
 // The nodes `node` calls, and the named functions it takes as values: code
 // it hands one to, such as a Core loop built into its own body, may call it
 // on top of its frame.
-sema_effect_stack_node_targets: fn(node: SemaEffectNode, node_by_key: NameRows) -> [Int] Never! {
-    targets := sema_effect_stack_call_targets(node.call_edges, node_by_key)
-    loop key in node.value_edges {
-        target: sema_effect_node_index(node_by_key, key) ?? next
-        sema_effect_stack_add_edge(targets, target)
+sema_effect_stack_node_targets: fn(node: SemaEffectNode) -> [Int] Never! {
+    targets := [Int]{}
+    loop target in node.call_targets {
+        if target >= 0 -> targets.push(target)
+    }
+    loop target in node.value_targets {
+        if target >= 0 -> sema_effect_stack_add_edge(targets, target)
     }
     targets
 }
@@ -4823,7 +4860,7 @@ sema_effect_stack_value_read: fn(kind: NodeKind) -> Bool Never! {
 // already has every implementation as an edge (sema_effect_record_dispatch);
 // its set is only named here. A function value with no checked body that
 // reached code makes leaves every reached call through a function value open.
-sema_effect_stack_seal: fn(frames: &SemaStackFrames, nodes: [SemaEffectNode], node_by_key: NameRows, arity: [Int], values: SemaStackValues) Never! {
+sema_effect_stack_seal: fn(frames: &SemaStackFrames, nodes: [SemaEffectNode], arity: [Int], values: SemaStackValues) Never! {
     calls_at := (loop _ in nodes -> [Int]{})
     loop (row, call) in values.calls -> calls_at[call.node].push(row)
     lambdas_at := (loop _ in nodes -> [Int]{})
@@ -4837,8 +4874,8 @@ sema_effect_stack_seal: fn(frames: &SemaStackFrames, nodes: [SemaEffectNode], no
     loop {
         index := seal.pending.pop() ?? { break }
         loop target in frames.edges[index] -> sema_effect_stack_reach(seal, target)
-        loop key in nodes[index].value_edges {
-            target: sema_effect_node_index(node_by_key, key) ?? next
+        loop target in nodes[index].value_targets {
+            if target < 0 -> next
             sema_effect_stack_take(seal, frames, nodes, arity, values, target)
         }
         loop target in wrappers_at[index] -> sema_effect_stack_take(seal, frames, nodes, arity, values, target)
@@ -5320,12 +5357,12 @@ sema_effect_memory_violation: fn(nodes: [SemaEffectNode], root: Int, denial: Eff
 // 2 (Rust `check_memory_facts`): a `-[!Mem.Alloc]>`,
 // `-[!Mem.Rc]>` or `-[!Mem.Alloc(above: N)]>` denial holds for every
 // function the root can reach (E0921).
-sema_effect_memory_project: fn(nodes: [SemaEffectNode], node_by_key: NameRows, root: Int, denial: EffectRowEntry, diagnostics: &[Diagnostic]) -> SemaMemoryProjection {
+sema_effect_memory_project: fn(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, diagnostics: &[Diagnostic]) -> SemaMemoryProjection {
     fact: sema_effect_memory_fact(denial.name) ?? panic("invalid checked memory denial")
     limit: sema_effect_memory_bound(denial.name)
     if limit == .Val(bytes_limit) {
         visiting := (loop _ in nodes -> false)
-        proof: sema_effect_arena_bound(nodes, node_by_key, root, visiting, [String]{nodes[root].display_key})
+        proof: sema_effect_arena_bound(nodes, root, visiting, [String]{nodes[root].display_key})
         if proof.failure == .Val(failure) {
             diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, true, failure))
             return sema_effect_memory_projection(failure)
@@ -5338,21 +5375,21 @@ sema_effect_memory_project: fn(nodes: [SemaEffectNode], node_by_key: NameRows, r
         return sema_effect_memory_projection(finding_total)
     }
     kind: if denial.name == "Mem.Rc" -> "rc" else -> "alloc"
-    finding: sema_effect_memory_search(nodes, node_by_key, root, kind) ?? return SemaMemoryProjection.Proven
+    finding: sema_effect_memory_search(nodes, root, kind) ?? return SemaMemoryProjection.Proven
     diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, false, finding))
     sema_effect_memory_projection(finding)
 }
 
 // `stack` and `frames` prove each `!Mem.Stack(above: N)`
 // (sema_effect_check_stack).
-sema_effect_check_memory_denials: fn(nodes: [SemaEffectNode], node_by_key: NameRows, root: Int, stack: &SemaStackWalk, frames: SemaStackFrames, diagnostics: &[Diagnostic], facts: &SemaMemoryProjectionFacts) {
+sema_effect_check_memory_denials: fn(nodes: [SemaEffectNode], root: Int, stack: &SemaStackWalk, frames: SemaStackFrames, diagnostics: &[Diagnostic], facts: &SemaMemoryProjectionFacts) {
     loop denial in nodes[root].memory_denials {
         if sema_effect_stack_bound(denial.name) != None {
             sema_effect_check_stack(stack, frames, nodes, root, denial, "signature denial `-[!{denial.name}]>` in {nodes[root].source_display}", diagnostics)
             next
         }
         if sema_effect_memory_fact(denial.name) == None -> next
-        projection: sema_effect_memory_project(nodes, node_by_key, root, denial, diagnostics)
+        projection: sema_effect_memory_project(nodes, root, denial, diagnostics)
         sema_effect_memory_publish(nodes, root, denial, projection, facts)
     }
 }
@@ -5486,6 +5523,7 @@ sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], ow
     region_node.direct = [String]{}
     region_node.direct_spans = [TEffectSpan]{}
     region_node.call_edges = [String]{}
+    region_node.call_targets = [Int]{}
     region_node.maximal = false
     region_node.maximal_span = None
     region_node.dispatches = [TEffectSpan]{}
@@ -5606,8 +5644,9 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     any_unsafe: unsafe_node || sema_effect_calls_any_unsafe_foreign(calls.modules)
     calls = sema_effect_collect_threads(modules, inputs, nodes, calls, any_unsafe, diagnostics, threads)
     sema_effect_resolve_type_params(nodes, calls)
-    sema_effect_check_expanding_instances(nodes, calls.node_by_key, inputs, diagnostics)
-    callers: sema_effect_callers(nodes, calls.node_by_key, table)
+    sema_effect_resolve_edges(nodes, calls.node_by_key)
+    sema_effect_check_expanding_instances(nodes, inputs, diagnostics)
+    callers: sema_effect_callers(nodes, table)
     solved: sema_effect_solve(nodes, callers)
     loop module_index in 0..<inputs.len() {
         sites := [U32:SharedLifetime]{}
@@ -5647,7 +5686,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         dispatch := Diagnostic?{None}
         if (nodes[node_index].has_declared_row || nodes[node_index].is_pure) && dispatch_reach[node_index] {
             visited := [Int]{}
-            site: sema_effect_find_dispatch(nodes, calls.node_by_key, dispatch_reach, node_index, dispatch_seen, visited)
+            site: sema_effect_find_dispatch(nodes, dispatch_reach, node_index, dispatch_seen, visited)
             loop row in visited -> dispatch_seen[row] = false
             if site == .Val(found) {
                 dispatch = Val(sema_effect_locate_dispatch(found, inputs))
@@ -5656,10 +5695,10 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         panic_steps := [String]{}
         unsafe_reach := SemaEffectUnsafeReach?{None}
         if nodes[node_index].prohibited.len() > 0 {
-            panic_steps = sema_effect_panic_steps(nodes, calls.node_by_key, node_index)
-            if sema_effect_reaches_unsafe(sema_effect_covered(solved[node_index], nodes[node_index].prohibited)) -> unsafe_reach = Val(sema_effect_unsafe_reach(nodes, calls.node_by_key, node_index))
+            panic_steps = sema_effect_panic_steps(nodes, node_index)
+            if sema_effect_reaches_unsafe(sema_effect_covered(solved[node_index], nodes[node_index].prohibited)) -> unsafe_reach = Val(sema_effect_unsafe_reach(nodes, node_index))
         }
-        notes: sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index])
+        notes: sema_effect_instance_notes(nodes, solved, nodes[node_index])
         if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, panic_steps, unsafe_reach, notes, pure_reached, function_diagnostics) {
             // Keep all diagnostics; the caller receives one complete graph
             // result instead of a partially updated function list.
@@ -5684,14 +5723,14 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     loop node_index in 0..<nodes.len() {
         if !nodes[node_index].is_pure -> next
         seen := (loop _ in nodes -> false)
-        path: sema_effect_state_writer_path(nodes, calls.node_by_key, node_index, seen)
+        path: sema_effect_state_writer_path(nodes, node_index, seen)
         if path.len() == 0 -> next
         state_diagnostics := [Diagnostic]{sema_effect_pure_state_diagnostic(nodes, path)}
         // The report points at the write, which may be in another module.
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[path[path.len() - 1]].module_index].source_segments, state_diagnostics)
     }
     // No function a runtime entry reaches may make a comptime input.
-    loop path in sema_effect_runtime_input_paths(nodes, calls.node_by_key, modules, inputs, prep_functions, calls.symbols) {
+    loop path in sema_effect_runtime_input_paths(nodes, modules, inputs, prep_functions, calls.symbols) {
         maker: path[path.len() - 1]
         input_diagnostics := loop input in nodes[maker].comptime_inputs -> sema_effect_runtime_input_diagnostic(nodes, path, input)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[maker].module_index].source_segments, input_diagnostics)
@@ -5706,7 +5745,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // bound and each entry's path bound.
     bodies := sema_effect_stack_bodies_empty()
     calls = sema_effect_stack_bodies(modules, inputs, nodes, calls, threads, bodies, closed: closed)
-    frames: sema_effect_stack_frames(nodes, calls.node_by_key, bodies, closed: closed)
+    frames: sema_effect_stack_frames(nodes, bodies, closed: closed)
     stack := sema_effect_stack_walk(nodes)
     // Whether a check walks the call graph past a body for what its reach
     // does: a memory or stack denial, a kernel's obligations, a cap over a
@@ -5716,7 +5755,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     loop node_index in 0..<nodes.len() {
         if nodes[node_index].memory_denials.len() > 0 || nodes[node_index].kernel != None -> walks = true
         memory_diagnostics := [Diagnostic]{}
-        sema_effect_check_memory_denials(nodes, calls.node_by_key, node_index, stack, frames, memory_diagnostics, memory_facts)
+        sema_effect_check_memory_denials(nodes, node_index, stack, frames, memory_diagnostics, memory_facts)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, memory_diagnostics)
     }
     // Rust bundle_memory_inputs: a manifest guarantee covers every qualified
@@ -5744,7 +5783,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         memory_facts.declarations.push(declaration)
         loop root in 0..<nodes.len() {
             memory_diagnostics := [Diagnostic]{}
-            projection: sema_effect_memory_project(nodes, calls.node_by_key, root, EffectRowEntry{name: name, span: Span{start: 0, end: 0}}, memory_diagnostics)
+            projection: sema_effect_memory_project(nodes, root, EffectRowEntry{name: name, span: Span{start: 0, end: 0}}, memory_diagnostics)
             memory_facts.projections.push(SemaMemoryProjectionRow{root: nodes[root].display_key, fact: fact, projection: projection})
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[root].module_index].source_segments, memory_diagnostics)
         }
@@ -5761,11 +5800,11 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             reached: sema_effect_covered(solved[node_index], [String]{denied})
             if reached.len() == 0 -> next
             panic_steps := [String]{}
-            if sema_effect_root(denied) == "Panic" -> panic_steps = sema_effect_panic_steps(nodes, calls.node_by_key, node_index)
+            if sema_effect_root(denied) == "Panic" -> panic_steps = sema_effect_panic_steps(nodes, node_index)
             unsafe_reach := SemaEffectUnsafeReach?{None}
-            if sema_effect_root(denied) == "Unsafe" -> unsafe_reach = Val(sema_effect_unsafe_reach(nodes, calls.node_by_key, node_index))
+            if sema_effect_root(denied) == "Unsafe" -> unsafe_reach = Val(sema_effect_unsafe_reach(nodes, node_index))
             denial_diagnostics := [Diagnostic]{}
-            denial_diagnostics.push(sema_effect_with_instance_notes(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_steps, unsafe_reach, denial.organization), sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index]), reached))
+            denial_diagnostics.push(sema_effect_with_instance_notes(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_steps, unsafe_reach, denial.organization), sema_effect_instance_notes(nodes, solved, nodes[node_index]), reached))
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, denial_diagnostics)
         }
     }
@@ -5794,8 +5833,8 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         if caps.len() == 0 -> next
         if !module_is_core(nodes[node_index].module_identity) -> walks = true
         cap_diagnostics := [Diagnostic]{}
-        notes: sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index])
-        loop cap in caps -> sema_effect_check_module_cap(nodes, calls.node_by_key, node_index, solved[node_index], cap, notes, stack, frames, cap_diagnostics)
+        notes: sema_effect_instance_notes(nodes, solved, nodes[node_index])
+        loop cap in caps -> sema_effect_check_module_cap(nodes, node_index, solved[node_index], cap, notes, stack, frames, cap_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, cap_diagnostics)
     }
     loop module_index in 0..<inputs.len() {
@@ -5807,8 +5846,8 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // All source reads are finished: stamp the solved rows in place, the
     // frame bound of each function a stack denial reaches, and each uncalled
     // function's heap and stack bounds.
-    called: sema_effect_called(nodes, calls.node_by_key)
-    heaps: sema_effect_heap_bounds(nodes, calls.node_by_key, called)
+    called: sema_effect_called(nodes)
+    heaps: sema_effect_heap_bounds(nodes, called)
     stacks: sema_effect_stack_bounds(stack, frames, nodes, called)
     loop module_row in inputs {
         target: module_row.module_index
@@ -5816,7 +5855,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             node_index: sema_effect_node_index(calls.node_by_key, modules[target].functions[function_index].key) ?? next
             effects := sema_effect_tfacts(nodes[node_index], solved[node_index])
             memoized: modules[target].functions[function_index].memo_bound != None || modules[target].functions[function_index].memo_unbounded
-            if memoized -> sema_effect_context_reach(nodes, calls.node_by_key, node_index, effects)
+            if memoized -> sema_effect_context_reach(nodes, node_index, effects)
             capped: cap_frames[node_index] != "" && !modules[target].functions[function_index].effect_scope.starts_with(cap_frames[node_index])
             frame_bound: if stack.guarded[node_index] -> frames.own[node_index] else -> -1
             modules[target].functions[function_index].effects = effects.move()
@@ -5835,7 +5874,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         if !module_is_core(nodes[node_index].module_identity) -> exact_errors += 1
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, pure_diagnostics)
     }
-    core_seal: if seal -> sema_effect_core_seal_rows(nodes.move(), calls, solved, table) else -> [SemaCoreSealEffects]{}
+    core_seal: if seal -> sema_effect_core_seal_rows(nodes.move(), solved, table) else -> [SemaCoreSealEffects]{}
     complete: !sema_has_error_since(diagnostics, 0)
     SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), core_seal: core_seal, walks: walks, exact_errors: exact_errors, symbols: calls.symbols.move()}
 }

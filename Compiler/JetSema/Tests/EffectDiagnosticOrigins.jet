@@ -7,7 +7,7 @@ use {
         sema_effect_check_node, sema_effect_dispatch_reach, sema_effect_find_dispatch, sema_effect_locate_dispatch,
         sema_effect_publish_diagnostics, sema_effect_unbounded_dispatch_diagnostic,
     ]
-    jet_foundation.[Diagnostic, Span, TEffectSpan, module_none, name_rows, name_rows_set]
+    jet_foundation.[Diagnostic, Span, TEffectSpan, module_none]
 }
 
 effect_origin_node: fn(key: String, module_index: Int) -> SemaEffectNode Never! {
@@ -40,19 +40,17 @@ effect_origin_input: fn(module_index: Int, file: String) -> SemaEffectModuleInpu
     caller.has_declared_row = true
     caller.declared = [String]{"IO"}
     caller.call_edges = [String]{"worker::inspect"}
+    caller.call_targets = [Int]{1}
     helper := effect_origin_node("worker::inspect", 1)
     helper.dispatches = [TEffectSpan]{TEffectSpan{name: "Shape::area", span: Span{start: 30, end: 34}}}
     nodes: [SemaEffectNode]{caller.copy(), helper.copy()}
-    by_key := name_rows()
-    name_rows_set(by_key, "main::ceiling", 0)
-    name_rows_set(by_key, "worker::inspect", 1)
     // callers[i] lists the nodes that call node i.
     reach: sema_effect_dispatch_reach(nodes, [[Int]]{[Int]{}, [Int]{0}})
     if !reach[0] || !reach[1] -> panic("dispatch reach lost the calling ceiling")
     inputs := [SemaEffectModuleInput]{effect_origin_input(0, "main.jet"), effect_origin_input(1, "worker.jet")}
     seen := [Bool]{false, false}
     visited := [Int]{}
-    site: sema_effect_find_dispatch(nodes, by_key, reach, 0, seen, visited) ?? panic("transitive dispatch not found")
+    site: sema_effect_find_dispatch(nodes, reach, 0, seen, visited) ?? panic("transitive dispatch not found")
     if visited.len() != 2 || visited[0] != 0 || visited[1] != 1 -> panic("dispatch search did not record its visited rows")
     if site.module_index != 1 || site.dispatch.span != (Span{start: 30, end: 34}) -> panic("dispatch lost its declaring module")
     located: sema_effect_locate_dispatch(site, inputs)
