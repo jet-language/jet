@@ -74,7 +74,6 @@ use jet_foundation.[
     TMethodRef,
     TTypeDef,
     Type,
-    compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_failure_text,
     compiler_threads_partition,
@@ -6233,8 +6232,8 @@ sema_effect_collect_claimers: fn(shared_state: Shared<SemaEffectCollectShared>, 
         sema_effect_collect_claimers(shared_state, bounds, queue, from + 1, workers, parts)
         claimed := head.join() ?? panic(compiler_threads_failure_text(err))
         loop claimed.len() > 0 {
-            done := claimed.pop() ?? break
-            parts[done.part] = compiler_take_rows<SemaEffectCollected>(done.collected)
+            done: claimed.pop() ?? break
+            parts[done.part] = done.collected.move()
         }
     }
 }
