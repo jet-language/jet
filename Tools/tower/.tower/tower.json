@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6887,
-    "rev": 103625,
+    "rev": 103645,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29986,8 +29986,8 @@
     {
       "id": "c0uyfbge",
       "num": 3262,
-      "title": "Close Unicode, regex and text-encoding contracts",
-      "body": "Close Unicode, regex and text-encoding contracts.\n\nCompare the selected text/regex/format/codec families with Jet on scalar boundaries, malformed text, views, conversions and repairable errors.\n\nCompare the selected text/regex/format/codec families with Jet on scalar boundaries, malformed text, views, conversions and repairable errors.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-core-f038. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.",
+      "title": "Unicode text and regex: full case folding, positions, display widths, producers and regex literal fixes",
+      "body": "Destination: core.text handles all of Unicode the same on every tier: full case mapping and folding, normalization, distinct byte, scalar and grapheme positions, display widths, honest producers, text built from whole UTF-8 runs, one name per case operation, and regex accessors and literals that teach the working form.\n\nWhy it matters: Latin-1-only case folding and byte-at-a-time text are silent wrong answers for most of the world's text.\n\nState (dev 168e1e9e92): Core/Text/Runtime/KernelUnicodeString.jet holds lower, upper and casefold; Core/Text/String.jet has both lower and to_lower; Core/Regex/Regex.jet is a bounded backtracking NFA over UTF-8 bytes.\n\nDecisions: D-UNICODE-CASE1=A, D-TEXT-CONTROL1=A, D-CHAR-SCALAR1=A, D-CORE-ONE-NAME1=A.\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (finding core-f038).\n\nMoved out 2026-11-15: number formatting, templates, locales and diffs to the text formatting card; message catalogs to the i18n card; the build-time regex literal to #6476; checked text sinks to #6852.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -30001,6 +30001,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: Unicode and regex criteria restated with proofs. Moved out: c6, c8, c9, c16, c17, c26 to #6885; c7 to #6886 (D-I18N1=A: translation is an opt-in package); c18 to #6476; c20 to #6852."
+        },
         {
           "at": "2026-11-13",
           "by": "Main",
@@ -30089,66 +30094,70 @@
         },
         {
           "n": 4,
-          "text": "`jet test Compiler --profile golden text/unicode_contracts` passes, with witnesses for full case folding (`Straße`→`strasse`, Greek final sigma, Turkish dotted I as the documented default), NFC/NFD/NFKC/NFKD, grapheme vs scalar vs byte counts, regex step-budget exhaustion and invalid-UTF-8 decode policy.",
+          "text": "Case mapping and folding cover full Unicode, not Latin-1 only (generated tables, like the normalization tables): `casefold(\"Straße\")` is `strasse`, Greek final sigma lowers correctly and Turkish dotted I follows the documented default; NFC, NFD, NFKC and NFKD, grapheme against scalar against byte counts, regex step-budget exhaustion and the invalid UTF-8 decode policy have witnesses. Proof: `jet test Compiler --profile golden --filter text/unicode_contracts` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-30T16:32:05.107Z"
+          "at": "2026-11-15T03:25:58.684Z"
         },
         {
           "n": 5,
-          "text": "[#1471]  • Golden `text/regex` passes on every applicable tier. • The core-surface ledger check reports the closed accessor gaps (pattern/source, flags, named_captures, count, escape).",
+          "text": "Regex accessors are complete: pattern (source), flags, named_captures, count and escape exist and the core-surface ledger reports no regex accessor gap (Text/Regex and RegexSyntax goldens already pass on O0, O1 and O2 on dev e764ade14b). Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` and `jet test Compiler --profile golden --filter Text/Regex`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:28:06.316Z"
+          "at": "2026-11-15T03:25:59.616Z"
         },
         {
           "n": 6,
           "text": "[#3252]  • Interpolation, sections, escaping and raw output. • Missing-field spans, malformed tags, depth/output/step limits. Encode renames are honoured. • Reuse allocation is measured. • Golden `text/template_render`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:28:06.983Z"
+          "evidence": "Moved to #6885 c4: templates belong on the text formatting card",
+          "at": "2026-11-15T03:26:05.960Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
           "text": "[#3289]  • Embedded `.mo` with context, three plural forms, ordered fallback and two concurrent catalogs. Malformed input is bounded. • No ambient locale or filesystem access; no secret leakage. • Golden `text/message_catalog`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:28:07.655Z"
+          "evidence": "Moved to #6886 c4: D-I18N1=A makes translation an opt-in package; catalogs belong on the i18n card",
+          "at": "2026-11-15T03:26:06.888Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
           "text": "[#3307]  • Draft and obtain the owner ballot for an explicit Locale object, data, default and API before implementation. • Then `Core/text/locale.jet` formats and parses en-US, de-DE, fr-FR and ja-JP number and date witnesses with an explicit Locale and no process-global default (golden `text/locale_format`). • Locale is kept separate from catalogs and normalization.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:28:08.339Z"
+          "evidence": "Moved to #6885 c5: locale formatting belongs on the text formatting card",
+          "at": "2026-11-15T03:26:07.823Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
           "text": "[#3311]  • Similarity, alignment, unified/context/HTML output and patch application are distinguished. • Newline, tie and cost rules are fixed against real consumers. • Each genuinely new public operation gets its own ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:28:09.402Z"
+          "evidence": "Moved to #6885 c6: diffs belong on the text formatting card",
+          "at": "2026-11-15T03:26:08.771Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
-          "text": "[#3370]  • UTF-8 byte, scalar and grapheme positions are distinct. • Empty delimiter, zero split limit, adjacent/trailing separators, CRLF and invalid bytes. • Borrowed substring lifetimes. • `text/core_text_calls` prints content, never view handles. Golden `text/text_producer_contracts` covers bytes, scalars, char_indices, graphemes, words, lines and the split family.",
+          "text": "Text producers keep UTF-8 byte, scalar and grapheme positions distinct; an empty delimiter, a zero split limit, adjacent and trailing separators, CRLF and invalid bytes have stated results; borrowed substrings keep their lifetimes; output prints content, never view handles. Proof: `jet test Compiler --profile golden --filter text/text_producer_contracts` (bytes, scalars, char_indices, graphemes, words, lines and the split family).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:28:10.807Z"
+          "at": "2026-11-15T03:26:00.473Z"
         },
         {
           "n": 11,
@@ -30161,93 +30170,98 @@
         },
         {
           "n": 12,
-          "text": "(was #4426) [#4219] Padding targets the promised display width, not the scalar count, with wide-scalar fill goldens.",
+          "text": "Padding targets the promised display width, not the scalar count. Proof: `jet test Compiler --profile golden --filter text/pad_display_width` with wide-scalar fill rows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:16:41.453Z"
+          "at": "2026-11-15T03:26:01.353Z"
         },
         {
           "n": 13,
-          "text": "(was #4426) [#4475] D-UNICODE-CASE1=A: generated Lowercase, Uppercase, Lt and UAX29 word facts drive istitle, is_lower and is_upper on every route.",
+          "text": "Generated Lowercase, Uppercase, Lt and UAX #29 word facts drive istitle, is_lower and is_upper on every route (D-UNICODE-CASE1=A). Proof: `jet test Compiler --profile golden --filter text/unicode_contracts` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:16:42.334Z"
+          "at": "2026-11-15T03:26:02.263Z"
         },
         {
           "n": 14,
-          "text": "(was #4426) [#4437] D-TEXT-CONTROL1=A: allocation-free text.has_control (any Cc) with the ratified empty and non-ASCII laws. The private grapheme helper is renamed.",
+          "text": "text.has_control reports any Cc character without allocating, with the ratified empty and non-ASCII laws, and the private grapheme helper is renamed (D-TEXT-CONTROL1=A). Proof: `jet test Compiler --profile core --filter Core/Text` covers it and its allocation count is zero.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:16:43.306Z"
+          "at": "2026-11-15T03:26:03.149Z"
         },
         {
           "n": 15,
-          "text": "(was #4426) [#4466] Every module named on the card (files.jet:1112, args.jet:107, parse.jet:710, ...) builds text from whole UTF-8 runs, never byte-at-a-time from_bytes. One non-ASCII witness per module.",
+          "text": "Core builds text from whole UTF-8 runs, never byte at a time through from_bytes, in every module that did (files, args, parse and the others listed in archived #4466), with one non-ASCII witness per module. Proof: `jet test Compiler --profile core --filter Core/` and `git grep -n 'from_bytes(\\[' -- Core` shows no byte-at-a-time builder.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:16:44.150Z"
+          "at": "2026-11-15T03:26:04.061Z"
         },
         {
           "n": 16,
           "text": "(was #4426) [#4417] D-FLOAT-POSITIONAL1=A: fmt.shortest gives shortest round-trip digits in positional layout, with the exact special-value policy.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:16:44.999Z"
+          "evidence": "Moved to #6885 c1: number formatting belongs on the text formatting card",
+          "at": "2026-11-15T03:26:09.737Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
           "text": "(was #4426) [#4331] fmt.decimal never crashes on any tier. fmt.bytes rounds binary units as selected. Crash witnesses are kept.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:16:45.840Z"
+          "evidence": "Moved to #6885 c2: number formatting belongs on the text formatting card",
+          "at": "2026-11-15T03:26:10.718Z",
+          "closure": "obsolete"
         },
         {
           "n": 18,
           "text": "(was #5466) A `Regex{…}` literal compiles to matcher code at build time: the built binary does no regex compile for it at run time (counter test), and an invalid literal is a compile error with its column (Perl and Python fail at run time).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:39:20.419Z"
+          "evidence": "Moved to #6476 c2: build-time regex compile goes with constant Regex hoisting",
+          "at": "2026-11-15T03:26:11.638Z",
+          "closure": "obsolete"
         },
         {
           "n": 19,
-          "text": "(was #5466) E0152 on a quoted regex that contains `{4}` names the brace as the cause and emits a `fix_edits` entry that rewrites the body to backtick raw text, which already works today: `Regex{`\\d{4}-\\d{2}`}` prints 2026-10 (probe work/p/b/rxtick.jet). Today `Regex{\"\\d{4}-\\d{2}\"}` reports \"A `Regex` literal cannot contain interpolation\" and suggests `re.compile(text)`, which drops the compile-time check (probe work/p/b/rxbrace.jet; JetSema/Source/Sema/Expressions/Constructors.jet:1681-1684). The 13 lines in 7 repo files that double braces inside `Regex{…}` move to the backtick form (`git grep -E 'Regex\\{[^}]*\\{\\{'`).",
+          "text": "E0152 on a quoted regex containing `{4}` names the brace as the cause and gives a `fix_edits` entry rewriting the body to backtick raw text (`Regex{`\\d{4}-\\d{2}`}` already works); the files that double braces inside `Regex{…}` move to the backtick form. Proof: `jet test Compiler --profile ui --filter regex_quoted_brace_fix` and `git grep -c -E 'Regex\\{[^}]*\\{\\{' -- '*.jet'` lists only intended cases.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:39:21.289Z"
+          "at": "2026-11-15T03:26:05.018Z"
         },
         {
           "n": 20,
           "text": "(was #1816 c2) A sink accepts only the checked text type or an audited .raw(); no sink registry or parallel text-safety mechanism exists [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:28.916Z"
+          "evidence": "Moved to #6852 c6: text sinks are a declared sink fact",
+          "at": "2026-11-15T03:26:12.516Z",
+          "closure": "obsolete"
         },
         {
           "n": 26,
           "text": "(was #4407 c1) core.text.fmt.decimal and the :Fixed(N) selector round the exact binary value ties-to-even (5/8 at 62.5 -> \"62\") [precut audit: Examples/features/text/fmt_contract pins tie:Fixed(2) of 0.125 as 0.13 (half away from zero); the row asks for ties-to-even]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:33.741Z"
+          "evidence": "Moved to #6885 c3: number formatting belongs on the text formatting card",
+          "at": "2026-11-15T03:26:13.427Z",
+          "closure": "obsolete"
         },
         {
           "n": 32,
@@ -30282,7 +30296,7 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:46.432Z",
-      "updated": "2026-11-15T03:10:58.620Z",
+      "updated": "2026-11-15T03:26:15.891Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 218,
       "goals": [
@@ -101098,6 +101112,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:25:08.392Z"
+        },
+        {
+          "n": 6,
+          "text": "A text sink accepts only the checked text type or an audited `.raw()`, through the declared sink fact; there is no sink registry or parallel text-safety mechanism. Proof: `jet test Compiler --profile ui --filter sink_needs_checked_text`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:57.775Z"
         }
       ],
       "refs": [],
@@ -101111,8 +101134,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-15T02:25:08.392Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:25:57.775Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 6
     },
     {
       "id": "c06r6neu",
@@ -209423,6 +209447,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:26:15.891Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0uyfbge",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:26:14.956Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0uyfbge",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:26:13.427Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0uyfbge",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-15T03:26:12.517Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0uyfbge",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T03:26:11.638Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0uyfbge",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-15T03:26:10.718Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0uyfbge",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-15T03:26:09.737Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0uyfbge",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T03:26:08.772Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0uyfbge",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T03:26:07.823Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0uyfbge",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T03:26:06.888Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0uyfbge",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T03:26:05.960Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0uyfbge",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T03:26:05.019Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0uyfbge",
+      "note": "#19: strip debris; proof; was: (was #5466) E0152 on a quoted regex that contains `{4}` names the brace as the cause and emits a `fix_edits` entry that rewrites the body to backtick raw text, which already works today: `Regex{`\\d{4}"
+    },
+    {
+      "at": "2026-11-15T03:26:04.062Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0uyfbge",
+      "note": "#15: strip debris; proof; was: (was #4426) [#4466] Every module named on the card (files.jet:1112, args.jet:107, parse.jet:710, ...) builds text from whole UTF-8 runs, never byte-at-a-time from_bytes. One non-ASCII witness per modu"
+    },
+    {
+      "at": "2026-11-15T03:26:03.149Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0uyfbge",
+      "note": "#14: strip debris; proof; was: (was #4426) [#4437] D-TEXT-CONTROL1=A: allocation-free text.has_control (any Cc) with the ratified empty and non-ASCII laws. The private grapheme helper is renamed."
+    },
+    {
+      "at": "2026-11-15T03:26:02.263Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0uyfbge",
+      "note": "#13: strip debris; proof; was: (was #4426) [#4475] D-UNICODE-CASE1=A: generated Lowercase, Uppercase, Lt and UAX29 word facts drive istitle, is_lower and is_upper on every route."
+    },
+    {
+      "at": "2026-11-15T03:26:01.353Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0uyfbge",
+      "note": "#12: strip debris; proof; was: (was #4426) [#4219] Padding targets the promised display width, not the scalar count, with wide-scalar fill goldens."
+    },
+    {
+      "at": "2026-11-15T03:26:00.473Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0uyfbge",
+      "note": "#10: strip debris; proof; was: [#3370]  • UTF-8 byte, scalar and grapheme positions are distinct. • Empty delimiter, zero split limit, adjacent/trailing separators, CRLF and invalid bytes. • Borrowed substring lifetimes. • `text/co"
+    },
+    {
+      "at": "2026-11-15T03:25:59.616Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0uyfbge",
+      "note": "#5: strip debris; only the ledger half remains; was: [#1471]  • Golden `text/regex` passes on every applicable tier. • The core-surface ledger check reports the closed accessor gaps (pattern/source, flags, named_captures, count, escape)."
+    },
+    {
+      "at": "2026-11-15T03:25:58.684Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0uyfbge",
+      "note": "#4: state the gap; proof; was: `jet test Compiler --profile golden text/unicode_contracts` passes, with witnesses for full case folding (`Straße`→`strasse`, Greek final sigma, Turkish dotted I as the documented default), NFC/NFD/NF"
+    },
+    {
+      "at": "2026-11-15T03:25:57.775Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0sdz4q0",
+      "note": "#6 A text sink accepts only the checked text type or an audited"
+    },
     {
       "at": "2026-11-15T03:25:56.259Z",
       "by": "TowerKeeper-1",
