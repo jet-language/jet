@@ -2,7 +2,8 @@
 // non-commit exit: the changed balance is restored (through the Ledger's
 // `Rollback` implementation, which says so), then the `on_rollback` hook runs,
 // in the cleanup that runs before the process exits with the requested
-// code.
+// code. The exit arrives as a function value with no effect row: one the
+// compiler can see, written in the block or reached through a call, is E0746.
 package: {
     name: "transact_process_exit"
     authority: { allow: [Exec, IO] }
@@ -33,17 +34,17 @@ leave: fn() {
     process.exit(0)
 }
 
-withdraw: fn(ledger: &Ledger) {
+withdraw: fn(ledger: &Ledger, stop: fn()) {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(fn() { print("hook: release the hold") })
         print("exiting inside the transaction")
-        leave()
+        stop()
     }
 }
 
 run: fn() {
     ledger := Ledger{balance: 100}
-    withdraw(ledger)
+    withdraw(ledger, leave)
     print("not reached: balance {ledger.balance}")
 }

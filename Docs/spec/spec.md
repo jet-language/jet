@@ -2175,8 +2175,9 @@ Inside `#Transact`, writes to `Shared` values are buffered and commit atomically
 The body runs exactly once. At commit, touched values are write-locked together
 in stable-address order, buffered writes are applied, and the locks are released.
 Contention waits; it does not retry the body. Irreversible `Net`, `FS`, or `Exec`
-effects inside the body are E0746; move them after the transaction or register
-them with `on_commit` on a named transaction. A transaction name is optional;
+effects inside the body are E0746, written there or reached through a call; move
+them after the transaction or register them with `on_commit` on a named
+transaction. A transaction name is optional;
 the named form exposes `on_commit` and `on_rollback`. Registering an
 `on_rollback` hook takes control of undo for the handled value, so that value is
 not automatically snapshotted (D-STM1, D-CONC-STM1=A, D-TXN-ROLLBACK).

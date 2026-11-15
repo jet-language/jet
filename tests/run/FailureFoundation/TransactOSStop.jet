@@ -2,7 +2,8 @@
 // exit: the changed balance is restored (through the Ledger's `Rollback`
 // implementation, which says so), then the `on_rollback` hook runs, in the
 // cleanup that runs before the process stops with the requested
-// code.
+// code. The stop arrives as a function value with no effect row: one the
+// compiler can see, written in the block or reached through a call, is E0746.
 package: {
     name: "transact_os_stop"
     authority: { allow: [Env, Exec, IO] }
@@ -35,17 +36,17 @@ halt: fn() {
     }
 }
 
-withdraw: fn(ledger: &Ledger) {
+withdraw: fn(ledger: &Ledger, stop: fn()) {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(fn() { print("hook: release the hold") })
         print("stopping inside the transaction")
-        halt()
+        stop()
     }
 }
 
 run: fn() {
     ledger := Ledger{balance: 100}
-    withdraw(ledger)
+    withdraw(ledger, halt)
     print("not reached: balance {ledger.balance}")
 }

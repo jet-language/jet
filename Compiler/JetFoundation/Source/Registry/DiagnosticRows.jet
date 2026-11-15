@@ -8134,7 +8134,7 @@ DIAGNOSTIC_ROWS: #run { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "An irreversible effect (Net/FS/Exec/FFI) used directly inside a `#Transact {{ … }}` block — can't be rolled back",
+        meaning: "An irreversible effect (Net/FS/Exec/FFI) used inside a `#Transact {{ … }}` block, directly or through a call — can't be rolled back",
         what: "`{{api}}` has the `{{effect_name}}` effect, which can't be rolled back inside a `#Transact` block.",
         why: "A `#Transact` block undoes its work on a `?`-failure; network, file, subprocess, and foreign effects leave external state a rollback can't take back unless the foreign binding declares a compensating undo.",
         fix: "Move the call after the block, register it with `<handle>.on_commit(fn() {{ … }})`, or declare `#Undo(inverse)` on the foreign binding.",

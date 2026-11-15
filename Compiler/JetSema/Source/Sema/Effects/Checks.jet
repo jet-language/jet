@@ -129,6 +129,10 @@ SemaEffectFunctionSource: struct {
     loop_spans: [Span]{[Span]{}}
     // `assume_deterministic` blocks suspend E3403.
     assume_det_spans: [Span]{[Span]{}}
+    // The authored `#Transact` blocks, outermost only: a call in one whose
+    // callee declares no row is held to the transaction wall once rows are
+    // solved (E0746).
+    transact_spans: [Span]{[Span]{}}
     // The first `#Memo` marker of a non-comptime function (E0938).
     memo_span: Span?{None}
     // A top-level `#Kernel(.parallel)` whose declaration obligations hold
@@ -503,22 +507,21 @@ SemaEffectScopedCall: struct {
 }
 
 // The effect facts a function's body gives its effect source: its `#FX(…)`
-// regions, loop spans and `assume_deterministic` spans, and for a top-level
-// function its pending kernel (sema_kernel_pending).
+// regions, loop spans, `assume_deterministic` spans and `#Transact` spans, and
+// for a top-level function its pending kernel (sema_kernel_pending).
 SemaEffectBodyFacts: struct {
     fx_regions: [SemaEffectFxRegion]{[SemaEffectFxRegion]{}}
     loop_spans: [Span]{[Span]{}}
     assume_det_spans: [Span]{[Span]{}}
+    transact_spans: [Span]{[Span]{}}
     kernel: SemaKernelPending?{None}
 }
 
 // The body facts of `func`, walked from its body, its kernel left out.
 sema_effect_body_facts: fn(func: Func) -> SemaEffectBodyFacts Never! {
-    SemaEffectBodyFacts{
-        fx_regions: sema_authority_fx_regions(func.body),
-        loop_spans: sema_effect_statement_spans(func.body, false),
-        assume_det_spans: sema_effect_statement_spans(func.body, true),
-    }
+    facts := SemaEffectBodyFacts{fx_regions: sema_authority_fx_regions(func.body)}
+    sema_effect_collect_statement_spans(func.body, facts)
+    facts
 }
 
 // The effect source of `func`, keyed `key`, its body facts `facts`: what its
@@ -541,6 +544,7 @@ sema_effect_source_from_header: fn(func: Func, key: String, facts: &&SemaEffectB
         fx_regions: owned.fx_regions.move(),
         loop_spans: owned.loop_spans.move(),
         assume_det_spans: owned.assume_det_spans.move(),
+        transact_spans: owned.transact_spans.move(),
         memo_span: sema_effect_memo_span(func),
         kernel: owned.kernel.move(),
         module_caps: func.module_caps,
@@ -566,24 +570,24 @@ sema_effect_memo_subject: fn(name: String) -> String Never! {
     "`{name}`"
 }
 
-// The spans of the body's loop statements, or of its `assume_deterministic`
-// blocks when `assume_det` is set.
-sema_effect_statement_spans: fn(statements: [Stmt], assume_det: Bool) -> [Span] {
-    spans := [Span]{}
-    sema_effect_collect_statement_spans(statements, assume_det, spans)
-    spans
-}
-
-sema_effect_collect_statement_spans: fn(statements: [Stmt], assume_det: Bool, spans: &[Span]) {
+// Gathers into `facts` the spans of the loops, the `assume_deterministic`
+// blocks and the authored `#Transact` blocks of `statements`. A `#Transact`
+// block inside another is left out: its calls are the outer block's.
+sema_effect_collect_statement_spans: fn(statements: [Stmt], facts: &SemaEffectBodyFacts) {
     loop statement in statements {
         if statement == {
             .While(_, body, span, _, _) | .For(_, _, _, _, body, span, _, _, _) | .Loop(body, span, _, _) | .CountedLoop(_, _, _, body, span, _, _) -> {
-                if !assume_det -> spans.push(span.copy())
-                sema_effect_collect_statement_spans(body, assume_det, spans)
+                facts.loop_spans.push(span.copy())
+                sema_effect_collect_statement_spans(body, facts)
             }
             .AssumeDet(_, _, body, span) -> {
-                if assume_det -> spans.push(span.copy())
-                sema_effect_collect_statement_spans(body, assume_det, spans)
+                facts.assume_det_spans.push(span.copy())
+                sema_effect_collect_statement_spans(body, facts)
+            }
+            .Transact(_, _, body, implicit, span) -> {
+                nested: if facts.transact_spans.last() == .Val(outer) -> sema_effect_span_contains(outer, span) else -> false
+                if !implicit && !nested -> facts.transact_spans.push(span.copy())
+                sema_effect_collect_statement_spans(body, facts)
             }
             .Unsafe(_, _, body, _)
             | .Impure(_, _, body, _)
@@ -597,15 +601,14 @@ sema_effect_collect_statement_spans: fn(statements: [Stmt], assume_det: Bool, sp
             | .AuthorityScope(_, _, _, body, _)
             | .ContextBlock(_, body, _)
             | .Live(body, _)
-            | .Transact(_, _, body, _, _)
-            | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_effect_collect_statement_spans(body, assume_det, spans)
+            | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_effect_collect_statement_spans(body, facts)
             .Switch(_, arms, else_body, _) -> {
-                loop arm in arms -> sema_effect_collect_statement_spans(arm.body, assume_det, spans)
-                if else_body == .Val(body) -> sema_effect_collect_statement_spans(body, assume_det, spans)
+                loop arm in arms -> sema_effect_collect_statement_spans(arm.body, facts)
+                if else_body == .Val(body) -> sema_effect_collect_statement_spans(body, facts)
             }
             .ComptimeIf(_, _, then_body, else_body, _, _) -> {
-                sema_effect_collect_statement_spans(then_body, assume_det, spans)
-                if else_body == .Val(body) -> sema_effect_collect_statement_spans(body, assume_det, spans)
+                sema_effect_collect_statement_spans(then_body, facts)
+                if else_body == .Val(body) -> sema_effect_collect_statement_spans(body, facts)
             }
             .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .Yield(_, _) | .DeferClose(_, _) -> {}
         }
@@ -800,8 +803,7 @@ sema_effect_root: fn(name: String) -> String Never! {
             break
         }
     }
-    if end == bytes.len() -> return name.copy()
-    String.from_bytes(bytes.slice(0, end)) ?? name.copy()
+    name.slice(0, end).copy()
 }
 
 // A root's place in Prelude/Effects.jet: the canonical order of a row.
@@ -5621,18 +5623,16 @@ sema_effect_walk_region_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tre
     Val(SemaEffectWalk.Region{node_index: node_index, region: region})
 }
 
-// (Rust `check_region_caps`): the effects a `#FX(…)` region reaches:
-// its own sites, everything its callees reach, and every effect when it makes
-// an unknown call. A call to a Core scope publisher inside the region reaches
-// it as the scoped effect its constant argument names, as a function's own
-// calls do (sema_effect_solve_scoped), so `files.read("data/{name}")` needs
-// `FS.Read("data/")`. The region's node is appended to `nodes` for the walk
-// (which writes only that node) and removed again before returning.
-sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], owner: Int, function: FnBody, region: SemaEffectFxRegion, facts: SemaEffectCallIndex, module_index: Int) -> [String] {
+// The node of the part of `function` inside `span`, a `#FX(…)` or `#Transact`
+// block keyed `{function.key}#{label}@{start}`: its own sites, its call edges
+// and its call sites, walked as its owner's were but from none of them. The
+// node is appended to `nodes` for the walk (which writes only that node) and
+// removed again before returning.
+sema_effect_region_walk: fn(nodes: &[SemaEffectNode], owner: Int, function: FnBody, span: Span, label: String, facts: SemaEffectCallIndex, module_index: Int) -> SemaEffectNode {
     // copy: the region node starts from its owner's declared row and spans;
     // the owner node stays in the graph.
     region_node := nodes[owner].copy()
-    region_node.key = "{function.key}#FX@{region.span.start}"
+    region_node.key = "{function.key}#{label}@{span.start}"
     region_node.direct = [String]{}
     region_node.direct_spans = [TEffectSpan]{}
     region_node.call_edges = [String]{}
@@ -5641,6 +5641,7 @@ sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], ow
     region_node.maximal_span = None
     region_node.dispatches = [TEffectSpan]{}
     region_node.memory_events = [SemaMemoryEvent]{}
+    region_node.memory_calls = [SemaMemoryCall]{}
     if &region_node.rare == .Val(rare) {
         rare.scoped_calls = [SemaEffectScopedCall]{}
         rare.bare_scope_callees = [String]{}
@@ -5650,9 +5651,19 @@ sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], ow
     ignored := [Diagnostic]{}
     caller: sema_effect_caller_slot(facts, module_index, function.key)
     loop statement in function.body {
-        sema_effect_walk_stmt_children(SemaEffectWalk.Region{node_index: region_index, region: region.span}, nodes, facts, ignored, caller, function.tree, function.tree.stmts[statement])
+        sema_effect_walk_stmt_children(SemaEffectWalk.Region{node_index: region_index, region: span}, nodes, facts, ignored, caller, function.tree, function.tree.stmts[statement])
     }
-    walked := nodes.pop() ?? panic("the #FX region node left the graph")
+    nodes.pop() ?? panic("the region node left the graph")
+}
+
+// (Rust `check_region_caps`): the effects a `#FX(…)` region reaches:
+// its own sites, everything its callees reach, and every effect when it makes
+// an unknown call. A call to a Core scope publisher inside the region reaches
+// it as the scoped effect its constant argument names, as a function's own
+// calls do (sema_effect_solve_scoped), so `files.read("data/{name}")` needs
+// `FS.Read("data/")`.
+sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], owner: Int, function: FnBody, region: SemaEffectFxRegion, facts: SemaEffectCallIndex, module_index: Int) -> [String] {
+    walked := sema_effect_region_walk(nodes, owner, function, region.span, "FX", facts, module_index)
     inferred := walked.direct.move()
     walked_rare: walked.rare ?? SEMA_EFFECT_NODE_NO_RARE
     if walked.maximal -> sema_effect_set_union(inferred, authority_grantable_roots())
@@ -5665,6 +5676,41 @@ sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], ow
         loop name in solved[target] -> sema_effect_region_add_scoped(inferred, walked_rare.scoped_calls, walked_rare.bare_scope_callees, edge, name)
     }
     inferred
+}
+
+// The calls of a `#Transact` block at `span` whose callee declares no effect
+// row: the transaction wall had no row for them while the body was checked
+// (sema_effect_check_transaction_wall), so each one whose solved row reaches
+// an irreversible effect is E0746 at its call. A callee that declares a row
+// met the wall at its call, and its body is held to that row. A lambda's body
+// (a `tx.on_commit` hook) and a call through a function value are no call of
+// the block.
+sema_effect_check_transact_calls: fn(nodes: &[SemaEffectNode], solved: [[String]], owner: Int, function: FnBody, span: Span, facts: SemaEffectCallIndex, module_index: Int, diagnostics: &[Diagnostic]) {
+    walked: sema_effect_region_walk(nodes, owner, function, span, "Transact", facts, module_index)
+    loop call in walked.memory_calls {
+        target: sema_effect_node_index(facts.node_by_key, call.callee) ?? next
+        if nodes[target].has_declared_row -> next
+        // The first effect of the callee's row that can't be rolled back.
+        loop effect_name in solved[target] {
+            if !sema_effect_vocabulary_irreversible(effect_name) -> next
+            diagnostics.push(sema_effect_transaction_wall_diagnostic(sema_effect_decl_label(call.callee), effect_name, call.span))
+            break
+        }
+    }
+}
+
+// Whether `effect_name` can't be rolled back, by the `irreversible` fact
+// Compiler/Prelude/Effects.jet gives it (EFFECT_VOCABULARY_ROWS): its own
+// row's, else its family's. A scoped name is judged by its effect.
+sema_effect_vocabulary_irreversible: fn(effect_name: String) -> Bool Never! {
+    base: effect_scope_split(effect_name).base
+    root: sema_effect_root(base)
+    family := false
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.name == base -> return row.irreversible
+        if row.name == root -> family = row.irreversible
+    }
+    family
 }
 
 // Adds callee `callee_key`'s effect `name` to a region's `inferred` row:
@@ -6387,19 +6433,22 @@ sema_effect_shared_facts: fn(call_facts: [SemaCallSiteFact]) -> [SemaCallSiteFac
 }
 
 // Every `#FX(…)` region of the functions of input module `module_index` stays
-// within its caps.
+// within its caps, and every `#Transact` block's calls within the transaction
+// wall.
 sema_effect_check_module_regions: fn(functions: [FnBody], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, solved: [[String]], calls: SemaEffectCallIndex, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic]) {
     region_diagnostics := [Diagnostic]{}
     loop function in functions {
         at: sema_effect_source_position(function, source_index) ?? next
-        if module_row.sources[at].fx_regions.len() == 0 -> next
+        source: module_row.sources[at]
+        if source.fx_regions.len() == 0 && source.transact_spans.len() == 0 -> next
         node_index: sema_effect_node_index(calls.node_by_key, function.key) ?? next
-        loop region in module_row.sources[at].fx_regions {
+        loop region in source.fx_regions {
             inferred: sema_effect_region_inferred(nodes, solved, node_index, function, region, calls, module_index)
             over: if region.deep -> sema_effect_deep_check_over(inferred) else -> sema_effect_uncovered(inferred, region.caps)
             if over.len() == 0 -> next
             region_diagnostics.push(if region.deep -> sema_effect_deep_check_diagnostic(over, region.caps_span) else -> sema_effect_scope_diagnostic("FX", over, region.caps, region.caps_span))
         }
+        loop span in source.transact_spans -> sema_effect_check_transact_calls(nodes, solved, node_index, function, span, calls, module_index, region_diagnostics)
     }
     sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, region_diagnostics)
 }
