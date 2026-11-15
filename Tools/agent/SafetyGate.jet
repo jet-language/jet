@@ -1822,7 +1822,8 @@ falsy: fn(value: Dyn) -> Bool Never! {
         .Bool(flag) -> !flag
         .Text(word) -> word == ""
         .Int(number) -> number == 0
-        .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
+        .Number(lexeme) -> (Float.parse(lexeme) ?? 1.0) == 0.0
+        .Float(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
     }
 }
 

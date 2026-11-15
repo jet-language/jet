@@ -381,8 +381,9 @@ measure_arm: fn(jet: String, work: String, samples: Int, name: String, battery: 
 // a's number at the JSON pointer `path` less b's, or "unavailable" when
 // either is not a whole number.
 delta: fn(a: Dyn, b: Dyn, path: String) -> Dyn Never! {
-    if (json.pointer(a, path) ?? Dyn.Null) == .Int(x) && (json.pointer(b, path) ?? Dyn.Null) == .Int(y) -> return (x - y).encode()
-    "unavailable".encode()
+    x: (json.pointer(a, path) ?? Dyn.Null).int() ?? return "unavailable".encode()
+    y: (json.pointer(b, path) ?? Dyn.Null).int() ?? return "unavailable".encode()
+    (x - y).encode()
 }
 
 // `git` in the checkout: its output, or the run fails, as it does past a

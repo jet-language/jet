@@ -88,7 +88,7 @@ check_maps: fn(origin: String, prefix: String, wasm_prefix: String) -> String Fa
 // The checks one version 3 map (`label`) must pass; the location of its first
 // mapping that lands on a Jet statement, as a JSON line.
 locate: fn(map: Dyn, label: String) -> String Failure! {
-    check(field(map, "version") == .Int(3), "{label} version")
+    check((field(map, "version").int() ?? 0) == 3, "{label} version")
     sources: items(field(map, "sources"))
     check(sources.len() > 0, "{label} sources")
     contents: items(field(map, "sourcesContent"))

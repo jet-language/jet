@@ -17,7 +17,7 @@ use {
     core.encoding.[Dyn]
     jet_canvas.[CanvasDebugPlace, CanvasHostEdit, CanvasHostReply, CanvasHostState, canvas_host_debug_place, canvas_machine_output, read_source_without_symlinks, source_revision]
     jet_debug.[DebugSnapshot, NativeDebugError, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_debug_lldb]
-    jet_foundation.[DeepChecks, Span, diagnostic_render, foundation_json_parse, foundation_json_quote]
+    jet_foundation.[DeepChecks, Span, diagnostic_render, foundation_json_integer, foundation_json_parse, foundation_json_quote]
 }
 
 JET_CLI_CANVAS_DEBUG_SCHEMA: 1
@@ -440,7 +440,7 @@ jet_cli_canvas_debug_ints: fn(value: Dyn) -> [Int] Never! {
     numbers := [Int]{}
     if value == .Array(items) {
         loop item in items {
-            if item == .Int(number) -> numbers.push(number)
+            if foundation_json_integer(item) == .Val(number) -> numbers.push(number)
         }
     }
     numbers

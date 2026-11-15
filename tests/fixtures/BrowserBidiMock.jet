@@ -179,8 +179,9 @@ truthy: fn(tree: Dyn) -> Bool {
         .Null -> false
         .Bool(value) -> value
         .Int(value) -> value != 0
+        .Number(lexeme) -> (Float.parse(lexeme) ?? 1.0) != 0.0
         .Text(value) -> value != ""
-        .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
+        .Float(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
     }
 }
 

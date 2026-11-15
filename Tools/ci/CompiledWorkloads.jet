@@ -1750,7 +1750,7 @@ review_main: fn(root: String, dir: String, inputs: ReviewInputs, board: String) 
         producer: field(provenance, "producer")
         trusted: head_commit(root) ?? ""
         producer_id: field(producer, "id")
-        integral: if producer_id == .Int(_) -> true else -> false
+        integral: if producer_id.int() == .Ok(_) -> true else -> false
         if review_run == Dyn.Null || producer == Dyn.Null || field(review_run, "path") != .Text(".github/workflows/compiled-workload-review.yml")
             || field(review_run, "event") != .Text("workflow_run") || field(review_run, "head_sha") != .Text(trusted)
             || field(producer, "name") != .Text("CI") || field(producer, "conclusion") != .Text("success") || !integral

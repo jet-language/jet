@@ -61,8 +61,8 @@ run: fn(check: Check) {
 masked: fn(key: String, value: Dyn) -> Dyn {
     if VARYING.contains(key) -> return Dyn.Text("<varies>")
     if value == {
-        .Bool(_) | .Float(_) | .Number(_) -> Dyn.Text("<varies>")
-        .Int(_) -> if STABLE.contains(key) -> value.copy() else -> Dyn.Text("<varies>")  // copy: the report keeps its own
+        .Bool(_) | .Float(_) -> Dyn.Text("<varies>")
+        .Int(_) | .Number(_) -> if STABLE.contains(key) -> value.copy() else -> Dyn.Text("<varies>")  // copy: the report keeps its own
         .Text(text) -> if key == "error_tail" -> Dyn.Text(without_runner_note(text)) else -> value.copy()  // copy: the report keeps its own
         .Array(items) -> Dyn.Array(items.map(fn(item) { masked("", item) }))
         .Object(entries) -> {

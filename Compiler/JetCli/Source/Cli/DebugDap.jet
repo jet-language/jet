@@ -21,7 +21,7 @@ use {
     dap_json: core.encoding.json
     dap_term: core.term
     jet_debug.[NativeDebugError, NativeLocal, NativeSession, NativeStop, NativeStopKind, debug_parse_expression, debug_parse_message, native_debug_hit_breakpoint, native_debug_jet_frame]
-    jet_foundation.[Expr, foundation_json_quote]
+    jet_foundation.[Expr, foundation_json_integer, foundation_json_quote]
 }
 
 // One `setBreakpoints` entry: its line, and its condition and log message
@@ -423,11 +423,10 @@ jet_cli_dap_texts_of: fn(members: &&[(key: String, value: Dyn)], name: String) -
     [String]{}
 }
 
+// The integer `value` holds, or -1. A parsed JSON number is a `.Number`
+// lexeme, which foundation_json_integer reads.
 jet_cli_dap_number: fn(value: Dyn) -> Int Never! {
-    if value == {
-        .Int(number) -> number
-        .Null | .Bool(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) | .Array(_) -> -1
-    }
+    foundation_json_integer(value) ?? -1
 }
 
 // The integer member `name`, or -1.

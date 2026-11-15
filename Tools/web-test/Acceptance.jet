@@ -88,7 +88,7 @@ check_bundle: fn(origin: String, prefix: String) Failure! {
     check(source_map != "", "{prefix} sourceMap missing")
     raw: hex.decode(source_map.removeprefix("0x").removeprefix("0X")) ?? return Err(Failure{message: "{prefix} sourceMap is not hex: {err}"})
     map: json.parse(String.from_bytes_lossy(raw)) ?? return Err(Failure{message: "{prefix} source map is not JSON: {err}"})
-    check(field(map, "version") == .Int(3), "{prefix} source map version")
+    check((field(map, "version").int() ?? 0) == 3, "{prefix} source map version")
     check(text(field(map, "mappings")) != "", "{prefix} source map mappings")
     check(items(field(map, "sources")).len() > 0, "{prefix} source map sources")
     bundle_files: [String]{"app.js", "jet_dom_runtime.js", "app.wasm", "app.js.map", "app.wasm.map"}
