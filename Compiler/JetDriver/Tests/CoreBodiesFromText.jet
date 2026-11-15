@@ -1,0 +1,106 @@
+// Assemble with the Compiler source unit. A traced compile counts the Core
+// function bodies it checked from their text, in all and by kind (JetSema
+// CoreDemand.jet sema_core_text_counters).
+use {
+    text_files: core.files
+    text_sys: core.sys
+    text_process: core.process
+    jet_driver.[
+        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode, JetDriverCompileRequest, jet_driver_compile, jet_driver_has_errors,
+        jet_driver_runtime_interface_sources,
+    ]
+    jet_cli.[jet_cli_builtin_core_rows, jet_cli_driver_request]
+    jet_foundation.[CompilerTraceSink]
+    jet_pkg_model.[JET_VERSION]
+}
+
+// A trace sink that appends each counter to `path`, one line each.
+CoreTextTrace: struct {
+    path: String
+
+    impl CompilerTraceSink {
+        begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS, Time]> {}
+
+        begin_item: fn(self, name: String, file: String, item: String) Never! -[FS, Time]> {}
+
+        end: fn(self, name: String, items: Int) Never! -[FS, Time]> {}
+
+        progress: fn(self, name: String, done: Int, total: Int) Never! -[FS]> {
+            if name.starts_with("counters.") -> text_files.append_all(self.path, "{name} = {done}\n") ?? panic("cannot write the trace: {err}")
+        }
+
+        functions: fn(self) -[]> Bool Never! {
+            false
+        }
+
+        cpu_ns: fn(self) -[Time]> Int Never! {
+            0
+        }
+    }
+}
+
+core_text_sink: fn(trace: &&CoreTextTrace) -> CompilerTraceSink Never! {
+    trace.move()
+}
+
+// The counters a Check compile of `source` traces, one `name = value` line
+// each.
+core_text_counters: fn(source: String) -> [String] {
+    path: text_files.join(text_sys.temp_dir(), "jet-core-text-{text_process.current_pid()}.trace")
+    text_files.write(path, "") ?? panic("cannot start the trace: {err}")
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
+            canonical_path: "/core-text",
+            identity: "core-text-root",
+            allow_hardlinks: false,
+            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/core-text/main.jet", relative_path: "main.jet", identity: "core-text-file", source: source}},
+            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+        }},
+        entry_root_identity: "core-text-root",
+        entry_path: "/core-text/main.jet",
+    }
+    core_rows := jet_cli_builtin_core_rows()
+    core_rows.extend(jet_driver_runtime_interface_sources())
+    request := jet_cli_driver_request(snapshot, core_rows, Val(1), JetDriverCompileMode.Check)
+    request.trace_sink = Val(core_text_sink(CoreTextTrace{path: path}))
+    request.host_facts.compiler_identity = Val("jet@{JET_VERSION}#core-text")
+    result: jet_driver_compile(request)
+    trace: text_files.read(path) ?? panic("cannot read the trace: {err}")
+    text_files.remove(path) ?? panic("cannot remove the trace: {err}")
+    problems := [String]{}
+    loop diagnostic in result.diagnostics -> problems.push("{diagnostic.code} {diagnostic.what}")
+    assert(result.complete && result.internal_problem == None && !jet_driver_has_errors(result.diagnostics), "the program did not compile: {result.internal_problem:Debug} {problems:Debug}")
+    lines := [String]{}
+    loop line in trace.split("\n") {
+        if line.starts_with("counters.core.bodies_from_text") -> lines.push(line)
+    }
+    lines
+}
+
+// The value of the counter `name` among `lines`, which must trace it once.
+core_text_value: fn(lines: [String], name: String) -> Int {
+    found := Int?{None}
+    loop line in lines {
+        parts: line.split(" = ").to_list()
+        if parts[0] != name -> next
+        assert(found == None, "`{name}` is traced more than once:\n{lines.join("\n")}")
+        found = Val(Int.parse(parts[1]) ?? panic("`{name}` has no count: {line}"))
+    }
+    found ?? panic("`{name}` is not traced:\n{lines.join("\n")}")
+}
+
+CORE_TEXT_KINDS: [String]{"demand", "generated", "generic", "impl", "prelude", "root", "upfront"}
+
+#Test("a traced compile counts the Core bodies it checks from text, by kind") {
+    named: core_text_counters("use {{ text_math: core.math }}\n\nrun: fn() {{\n    print(text_math.lcm(4, 6))\n    print(max(1, 2))\n}}\n")
+    assert(named.len() == CORE_TEXT_KINDS.len() + 1, "one total and one count per kind:\n{named.join("\n")}")
+    total := 0
+    loop kind in CORE_TEXT_KINDS -> total += core_text_value(named, "counters.core.bodies_from_text.{kind}")
+    assert(core_text_value(named, "counters.core.bodies_from_text") == total, "the total is the sum of the kinds:\n{named.join("\n")}")
+    // `lcm` and the `gcd` it calls wait for demand; `max` is a Prelude body.
+    assert(core_text_value(named, "counters.core.bodies_from_text.demand") >= 2, "`lcm` and `gcd` were not checked on demand:\n{named.join("\n")}")
+    assert(core_text_value(named, "counters.core.bodies_from_text.prelude") >= 1, "`max` was not counted as a Prelude body:\n{named.join("\n")}")
+    plain: core_text_counters("run: fn() {{\n    print(\"hi\")\n}}\n")
+    assert(core_text_value(plain, "counters.core.bodies_from_text.demand") == 0, "a program that names no Core function demanded a Core body:\n{plain.join("\n")}")
+}

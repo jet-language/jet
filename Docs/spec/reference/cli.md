@@ -864,7 +864,13 @@ Core facts seal that only the program's run-time direct calls reach
 (`kept_*`), and how many kept bodies each reason keeps (`kept.<reason>`:
 the facts' reason the function is not sealed, `comptime` or `value` for a
 sealed one a compile-time function reaches or a body names as a value,
-`unlisted` for one the facts lack)), throttled progress counts, and the
+`unlisted` for one the facts lack)), the `core.bodies_from_text` counters
+(how many Core and Prelude function bodies the compile checked from their
+text, up front or on demand, and how many of each kind, each body under the
+first that fits: `prelude`, `generic`, `impl` for a trait-impl method,
+`generated`, `root` for a lowering root or a `close` method, `demand` for
+one a demand wave checked, `upfront` for any other), throttled progress
+counts, and the
 scaling counters. `--trace=FILE` writes the same events to FILE as Chrome
 trace-event lines, flushed per event, in the `JET_TRACE_FILE` trace format
 (`Tools/perf/jetc-trace/summarize.mjs FILE --watch`

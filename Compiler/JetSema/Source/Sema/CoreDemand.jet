@@ -313,6 +313,65 @@ sema_core_demand_counters: fn(graph: SemaRegistrationGraph, tally: SemaCoreDeman
     }
 }
 
+// Traces how many Core function bodies a finalization checked from their
+// text (`counters.core.bodies_from_text`), once its demand rounds ran, and
+// how many of each kind (`counters.core.bodies_from_text.<kind>`, every
+// kind, none left out). The count takes in the bodies checked up front as
+// well as those a demand wave checked, and the Prelude's: those of
+// `core.prelude`, module `core` and the compiler-owned Prelude modules
+// (Prelude/Errors, Prelude/Effects.jet), checked from their build-time
+// syntax rows. A body checked by its signature alone (FnBody.stand_in) is
+// not one. Each body counts under the first kind it is, in this order:
+// `prelude`, a Prelude body; `generic`, a body with type parameters;
+// `impl`, a trait-impl method; `generated`, a compiler-generated body (a
+// derive or codec one); `root`, a lowering root
+// (SemaRegistrationGraph.core_lowering_roots) or a `close` method;
+// `demand`, a body a demand wave checked (graph.core_checked, which
+// sema_core_bound_counters splits by why a run keeps it); `upfront`, any
+// other.
+sema_core_text_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], trace_sink: CompilerTraceSink?) Never! {
+    sink: trace_sink ?? return
+    prelude := 0
+    generic := 0
+    trait_impl := 0
+    generated := 0
+    root := 0
+    demand := 0
+    upfront := 0
+    loop checked in modules {
+        in_prelude: checked.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || (module_is_core(checked.module_identity) && (checked.module_name == "core.prelude" || checked.module_name == "core"))
+        if !in_prelude && !module_is_core(checked.module_identity) -> next
+        loop function in checked.functions {
+            if function.stand_in -> next
+            lowering_root := false
+            if graph.core_lowering_roots == .Val(roots) -> lowering_root = roots.get(function.key) != None
+            if in_prelude {
+                prelude += 1
+            } else if function.generic_params.len() > 0 {
+                generic += 1
+            } else if function.kind == .TraitMethod(_, _, _, _, _) {
+                trait_impl += 1
+            } else if function.synthetic {
+                generated += 1
+            } else if lowering_root || (function.name == "close" && function.kind == .Method(_, _)) {
+                root += 1
+            } else if graph.core_checked.get(function.key) != None {
+                demand += 1
+            } else {
+                upfront += 1
+            }
+        }
+    }
+    sink.progress("counters.core.bodies_from_text", prelude + generic + trait_impl + generated + root + demand + upfront, -1)
+    sink.progress("counters.core.bodies_from_text.demand", demand, -1)
+    sink.progress("counters.core.bodies_from_text.generated", generated, -1)
+    sink.progress("counters.core.bodies_from_text.generic", generic, -1)
+    sink.progress("counters.core.bodies_from_text.impl", trait_impl, -1)
+    sink.progress("counters.core.bodies_from_text.prelude", prelude, -1)
+    sink.progress("counters.core.bodies_from_text.root", root, -1)
+    sink.progress("counters.core.bodies_from_text.upfront", upfront, -1)
+}
+
 // Consecutive demand waves in one body pass (sema_finalize_pass_open): the
 // pass facts, body values, program tables and pass environment are built
 // once for all of them, so a wave costs only the bodies it checks. The first
