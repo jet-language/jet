@@ -1116,8 +1116,8 @@ Reader: trait {
 }
 
 Writer: trait {
-    write: fn(&self, bytes: [U8]) -> Int IOError!
-    write_all: fn(&self, bytes: [U8]) IOError!
+    write_bytes: fn(&self, bytes: [U8]) IOError!
+    flush: fn(&self) IOError!
 }
 ```
 
@@ -1129,9 +1129,12 @@ n)` grows the caller's `out` in place. An implementation must declare the
 same access for each parameter that the trait writes (`&`) or moves (`&&`);
 `read_into: fn(&self, buffer: [U8], limit: Int)` is E0907.
 
+`write_bytes` writes all of `bytes` or fails; `flush` pushes what the sink
+holds on to its destination.
+
 core.files' `FileReader` implements `Reader` and its `FileWriter` implements
-`Writer`: `write` hands over every byte and returns the count, and the bytes
-stay buffered until `flush`, `fsync` or close. core.term's binary cursor
+`Writer`: `write_bytes` hands over every byte, and the bytes stay buffered
+until `flush`, `fsync` or close. core.term's binary cursor
 (`Reader.over(bytes)`) and standard input (`term.stdin()`) implement
 `Reader`, and both refuse a `limit` that is not positive with
 `IOError.InvalidInput`. The cursor hands out the bytes it has not yet read.

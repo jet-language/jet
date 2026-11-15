@@ -22,8 +22,10 @@ pipe: fn<R: Reader, W: Writer>(&source: R, &sink: W, step: Int) -> Int IOError! 
     loop {
         chunk: source.read(step) ?? return Err(err)
         if chunk.len() == 0 -> break
-        total += sink.write(chunk) ?? return Err(err)
+        sink.write_bytes(chunk) ?? return Err(err)
+        total += chunk.len()
     }
+    sink.flush() ?? return Err(err)
     Ok(total)
 }
 
@@ -46,10 +48,10 @@ run: fn() {
     source := files.open("in.txt") ?? panic("open in.txt again")
     sink := files.create("out.txt") ?? panic("create out.txt")
     copied: pipe(source, sink, 5) ?? panic("pipe file")
-    wrote: sink.write("!".bytes()) ?? panic("write")
+    sink.write_bytes("!".bytes()) ?? panic("write_bytes")
     sink.write_all(".".bytes()) ?? panic("write_all")
     sink.flush() ?? panic("flush")
-    print("copied {copied}+{wrote} {files.read("out.txt") ?? "<unread>"}")
+    print("copied {copied} {files.read("out.txt") ?? "<unread>"}")
 
     cursor := Reader.over("cursor bytes".bytes())
     head: cursor.read(6) ?? panic("cursor read")
