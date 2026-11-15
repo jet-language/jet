@@ -121,6 +121,9 @@ sema_serde_expand_builtin_items: fn(items: &[Item], foreign: [String:Bool]) {
                 if decode && !sema_serde_items_generated(decode_impls) && sema_serde_items_enum_valid(items, facts, definition, "Decode", auto_decode) -> generated.push(sema_serde_items_enum_decode(definition, encode, decode, span))
             }
             .Distinct(definition) -> {
+                // A distinct built on a distinct declared before it is not
+                // registered (E0129), so it gets no codec to register either.
+                if sema_serde_items_base_is_earlier_distinct(items, index, definition) -> next
                 span: sema_serde_items_derive_span(definition.derives, definition.name_span)
                 codecs: [String]{"Encode", "Decode"}
                 loop trait_name in codecs {
@@ -135,6 +138,17 @@ sema_serde_expand_builtin_items: fn(items: &[Item], foreign: [String:Bool]) {
         }
     }
     loop item in generated -> items.push(item)
+}
+
+// Whether `definition`, the item at `at`, is built on a distinct type
+// declared before it: registration refuses that chain (E0129).
+sema_serde_items_base_is_earlier_distinct: fn(items: [Item], at: Int, definition: DistinctDef) -> Bool Never! {
+    if definition.base == .Named(base_name) {
+        loop index in 0..<at {
+            if items[index] == .Distinct(earlier) && earlier.name == base_name -> return true
+        }
+    }
+    false
 }
 
 // Rust `invalid_serde_derive_impls`, negated, for one declaration and codec.
