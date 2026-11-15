@@ -1476,12 +1476,14 @@ JetDriverReachHeldModule: struct {
 
 // What jet_driver_reach_parse_held did: how many held declarations took
 // their stubs' places (-1 when a parse failed: its diagnostics are in the
-// load's), how many ready parses it read and their bytes, and the internal
-// problem of a ready parse missing or unreadable.
+// load's), how many ready parses it read, their bytes and the reads of the
+// interface it took, and the internal problem of a ready parse missing or
+// unreadable.
 JetDriverReachHeldParse: struct {
     count: Int
     fragments: Int
     fragment_bytes: Int
+    fragment_reads: Int
     problem: String?
 }
 
@@ -1503,15 +1505,17 @@ jet_driver_reach_reached_items: fn(reach: JetDriverReach, count: Int) -> [[Bool]
 // one, without reach; `reached` is jet_driver_reach_reached_items') takes
 // its stub's place, and its side tables join the module's. A module that
 // read its rows from the Core interface reads each declaration's ready
-// parse in place from it; the interface is part of the compiler, so one
-// missing or unreadable is a defect of the build, the internal problem the
-// result names. Any other module parses from its source, with every other
+// parse from it through one window (jet_driver_core_ready_program); the
+// interface is part of the compiler, so one missing or unreadable is a
+// defect of the build, the internal problem the result names. Any other
+// module parses from its source, with every other
 // byte blanked so its spans stay the source's. Those modules parse on the
 // admitted threads and join in `held` order: a parse reads nothing but its
 // own blanked source, so the programs and diagnostics are those of parsing
 // each in turn.
 jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriverReach, reached: [[Bool]], held: [JetDriverReachHeldModule], modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic]) -> JetDriverReachHeldParse {
-    done := JetDriverReachHeldParse{count: 0, fragments: 0, fragment_bytes: 0, problem: None}
+    done := JetDriverReachHeldParse{count: 0, fragments: 0, fragment_bytes: 0, fragment_reads: 0, problem: None}
+    window := jet_driver_core_interface_window()
     // The held modules with a declaration to parse, in `held` order: each
     // one's place in the load's modules, the program.items positions its
     // parse fills, and its blanked source.
@@ -1524,7 +1528,7 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
                 if reach.enabled && !jet_driver_reach_has(reached[row.loaded], declaration.position) {
                     next
                 }
-                part := jet_driver_core_ready_program(request.core_interface, row.ready, index) ?? return jet_driver_reach_held_missing(done, modules[row.loaded].module_name, declaration.name)
+                part := jet_driver_core_ready_program(request.core_interface, window, row.ready, index) ?? return jet_driver_reach_held_missing(done, modules[row.loaded].module_name, declaration.name)
                 item := part.program.items.pop() ?? return jet_driver_reach_held_missing(done, modules[row.loaded].module_name, declaration.name)
                 if part.program.items.len() > 0 {
                     return jet_driver_reach_held_missing(done, modules[row.loaded].module_name, declaration.name)
@@ -1542,6 +1546,7 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
                 done.count += 1
                 done.fragments += 1
                 done.fragment_bytes += part.size
+                done.fragment_reads = window.reads
             }
             next
         }

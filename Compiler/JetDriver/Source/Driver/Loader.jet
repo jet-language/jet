@@ -6655,6 +6655,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     internal_problem := held_parsed.problem.move()
     fragments := held_parsed.fragments
     fragment_bytes := held_parsed.fragment_bytes
+    fragment_reads := held_parsed.fragment_reads
     bodies_parsed := 0
     if request.trace_sink == .Val(sink) {
         held_total := 0
@@ -6673,12 +6674,14 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         internal_problem = restore.problem.move()
         fragments += restore.fragments
         fragment_bytes += restore.fragment_bytes
+        fragment_reads += restore.fragment_reads
         if request.trace_sink == .Val(sink) {
             bodies_parsed += restored
             // The ready parses the load read of the Core interface, in
-            // place of parsing Core text again.
+            // place of parsing Core text again, and the reads they took.
             sink.progress("counters.load.core_fragments", fragments, -1)
             sink.progress("counters.load.core_fragment_bytes", fragment_bytes, -1)
+            sink.progress("counters.load.core_fragment_reads", fragment_reads, -1)
             sink.progress("counters.load.core_lazy_modules", lazy_modules.len(), -1)
             sink.progress("counters.load.core_bodies_restored", restored, -1)
             waiting := 0

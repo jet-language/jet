@@ -806,6 +806,18 @@ x64_self_read: fn(at: Int, size: Int) -> [U8]? {
     Val(bytes)
 }
 
+// x64_self_read into the first `size` bytes of `into`, a List of the
+// caller's that a run of reads reuses, grown to `size` when it is shorter;
+// false when the file can't be opened or read, or ends first.
+x64_self_read_into: fn(at: Int, into: &[U8], size: Int) -> Bool {
+    if at < 0 || size < 0 -> return false
+    if size == 0 -> return true
+    if into.len() < size -> link_pad_to(into, size, 0)
+    fd: loader_self_fd()
+    if fd < 0 -> return false
+    loader_pread(fd, mem.address_of(into[0]), size, at) == ""
+}
+
 // Names the kept form (x64_executable_keep): "JETKEEP2".
 LOADER_KEPT_MAGIC: 0x325045454b54454a
 

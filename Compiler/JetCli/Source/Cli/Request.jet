@@ -103,7 +103,7 @@ use {
         jet_eval_default_config,
         jet_eval_native_session,
     ]
-    jet_backend.[X64ImageFile, X64_SELF_EXECUTABLE, x64_image_file_read, x64_image_part_file, x64_link_runtime_image, x64_link_runtime_pack]
+    jet_backend.[X64ImageFile, X64_SELF_EXECUTABLE, x64_image_file_read, x64_image_part_file, x64_link_runtime_image, x64_link_runtime_pack, x64_self_read, x64_self_read_into]
     jet_ir.[IRLibraryExportRow, IRLibraryResult, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent, sema_core_bodies_read]
@@ -1534,14 +1534,47 @@ JetCLIBuiltinCoreSourceReader: struct {
 }
 
 // This jet's Core interface (JetDriverCompileRequest.core_interface): its
-// `core.interface` runtime part, read by range (jet_cli_runtime_part_range).
-// jet-bare carries none, so its loads parse every Core unit whole.
+// `core.interface` runtime part, `size` bytes. A load decodes what it reads
+// of it in memory of its own, so the reads are positioned reads of this
+// jet's file, where the part starts at file offset `at`, through the one
+// descriptor the process holds of it (JetBackend Image/Loader.jet
+// x64_self_read), and none of the part's pages is mapped. When the part
+// found in the file is not the one lent (`at` -1), they read the lent part
+// (jet_cli_runtime_part_range). jet-bare carries none (`size` 0), so its
+// loads parse every Core unit whole.
 JetCLICoreInterface: struct {
+    at: Int
+    size: Int
+
     impl JetDriverCoreInterfaceReader {
-        read: fn(self, at: Int, size: Int) -[Env]> [U8]? {
+        read: fn(self, at: Int, size: Int) -[Env, FFI.Asm]> [U8]? {
+            if at < 0 || size < 0 || at + size > self.size -> return None
+            if self.at >= 0 -> return x64_self_read(self.at + at, size)
             jet_cli_runtime_part_range(JET_CLI_CORE_INTERFACE_FILE, at, size)
         }
+
+        read_into: fn(self, at: Int, into: &[U8], size: Int) -[Env, FFI.Asm]> Bool {
+            if at < 0 || size < 0 || at + size > self.size -> return false
+            if self.at >= 0 -> return x64_self_read_into(self.at + at, into, size)
+            lent: jet_cli_runtime_part_range(JET_CLI_CORE_INTERFACE_FILE, at, size) ?? return false
+            loop index in 0..<min(size, into.len()) -> into[index] = lent[index]
+            if into.len() < size -> into.extend(lent[into.len()..<size])
+            true
+        }
+
+        size: fn(self) -[Env]> Int { self.size }
     }
+}
+
+// This jet's Core interface reader: its part's place in this jet's file
+// when the part found there is the one lent (jet_cli_runtime_part_file).
+jet_cli_core_interface: fn() -[FS.Read, Env, FFI.Asm]> JetCLICoreInterface Never! {
+    size: jet_cli_runtime_part_size(JET_CLI_CORE_INTERFACE_FILE)
+    if size == 0 -> return JetCLICoreInterface{at: -1, size: 0}
+    if jet_cli_runtime_part_file(JET_CLI_CORE_INTERFACE_FILE) == .Val(found) {
+        return JetCLICoreInterface{at: found.at, size: size}
+    }
+    JetCLICoreInterface{at: -1, size: size}
 }
 
 // The toolchain tree `toolchain:` comptime inputs of `input`'s compile read:
@@ -1642,7 +1675,7 @@ jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sou
         host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: jet_cli_compiler_identity()},
         eval_config: jet_cli_eval_config(),
         record_store: None,
-        core_interface: Val(JetCLICoreInterface{}),
+        core_interface: Val(jet_cli_core_interface()),
         trace_sink: None,
         compiler_threads: CompilerThreads{cap: Val(threads ?? jet_cli_default_threads(cores, work)), cores: cores, memory_available: jet_cli_memory_available()},
         mode: mode,

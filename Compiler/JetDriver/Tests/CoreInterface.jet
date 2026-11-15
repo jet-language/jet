@@ -171,10 +171,19 @@ InterfaceTestReader: struct {
     bytes: [U8]
 
     impl JetDriverCoreInterfaceReader {
-        read: fn(self, at: Int, size: Int) -[Env]> [U8]? {
+        read: fn(self, at: Int, size: Int) -[Env, FFI.Asm]> [U8]? {
             if at < 0 || size < 0 || at + size > self.bytes.len() -> return None
             Val(self.bytes[at..<at + size])
         }
+
+        read_into: fn(self, at: Int, into: &[U8], size: Int) -[Env, FFI.Asm]> Bool {
+            if at < 0 || size < 0 || at + size > self.bytes.len() -> return false
+            loop index in 0..<min(size, into.len()) -> into[index] = self.bytes[at + index]
+            if into.len() < size -> into.extend(self.bytes[at + into.len()..<at + size])
+            true
+        }
+
+        size: fn(self) -[Env]> Int { self.bytes.len() }
     }
 }
 
@@ -410,10 +419,13 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     assert_eq(lazy.counters.get("counters.load.core_bodies"), eager.counters.get("counters.load.core_bodies"))
     assert((lazy.counters.get("counters.load.core_bodies_parsed") ?? 0) < (eager.counters.get("counters.load.core_bodies_parsed") ?? 0))
     // The lazy load read the ready parses of the bodies it kept and the
-    // held declarations it reached, and lexed fewer Core tokens.
+    // held declarations it reached, each run of them in one read of the
+    // interface, and lexed fewer Core tokens.
     assert_eq(eager.counters.get("counters.load.core_fragments"), Val(0))
     assert((lazy.counters.get("counters.load.core_fragments") ?? 0) > 0)
     assert((lazy.counters.get("counters.load.core_fragment_bytes") ?? 0) > 0)
+    assert((lazy.counters.get("counters.load.core_fragment_reads") ?? 0) > 0)
+    assert((lazy.counters.get("counters.load.core_fragment_reads") ?? 0) < (lazy.counters.get("counters.load.core_fragments") ?? 0))
     assert((lazy.counters.get("counters.parse.core_tokens") ?? 0) < (eager.counters.get("counters.parse.core_tokens") ?? 0))
     // Each lazy Core module carries the unit mentions a scan of its text
     // gives, so registration scans none of it; an eager load carries none.

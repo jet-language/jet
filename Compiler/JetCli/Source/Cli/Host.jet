@@ -834,6 +834,25 @@ jet_cli_runtime_part_range: fn(name: String, at: Int, size: Int) -[Env]> [U8]? N
     cli_runtime.image_part(part, at, size)
 }
 
+// The size of this jet's runtime part `name`; 0 when it carries none
+// (jet-bare).
+jet_cli_runtime_part_size: fn(name: String) -[Env]> Int Never! {
+    cli_runtime.image_part_size("{JET_CLI_RUNTIME_PART_PREFIX}{name}") ?? 0
+}
+
+// Where this jet's runtime part `name` lies in its own file (JetBackend
+// Image/Loader.jet x64_image_part_file) when the part found there is the
+// one lent (jet_cli_runtime_part), so positioned reads of the file read the
+// lent bytes without mapping them; None when this jet carries no such part
+// or the file's is not that one.
+jet_cli_runtime_part_file: fn(name: String) -[FS.Read, Env, FFI.Asm]> X64ImagePart? Never! {
+    part: "{JET_CLI_RUNTIME_PART_PREFIX}{name}"
+    size: cli_runtime.image_part_size(part) ?? return None
+    found: x64_image_part_file(part) ?? return None
+    if found.size != size -> return None
+    Val(found)
+}
+
 // The sealed keys of the Core facts list `facts` (JET_CLI_CORE_FACTS_FILE:
 // `key<TAB>reason` rows) and, apart, each other row's key and reason.
 JetCLICoreFacts: struct {

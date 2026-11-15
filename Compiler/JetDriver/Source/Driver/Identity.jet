@@ -238,8 +238,13 @@ JetDriverCoreSourceReader: trait {
 
 // The host's `core.interface` (CoreInterface.jet): its `size` bytes from
 // byte `at`; `None` when the host has none or the range runs past its end.
+// `read_into` puts them in the first `size` bytes of `into` instead, grown
+// to `size` when it is shorter, false when `read` would give None; `size`
+// is how many bytes it has (0 when none).
 JetDriverCoreInterfaceReader: trait {
-    read: fn(self, at: Int, size: Int) -[Env]> [U8]?
+    read: fn(self, at: Int, size: Int) -[Env, FFI.Asm]> [U8]?
+    read_into: fn(self, at: Int, into: &[U8], size: Int) -[Env, FFI.Asm]> Bool
+    size: fn(self) -[Env]> Int
 }
 
 jet_driver_core_text: fn(text: String) -> Shared<JetDriverCoreText> Never! {
