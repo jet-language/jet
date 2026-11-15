@@ -4682,7 +4682,9 @@ PatternBindingCountMismatch: struct {
         safety_reason: "An extra or missing name leaves a binding without a value or a part of the value without a binding."
         expert_path: "none: the pattern binds exactly the parts the value has"
         meaning: "A pattern that binds a different number of names than the value has parts"
-        no_fix: .Ambiguous
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .NeedsReview
 
         what: fn(self) -> String { "Pattern binding count mismatch" }
 
@@ -5151,6 +5153,9 @@ UninferableEnumCase: struct {
         safety_reason: "With no type in context, `.Variant` names no enum, so the value has no type."
         expert_path: "none: write the enum name, or give the value a type context"
         meaning: "A leading-dot variant with no enum type to take it from"
+        structured_fix: .SuggestedSourceEdit
+        no_fix: None
+        fix_safety: .NeedsReview
 
         what: fn(self) -> String {
             "Leading-dot variant: enum (`.Variant`) with no inferable type from context"
@@ -16074,6 +16079,9 @@ PayloadCaseWithIntBacking: struct {
         expert_path: "none: a payload enum keeps the default layout"
         meaning: "Integer backing on an enum whose case carries a payload"
         detail: true
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .APIChanging
 
         what: fn(self) -> String {
             "`#Layout({self.backing})` is on an enum with a case that carries a payload."
@@ -16099,6 +16107,9 @@ CaseNumberOutOfRange: struct {
         expert_path: "none: the case numbers fit the backing type"
         meaning: "Enum case number does not fit the integer backing"
         detail: true
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .APIChanging
 
         what: fn(self) -> String {
             "A case number of a `#Layout({self.backing})` enum is outside the range of `{self.backing}`."

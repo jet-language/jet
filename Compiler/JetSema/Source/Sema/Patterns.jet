@@ -446,9 +446,33 @@ sema_pattern_slot_facts: fn(slots: [PatSlot], expected: [Type], variant: String,
     }
     if slots.len() != expected.len() {
         complete = false
-        diagnostics.push(sema_error("E0306", span, "pattern `{variant}` expects {expected.len()} binding{if expected.len() == 1 -> "" else -> "s"}, got {slots.len()}", "each payload field needs its own binding slot", "write the variant with the declared payload arity"))
+        diagnostic := sema_error("E0306", span, "pattern `{variant}` expects {expected.len()} binding{if expected.len() == 1 -> "" else -> "s"}, got {slots.len()}", "each payload field needs its own binding slot", "write the variant with the declared payload arity")
+        if slots.len() < expected.len() {
+            if sema_pattern_missing_slots_edit(slots.len(), expected.len(), span, env, program) == .Val(edit) -> diagnostic = diagnostic_with_edit(diagnostic, edit)
+        }
+        diagnostics.push(diagnostic)
     }
     complete
+}
+
+// The edit that pads a positional payload pattern written with too few slots
+// with `_` wildcards before its `)`, so each written slot keeps its field.
+// None when the pattern does not end in `)` in the source.
+sema_pattern_missing_slots_edit: fn(written: Int, arity: Int, span: Span, env: SemaScopeEnvironment, program: SemaProgramTables) -> TextEdit? {
+    graph: program.registration_graph ?? return None
+    caller: sema_scope_caller_index(env, graph) ?? return None
+    raw: graph.modules[caller].source.bytes()
+    if span.end < 2 || span.end > raw.len() || raw[span.end - 1] != (U8{41}) -> return None
+    before := span.end - 2
+    loop before > span.start && sema_stmt_ascii_space(raw[before]) -> before -= 1
+    // After `(` or a trailing `,` the first wildcard needs no comma of its own.
+    prefix: if {
+        raw[before] == (U8{40}) -> ""
+        raw[before] == (U8{44}) -> " "
+        else -> ", "
+    }
+    added: loop _ in written..<arity -> "_"
+    Val(TextEdit{span: Span{start: span.end - 1, end: span.end - 1}, new_text: "{prefix}{added.join(", ")}"})
 }
 
 // Whether a variant pattern uses the named payload
@@ -507,13 +531,15 @@ sema_pattern_unnamed_payload_error: fn(variant: String, slots: [PatSlot], arity:
 
 // Place each `field: slot` entry at its field's
 // position. A left-out field needs the trailing `..` (E0326) and then
-// matches anything; `..` after every field is redundant (E0327).
+// matches anything; `..` after every field is redundant (E0327). A label the
+// case does not declare (E0302) already names the field it stands for, so
+// that pattern reports no left-out fields.
 sema_pattern_place_named_slots: fn(written: [PatSlot], fields: [VariantField], variant: String, span: Span, diagnostics: &[Diagnostic]) -> [PatSlot] {
     placed := [PatSlot?]{}
     loop _ in fields -> placed.push(None)
     names: loop declared in fields -> declared.name
-    declared_list: names.join(", ")
     rest := Span?{None}
+    unknown := false
     loop entry in written {
         if entry == {
             .Named(field, field_span, slot) -> {
@@ -525,7 +551,10 @@ sema_pattern_place_named_slots: fn(written: [PatSlot], fields: [VariantField], v
                     }
                 }
                 if {
-                    found < 0 -> diagnostics.push(sema_error("E0302", field_span, "case `{variant}` has no field `{field}`", "`{variant}` declares the fields {declared_list}", "name one of the declared fields"))
+                    found < 0 -> {
+                        diagnostics.push(sema_pattern_unknown_label(variant, field, field_span, slot, names, sema_pattern_written_labels(written, names)))
+                        unknown = true
+                    }
                     placed[found] != None -> diagnostics.push(sema_error("E0303", field_span, "field `{field}` appears more than once", "each payload field may be matched only once", "remove the duplicate field"))
                     else -> placed[found] = Val(slot)
                 }
@@ -541,9 +570,62 @@ sema_pattern_place_named_slots: fn(written: [PatSlot], fields: [VariantField], v
     missing_list: missing.join(", ")
     if rest == {
         .Val(rest_span) -> if missing.len() == 0 -> diagnostics.push(sema_error("E0327", rest_span, "this `..` is redundant", "the pattern already names every field of `{variant}`", "remove `..` or leave out at least one field"))
-        .None -> if missing.len() > 0 -> diagnostics.push(sema_error("E0326", span, "this pattern leaves out fields of `{variant}`: {missing_list}", "a pattern that doesn't name every field must end with `..` so the skipped fields are visible at a glance", "add `, ..` before the closing `}}`, or name {missing_list}"))
+        .None -> if missing.len() > 0 && !unknown -> diagnostics.push(sema_error("E0326", span, "this pattern leaves out fields of `{variant}`: {missing_list}", "a pattern that doesn't name every field must end with `..` so the skipped fields are visible at a glance", "add `, ..` before the closing `}}`, or name {missing_list}"))
     }
     loop slot in placed -> slot ?? PatSlot.Wildcard
+}
+
+// Which declared fields a named payload pattern writes a label for, one flag
+// per declared field.
+sema_pattern_written_labels: fn(written: [PatSlot], declared: [String]) -> [Bool] {
+    flags := [Bool]{}
+    loop name in declared {
+        found := false
+        loop entry in written {
+            if entry == {
+                .Named(field, _, _) -> if field == name -> found = true
+                .Wildcard | .Bind(_, _) | .Range(_, _) | .Nested(_) | .Value(_) | .Rest(_) -> {}
+            }
+        }
+        flags.push(found)
+    }
+    flags
+}
+
+// E0302 for a payload pattern label `field` that `variant` does not declare;
+// the edit renames it when sema_payload_label_suggestion names one field. A
+// label written alone (`{hieght}`) also binds that name, so it becomes
+// `h: hieght` and the arm keeps its binding.
+sema_pattern_unknown_label: fn(variant: String, field: String, field_span: Span, slot: PatSlot, declared: [String], written: [Bool]) -> Diagnostic {
+    suggestion: sema_payload_label_suggestion(field, declared, written)
+    fix: if suggestion == .Val(near) -> "did you mean `{near}`?" else -> "name one of the declared fields"
+    diagnostic: sema_error("E0302", field_span, "case `{variant}` has no field `{field}`", "`{variant}` declares the fields {declared.join(", ")}", fix)
+    near: suggestion ?? return diagnostic
+    alone: if slot == .Bind(_, bind_span) -> bind_span == field_span else -> false
+    new_text: if alone -> "{near}: {field}" else -> near
+    diagnostic_with_edit(diagnostic, TextEdit{span: field_span, new_text: new_text})
+}
+
+// The declared payload field a label the case does not declare stands for:
+// the nearest declared name when no label writes it yet, else the one field
+// no label writes. `written` flags each declared field a label writes. None
+// when neither settles one field.
+sema_payload_label_suggestion: fn(label: String, declared: [String], written: [Bool]) -> String? {
+    near := sema_suggest_field(label, declared) ?? ""
+    only := ""
+    open := 0
+    loop (index, name) in declared {
+        if {
+            !written[index] -> {
+                open += 1
+                only = name
+            }
+            name == near -> near = ""
+        }
+    }
+    if near != "" -> return Val(near)
+    if open == 1 -> return Val(only)
+    None
 }
 
 // The case a dotless `Name.Case` pattern names when `Name` is the subject's

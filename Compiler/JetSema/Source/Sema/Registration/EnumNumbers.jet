@@ -10,7 +10,9 @@
 //                                     the backing holds but no case has
 // A case payload (E1120), a number outside the backing type (E1121) and a
 // number two cases share (E1122) are refused; a case number is an integer
-// literal (E0035), so the checks see every number.
+// literal (E0035), so the checks see every number. E1120's edit deletes the
+// `#Layout` line, and E1121's names the narrowest backing type that holds
+// every case number.
 //
 // `#[Specified, Layout(U8)]` makes every case of a numbered enum state its
 // number, so adding or moving a case renumbers no other: a case without one
@@ -23,19 +25,23 @@ use {
         Func,
         Item,
         Marker,
+        Span,
+        TextEdit,
         UnOp,
+        diagnostic_with_edit,
         expr_span,
         jet_layout_integer_backing_max,
         jet_layout_integer_backing_min,
         jet_target_layout_enum_backing,
         jet_target_layout_enum_c_tag,
+        jet_target_layout_marker_expression,
     ]
     jet_parser.[
         parse_source,
     ]
 }
 
-sema_enum_numbers_expand: fn(items: &[Item], diagnostics: &[Diagnostic]) {
+sema_enum_numbers_expand: fn(items: &[Item], source: String, diagnostics: &[Diagnostic]) {
     loop index in 0..<items.len() {
         if items[index] == .Struct(definition) {
             if sema_enum_numbers_marker(definition.type_markers, "Specified") == .Val(specified) -> diagnostics.push(sema_enum_numbers_unnumbered_specified(specified, "struct `{definition.name}`, which has no cases"))
@@ -43,7 +49,7 @@ sema_enum_numbers_expand: fn(items: &[Item], diagnostics: &[Diagnostic]) {
         if items[index] == .Enum(definition) {
             sema_enum_numbers_check_specified(definition, diagnostics)
             backing: jet_target_layout_enum_backing(definition) ?? next
-            numbers: sema_enum_numbers_checked(definition, backing, diagnostics) ?? next
+            numbers: sema_enum_numbers_checked(definition, backing, source, diagnostics) ?? next
             methods: sema_enum_numbers_methods(definition, backing, numbers, diagnostics) ?? next
             updated := definition
             // The methods are the compiler's: they report at the enum, and
@@ -93,11 +99,13 @@ sema_enum_numbers_marker: fn(markers: [Marker], name: String) -> Marker? {
 }
 
 // Every case's number in declaration order, or None after a diagnostic.
-sema_enum_numbers_checked: fn(definition: EnumDef, backing: String, diagnostics: &[Diagnostic]) -> [Int]? {
+sema_enum_numbers_checked: fn(definition: EnumDef, backing: String, source: String, diagnostics: &[Diagnostic]) -> [Int]? {
     marker: sema_enum_numbers_layout_marker(definition)
     loop variant in definition.variants {
         if !(variant.payload == .Unit) {
-            diagnostics.push(sema_error("E1120", marker.span, "`#Layout({backing})` backs only a payload-free enum, and case `{variant.name}` of `{definition.name}` carries a payload", "a backing type gives each case one number; a case with fields is more than a number", "remove the payload from `{variant.name}`, or remove `#Layout({backing})` and convert with your own methods"))
+            diagnostic := sema_error("E1120", marker.span, "`#Layout({backing})` backs only a payload-free enum, and case `{variant.name}` of `{definition.name}` carries a payload", "a backing type gives each case one number; a case with fields is more than a number", "remove the payload from `{variant.name}`, or remove `#Layout({backing})` and convert with your own methods")
+            if sema_enum_numbers_marker_removal(marker, source) == .Val(edit) -> diagnostic = diagnostic_with_edit(diagnostic, edit)
+            diagnostics.push(diagnostic)
             return None
         }
     }
@@ -105,6 +113,8 @@ sema_enum_numbers_checked: fn(definition: EnumDef, backing: String, diagnostics:
     greatest: jet_layout_integer_backing_max(backing)
     numbers := [Int]{}
     valid := true
+    // The first E1121, which carries the edit that widens the backing.
+    first_range := -1
     next_number := 0
     loop variant in definition.variants {
         number := next_number
@@ -112,6 +122,7 @@ sema_enum_numbers_checked: fn(definition: EnumDef, backing: String, diagnostics:
             if sema_enum_numbers_literal(expression) == .Val(written) {
                 number = written
                 if number < least || number > greatest {
+                    if first_range < 0 -> first_range = diagnostics.len()
                     diagnostics.push(sema_error("E1121", expr_span(expression), "case `{variant.name}` is {number}, which `{backing}` can't hold", "`#Layout({backing})` stores every case number of `{definition.name}` as a `{backing}` ({least} to {greatest})", "use a number from {least} to {greatest}, or a wider backing type"))
                     valid = false
                 }
@@ -120,6 +131,7 @@ sema_enum_numbers_checked: fn(definition: EnumDef, backing: String, diagnostics:
                 valid = false
             }
         } else if number > greatest {
+            if first_range < 0 -> first_range = diagnostics.len()
             diagnostics.push(sema_error("E1121", variant.name_span, "case `{variant.name}` counts up to {number}, which `{backing}` can't hold", "a case without a number is one more than the case before it, and `#Layout({backing})` stores numbers from {least} to {greatest}", "give `{variant.name}` a number from {least} to {greatest}, or use a wider backing type"))
             valid = false
         }
@@ -135,8 +147,47 @@ sema_enum_numbers_checked: fn(definition: EnumDef, backing: String, diagnostics:
         // refused by the range check above.
         next_number = if number == 9223372036854775807 -> number else -> number + 1
     }
+    if first_range >= 0 {
+        if sema_enum_numbers_widened(marker, backing, numbers) == .Val(edit) -> diagnostics[first_range] = diagnostic_with_edit(diagnostics[first_range], edit)
+    }
     if !valid -> return None
     Val(numbers)
+}
+
+// The edit that names, in place of `backing`, the narrowest backing type that
+// holds every case number: unsigned unless `backing` or a number is signed.
+// None when no backing type holds them all.
+sema_enum_numbers_widened: fn(marker: Marker, backing: String, numbers: [Int]) -> TextEdit? {
+    written: jet_target_layout_marker_expression(marker, 0) ?? return None
+    least := 0
+    greatest := 0
+    loop number in numbers {
+        if number < least -> least = number
+        if number > greatest -> greatest = number
+    }
+    candidates: if least < 0 || backing.starts_with("I") -> [String]{"I8", "I16", "I32", "I64"} else -> [String]{"U8", "U16", "U32", "U64"}
+    loop candidate in candidates {
+        if jet_layout_integer_backing_min(candidate) <= least && jet_layout_integer_backing_max(candidate) >= greatest -> return Val(TextEdit{span: expr_span(written), new_text: candidate})
+    }
+    None
+}
+
+// The edit that deletes a `#Layout(…)` marker written alone on its line, with
+// that line. None for a marker that shares its line, sits in a `#[…]` list or
+// is written inside the body.
+sema_enum_numbers_marker_removal: fn(marker: Marker, source: String) -> TextEdit? {
+    if marker.inside -> return None
+    raw: source.bytes()
+    start: marker.span.start
+    end: marker.span.end
+    if start < 0 || end > raw.len() || start >= end || raw[start] != (U8{35}) -> return None
+    line_start := start
+    loop line_start > 0 && (raw[line_start - 1] == (U8{32}) || raw[line_start - 1] == (U8{9})) -> line_start -= 1
+    if line_start > 0 && raw[line_start - 1] != (U8{10}) -> return None
+    line_end := end
+    loop line_end < raw.len() && (raw[line_end] == (U8{32}) || raw[line_end] == (U8{9}) || raw[line_end] == (U8{13})) -> line_end += 1
+    if line_end >= raw.len() || raw[line_end] != (U8{10}) -> return None
+    Val(TextEdit{span: Span{start: line_start, end: line_end + 1}, new_text: ""})
 }
 
 sema_enum_numbers_layout_marker: fn(definition: EnumDef) -> Marker Never! {

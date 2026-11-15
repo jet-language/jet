@@ -15,6 +15,7 @@ use jet_foundation.[
     core_enum_payload_variants,
     core_enum_variants,
     diagnostic_with_edit,
+    diagnostic_with_structured_edit,
     expr_span,
     measure_literal_value,
     type_name,
@@ -484,7 +485,44 @@ sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span,
         diagnostics.push(sema_error("E0307", span, "this multi-head function doesn't cover every case — missing: {names}", "each multi-head head covers one argument shape, so every variant must appear once", "add a head for: {names}"))
         return
     }
-    diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every case — missing: {names}", "every arm here is a pattern test, so each variant must appear once", "add an arm for: {names}"))
+    diagnostic: sema_error("E0307", span, "this `if` doesn't cover every case — missing: {names}", "every arm here is a pattern test, so each variant must appear once", "add an arm for: {names}")
+    patterns := [String]{}
+    loop name in missing {
+        // A nested witness (`Err(.High)`) is already a whole pattern.
+        if name.contains("(") && !name.ends_with("(...)") {
+            patterns.push(".{name}")
+            next
+        }
+        pattern: sema_coverage_case_pattern(subject_ty, name, environment, program) ?? {
+            diagnostics.push(diagnostic)
+            return
+        }
+        patterns.push(pattern)
+    }
+    edit: sema_coverage_missing_arms_edit(patterns, span, environment, program) ?? {
+        diagnostics.push(diagnostic)
+        return
+    }
+    diagnostics.push(diagnostic_with_structured_edit(diagnostic, edit))
+}
+
+// The edit that writes one `.Case -> {}` arm per missing case on its own
+// line before the table's closing brace, one level deeper than the brace.
+// None when the brace shares its line with an arm or the source does not
+// hold the table.
+sema_coverage_missing_arms_edit: fn(patterns: [String], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TextEdit? {
+    graph: program.registration_graph ?? return None
+    caller: sema_scope_caller_index(environment, graph) ?? return None
+    raw: graph.modules[caller].source.bytes()
+    close: sema_stmt_table_close(raw, span.start) ?? return None
+    line_start := close
+    loop line_start > 0 && raw[line_start - 1] != (U8{10}) -> line_start -= 1
+    loop at in line_start..<close {
+        if raw[at] != (U8{32}) && raw[at] != (U8{9}) -> return None
+    }
+    indent: sema_stmt_source_text(raw, Span{start: line_start, end: close}) ?? ""
+    arms: loop pattern in patterns -> "{indent}    {pattern} -> {{}}\n"
+    Val(TextEdit{span: Span{start: line_start, end: line_start}, new_text: arms.join("")})
 }
 
 // `note_pattern_coverage`: an arm head that an earlier full arm, or an ancestor

@@ -56,6 +56,7 @@ use {
         jet_target_layout_atomic_scalar_type,
         checked_generated_local,
         TextEdit,
+        diagnostic_with_alternative_edit,
         diagnostic_with_edit,
         ModuleID,
         module_is_core,
@@ -821,7 +822,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
     resolved_name := type_name
     if resolved_name == "" {
         expected_ty: expected ?? {
-            diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
+            diagnostics.push(sema_expression_uninferable_case(variant, span, None, environment, program))
             return None
         }
         normalized: sema_expr_unwrap_tag(expected_ty)
@@ -838,7 +839,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> ""
         }
         if resolved_name == "" {
-            diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
+            diagnostics.push(sema_expression_uninferable_case(variant, span, Val(normalized), environment, program))
             return None
         }
     }
@@ -1027,7 +1028,8 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
                     }
                 }
                 if found < 0 {
-                    diagnostics.push(sema_error("E0302", expr_span(payload_expr), "variant `{variant}` has no field `{label}`", "named enum payloads use the declaration's field names", "use a declared payload field"))
+                    labels: loop declared in fields -> declared.name
+                    diagnostics.push(sema_expression_unknown_payload_label(variant, label, labels, args, payload_expr, environment, program))
                     return None
                 }
                 if supplied[found] {
@@ -1220,7 +1222,7 @@ sema_expression_core_enum_named_literal: fn(enum_name: String, display_name: Str
             }
         }
         if found < 0 {
-            diagnostics.push(sema_error("E0302", expr_span(payload_expr), "variant `{variant}` has no field `{label}`", "named enum payloads use the declaration's field names", "use a declared payload field"))
+            diagnostics.push(sema_expression_unknown_payload_label(variant, label, labels, args, payload_expr, environment, program))
             return None
         }
         if supplied[found] {
@@ -1259,6 +1261,115 @@ sema_expression_core_enum_named_literal: fn(enum_name: String, display_name: Str
     if failed -> return None
     value: sema_tree_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Named{fields: named_values}}, span)
     sema_expr_expected(value, expected, environment, program, diagnostics)
+}
+
+// E0302 for a named payload label `label` that `variant` does not declare,
+// reported at the label. When sema_payload_label_suggestion names one field,
+// the edit renames the label; a label written alone (`{height}`) keeps its
+// value's name by becoming `h: height`. A label the source holds in neither
+// form keeps the report at its value, with no edit.
+sema_expression_unknown_payload_label: fn(variant: String, label: String, declared: [String], args: [EnumLitArg], value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+    written := [Bool]{}
+    loop declared_name in declared {
+        found := false
+        loop arg in args {
+            if arg == .Named(name, _) {
+                if name == declared_name -> found = true
+            }
+        }
+        written.push(found)
+    }
+    value_span: expr_span(value)
+    label_span: sema_expression_payload_label_span(label, value_span, environment, program)
+    suggestion: sema_payload_label_suggestion(label, declared, written)
+    fix: if suggestion == .Val(near) -> "did you mean `{near}`?" else -> "use a declared payload field"
+    diagnostic: sema_error("E0302", label_span ?? value_span, "variant `{variant}` has no field `{label}`", "named enum payloads use the declaration's field names", fix)
+    near: suggestion ?? return diagnostic
+    at: label_span ?? return diagnostic
+    new_text: if at == value_span -> "{near}: {label}" else -> near
+    diagnostic_with_edit(diagnostic, TextEdit{span: at, new_text: new_text})
+}
+
+// The span of the `label` written just before `: value`, or the value's own
+// span when the label is written alone and the value is the name it stands
+// for. None when the source holds anything else there.
+sema_expression_payload_label_span: fn(label: String, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Span? {
+    graph: program.registration_graph ?? return None
+    caller: sema_scope_caller_index(environment, graph) ?? return None
+    raw: graph.modules[caller].source.bytes()
+    if value_span.start < 1 || value_span.end > raw.len() -> return None
+    at := value_span.start - 1
+    loop at > 0 && sema_stmt_ascii_space(raw[at]) -> at -= 1
+    if raw[at] != (U8{58}) {
+        if (sema_stmt_source_text(raw, value_span) ?? "") == label -> return Val(value_span)
+        return None
+    }
+    at -= 1
+    loop at > 0 && sema_stmt_ascii_space(raw[at]) -> at -= 1
+    end: at + 1
+    start: end - label.bytes().len()
+    if start < 0 -> return None
+    if (sema_stmt_source_text(raw, Span{start: start, end: end}) ?? "") != label -> return None
+    Val(Span{start: start, end: end})
+}
+
+// E0330 for a leading-dot case `.variant` whose enum no expected type
+// settles. The enums that declare the case are its candidates: the members of
+// an expected union, or, with no expected type, the enums this module
+// declares. Two or more make the case ambiguous. The edit writes the first
+// candidate's name before the dot, and each other candidate is an
+// alternative edit.
+sema_expression_uninferable_case: fn(variant: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+    owners: sema_expression_case_owners(variant, span, expected, environment, program)
+    if owners.len() == 0 -> return sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected")
+    written: loop owner in owners -> "`{owner}.{variant}`"
+    named: loop owner in owners -> "`{owner}`"
+    single: owners.len() == 1
+    what: if single -> "can't infer the enum type for `.{variant}`" else -> "`.{variant}` could be a case of {named.join(" or ")}"
+    why: if single -> "a leading-dot variant needs a known enum type from context" else -> "a leading-dot case names one enum, and nothing here picks one of the enums that declare `{variant}`"
+    fix: if single -> "write the full form {written[0]}" else -> "write the enum name: {written.join(" or ")}"
+    diagnostic := sema_error("E0330", span, what, why, fix)
+    graph: program.registration_graph ?? return diagnostic
+    caller: sema_scope_caller_index(environment, graph) ?? return diagnostic
+    raw: graph.modules[caller].source.bytes()
+    if span.start < 0 || span.start >= raw.len() || raw[span.start] != (U8{46}) -> return diagnostic
+    at: Span{start: span.start, end: span.start}
+    diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: at, new_text: owners[0]})
+    loop index in 1..<owners.len() -> diagnostic = diagnostic_with_alternative_edit(diagnostic, TextEdit{span: at, new_text: owners[index]})
+    diagnostic
+}
+
+// The names of the enums a leading-dot `.variant` could build, in written
+// order: the members of an expected union that declare the case, or, with no
+// expected type, this module's enums that declare it. Empty when a candidate
+// is declared in another module, whose name this module may write otherwise.
+sema_expression_case_owners: fn(variant: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] {
+    owners := [String]{}
+    graph: program.registration_graph ?? return owners
+    caller: sema_scope_caller_index(environment, graph) ?? return owners
+    if expected == .Val(carrier) {
+        if carrier == .Union(members) {
+            loop member in members {
+                if sema_pattern_union_tag(member) == variant -> return [String]{}
+                probe := [Diagnostic]{}
+                if !sema_pattern_payload(member, variant, environment, program, span, probe).known -> next
+                owner: sema_pattern_nominal_row(graph, environment.module_identity, sema_pattern_unwrap_tags(member)) ?? return [String]{}
+                if owner.module_index != caller -> return [String]{}
+                owners.push(graph.modules[caller].nominals[owner.row].symbol.name)
+            }
+        }
+        return owners
+    }
+    loop nominal in graph.modules[caller].nominals {
+        if nominal.kind != SemaRegistrationNominalKind.Enum || nominal.compiler_owned -> next
+        loop row in nominal.variants {
+            if row.symbol.name == variant {
+                owners.push(nominal.symbol.name)
+                break
+            }
+        }
+    }
+    owners
 }
 
 // Rust `check_struct_lit` / `check_enum_lit`: every field a literal leaves
