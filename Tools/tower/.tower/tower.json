@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6862,
-    "rev": 103100,
+    "rev": 103116,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26221,21 +26221,21 @@
         },
         {
           "n": 14,
-          "text": "[retarget] Every dispatch table requires exactly one statically typed hole. Missing, repeated, ambiguous, wrong-type and non-Bool headers get registered diagnostics (DiagnosticRows.jet) with UI snapshots.",
+          "text": "Every dispatch table requires exactly one statically typed hole. Missing, repeated, ambiguous, wrong-type and non-Bool headers get registered diagnostics (DiagnosticRows.jet) with UI snapshots. Proof: `jet test Compiler --profile ui --filter dispatch_hole_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:38:33.378Z"
+          "at": "2026-11-15T02:46:39.314Z"
         },
         {
           "n": 19,
-          "text": "[retarget] Syntax registry entry, syntax-decisions log entry, regenerated `jet devtools grammars` output and re-blessed snapshots.",
+          "text": "The dispatch-hole syntax has its syntax registry row, its syntax-decisions.md entry, regenerated editor grammars and re-blessed snapshots. Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:38:36.097Z"
+          "at": "2026-11-15T02:46:40.186Z"
         },
         {
           "n": 20,
@@ -26312,8 +26312,8 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-11T12:59:34.979Z",
-      "updated": "2026-11-15T02:11:03.347Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:46:40.186Z",
+      "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-15T00:09:14.389Z",
       "goals": [
         "G6"
@@ -48089,7 +48089,7 @@
     {
       "id": "c0441rvj",
       "num": 4623,
-      "title": "Names in every script, one stored form, look-alike warnings: the identifier law (ballot D-IDENT-CHARS1)",
+      "title": "Names in every script, one stored form, look-alike names are tidy errors (D-IDENT-CHARS1)",
       "body": "Job: a learner names things in their own language, and a reviewer sees exactly the names that compile.\n\nToday (exercised with release jet dev-05ea86f65; probes in $JET_SCRATCH_ROOT/mine/legwork/languages-b/probes/):\n- Probe A: `café` typed with a one-piece é works; the same-looking `café` typed as e + U+0301 fails with E0001 'The character U+0301 doesn't mean anything here (yet)'. Probe C: Devanagari `नमस्ते` fails on U+094D. Combining marks are never allowed, so mark-based scripts cannot be used for names.\n- Probe D: Latin `a` and Cyrillic `а` bind two silent, different names.\n- Source reading: both lexers accept 'alphabetic or numeric' scalars only (Scan.jet:47-55; Scan.rs:772), with no normal form and no look-alike check. The self-hosted lexer uses Core's approximate classifier (#4426), so the two compilers can disagree.\n\nNot in this card: invisible bidirectional controls in source (Trojan Source, CVE-2021-42574) are already owned without an owner gate as #3881 criterion [#4204] (merged from #4204). This card depends on that work and on #4426's pinned UCD data.\n\nSource witnesses: CURSED (youtube BiFt4vw1-uM 13:29-24:08): an agent 'added emoji names' by editing only identifier start/continue tables; the generated JavaScript could not run and the compiler copy segfaulted (name rules are end-to-end law, not a lexer table). DreamBerd reaction (_oiBWfuf0Oo 03:52-04:31). Rule 9: Rust RFC 2457 (UAX #31 + NFC + confusable_idents warning), Python PEP 3131 (NFKC), C++ P1949 (UAX #31, no emoji).\n\nThe ballot decides the character law. After ratification: one generated XID/NFC/confusable data home shared by both lexers, formatter NFC rewrite, UTS #39 skeleton warning per package, spec.md:47-48 rewrite, syntax registry and editor grammars regenerated, UI goldens.\n\nDistilled 2026-10-05 by DistillLang from the six mining batches; Tower snapshot rev 74843 (jet-state digest INCONSISTENT during collection: rerun before posting).",
       "kind": "feature",
       "track": "sidequest",
@@ -48246,7 +48246,7 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.274Z",
-      "updated": "2026-11-15T02:44:18.755Z",
+      "updated": "2026-11-15T02:46:02.973Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
@@ -63588,7 +63588,7 @@
     {
       "id": "c0j8ez91",
       "num": 6004,
-      "title": "Map: Unit family: parse, members, conversions, currency and backend",
+      "title": "Unit family: the five known-failing unit cases pass (conversions, UnitConvert lowering, derived units)",
       "body": "Destination: The Unit family testkit cases and dimensional goldens pass; then re-triage the stream-predicate-only rows (#5811).\nNotes: Batch G14 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && TESTKIT_ARGS=\"--cases $JET_SCRATCH_ROOT/lanes/Audit/consol/cases/G14.golden.txt --tier o0,o1\" JET=$JET Tools/agent/jet-env jet test Tools/testkit \"suite golden\". Order: #5586 #5809 #5804 #5805 #5806 #5807 #5811.\nDecisions so far: none linked to member cards.\nFog: no criteria yet on #5804 #5805 #5806 #5807 #5809 #5811 #5586 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
       "kind": "task",
       "track": "epoch",
@@ -63603,6 +63603,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned in place: c4, c6 and c7 now name the five #6004 rows of tests/known-failing.tsv on dev 72a8142651. physical_unit_codable_round_trips_as_its_concrete_type is #6843's row, and tests/ui/unit_family_unknown_header_field is #6425's."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -63671,65 +63676,65 @@
         {
           "n": 3,
           "text": "(was #5805) Unit family: unit constructors and members not found (E0107/E0405/E0311: Meter.from_float after ??, CelsiusPoint, MPerS, .raw())",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:53:37.353Z"
+          "evidence": "dev 4b0e37a662 (GoalsA-1-3 unit-family-display-exact). p140 batch compiler (dev fa5d990a8c), 2026-11-14 21:45: jet test Compiler --profile cases --filter unit_family -> PASS 51 FAIL 0 KF 6 (was 43/14). Passing for this criterion: unit_family/multi_word_member_pascal_cases and unit_family/exact_concrete_coercion_uses_the_value_not_only_the_scale_denominator (constructors and members resolve). The remaining 6 KF rows are c4, c6 and #6843.",
+          "at": "2026-11-15T02:46:03.893Z"
         },
         {
           "n": 4,
-          "text": "(was #5806) Unit family: conversion checks wrong (E0112 Meter vs Millimeter, E0127 implicit rounding, E0113 [Int] vs [Int#5])",
+          "text": "Unit conversions check right: a fixed-length measure keeps its `[Int#5]` shape through `join` (today E0113), and a rounded conversion refuses float precision loss and bounds huge digits without a false overflow (today E0127). Proof: `jet test Compiler --profile cases --filter measure_rules_cover_fixed_lengths_and_matrix_shapes` and `--filter rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits` pass, and their rows leave tests/known-failing.tsv.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:53:49.116Z"
+          "at": "2026-11-15T02:46:36.666Z"
         },
         {
           "n": 5,
           "text": "(was #5807) Unit family: currency Usd arithmetic and display not supported (E0360 no * or + for Usd, E0112 print)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:54:00.525Z"
+          "evidence": "dev 4b0e37a662 (GoalsA-1-3 unit-family-display-exact). p140 batch compiler (dev fa5d990a8c), 2026-11-14 21:45: jet test Compiler --profile cases --filter unit_family -> PASS 51 FAIL 0 KF 6 (was 43/14). Passing for this criterion: unit_family/currency_keeps_nominal_arithmetic_behavior (Usd arithmetic and display).",
+          "at": "2026-11-15T02:46:05.764Z"
         },
         {
           "n": 6,
-          "text": "(was #5809) Unit family: backend gaps and crashes (E2104 UnitConvert, SIGILL in exactness, two sema ICEs)",
+          "text": "The back end lowers UnitConvert: the poundforce case builds and uses the exact defined ratio on O0, O1 and O2 (today E2104 'expression UnitConvert'). Proof: `jet test Compiler --profile cases --filter poundforce_uses_the_exact_defined_ratio_across_execution_tiers` passes and its row leaves tests/known-failing.tsv.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:54:23.245Z"
+          "at": "2026-11-15T02:46:37.534Z"
         },
         {
           "n": 7,
-          "text": "(was #5811) Unit family and marker groups: 13 cases fail only their stream predicates (no replayable first error)",
+          "text": "A derived quantity converts to the named derived unit of the same dimension (Time^-2 * Length * Mass accepted as Newton; D-DERIVED-DIMENSION-CLAIM1), on O0, O1 and O2. The second case is renamed to drop its interpreter and JIT wording (there is no interpreter tier, D-EXEC2=A). Proof: `jet test Compiler --profile cases --filter user_dimensions_` passes both cases (user_dimensions_compose_and_named_derived_units_share_the_structure and the renamed user_dimensions_keep_interpreter_and_resident_jit_parity) and their rows leave tests/known-failing.tsv.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:54:38.595Z"
+          "at": "2026-11-15T02:46:38.436Z"
         },
         {
           "n": 8,
           "text": "(was #1268 c1) Default print/Display shows magnitude + unit for quantity and unit-family values (12 meter, 4 meter/second, 766 px); hand-written Display overrides [precut audit: failing on 9c7ddf1359: C:unit_family/quantities_display_units_styles_and_explicit_overrides KNOWN-FAILING #6004 Error [E0112]: `print` doesn't know how to show `Usd`: exit 1; expected 0 (known-failing #6004: Error [E0112]: `print` doesn't know how to show `Usd`)]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:08.692Z"
+          "evidence": "dev 4b0e37a662 (GoalsA-1-3 unit-family-display-exact). p140 batch compiler (dev fa5d990a8c), 2026-11-14 21:45: jet test Compiler --profile cases --filter unit_family -> PASS 51 FAIL 0 KF 6 (was 43/14). Passing for this criterion: unit_family/quantities_display_units_styles_and_explicit_overrides (default Display shows magnitude + unit; hand-written override).",
+          "at": "2026-11-15T02:46:06.862Z"
         },
         {
           "n": 9,
           "text": "(was #1268 c2) Explicit style controls from option D ship in the same slice: format-syntax selection of symbol vs long name vs bare number (working spelling {value#Unit(name)} / {value#Unit(bare)}; symbol is the default), one Display mechanism underneath [precut audit: failing on 9c7ddf1359: C:unit_family/quantities_display_units_styles_and_explicit_overrides KNOWN-FAILING #6004 Error [E0112]: `print` doesn't know how to show `Usd`: exit 1; expected 0 (known-failing #6004: Error [E0112]: `print` doesn't know how to show `Usd`)]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:09.312Z"
+          "evidence": "dev 4b0e37a662 (GoalsA-1-3 unit-family-display-exact). p140 batch compiler (dev fa5d990a8c), 2026-11-14 21:45: jet test Compiler --profile cases --filter unit_family -> PASS 51 FAIL 0 KF 6 (was 43/14). Passing for this criterion: unit_family/quantities_display_units_styles_and_explicit_overrides (symbol, long name and bare styles).",
+          "at": "2026-11-15T02:46:07.901Z"
         }
       ],
       "refs": [],
@@ -63741,8 +63746,8 @@
       "parentId": "c0max8v8",
       "needsAcceptance": false,
       "created": "2026-10-28T11:42:14.354Z",
-      "updated": "2026-11-13T02:07:57.988Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:46:42.760Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
@@ -84813,6 +84818,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned: the TLS host reads (c12, c14, c15) moved to #6861; c16-c17 restated as the freestanding execution proofs #2300 left; c18 merged into c17."
+        },
+        {
           "at": "2026-11-11",
           "by": "Main",
           "text": "Main decisions 2026-11-11 (TlsLead-3's open items): (1) the row_splits rows in RuntimeEffectRows (jet_time_raw_wall_sample via ssl_time, jet_random_os_entropy, jet_files_read_bytes_os, jet_fs_directory_open/close) stay until the owner ballot on whether a protocol root (Net) covers its host reads (Time, Rand, FS.Read); if it does not, the TLS entries declare the full rows in one cutover. (2) The F32 bit pair (core.math.__to_bits_f32/__from_bits_f32) has no runtime carrier: it is an IR-lowered pure intrinsic like sqrt, exempt here, pinned by a signaling-NaN round-trip case at O0/O1/O2. (3) tls.client is one declaration (tcp, server_name, config?, deadline?) -[Net, Time.Wait]> TLSStream NetError!; the host/port form and the sema arity/type dispatch are removed, and callers use tls.connect_host. (4) The 402 E3203 NonCAbiType errors come from seeds that predate the carrier commits (1e02b82ef1, 3bf0e43440, 8ff2c54775). No gate depends on them; the chain's last SUB checks the runtime binding package on the first batch compiler after it lands."
@@ -84976,20 +84986,22 @@
         {
           "n": 14,
           "text": "From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). The D-NET-HOSTREADS1 implementation names its applicable-tier proof (O0, O1, O2, and web where applicable) and the outcome on targets with no clock, no entropy source or no filesystem, each proven by a case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T21:49:46.596Z"
+          "evidence": "Moved to #6861 c4: the missing-source outcome and tier proof go with the host-read card",
+          "at": "2026-11-15T02:45:59.572Z",
+          "closure": "obsolete"
         },
         {
           "n": 15,
           "text": "From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). If file-free sandboxed or embedded TLS is required, a scoped design proves separate precise entry paths or a complete provider API and lifetime design. A configuration value alone does not remove the conservative effects.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T21:49:47.688Z"
+          "evidence": "Moved to #6861 c5: the embedded-TLS guard goes with the host-read card",
+          "at": "2026-11-15T02:46:00.495Z",
+          "closure": "obsolete"
         },
         {
           "n": 16,
@@ -85012,11 +85024,12 @@
         {
           "n": 18,
           "text": "(was #2300 c5) All five required witness sources and their target and runner applicability are integrated without a second Prelude. (moved from #4741 c15)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:54:00.406Z"
+          "evidence": "Merged into #6615 c17: the witness sources are integrated (#2300 c5, source inspection); running them is c17",
+          "at": "2026-11-15T02:46:01.460Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [
@@ -85033,7 +85046,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:43:21.231Z",
-      "updated": "2026-11-15T02:45:58.345Z",
+      "updated": "2026-11-15T02:46:04.850Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 18
     },
@@ -206178,6 +206191,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:46:42.761Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0j8ez91",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:46:41.707Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0j8ez91",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T02:46:40.186Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0p39lw2",
+      "note": "#19: strip debris; add proof; was: [retarget] Syntax registry entry, syntax-decisions log entry, regenerated `jet devtools grammars` output and re-blessed snapshots."
+    },
+    {
+      "at": "2026-11-15T02:46:39.314Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0p39lw2",
+      "note": "#14: strip debris; add proof; was: [retarget] Every dispatch table requires exactly one statically typed hole. Missing, repeated, ambiguous, wrong-type and non-Bool headers get registered diagnostics (DiagnosticRows.jet) with UI snapsh"
+    },
+    {
+      "at": "2026-11-15T02:46:38.436Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0j8ez91",
+      "note": "#7: restated against the two derived-dimension cases tests/known-failing.tsv lists for #6004 on dev 72a8142651; strip debris; was: (was #5811) Unit family and marker groups: 13 cases fail only their stream predicates (no replayable first error)"
+    },
+    {
+      "at": "2026-11-15T02:46:37.534Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0j8ez91",
+      "note": "#6: restated against the one backend case still listed for #6004 on dev 72a8142651; strip debris; was: (was #5809) Unit family: backend gaps and crashes (E2104 UnitConvert, SIGILL in exactness, two sema ICEs)"
+    },
+    {
+      "at": "2026-11-15T02:46:36.666Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0j8ez91",
+      "note": "#4: restated against the cases tests/known-failing.tsv lists for #6004 on dev 72a8142651; strip debris; was: (was #5806) Unit family: conversion checks wrong (E0112 Meter vs Millimeter, E0127 implicit rounding, E0113 [Int] vs [Int#5])"
+    },
+    {
+      "at": "2026-11-15T02:46:07.901Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j8ez91",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T02:46:06.862Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j8ez91",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T02:46:05.764Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j8ez91",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T02:46:04.850Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0bbj6h3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:46:03.893Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j8ez91",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T02:46:02.973Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0441rvj",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T02:46:01.461Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-15T02:46:00.495Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-15T02:45:59.572Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#14"
+    },
     {
       "at": "2026-11-15T02:45:58.345Z",
       "by": "TowerKeeper-1",
