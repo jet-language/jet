@@ -12,7 +12,7 @@ run: fn() {
     server: task {
         stream := net.tcp_accept(listener) ?? panic("accept")
         ready_tx.send(1)
-        if stream.read(1) == {
+        if stream.read_bytes(1) == {
             .Ok(_) -> print("unexpected read")
             .Err(error) -> print(net.error_message(error))
         }

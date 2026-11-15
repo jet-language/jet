@@ -26,7 +26,7 @@ serve: fn(listener: TCPListener, response: [U8], hold: Bool) -[Net, Time.Wait]> 
     stream := net.tcp_accept(listener) ?? return "accept failed"
     request := [U8]{}
     loop {
-        chunk: stream.read(4096, deadline: 10s) ?? return "read failed"
+        chunk: stream.read_bytes(4096, deadline: 10s) ?? return "read failed"
         if chunk.len() == 0 -> break
         loop byte in chunk -> request.push(byte)
         n: request.len()
@@ -36,7 +36,7 @@ serve: fn(listener: TCPListener, response: [U8], hold: Bool) -[Net, Time.Wait]> 
     loop at < response.len() {
         rest := [U8]{}
         loop index in at..<response.len() -> rest.push(response[index])
-        sent: stream.write(rest, deadline: 10s) ?? return "write failed"
+        sent: stream.write_some(rest, deadline: 10s) ?? return "write failed"
         at += sent
     }
     stream.close() ?? return "close failed"

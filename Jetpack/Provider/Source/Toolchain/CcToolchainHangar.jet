@@ -322,7 +322,7 @@ provider_cc_read_bounded_file: fn(path: String, limit: Int, label: String) -[FS]
     }
     bytes := [U8]{}
     loop {
-        chunk: reader.read(limit + 1 - bytes.len()) ?? {
+        chunk: reader.read_bytes(limit + 1 - bytes.len()) ?? {
             return Err(CcToolchainError.Invalid("read {label}: {err}"))
         }
         if chunk.len() == 0 -> break

@@ -277,7 +277,7 @@ store_nix_download: fn(endpoint: NixCacheEndpoint, url: String, signed_size: Int
             count += chunk.len()
             if count > span.end -> return Err(NixCacheError.new(.CompressedCorruption, "Nix cache response exceeded its signed byte limit"))
             hasher.update(chunk)
-            output.write_all(chunk) ?? return Err(NixCacheError.new(.Admission, "could not stage the Nix cache object: {err}"))
+            output.write_bytes(chunk) ?? return Err(NixCacheError.new(.Admission, "could not stage the Nix cache object: {err}"))
             store_nix_progress_transferred(progress, chunk.len())
         }
         if count != span.end {

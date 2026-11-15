@@ -27,7 +27,7 @@ request_head: fn(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: 5s per read,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
-        block: stream.read(512, deadline: 5s) ?? panic("request read")
+        block: stream.read_bytes(512, deadline: 5s) ?? panic("request read")
         assert(block.len() > 0)
         loop byte in block { request.push(byte) }
         assert(request.len() <= 65536)
@@ -45,16 +45,16 @@ run: fn() {
     first_peer: task {
         stream := listener.accept() ?? panic("accept")
         assert(prefix(request_head(stream), "GET /early HTTP/1.1{PEER_CRLF}".bytes()))
-        stream.write_all("HTTP/1.1 103 Early Hints{PEER_CRLF}Link: </style.css>; rel=preload{PEER_CRLF}{PEER_CRLF}HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 3{PEER_CRLF}Connection: keep-alive{PEER_CRLF}{PEER_CRLF}one".bytes()) ?? panic("early response")
+        stream.write_bytes("HTTP/1.1 103 Early Hints{PEER_CRLF}Link: </style.css>; rel=preload{PEER_CRLF}{PEER_CRLF}HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 3{PEER_CRLF}Connection: keep-alive{PEER_CRLF}{PEER_CRLF}one".bytes()) ?? panic("early response")
         assert(prefix(request_head(stream), "GET /reuse HTTP/1.1{PEER_CRLF}".bytes()))
-        stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 3{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}two".bytes()) ?? panic("reuse response")
+        stream.write_bytes("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 3{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}two".bytes()) ?? panic("reuse response")
     }
     upgrade_listener: net.tcp_listen("127.0.0.1:0") ?? panic("upgrade listen")
     publish(upgrade_listener, "{work}/upgrade_addr.txt")
     upgrade_peer: task {
         stream := upgrade_listener.accept() ?? panic("upgrade accept")
         _: request_head(stream)
-        stream.write_all("HTTP/1.1 101 Switching Protocols{PEER_CRLF}Connection: upgrade{PEER_CRLF}Upgrade: websocket{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("upgrade response")
+        stream.write_bytes("HTTP/1.1 101 Switching Protocols{PEER_CRLF}Connection: upgrade{PEER_CRLF}Upgrade: websocket{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("upgrade response")
     }
     first_peer.join() ?? panic("first peer join")
     upgrade_peer.join() ?? panic("upgrade peer join")

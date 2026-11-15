@@ -1147,7 +1147,7 @@ store_cache_write_resumable: fn(path: String, bytes: [U8]) StoreError! {
         files.create(partial, if_exists: .Refuse)
     }
     out := files.append(partial)
-    out.write_all(bytes[offset..<bytes.len()])
+    out.write_bytes(bytes[offset..<bytes.len()])
     out.fsync()
     if store_archive_lstat_ok(path) == {
         .Val(metadata) -> {

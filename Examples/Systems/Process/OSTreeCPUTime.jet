@@ -30,7 +30,7 @@ run: fn() {
     script: "sh -c 'i=0; while [ $i -lt 300000 ]; do i=$((i+1)); done'; echo done; read line"
     child := process.cmd(["sh", "-c", script]).stdin(.Stream).stdout(.Stream).spawn() ?? panic("sh did not start: {err}")
     // The shell prints only once it has waited for the busy grandchild.
-    said: child.stdout.read(64) ?? panic("read: {err}")
+    said: child.stdout.read_bytes(64) ?? panic("read: {err}")
     // A bound fallible call would pass its failure up; matching the call keeps
     // the result, so an Unsupported host still prints its line.
     counted: if os.tree_cpu_time(child.id()) == {

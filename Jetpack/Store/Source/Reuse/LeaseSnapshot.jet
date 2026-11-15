@@ -316,7 +316,7 @@ store_reuse_executable_lease_members: fn(executables: &[SnapshotFile]) -> [Lease
             input.seek(0)
             hasher := StreamingSHA256.new()
             loop {
-                chunk: input.read(65536)
+                chunk: input.read_bytes(65536)
                 if chunk.len() == 0 -> break
                 hasher.update(chunk)
             }
@@ -359,7 +359,7 @@ store_reuse_create_exec_wrappers: fn(snapshot_root: String, executables: [Snapsh
     if ready.trim() != "ready" -> return Err(store_reuse_wrapper_keeper_error(child, "creating private executable mount"))
     root: "/proc/{child.id()}/root{mountpoint}"
     loop executable in executables -> files.symlink(store_lease_wrapper_target(root_fd, bin, executable.relative), files.join(root, executable.relative))
-    child.stdin.write_all("seal\n".bytes())
+    child.stdin.write_bytes("seal\n".bytes())
     sealed: store_reuse_keeper_line(child)
     if sealed.trim() != "sealed" -> return Err(store_reuse_wrapper_keeper_error(child, "sealing private executable mount"))
     directory: store_reuse_hold_directory(root)

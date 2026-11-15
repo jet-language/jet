@@ -127,7 +127,7 @@ evidence_append_locked: fn(path: String, writer: &evidence_files.FileWriter, fra
     if info.size == 0 {
         header := EVIDENCE_REPORT_MAGIC.bytes()
         evidence_put_number(header, U64{EVIDENCE_REPORT_VERSION}, 2)
-        writer.write_all(header) ?? return Err(evidence_codec_error("{err}"))
+        writer.write_bytes(header) ?? return Err(evidence_codec_error("{err}"))
     } else if info.size < 10 {
         return Err(evidence_codec_error("truncated evidence report header"))
     } else {
@@ -136,7 +136,7 @@ evidence_append_locked: fn(path: String, writer: &evidence_files.FileWriter, fra
         evidence_put_number(expected, U64{EVIDENCE_REPORT_VERSION}, 2)
         if header != expected -> return Err(evidence_codec_error("evidence report schema conflict"))
     }
-    writer.write_all(frame) ?? return Err(evidence_codec_error("{err}"))
+    writer.write_bytes(frame) ?? return Err(evidence_codec_error("{err}"))
     writer.flush() ?? return Err(evidence_codec_error("{err}"))
 }
 
@@ -145,7 +145,7 @@ evidence_read_header: fn(path: String) -[FS.Read]> [U8] IOError! {
     reader := evidence_files.open(path)
     header := [U8]{}
     loop header.len() < 10 {
-        chunk: reader.read(10 - header.len())
+        chunk: reader.read_bytes(10 - header.len())
         if chunk.len() == 0 -> break
         header.extend(chunk)
     }

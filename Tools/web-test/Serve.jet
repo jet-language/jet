@@ -109,7 +109,7 @@ request_target: fn(stream: &TCPStream) -> String? {
     head := [U8]{}
     loop head.len() < C_MAX_HEAD_BYTES {
         // A silent client is given up on after 5 s.
-        chunk: stream.read(4096, deadline: 5s) ?? return None
+        chunk: stream.read_bytes(4096, deadline: 5s) ?? return None
         if chunk.len() == 0 -> return None
         loop byte in chunk -> head.push(byte)
         if head_end(head) {
@@ -238,7 +238,7 @@ file_reply: fn(file: &&HeldFile, served: String) -> Reply {
     held := file
     body := [U8]{}
     loop {
-        chunk: held.reader.read(C_READ_BYTES) ?? return refused(404)
+        chunk: held.reader.read_bytes(C_READ_BYTES) ?? return refused(404)
         if chunk.len() == 0 -> break
         loop byte in chunk -> body.push(byte)
     }

@@ -334,7 +334,7 @@ build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] B
     bytes := [U8]{}
     loop bytes.len() <= limit {
         want: limit + 1 - bytes.len()
-        chunk: reader.read(if want < BUILD_READ_CHUNK_BYTES -> want else -> BUILD_READ_CHUNK_BYTES) ?? return Err(BuildIOError.from(err))
+        chunk: reader.read_bytes(if want < BUILD_READ_CHUNK_BYTES -> want else -> BUILD_READ_CHUNK_BYTES) ?? return Err(BuildIOError.from(err))
         if chunk.len() == 0 -> break
         bytes.extend(chunk)
     }
@@ -371,7 +371,7 @@ build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, execut
         if directory.create(temp_name, if_exists: .Refuse, mode: Val(if executable -> 0o755 else -> 0o600)) == {
             .Ok(created) -> {
                 writer := created
-                writer.write_all(bytes) ?? return Err(BuildIOError.from(err))
+                writer.write_bytes(bytes) ?? return Err(BuildIOError.from(err))
                 writer.fsync() ?? return Err(BuildIOError.from(err))
                 close(writer)
                 if directory.rename(temp_name, final_name) == {
@@ -644,7 +644,7 @@ build_record_cache_event: fn(action: String, key: String, status: ActionCacheSta
     parent: files.dirname(path)
     if parent != "" -> files.create_dir_all(parent).drop("cache observation evidence is best-effort")
     writer := files.append(path, links: .Refuse) ?? return
-    writer.write_all(payload.bytes()).drop("cache observation evidence is best-effort")
+    writer.write_bytes(payload.bytes()).drop("cache observation evidence is best-effort")
     writer.flush().drop("cache observation evidence is best-effort")
 }
 

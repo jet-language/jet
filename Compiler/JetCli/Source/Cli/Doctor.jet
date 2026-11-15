@@ -113,7 +113,7 @@ jet_cli_doctor_check_lsp: fn() -[Env, Exec, Time.Wait]> JetCLIDoctorCheck Never!
     body: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"processId\":null,\"rootUri\":null,\"capabilities\":{{}}}}}}"
     spec: doctor_process.cmd([String]{doctor_sys.executable(), "self", "lsp"}).env("NO_COLOR", "1").stdin(.Stream).stdout(.Capture).stderr(.Capture).timeout(10s)
     child := spec.spawn() ?? return jet_cli_doctor_problem("lsp", label, "{command} did not start: {err}", fix, false)
-    child.stdin.write("Content-Length: {body.count_bytes()}\r\n\r\n{body}".bytes()).drop("a server that stopped reading reports why on stderr")
+    child.stdin.write_bytes("Content-Length: {body.count_bytes()}\r\n\r\n{body}".bytes()).drop("a server that stopped reading reports why on stderr")
     child.stdin.close()
     receipt: child.wait() ?? return jet_cli_doctor_problem("lsp", label, "{command} did not finish: {err}", fix, false)
     if receipt.output.contains("\"capabilities\"") -> return jet_cli_doctor_ok("lsp", label, "{command} answered `initialize`")

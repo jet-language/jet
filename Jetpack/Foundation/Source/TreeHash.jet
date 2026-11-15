@@ -155,7 +155,7 @@ foundation_hash_regular_nofollow: fn(path: String, expected: Stat, hasher: &Stre
     hasher.update(length)
     actual_length := 0
     loop {
-        chunk: if reader.read(FOUNDATION_READ_CHUNK) == {
+        chunk: if reader.read_bytes(FOUNDATION_READ_CHUNK) == {
             .Ok(bytes) -> bytes
             .Err(error) -> { return Err(TreeHashError.IO{path: path, detail: "{error}"}) }
         }
@@ -197,7 +197,7 @@ foundation_sha256_file_hex: fn(path: String) -[FS]> String IOError! {
     hasher := StreamingSHA256.new()
     actual_length := 0
     loop {
-        chunk: opened.handle.read(FOUNDATION_READ_CHUNK)
+        chunk: opened.handle.read_bytes(FOUNDATION_READ_CHUNK)
         if chunk.len() == 0 -> break
         actual_length += chunk.len()
         if actual_length > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, path, "file grew beyond the tree hashing bound"))
@@ -233,7 +233,7 @@ foundation_read_handle_bounded: fn(handle: &FileReader, max_bytes: Int, bound_er
     loop {
         remaining: max_bytes - bytes.len()
         request: if remaining >= FOUNDATION_READ_CHUNK -> FOUNDATION_READ_CHUNK else -> remaining + 1
-        chunk: handle.read(request)
+        chunk: handle.read_bytes(request)
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > max_bytes -> return Err(bound_error)
@@ -563,7 +563,7 @@ FoundationDirectoryAuthority: struct {
             hasher.update(length)
             actual := 0
             loop {
-                chunk: rows[index].reader.read(FOUNDATION_READ_CHUNK)
+                chunk: rows[index].reader.read_bytes(FOUNDATION_READ_CHUNK)
                 if chunk.len() == 0 -> break
                 actual += chunk.len()
                 if actual > rows[index].identity.size -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(rows[index].relative), os_code: None, cause: Val("package source file grew while hashing")}))
@@ -670,10 +670,10 @@ foundation_copy_held_reader: fn(reader: &FileReader, destination: Directory, nam
     writer := destination.create(name, if_exists: .Refuse, mode: Val(384))
     actual := 0
     loop {
-        chunk: reader.read(FOUNDATION_READ_CHUNK)
+        chunk: reader.read_bytes(FOUNDATION_READ_CHUNK)
         if chunk.len() == 0 -> break
         actual += chunk.len()
-        writer.write_all(chunk)
+        writer.write_bytes(chunk)
     }
     writer.fsync()
     Ok(actual)
@@ -766,7 +766,7 @@ foundation_same_directory: fn(path_stat: Stat, held: Stat) -> Bool Never! {
 // One staging/rename path; the callback is fallible production validation,
 // not a notification hook. All failures here are pre-publication.
 foundation_stage_and_rename: fn(directories: [FoundationPublicationDirectory], parent: Directory, writer: &FileWriter, temporary: String, final_name: String, contents: [U8], expected_destination: FileID?, before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) -[FS, Env]> FileID FoundationPublicationError! {
-    writer.write_all(contents) ?? return Err(FoundationPublicationError{phase: .WriteStage, error: err})
+    writer.write_bytes(contents) ?? return Err(FoundationPublicationError{phase: .WriteStage, error: err})
     // #3593: permissions are applied to the HELD writer, never a pathname.
     // The stage starts owner-only even when its final public mode is 0644.
     writer.set_mode(policy.mode) ?? return Err(FoundationPublicationError{phase: .SetMode, error: err})

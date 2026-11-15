@@ -23,7 +23,7 @@ gallery: fn() -> WebPage {
 // The body of the answer to `GET path`, read until the server closes.
 get_body: fn(addr: String, path: String) -> [U8] {
     stream := net.tcp_connect(addr) ?? panic("connect: {err}")
-    stream.write_all("GET {path} HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes()) ?? panic("request: {err}")
+    stream.write_bytes("GET {path} HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes()) ?? panic("request: {err}")
     bytes := [U8]{}
     loop {
         part: net.tcp_read_bytes(stream, 65536) ?? panic("read: {err}")

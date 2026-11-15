@@ -175,7 +175,7 @@ cli_read_bounded: fn(path: String) -[FS]> String CLIError! {
     if reader.stat().size > TOOL_PROFILE_MAX_METADATA_BYTES -> return Err(CLIError.Other("profile metadata exceeds byte bound"))
     bytes := [U8]{}
     loop {
-        chunk: reader.read(TOOL_PROFILE_MAX_METADATA_BYTES + 1 - bytes.len())
+        chunk: reader.read_bytes(TOOL_PROFILE_MAX_METADATA_BYTES + 1 - bytes.len())
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > TOOL_PROFILE_MAX_METADATA_BYTES -> return Err(CLIError.Other("profile metadata exceeds byte bound"))
@@ -187,7 +187,7 @@ cli_read_bounded: fn(path: String) -[FS]> String CLIError! {
 // Exclusive create (never replace), write, and fsync.
 cli_write_synced: fn(path: String, bytes: [U8]) CLIError! -[FS]> {
     writer := files.create(path, if_exists: CreateIfExists.Refuse)
-    writer.write_all(bytes)
+    writer.write_bytes(bytes)
     writer.fsync()
 }
 

@@ -12,7 +12,7 @@ s6_invalid_crlf: fn() -> String { "\r\n" }
 
 s6_invalid_exchange: fn(addr: String, lines: [String]) -> String {
     stream := net.tcp_connect(addr) ?? panic("connect")
-    stream.write_all(lines.join(s6_invalid_crlf()).bytes()) ?? panic("request write")
+    stream.write_bytes(lines.join(s6_invalid_crlf()).bytes()) ?? panic("request write")
     net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
     parts := [String]{}
     loop {

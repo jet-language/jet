@@ -510,12 +510,15 @@ sema_process_terminal_method: fn(receiver: Expr, receiver_value: TExpr, method: 
 }
 
 sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    // `write_some(bytes)` (also `write`) is one partial write that reports
-    // the count taken; `write_bytes(bytes)` (also `write_all`) and
-    // `write_text(text)` write every byte.
+    // `write_some(bytes)` (also `write` given bytes) is one partial write
+    // that reports the count taken; `write_bytes(bytes)` (also `write_all`)
+    // and `write(text)` (also `write_text`) write every byte.
+    text_write: method == "write" && args.len() == 1 && sema_network_handle_text_argument(args, environment, program, scopes, state, tail_store, context)
     result: if method == {
-        "write" | "write_some" -> {
-            if args.len() == 1 -> Val(sema_process_io_result(Type.Int)) else -> None
+        "write" | "write_some" -> if {
+            text_write -> Val(sema_process_io_result(Type.Named{name: "Unit"}))
+            args.len() == 1 -> Val(sema_process_io_result(Type.Int))
+            else -> None
         }
         "write_all" | "write_bytes" | "write_text" -> {
             if args.len() == 1 -> Val(sema_process_io_result(Type.Named{name: "Unit"})) else -> None
@@ -534,13 +537,17 @@ sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
     }
     required: if method == {
         "write_text" -> [Type]{Type.String}
-        "write" | "write_some" | "write_all" | "write_bytes" -> [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}
+        "write" | "write_some" | "write_all" | "write_bytes" -> {
+            if text_write -> [Type]{Type.String} else -> [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}
+        }
         else -> [Type]{}
     }
     values: sema_process_check_args(args, required, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_process_check_method_ownership(receiver, "ProcessStdin.{method}", args, required, [Bool]{}, AccessConvention.Read, span, scopes, state, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     operation: if method == {
-        "write" | "write_some" -> THandleOp.ProcessStdinWrite
+        "write" | "write_some" -> {
+            if text_write -> THandleOp.ProcessStdinWriteText else -> THandleOp.ProcessStdinWrite
+        }
         "write_all" | "write_bytes" -> THandleOp.ProcessStdinWriteAll
         "write_text" -> THandleOp.ProcessStdinWriteText
         else -> THandleOp.ProcessStdinClose

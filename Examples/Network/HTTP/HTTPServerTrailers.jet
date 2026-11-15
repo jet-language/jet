@@ -36,7 +36,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     server_task: task {
         mux.serve_once(listener) ?? panic("serve")
     }
-    wire_stream.write_all(raw_request) ?? panic("request")
+    wire_stream.write_bytes(raw_request) ?? panic("request")
     loop _ in 0..32 {
         chunk = wire_stream.read_text(8192) ?? panic("response")
         if chunk == "" -> break

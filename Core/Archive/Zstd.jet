@@ -430,7 +430,7 @@ ZstdReader: struct {
         loop {
             out: self.decoder.read(limit)
             if out.len() > 0 || limit <= 0 || self.ended -> return Ok(out)
-            chunk: self.file.read(C_READ_CHUNK) ?? return Err(ZstdFileError.Read)
+            chunk: self.file.read_bytes(C_READ_CHUNK) ?? return Err(ZstdFileError.Read)
             if chunk.len() == 0 {
                 self.ended = true
                 self.decoder.finish()

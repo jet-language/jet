@@ -568,7 +568,7 @@ store_repro_persist_report: fn(roots: HangarRoots, action_key: String, report: S
 
 store_repro_publish_report: fn(directory: String, partial: String, destination: String, report: String) StoreError! -[FS]> {
     output := files.create(partial, if_exists: .Refuse)
-    output.write_all(report.bytes())
+    output.write_bytes(report.bytes())
     output.fsync()
     files.set_mode(partial, 0o600)
     files.hard_link(partial, destination)

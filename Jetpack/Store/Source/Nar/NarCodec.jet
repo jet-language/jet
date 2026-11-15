@@ -66,7 +66,7 @@ NarByteSource: struct {
 
     read: fn(&self, limit: Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError! {
         if &self.input == {
-            .File(file) -> file.read(limit)
+            .File(file) -> file.read_bytes(limit)
             .Zstd(decoder) -> {
                 if decoder.read(limit) == {
                     .Ok(bytes) -> Ok(bytes)
@@ -426,7 +426,7 @@ NarStreamReader: struct {
         loop remaining > 0 {
             step: if remaining < STORE_NAR_CHUNK_BYTES -> remaining else -> STORE_NAR_CHUNK_BYTES
             chunk: self.read_exact(step)
-            writer.write_all(chunk)
+            writer.write_bytes(chunk)
             remaining = remaining - step
         }
         writer.fsync()
@@ -724,7 +724,7 @@ store_nar_read_bounded_with_expected: fn(path: String, limit: Int, expected: Sta
     if !store_nar_same_regular_metadata(metadata, opened) -> return Err(store_nar_invalid("binary-cache input changed before being read"))
     bytes := [U8]{}
     loop {
-        chunk: reader.read(STORE_NAR_CHUNK_BYTES)
+        chunk: reader.read_bytes(STORE_NAR_CHUNK_BYTES)
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(store_nar_invalid("binary-cache input exceeded its limit while being read"))
@@ -748,7 +748,7 @@ store_nar_write_atomic: fn(path: String, bytes: [U8]) StoreError! {
     sequence: process_sequence_take(STORE_NAR_STAGE_SEQUENCE)
     partial: "{files.with_suffix(path, "")}.nar-partial-{process.current_pid()}-{store_nar_unique_suffix(sequence)}"
     writer := files.create(partial, if_exists: .Refuse)
-    writer.write_all(bytes)
+    writer.write_bytes(bytes)
     writer.fsync()
     if files.hard_link(partial, path) == {
         .Ok(_) -> {

@@ -97,7 +97,7 @@ kit_steps_send_chunk: fn(out: Sender<[U8]>, chunk: &&[U8]) Err! {
 // cancelled join) means the stream really ended.
 kit_steps_session_pull: fn(stream: ProcessStdoutStream, out: Sender<[U8]>) -> String Never! {
     loop {
-        chunk: stream.read(65536) ?? {
+        chunk: stream.read_bytes(65536) ?? {
             kit_steps_send_chunk(out, [U8]{}).drop("nobody reads a gone session")
             return "{err}"
         }
@@ -307,7 +307,7 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
         input_error := ""
         if step.stdin == "null" -> child.stdin.close()
         else if prepared.stdin.len() > 0 {
-            child.stdin.write_all(prepared.stdin) ?? {
+            child.stdin.write_bytes(prepared.stdin) ?? {
                 input_error = "session stdin: {err}"
                 ()
             }

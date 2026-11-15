@@ -16,7 +16,7 @@ run: fn() {
     mux.get("/live", fn(req: HTTPRequest) { handle(req) })
     serving: task { mux.serve_once(listener) ?? panic("serve") }
     stream: net.tcp_connect(addr) ?? panic("connect")
-    stream.write_all("GET /live HTTP/1.1{cr}\nHost: local{cr}\nUpgrade: websocket{cr}\nConnection: Upgrade{cr}\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=={cr}\nSec-WebSocket-Version: 13{cr}\n{cr}\n".bytes()) ?? panic("handshake")
+    stream.write_bytes("GET /live HTTP/1.1{cr}\nHost: local{cr}\nUpgrade: websocket{cr}\nConnection: Upgrade{cr}\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=={cr}\nSec-WebSocket-Version: 13{cr}\n{cr}\n".bytes()) ?? panic("handshake")
     headers := ""
     loop !headers.contains("{cr}\n{cr}\n") {
         part: stream.read_text(8192) ?? panic("response headers")

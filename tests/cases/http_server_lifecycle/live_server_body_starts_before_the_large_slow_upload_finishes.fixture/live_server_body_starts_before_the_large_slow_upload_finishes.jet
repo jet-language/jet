@@ -29,15 +29,15 @@ use {
     length: 512 * 1024
     client: net.tcp_connect(addr) ?? panic("connect")
     crlf: "\r\n"
-    client.write_all("POST /slow HTTP/1.1{crlf}Host: local{crlf}Content-Length: {length}{crlf}Connection: close{crlf}{crlf}".bytes()) ?? panic("headers write")
+    client.write_bytes("POST /slow HTTP/1.1{crlf}Host: local{crlf}Content-Length: {length}{crlf}Connection: close{crlf}{crlf}".bytes()) ?? panic("headers write")
     chunk := [U8]{}
     loop _ in 0..<4096 -> chunk.push(7)
-    client.write_all(chunk) ?? panic("first write")
+    client.write_bytes(chunk) ?? panic("first write")
     if {
         first_length, first_rx -> assert(first_length == 4096)
         after 2s -> panic("handler must pull before the upload finishes")
     }
-    loop _ in 1..<(length /% 4096) -> client.write_all(chunk) ?? panic("remaining write")
+    loop _ in 1..<(length /% 4096) -> client.write_bytes(chunk) ?? panic("remaining write")
     parts := [String]{}
     loop {
         part: client.read_text(8192) ?? panic("response read")

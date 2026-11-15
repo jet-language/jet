@@ -977,7 +977,7 @@ store_archive_read_bounded_limit: fn(path: String, limit: Int, label: String) ->
     reader := files.open(path, links: .Refuse)
     bytes := [U8]{}
     loop {
-        chunk: reader.read(65536)
+        chunk: reader.read_bytes(65536)
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(StoreError.InvalidData("{label} exceeded its bound while being read"))
@@ -1015,7 +1015,7 @@ store_archive_publish_partial: fn(partial: String, path: String, bytes: [U8], mo
         }
         .None -> {}
     }
-    out.write_all(bytes)
+    out.write_bytes(bytes)
     out.fsync()
     files.rename(partial, path)
 }

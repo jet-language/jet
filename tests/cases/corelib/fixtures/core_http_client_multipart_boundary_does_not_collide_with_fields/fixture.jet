@@ -22,7 +22,7 @@ multipart_test: fn() {
         stream := net.tcp_accept(listener) ?? panic("accept")
         request := [U8]{}
         loop {
-            chunk: stream.read(4096, deadline: 5s) ?? panic("read request")
+            chunk: stream.read_bytes(4096, deadline: 5s) ?? panic("read request")
             assert(chunk.len() != 0, "multipart request ended before body")
             loop b in chunk -> request.push(b)
             shown: String.from_bytes(request) ?? panic("request UTF-8")

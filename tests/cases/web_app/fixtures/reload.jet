@@ -23,7 +23,7 @@ reload_ask: fn(port: String) -> String? {
     stream := net.tcp_connect("127.0.0.1:{port}") ?? return None
     crlf: "\r\n"
     request: "GET /__jet/reload HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
-    stream.write_all(request.bytes()) ?? return None
+    stream.write_bytes(request.bytes()) ?? return None
     net.tcp_shutdown(stream, NetShutdown.Write) ?? return None
     net.set_read_timeout(stream, 5000) ?? panic("read timeout")
     bytes := [U8]{}

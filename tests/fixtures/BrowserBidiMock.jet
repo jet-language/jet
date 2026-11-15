@@ -195,7 +195,7 @@ Peer: struct {
 
 // Read what the client has sent so far; an end of stream or a socket error ends the peer.
 receive: fn(peer: &Peer) {
-    chunk: if peer.stream.read(65536, deadline: remaining(peer.started)) == {
+    chunk: if peer.stream.read_bytes(65536, deadline: remaining(peer.started)) == {
         .Ok(got) -> got
         .Err(failure) -> {
             _: remaining(peer.started)
@@ -220,7 +220,7 @@ take_bytes: fn(peer: &Peer, n: Int) -> [U8] {
 }
 
 send: fn(peer: &Peer, bytes: [U8]) {
-    if peer.stream.write_all(bytes) == {
+    if peer.stream.write_bytes(bytes) == {
         .Ok(_) -> {}
         .Err(_) -> {}
     }

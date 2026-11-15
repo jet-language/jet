@@ -53,7 +53,7 @@ run_worker: fn(args: [String]) {
     stream: net.tcp_connect(address) ?? panic("worker connect failed")
     request: stream.read_text(8192) ?? panic("worker read failed")
     value: request.trim().to_int() ?? panic("TCP request was not an Int")
-    stream.write_all((value * value).to_string().bytes()) ?? panic("worker write failed")
+    stream.write_bytes((value * value).to_string().bytes()) ?? panic("worker write failed")
     stream.close() ?? panic("worker close failed")
 }
 
@@ -75,8 +75,8 @@ run_tcp_parent: fn() {
 
     first_connection: listener.accept() ?? panic("first accept failed")
     second_connection: listener.accept() ?? panic("second accept failed")
-    first_connection.write_all("7".bytes()) ?? panic("first request failed")
-    second_connection.write_all("11".bytes()) ?? panic("second request failed")
+    first_connection.write_bytes("7".bytes()) ?? panic("first request failed")
+    second_connection.write_bytes("11".bytes()) ?? panic("second request failed")
     first_result: first_connection.read_text(8192) ?? panic("first response failed")
     second_result: second_connection.read_text(8192) ?? panic("second response failed")
     first_connection.close() ?? panic("first connection close failed")

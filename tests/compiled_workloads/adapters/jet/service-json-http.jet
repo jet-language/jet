@@ -95,7 +95,7 @@ slow_client: fn(address: String, timeout_ms: Int) {
         headers.push(13)
         headers.push(10)
     }
-    _: stream.write_all(headers, deadline: wait) ?? panic("slow client write failed")
+    _: stream.write_bytes(headers, deadline: wait) ?? panic("slow client write failed")
     time.sleep(wait)
     _: stream.close() ?? panic("slow client close failed")
 }

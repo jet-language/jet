@@ -181,7 +181,7 @@ store_artifact_read_file: fn(path: String) -[FS]> ArtifactRawRead ArtifactStoreE
     if !store_artifact_same_file(metadata, held) -> return Ok(ArtifactRawRead.Corrupt("entry changed while opening"))
     bytes := [U8]{}
     loop {
-        chunk: reader.read(65536)
+        chunk: reader.read_bytes(65536)
         if chunk.len() == 0 -> break
         bytes.extend(chunk)
     }
@@ -230,7 +230,7 @@ store_artifact_replace_file: fn(path: String, bytes: [U8], durable: Bool) Artifa
 // #3593: exclusive create Refuse and FileWriter.write_all/fsync are provider gates.
 store_artifact_replace_with: fn(temporary: String, path: String, parent: String, bytes: [U8], durable: Bool) ArtifactStoreError! -[FS]> {
     writer := files.create(temporary, if_exists: .Refuse)
-    writer.write_all(bytes)
+    writer.write_bytes(bytes)
     if durable -> writer.fsync()
     close(writer)
     files.rename(temporary, path)
@@ -248,7 +248,7 @@ store_artifact_set_executable: fn(path: String, executable: Bool) ArtifactStoreE
 // something only while their owner runs, so their bytes are not synced.
 store_artifact_create_new: fn(path: String, bytes: [U8]) ArtifactStoreError! -[FS]> {
     writer := files.create(path, if_exists: .Refuse)
-    writer.write_all(bytes)
+    writer.write_bytes(bytes)
     close(writer)
 }
 
@@ -264,7 +264,7 @@ store_artifact_append: fn(path: String, bytes: [U8], durable: Bool) ArtifactStor
         .Err(_) -> {}
     }
     writer := files.append(path)
-    writer.write_all(bytes)
+    writer.write_bytes(bytes)
     if durable -> writer.fsync()
     close(writer)
     if durable -> store_artifact_sync_dir(files.dirname(path))

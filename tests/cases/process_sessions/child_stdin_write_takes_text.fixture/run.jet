@@ -1,0 +1,19 @@
+use process: core.process
+
+// `write` on a child's stdin takes text as well as bytes: given a `String`
+// it writes every byte of it, so nothing comes back to count.
+run: fn() {
+    child: process.cmd([String]{"cat"}).stdin(.Stream).stdout(.Stream).spawn() ?? panic("spawn failed")
+    child.stdin.write("hello, ") ?? panic("text write failed")
+    taken: child.stdin.write("pipe\n".bytes()) ?? panic("byte write failed")
+    child.stdin.close()
+    received := [U8]{}
+    loop {
+        chunk: child.stdout.read_bytes(64) ?? panic("read_bytes failed")
+        if chunk.len() == 0 -> break
+        loop byte in chunk { received.push(byte) }
+    }
+    print("took {taken}, received {String.from_bytes(received) ?? "?"}")
+    receipt: child.wait() ?? panic("wait failed")
+    print("exit {receipt.code}")
+}

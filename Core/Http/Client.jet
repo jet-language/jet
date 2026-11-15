@@ -677,7 +677,7 @@ __build_send: fn(&wire: __BuildWire, bytes: [U8]) -[Net, Time.Wait]> Int __Build
             .None -> {
                 if wire.tcp == {
                     .Val(stream) -> {
-                        if stream.write(rest, deadline: Duration{ns: remaining}) == {
+                        if stream.write_some(rest, deadline: Duration{ns: remaining}) == {
                             .Ok(sent) -> {
                                 if sent == 0 {
                                     failed = "unmapped"

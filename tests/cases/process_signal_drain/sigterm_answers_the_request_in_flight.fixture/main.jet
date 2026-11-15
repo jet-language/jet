@@ -24,7 +24,7 @@ run: fn() {
     client: task {
         #Shield {
             held: net.tcp_connect(addr) ?? process.fail(1, "connect: {err}")
-            held.write_all("GET /hi HTTP/1.1{crlf()}".bytes()) ?? process.fail(1, "write: {err}")
+            held.write_bytes("GET /hi HTTP/1.1{crlf()}".bytes()) ?? process.fail(1, "write: {err}")
             time.sleep(100ms)
             print("ready")
             // A pipe stdout is written when its buffer fills (spec.md
@@ -32,7 +32,7 @@ run: fn() {
             ready_out := term.stdout()
             ready_out.flush() ?? process.fail(1, "flush: {err}")
             time.sleep(300ms)
-            held.write_all("Host: test{crlf()}{crlf()}".bytes()) ?? process.fail(1, "write: {err}")
+            held.write_bytes("Host: test{crlf()}{crlf()}".bytes()) ?? process.fail(1, "write: {err}")
             parts := [String]{}
             loop {
                 part: held.read_text(8192) ?? process.fail(1, "read: {err}")

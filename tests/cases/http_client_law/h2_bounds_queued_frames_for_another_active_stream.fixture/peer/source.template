@@ -27,7 +27,7 @@ request_head: fn(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: 5s per read,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
-        block: stream.read(512, deadline: 5s) ?? panic("request read")
+        block: stream.read_bytes(512, deadline: 5s) ?? panic("request read")
         assert(block.len() > 0)
         loop byte in block { request.push(byte) }
         assert(request.len() <= 65536)
@@ -48,7 +48,7 @@ Frame: struct {
 read_exact: fn(stream: TCPStream, size: Int) -> [U8] {
     out := [U8]{}
     loop out.len() < size {
-        chunk: stream.read(size - out.len(), deadline: 5s) ?? panic("frame read_exact")
+        chunk: stream.read_bytes(size - out.len(), deadline: 5s) ?? panic("frame read_exact")
         assert(chunk.len() > 0)
         loop byte in chunk { out.push(byte) }
     }
@@ -63,8 +63,8 @@ read_frame: fn(stream: TCPStream) -> Frame {
 write_frame: fn(stream: TCPStream, kind: Int, flags: Int, id: Int, payload: [U8]) {
     size: payload.len()
     head: [U8]{(U8{(size >> 16).bit_and(255)}), (U8{(size >> 8).bit_and(255)}), (U8{size.bit_and(255)}), (U8{kind}), (U8{flags}), (U8{(id >> 24).bit_and(255)}), (U8{(id >> 16).bit_and(255)}), (U8{(id >> 8).bit_and(255)}), (U8{id.bit_and(255)})}
-    stream.write_all(head, deadline: 2s) ?? panic("frame head write_all")
-    stream.write_all(payload, deadline: 2s) ?? panic("frame payload write_all")
+    stream.write_bytes(head, deadline: 2s) ?? panic("frame head write_all")
+    stream.write_bytes(payload, deadline: 2s) ?? panic("frame payload write_all")
 }
 first_headers: fn(stream: TCPStream) -> Frame {
     loop {
@@ -80,7 +80,7 @@ preface: fn(stream: &TCPStream) {
 observed_closed: fn(stream: &TCPStream) -> Bool {
     deadline: time.instant() + 500ms
     loop {
-        if stream.read(1, deadline: 50ms) == {
+        if stream.read_bytes(1, deadline: 50ms) == {
             .Ok(bytes) -> { if bytes.len() == 0 -> return true }
             .Err(error) -> {
                 if error == {
@@ -108,11 +108,11 @@ run: fn() {
     head: [U8]{1,0,0,0,0,0,0,0,3}
     loop i in 0..<1024 {
         // Original send bool: first failed header/payload stops flood, not a test failure.
-        if stream.write_all(head, deadline: 2s) == {
+        if stream.write_bytes(head, deadline: 2s) == {
             .Err(_) -> break
             .Ok(_) -> {}
         }
-        if stream.write_all(chunk, deadline: 2s) == {
+        if stream.write_bytes(chunk, deadline: 2s) == {
             .Err(_) -> break
             .Ok(_) -> {}
         }

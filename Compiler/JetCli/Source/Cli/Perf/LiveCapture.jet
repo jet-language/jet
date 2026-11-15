@@ -77,7 +77,7 @@ jet_cli_perf_read_private: fn(path: String, limit: Int) -[FS.Read, Env, Time.Wai
     if before.owner != Val(perf_sys.getuid()) -> return Err(jet_cli_read_error("observation belongs to another user"))
     bytes := [U8]{}
     loop {
-        chunk: reader.read(jet_cli_table_min(65536, limit + 1 - bytes.len())) ?? return Err(jet_cli_read_error("cannot read observation `{path}`"))
+        chunk: reader.read_bytes(jet_cli_table_min(65536, limit + 1 - bytes.len())) ?? return Err(jet_cli_read_error("cannot read observation `{path}`"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(jet_cli_read_error("observation exceeds {limit} bytes"))
@@ -89,7 +89,7 @@ jet_cli_perf_read_private: fn(path: String, limit: Int) -[FS.Read, Env, Time.Wai
 jet_cli_perf_process_stat: fn(pid: Int) -[FS.Read, Time.Wait]> String JetCLIReadError! {
     if pid <= 0 || pid > 4294967295 -> return Err(jet_cli_read_error("process id must be a nonzero u32"))
     reader := perf_files.open("/proc/{pid}/stat") ?? return Err(jet_cli_read_error("cannot verify process {pid} identity"))
-    raw: reader.read(65537) ?? return Err(jet_cli_read_error("cannot read process identity"))
+    raw: reader.read_bytes(65537) ?? return Err(jet_cli_read_error("cannot read process identity"))
     if raw.len() > 65536 -> return Err(jet_cli_read_error("process identity exceeds its bound"))
     Ok(String.from_bytes(raw) ?? return Err(jet_cli_read_error("process identity is not UTF-8")))
 }

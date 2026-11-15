@@ -474,7 +474,7 @@ provider_native_fetch_remote_artifact: fn(url: String, destination: String, labe
         chunk: part ?? return Err(RegistryError.Reason("could not read {label}: {err}"))
         total += chunk.len()
         if total > NATIVE_MAX_ARTIFACT_BYTES -> return Err(RegistryError.Reason("{label} exceeds its size bound"))
-        output.write_all(chunk) ?? return Err(RegistryError.Reason("could not write {label}: {err}"))
+        output.write_bytes(chunk) ?? return Err(RegistryError.Reason("could not write {label}: {err}"))
     }
     output.fsync() ?? return Err(RegistryError.Reason("could not sync {label}: {err}"))
     provider_native_validate_artifact_file(destination, label)
@@ -495,9 +495,9 @@ provider_native_copy_bounded_file: fn(source: String, destination: String) Regis
     input := files.open(source) ?? return Err(RegistryError.Provider(provider_native_error("could not open fixture artifact: {err}")))
     output := files.create(destination, if_exists: .Refuse) ?? return Err(RegistryError.Provider(provider_native_error("could not create fixture staging file: {err}")))
     loop {
-        chunk: input.read(PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Provider(provider_native_error("could not copy fixture artifact: {err}")))
+        chunk: input.read_bytes(PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Provider(provider_native_error("could not copy fixture artifact: {err}")))
         if chunk.len() == 0 -> break
-        output.write_all(chunk) ?? return Err(RegistryError.Provider(provider_native_error("could not copy fixture artifact: {err}")))
+        output.write_bytes(chunk) ?? return Err(RegistryError.Provider(provider_native_error("could not copy fixture artifact: {err}")))
     }
     output.fsync() ?? return Err(RegistryError.Provider(provider_native_error("could not sync fixture artifact: {err}")))
 }

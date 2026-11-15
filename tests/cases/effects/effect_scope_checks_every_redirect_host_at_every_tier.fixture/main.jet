@@ -35,7 +35,7 @@ run: fn() (Closed | NetError | TaskFailure)! {
         second: listener.accept() ?? panic("accept")
         _: second.read_text(8192) ?? panic("request")
         port: (listener.local_addr() ?? panic("address")).split(":").to_list()[1]
-        second.write_all("HTTP/1.1 302 Found\r\nLocation: http://localhost:{port}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".bytes()) ?? panic("redirect")
+        second.write_bytes("HTTP/1.1 302 Found\r\nLocation: http://localhost:{port}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".bytes()) ?? panic("redirect")
     }
     addr: ch.receive() ?? panic("address")
     port: addr.split(":").to_list()[1]

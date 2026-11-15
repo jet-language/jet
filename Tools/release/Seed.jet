@@ -255,7 +255,7 @@ pump_stdout: fn(stream: ProcessStdoutStream, log: String) Never! -[Exec, FS, Tim
         return
     }
     loop chunk in stream.chunks(65536) {
-        writer.write_all(chunk) ?? ()
+        writer.write_bytes(chunk) ?? ()
         writer.flush() ?? ()
     }
 }
@@ -266,7 +266,7 @@ pump_stderr: fn(stream: ProcessStderrStream, log: String) Never! -[Exec, FS, Tim
         return
     }
     loop chunk in stream.chunks(65536) {
-        writer.write_all(chunk) ?? ()
+        writer.write_bytes(chunk) ?? ()
         writer.flush() ?? ()
     }
 }

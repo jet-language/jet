@@ -191,9 +191,9 @@ store_copy_shared_file: fn(shared: String, key: String, source_path: String, sou
     output := files.create(partial, if_exists: .Refuse)
     input := files.open(source_path)
     loop {
-        chunk: input.read(65536)
+        chunk: input.read_bytes(65536)
         if chunk.len() == 0 -> break
-        output.write_all(chunk)
+        output.write_bytes(chunk)
     }
     output.fsync()
     files.set_mode(partial, mode)
@@ -215,8 +215,8 @@ store_files_equal: fn(left: String, right: String) -[FS]> Bool StoreError! {
     left_reader := files.open(left)
     right_reader := files.open(right)
     loop {
-        left_chunk: left_reader.read(65536)
-        right_chunk: right_reader.read(65536)
+        left_chunk: left_reader.read_bytes(65536)
+        right_chunk: right_reader.read_bytes(65536)
         if left_chunk.len() != right_chunk.len() -> return Ok(false)
         if left_chunk.len() == 0 -> return Ok(true)
         if left_chunk != right_chunk -> return Ok(false)

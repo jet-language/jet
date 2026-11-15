@@ -272,7 +272,7 @@ read_bounded: fn(file: String, size: Int, label: String, limit: Int) -[FS]> [U8]
     reader := files.open(file, links: .Refuse) ?? return Err(failed("{label} cannot be opened: {file}: {err}"))
     bytes := [U8]{}
     loop {
-        chunk: reader.read(READ_CHUNK) ?? return Err(failed("{label} cannot be read: {file}: {err}"))
+        chunk: reader.read_bytes(READ_CHUNK) ?? return Err(failed("{label} cannot be read: {file}: {err}"))
         if chunk.len() == 0 -> break
         if bytes.len() + chunk.len() > limit -> return Err(failed("{label} exceeds the {limit} byte bound"))
         bytes.extend(chunk)
@@ -324,7 +324,7 @@ immutable: fn(file: String, bytes: [U8]) -[Env, FS]> StageError! {
 }
 
 publish: fn(writer: &files.FileWriter, partial: String, file: String, parent: String, bytes: [U8]) IOError! -[FS]> {
-    writer.write_all(bytes) ?? return Err(err)
+    writer.write_bytes(bytes) ?? return Err(err)
     writer.fsync() ?? return Err(err)
     files.rename(partial, file) ?? return Err(err)
     held: files.open_directory(parent) ?? return Err(err)

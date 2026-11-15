@@ -32,7 +32,7 @@ status_of: fn(stream: TCPStream) -> String {
 }
 
 finish: fn(stream: TCPStream) -> String {
-    stream.write_all("Host: test{crlf()}{crlf()}".bytes()) ?? panic("request write")
+    stream.write_bytes("Host: test{crlf()}{crlf()}".bytes()) ?? panic("request write")
     status_of(stream)
 }
 
@@ -50,7 +50,7 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure)! {
         listening.serve() ?? panic("serve")
     }
     active: net.tcp_connect(addr)
-    active.write_all("GET /hi HTTP/1.1{crlf()}".bytes())
+    active.write_bytes("GET /hi HTTP/1.1{crlf()}".bytes())
     time.sleep(100ms)
 
     limit: sys.open_file_limit()
@@ -67,7 +67,7 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure)! {
     // accept then finds none.
     close_one(fillers)
     waiting: net.tcp_connect(addr)
-    waiting.write_all("GET /hi HTTP/1.1{crlf()}".bytes())
+    waiting.write_bytes("GET /hi HTTP/1.1{crlf()}".bytes())
     time.sleep(300ms)
     print("served while out of descriptors: {finish(active)}")
 

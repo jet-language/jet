@@ -479,7 +479,7 @@ read_bounded: fn(reader: &files.FileReader, limit: Int, label: String) -[FS]> [U
     if start.size > limit -> return Err(failed("{label} exceeds the {limit} byte bound"))
     bytes := [U8]{}
     loop {
-        chunk: reader.read(READ_CHUNK) ?? return Err(failed("{label} cannot be read: {err}"))
+        chunk: reader.read_bytes(READ_CHUNK) ?? return Err(failed("{label} cannot be read: {err}"))
         if chunk.len() == 0 -> break
         if bytes.len() + chunk.len() > limit -> return Err(failed("{label} exceeds the {limit} byte bound"))
         bytes.extend(chunk)
@@ -513,11 +513,11 @@ compare_files: fn(source: &files.FileReader, destination: &files.FileReader, lim
     if source_stat.size != destination_stat.size -> return Err(failed("{label} immutable bytes changed"))
     total := 0
     loop total < source_stat.size {
-        chunk: source.read(wanted(source_stat.size, total)) ?? return Err(failed("{label} source cannot be read: {err}"))
+        chunk: source.read_bytes(wanted(source_stat.size, total)) ?? return Err(failed("{label} source cannot be read: {err}"))
         if chunk.len() == 0 -> return Err(failed("{label} source changed while it was read"))
         other := [U8]{}
         loop other.len() < chunk.len() {
-            more: destination.read(chunk.len() - other.len()) ?? return Err(failed("{label} destination cannot be read: {err}"))
+            more: destination.read_bytes(chunk.len() - other.len()) ?? return Err(failed("{label} destination cannot be read: {err}"))
             if more.len() == 0 -> return Err(failed("{label} destination changed while it was read"))
             other.extend(more)
         }
@@ -560,9 +560,9 @@ fill_from: fn(source: &files.FileReader, writer: &files.FileWriter, limit: Int, 
     start: source.stat() ?? return Err(failed("{label} source cannot be inspected: {err}"))
     total := 0
     loop total < start.size {
-        chunk: source.read(wanted(start.size, total)) ?? return Err(failed("{label} source cannot be read: {err}"))
+        chunk: source.read_bytes(wanted(start.size, total)) ?? return Err(failed("{label} source cannot be read: {err}"))
         if chunk.len() == 0 -> return Err(failed("{label} source changed while it was read"))
-        writer.write_all(chunk) ?? return Err(failed("{label} temporary file cannot be written: {err}"))
+        writer.write_bytes(chunk) ?? return Err(failed("{label} temporary file cannot be written: {err}"))
         total += chunk.len()
         if total > limit -> return Err(failed("{label} exceeds the {limit} byte bound"))
     }
@@ -573,7 +573,7 @@ fill_from: fn(source: &files.FileReader, writer: &files.FileWriter, limit: Int, 
 }
 
 fill_bytes: fn(writer: &files.FileWriter, bytes: [U8], label: String) -[FS]> files.Stat StageError! {
-    writer.write_all(bytes) ?? return Err(failed("{label} temporary file cannot be written: {err}"))
+    writer.write_bytes(bytes) ?? return Err(failed("{label} temporary file cannot be written: {err}"))
     writer.fsync() ?? return Err(failed("{label} temporary file cannot be synced: {err}"))
     writer.stat() ?? return Err(failed("{label} temporary file cannot be inspected: {err}"))
 }
@@ -1236,7 +1236,7 @@ acquire_lock: fn(root: files.Directory) -[Env, FS]> files.Stat StageError! {
         .Err(.AlreadyExists(_)) -> return Err(failed("publication root is busy"))
         .Err(error) -> return Err(failed("publication lock cannot be created: {error}"))
     }
-    writer.write_all("{sys.getpid()}\n".bytes()) ?? return Err(failed("publication lock cannot be written: {err}"))
+    writer.write_bytes("{sys.getpid()}\n".bytes()) ?? return Err(failed("publication lock cannot be written: {err}"))
     writer.fsync() ?? return Err(failed("publication lock cannot be synced: {err}"))
     writer.stat() ?? return Err(failed("publication lock cannot be inspected: {err}"))
 }

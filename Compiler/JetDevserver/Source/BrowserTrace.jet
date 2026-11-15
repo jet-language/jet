@@ -60,7 +60,7 @@ BrowserTraceRelay: struct {
         fields := [String]{"\"nonce\":{foundation_json_quote(nonce)}", "\"pid\":{pid}", "\"started\":{foundation_json_quote(started)}", "\"sources\":{foundation_json_quote(browser_trace_hex.encode(browser_trace_encode_sources(identity.sources).bytes()))}"}
         if identity.source_map == .Val(map) -> fields.push("\"source_map\":{foundation_json_quote(browser_trace_hex.encode(map.bytes()))}")
         header: browser_trace_status_line(BROWSER_TRACE_RELAY_ACTION, fields)
-        writer.write_all(header.bytes()) ?? return Err(browser_trace_error("cannot initialize browser trace relay: {err}"))
+        writer.write_bytes(header.bytes()) ?? return Err(browser_trace_error("cannot initialize browser trace relay: {err}"))
         writer.flush() ?? return Err(browser_trace_error("cannot flush browser trace relay: {err}"))
         BrowserTraceRelay{writer: writer, nonce: nonce, path: path, rows: 0, started: browser_trace_time.instant()}
     }
@@ -98,7 +98,7 @@ BrowserTraceRelay: struct {
     }
 
     append: fn(&self, line: String) BrowserTraceRecordError! {
-        self.writer.write_all(line.bytes()) ?? return Err(BrowserTraceRecordError.Unavailable)
+        self.writer.write_bytes(line.bytes()) ?? return Err(BrowserTraceRecordError.Unavailable)
         self.writer.flush() ?? return Err(BrowserTraceRecordError.Unavailable)
     }
 
@@ -158,7 +158,7 @@ browser_trace_secure_read: fn(path: String, limit: Int, label: String) -> String
     if !metadata.is_file || metadata.size > limit -> return Err(browser_trace_error("{label} is not bounded"))
     bytes := [U8]{}
     loop {
-        chunk: reader.read(limit + 1 - bytes.len()) ?? return Err(browser_trace_error("cannot read {label}"))
+        chunk: reader.read_bytes(limit + 1 - bytes.len()) ?? return Err(browser_trace_error("cannot read {label}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(browser_trace_error("{label} exceeds its limit"))

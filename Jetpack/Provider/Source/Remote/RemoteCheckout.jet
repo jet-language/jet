@@ -400,7 +400,7 @@ provider_same_file_identity: fn(left: Stat, right: Stat) -> Bool Never! {
 provider_read_all: fn(reader: &FileReader) -[FS]> [U8] IOError! {
     bytes := [U8]{}
     loop {
-        chunk: reader.read(PROVIDER_READ_CHUNK_BYTES)
+        chunk: reader.read_bytes(PROVIDER_READ_CHUNK_BYTES)
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
     }
@@ -532,9 +532,9 @@ provider_create_temp_file_name: fn(destination: Directory, mode: Int) -[FS, Rand
 
 provider_fill_temp_file: fn(reader: &FileReader, before: Stat, destination: Directory, temporary: String, writer: &FileWriter, mode: Int, destination_name: String) IOError! -[FS]> {
     loop {
-        chunk: reader.read(PROVIDER_READ_CHUNK_BYTES)
+        chunk: reader.read_bytes(PROVIDER_READ_CHUNK_BYTES)
         if chunk.len() == 0 -> break
-        writer.write_all(chunk)
+        writer.write_bytes(chunk)
     }
     writer.set_mode(mode)
     writer.fsync()

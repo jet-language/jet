@@ -96,7 +96,7 @@ env_transition_read_bounded: fn(path: String) -[FS]> [U8] EnvironmentError! {
     reader := files.open(path, links: .Refuse) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
     bytes := [U8]{}
     loop {
-        chunk: reader.read(TRANSITION_READ_CHUNK) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
+        chunk: reader.read_bytes(TRANSITION_READ_CHUNK) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > TRANSITION_MAX_JOURNAL_BYTES {
@@ -230,7 +230,7 @@ env_transition_write_atomic: fn(path: String, bytes: [U8]) EnvironmentError! -[F
 
 env_transition_stage: fn(temp: String, bytes: [U8]) IOError! -[FS]> {
     output := files.create(temp, if_exists: .Refuse)
-    output.write_all(bytes)
+    output.write_bytes(bytes)
     output.fsync()
 }
 

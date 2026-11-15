@@ -434,7 +434,7 @@ jet_native_test_batch_failure: fn(missing: [JetNativeTestCase], serial: Bool, er
 jet_native_test_alone_run: fn(spec: ProcessSpec) -> ProcessReceipt IOError! {
     journal: native_test_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) ?? return spec.run()
     child: spec.stdin(.Stream).spawn() ?? return Err(err)
-    child.stdin.write_all(jet_cli_replay_journal_stdin(journal)).drop("a rerun that stops reading early reports why on stderr")
+    child.stdin.write_bytes(jet_cli_replay_journal_stdin(journal)).drop("a rerun that stops reading early reports why on stderr")
     child.stdin.close()
     child.wait()
 }

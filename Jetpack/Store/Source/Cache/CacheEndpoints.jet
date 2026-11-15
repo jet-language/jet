@@ -406,14 +406,14 @@ store_cache_run_bounded_output: fn(spec: ProcessSpec, input: [U8]?, limit: Int, 
     child: streamed.stdout(.Stream).stderr(.Capture).spawn() ?? return Err(StoreError.InvalidData("{adapter} could not start: {StoreError.IO(err).message()}"))
     if input == {
         .Val(bytes) -> {
-            child.stdin.write_all(bytes)
+            child.stdin.write_bytes(bytes)
             child.stdin.close()
         }
         .None -> {}
     }
     stdout := [U8]{}
     loop {
-        chunk: child.stdout.read(65536)
+        chunk: child.stdout.read_bytes(65536)
         if chunk.len() == 0 -> break
         loop byte in chunk -> stdout.push(byte)
         if stdout.len() > limit {

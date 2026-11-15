@@ -67,7 +67,7 @@ s5_web_find: fn(bytes: [U8], marker: [U8]) -> Int? {
 s5_web_read_to_end: fn(stream: &net.TCPStream) -> [U8]? {
     output := [U8]{}
     loop {
-        part: stream.read(8192, deadline: 5s) ?? return None
+        part: stream.read_bytes(8192, deadline: 5s) ?? return None
         if part.len() == 0 -> return Val(output)
         loop byte in part -> output.push(byte)
     }

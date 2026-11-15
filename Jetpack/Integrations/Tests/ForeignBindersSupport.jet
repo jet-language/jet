@@ -47,7 +47,7 @@ pkg_binders_test_php_discover: fn(php: String, source: String, serial: Int) -[FS
 pkg_binders_test_read_exact: fn(child: &ProcessChild, count: Int) -[Exec, Time.Wait]> [U8] {
     out := [U8]{}
     loop out.len() < count {
-        chunk: child.stdout.read(count - out.len()) ?? panic("read worker output")
+        chunk: child.stdout.read_bytes(count - out.len()) ?? panic("read worker output")
         if chunk.len() == 0 -> panic("worker closed its output early")
         loop byte in chunk -> out.push(byte)
     }

@@ -56,7 +56,7 @@ compose: fn(catalog: Catalog?, at: SourceLocation{#caller}) -> App? {
 get: fn(addr: String, path: String) -> String NetError! {
     client: net.tcp_connect(addr) ?? return Err(err)
     crlf: "\r\n"
-    client.write_all("GET {path} HTTP/1.1{crlf}Host: local{crlf}Connection: close{crlf}{crlf}".bytes()) ?? return Err(err)
+    client.write_bytes("GET {path} HTTP/1.1{crlf}Host: local{crlf}Connection: close{crlf}{crlf}".bytes()) ?? return Err(err)
     parts := [String]{}
     loop {
         part: client.read_text(8192) ?? break

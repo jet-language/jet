@@ -116,7 +116,7 @@ OverlayAuthority: struct {
         identity: env_overlay_identity(info) ?? return Err(OverlayError.Patch("{label} `{path}` {ENV_OVERLAY_HARD_LINKED}"))
         bytes := [U8]{}
         loop {
-            chunk: handle.read(65536) ?? return Err(OverlayError.IO("could not read {label} `{path}`: {err}"))
+            chunk: handle.read_bytes(65536) ?? return Err(OverlayError.IO("could not read {label} `{path}`: {err}"))
             if chunk.len() == 0 -> break
             bytes.extend(chunk)
         }
@@ -379,7 +379,7 @@ env_overlay_write_atomically: fn(entry: OverlayStagedFile, root_handle: Director
 // rename is best effort, so a reporting failure cannot claim a failed commit
 // after the destination already changed.
 env_overlay_publish: fn(entry: OverlayStagedFile, parent: Directory, file: &FileWriter, temporary: String, bytes: [U8]) IOError! -[FS]> {
-    file.write_all(bytes)
+    file.write_bytes(bytes)
     file.set_mode(entry.mode)
     file.fsync()
     parent.fsync()

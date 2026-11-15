@@ -193,7 +193,7 @@ check: fn(receipt: ProcessReceipt) IOError! {
 
 stdin_text: fn(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> {
     child: spec.stdin(.Stream).spawn()
-    child.stdin.write_all(text.bytes())
+    child.stdin.write_bytes(text.bytes())
     child.stdin.close()
     receipt: child.wait()
     check(receipt)
@@ -713,8 +713,8 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
     child: Sh{argv: [String]{"sh", "-c", "while read -r line; do echo \"$line\"; done"}}.spec().stdin(.Stream).stdout(.Stream).spawn() ?? panic("sh did not start: {err}")
     start: core.time.instant()
     loop _ in 0..<100 {
-        child.stdin.write_all("x\n".bytes()) ?? panic("write failed: {err}")
-        assert_eq(child.stdout.read(64) ?? [U8]{}, [U8]{120, 10})
+        child.stdin.write_bytes("x\n".bytes()) ?? panic("write failed: {err}")
+        assert_eq(child.stdout.read_bytes(64) ?? [U8]{}, [U8]{120, 10})
     }
     elapsed: core.time.instant() - start
     child.stdin.close()
@@ -825,9 +825,9 @@ __ProcessChunkCursor: struct {
             if self.done -> return None
             piece := [U8]{}
             if self.stdout == .Val(stream) {
-                piece = stream.read(self.size) ?? [U8]{}
+                piece = stream.read_bytes(self.size) ?? [U8]{}
             } else if self.stderr == .Val(stream) {
-                piece = stream.read(self.size) ?? [U8]{}
+                piece = stream.read_bytes(self.size) ?? [U8]{}
             }
             if piece.len() == 0 {
                 self.done = true

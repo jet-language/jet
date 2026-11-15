@@ -625,7 +625,7 @@ __refuse: fn(stream: &&TCPStream, tls: HTTPServerTLS?) Never! -[Net, Time]> {
     plain := true
     if tls == .Val(_) -> plain = false
     if plain {
-        if stream.write_all(__error_wire(503), deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
+        if stream.write_bytes(__error_wire(503), deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
             .Ok(_) -> {}
             .Err(_) -> {}
         }
@@ -1580,7 +1580,7 @@ __send: fn(stream: __HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool
     if remaining <= 0 -> return false
     if stream.tls == .Val(secure) -> return secure.write_all(bytes, Duration{ns: remaining})
     if stream.tcp == .Val(plain) {
-        return if plain.write_all(bytes, deadline: Duration{ns: remaining}) == {
+        return if plain.write_bytes(bytes, deadline: Duration{ns: remaining}) == {
             .Ok(_) -> true
             .Err(_) -> false
         }

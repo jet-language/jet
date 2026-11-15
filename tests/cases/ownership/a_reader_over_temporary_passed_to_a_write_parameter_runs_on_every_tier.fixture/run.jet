@@ -6,8 +6,8 @@ use term: core.term
 // Reads one byte of `source`, then `count - 1` more: ten per byte of the
 // first read plus one per byte of the second.
 head: fn(&source: term.Reader, count: Int) -> Int IOError! {
-    first: source.read(1) ?? return Err(err)
-    rest: source.read(count - 1) ?? return Err(err)
+    first: source.read_bytes(1) ?? return Err(err)
+    rest: source.read_bytes(count - 1) ?? return Err(err)
     Ok(first.len() * 10 + rest.len())
 }
 

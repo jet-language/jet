@@ -279,7 +279,7 @@ provider_cc_pack_download: fn(url: String, destination: String, asset: CcPackAss
         chunk: part ?? return Err(CcToolchainError.Invalid("download C toolchain pack: {err}"))
         total += chunk.len()
         if total > asset.size -> return Err(CcToolchainError.Invalid("C toolchain pack at {url} is larger than the {asset.size} bytes this jet expects"))
-        output.write_all(chunk) ?? return Err(CcToolchainError.Invalid("write C toolchain pack staging file: {err}"))
+        output.write_bytes(chunk) ?? return Err(CcToolchainError.Invalid("write C toolchain pack staging file: {err}"))
     }
 }
 
@@ -289,7 +289,7 @@ provider_cc_pack_verify_archive: fn(file: &files.FileReader, asset: CcPackAsset,
     hasher := StreamingSHA256.new()
     total := 0
     loop {
-        chunk: file.read(CC_PACK_READ_CHUNK) ?? return Err(CcToolchainError.Invalid("read C toolchain pack from {origin}: {err}"))
+        chunk: file.read_bytes(CC_PACK_READ_CHUNK) ?? return Err(CcToolchainError.Invalid("read C toolchain pack from {origin}: {err}"))
         if chunk.len() == 0 -> break
         total += chunk.len()
         if total > asset.size -> return Err(CcToolchainError.Invalid("C toolchain pack from {origin} is larger than the {asset.size} bytes this jet expects"))
@@ -537,7 +537,7 @@ CcPackTarStream: struct {
             if !(self.fill(1)) -> return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
             available: self.buffer.len() - self.at
             step: if available < remaining -> available else -> remaining
-            output.write_all(self.buffer.slice(self.at, self.at + step)) ?? return Err(CcToolchainError.Invalid("write `{path}`: {err}"))
+            output.write_bytes(self.buffer.slice(self.at, self.at + step)) ?? return Err(CcToolchainError.Invalid("write `{path}`: {err}"))
             self.at += step
             remaining -= step
         }

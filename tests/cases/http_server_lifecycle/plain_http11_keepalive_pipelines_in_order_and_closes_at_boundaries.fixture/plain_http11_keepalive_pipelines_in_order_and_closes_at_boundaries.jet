@@ -17,7 +17,7 @@ s6_pipeline_crlf: fn() -> String { "\r\n" }
 
 s6_pipeline_exchange: fn(addr: String, request: String) -> String {
     stream := net.tcp_connect(addr) ?? panic("connect")
-    stream.write_all(request.bytes()) ?? panic("request write")
+    stream.write_bytes(request.bytes()) ?? panic("request write")
     net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request write")
     parts := [String]{}
     loop {

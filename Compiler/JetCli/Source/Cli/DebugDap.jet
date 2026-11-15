@@ -345,7 +345,7 @@ jet_cli_dap_read: fn() -[IO, Time.Wait]> String? Never! {
     length := -1
     header := [U8]{}
     loop true {
-        byte: input.read(1) ?? return None
+        byte: input.read_bytes(1) ?? return None
         if byte.len() == 0 -> return None
         if byte[0] != 10 {
             header.push(byte[0])
@@ -358,7 +358,7 @@ jet_cli_dap_read: fn() -[IO, Time.Wait]> String? Never! {
     }
     body := [U8]{}
     loop body.len() < length {
-        chunk: input.read(length - body.len()) ?? return None
+        chunk: input.read_bytes(length - body.len()) ?? return None
         if chunk.len() == 0 -> return None
         body.extend(chunk)
     }

@@ -189,7 +189,7 @@ run_tier: fn(jet: String, tier: String, path: String, stdin: String) -[Exec, Tim
             else -> {
                 child: spec.stdin(.Stream).spawn() ?? return failed_run(out, "{argv[0]} did not start: {err}")
                 undelivered := ""
-                if child.stdin.write_all(stdin.bytes()) == {
+                if child.stdin.write_bytes(stdin.bytes()) == {
                     .Ok(_) -> {}
                     .Err(failure) -> undelivered = "stdin was not delivered: {failure}"
                 }

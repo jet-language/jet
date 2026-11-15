@@ -32,7 +32,7 @@ get_body: fn(port: String, path: String) -> [U8] {
         }
     }
     stream := connected ?? panic("connected stream")
-    stream.write_all("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".bytes()) ?? panic("request write")
+    stream.write_bytes("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".bytes()) ?? panic("request write")
     bytes := [U8]{}
     loop {
         part: net.tcp_read_bytes(stream, 65536) ?? panic("response read")

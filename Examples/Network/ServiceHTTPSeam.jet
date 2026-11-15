@@ -86,7 +86,7 @@ isolated: fn(raw: String, store: NoteStore, calls: Shared<Calls>) -> Int {
 // The loopback path: the status the server answers for `raw` over TCP.
 loopback: fn(addr: String, raw: String) -> Int NetError! {
     client: net.tcp_connect(addr) ?? return Err(err)
-    client.write_all(raw.bytes()) ?? return Err(err)
+    client.write_bytes(raw.bytes()) ?? return Err(err)
     parts := [String]{}
     loop {
         part: client.read_text(8192) ?? break

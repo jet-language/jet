@@ -116,7 +116,7 @@ JetCLIRootedDirectory: struct {
         if !opened.is_file || opened.id != info.id -> return Err(jet_cli_read_error("`{shown}` changed while it was read"))
         bytes := [U8]{}
         loop {
-            chunk: reader.read(JET_CLI_ROOTED_READ_CHUNK) ?? return Err(jet_cli_read_error("could not read `{shown}`: {jet_cli_io_error_text(err)}"))
+            chunk: reader.read_bytes(JET_CLI_ROOTED_READ_CHUNK) ?? return Err(jet_cli_read_error("could not read `{shown}`: {jet_cli_io_error_text(err)}"))
             if chunk.len() == 0 -> break
             loop byte in chunk -> bytes.push(byte)
             if bytes.len() > limit -> return Err(jet_cli_read_error("`{shown}` exceeds {limit} bytes"))
@@ -366,7 +366,7 @@ JetCLIRootedEntry: struct {
 }
 
 jet_cli_rooted_fill: fn(writer: &cli_files.FileWriter, bytes: [U8], mode: Int?, durable: Bool) IOError! -[FS, Time.Wait]> {
-    writer.write_all(bytes)
+    writer.write_bytes(bytes)
     if mode == .Val(bits) -> writer.set_mode(bits)
     if durable {
         writer.fsync()

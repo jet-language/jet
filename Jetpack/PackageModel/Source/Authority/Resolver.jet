@@ -111,7 +111,7 @@ AuthorityResolver: struct {
         }
         bytes := [U8]{}
         loop {
-            chunk: handle.read(AUTHORITY_READ_CHUNK) ?? return Err(AuthorityError.IO{path: full, operation: "read", detail: "{err}"})
+            chunk: handle.read_bytes(AUTHORITY_READ_CHUNK) ?? return Err(AuthorityError.IO{path: full, operation: "read", detail: "{err}"})
             if chunk.len() == 0 -> break
             bytes.extend(chunk)
             if bytes.len() > PKG_MAX_TREE_FILE_BYTES {

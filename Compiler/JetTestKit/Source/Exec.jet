@@ -356,7 +356,7 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
     // stdin closed the pipe, which is no error when there was nothing to send.
     input_error := ""
     if stdin.len() > 0 {
-        child.stdin.write_all(stdin) ?? {
+        child.stdin.write_bytes(stdin) ?? {
             input_error = "stdin: {err}"
             ()
         }
@@ -429,7 +429,7 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
 // other cannot stall the child.
 kit_exec_read_stdout: fn(stream: ProcessStdoutStream, bytes: &[U8]) -> String {
     loop {
-        chunk: stream.read(1048576) ?? return "read stdout: {err}"
+        chunk: stream.read_bytes(1048576) ?? return "read stdout: {err}"
         if chunk.len() == 0 -> return ""
         bytes.extend(chunk)
     }
@@ -438,7 +438,7 @@ kit_exec_read_stdout: fn(stream: ProcessStdoutStream, bytes: &[U8]) -> String {
 
 kit_exec_read_stderr: fn(stream: ProcessStderrStream, bytes: &[U8]) -> String {
     loop {
-        chunk: stream.read(1048576) ?? return "read stderr: {err}"
+        chunk: stream.read_bytes(1048576) ?? return "read stderr: {err}"
         if chunk.len() == 0 -> return ""
         bytes.extend(chunk)
     }

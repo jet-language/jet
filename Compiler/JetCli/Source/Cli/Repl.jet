@@ -638,7 +638,7 @@ jet_cli_repl_run_child: fn(session: JetCLIReplSession, binary: String) -> JetCLI
         jet_cli_repl_discard(binary)
         return jet_cli_repl_unstarted("{err}")
     }
-    child.stdin.write("{binary.count_bytes()}\n{binary}".bytes()).drop("a child that stopped reading reports why on stderr")
+    child.stdin.write_bytes("{binary.count_bytes()}\n{binary}".bytes()).drop("a child that stopped reading reports why on stderr")
     child.stdin.close()
     receipt: child.wait() ?? {
         jet_cli_repl_discard(binary)

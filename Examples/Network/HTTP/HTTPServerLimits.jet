@@ -27,7 +27,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         smuggling_request.push(13)
         smuggling_request.push(10)
     }
-    smuggling.write_all(smuggling_request) ?? panic("smuggling write")
+    smuggling.write_bytes(smuggling_request) ?? panic("smuggling write")
     smuggling_response: smuggling.read_text(8192) ?? panic("smuggling read")
     print(smuggling_response.starts_with("HTTP/1.1 400 Bad Request"))
     print(smuggling_response.contains("handler ran"))
@@ -38,7 +38,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         oversized_request.push(13)
         oversized_request.push(10)
     }
-    oversized.write_all(oversized_request) ?? panic("oversized write")
+    oversized.write_bytes(oversized_request) ?? panic("oversized write")
     oversized_response: oversized.read_text(8192) ?? panic("oversized read")
     print(oversized_response.starts_with("HTTP/1.1 413 Payload Too Large"))
     print(oversized_response.contains("handler ran"))

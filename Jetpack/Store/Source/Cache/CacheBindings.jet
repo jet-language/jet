@@ -231,7 +231,7 @@ store_cache_write_new_key: fn(path: String) StoreError! {
     secret: random.bytes(32) ?? return Err(StoreError.Other("{err}"))
     if store_archive_lstat_ok(path) != None -> return
     out := files.create(path, if_exists: .Refuse)
-    out.write_all(secret)
+    out.write_bytes(secret)
     out.fsync()
     if sys.is_unix() -> files.set_mode(path, STORE_MODE_PRIVATE_FILE)
 }
@@ -351,7 +351,7 @@ store_cache_atomic_replace: fn(path: String, bytes: [U8]) StoreError! {
 }
 
 store_cache_finish_replace: fn(out: &FileWriter, partial: String, path: String, bytes: [U8]) StoreError! {
-    out.write_all(bytes)
+    out.write_bytes(bytes)
     out.fsync()
     if sys.is_windows() -> files.remove(path)
     files.rename(partial, path)

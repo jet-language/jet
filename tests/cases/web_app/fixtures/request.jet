@@ -36,7 +36,7 @@ run: fn() {
     stream := connected ?? panic("connected stream")
     crlf: "\r\n"
     request: "{method} {path} HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
-    stream.write_all(request.bytes()) ?? panic("request write")
+    stream.write_bytes(request.bytes()) ?? panic("request write")
     net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
     bytes := [U8]{}
     complete := false
@@ -48,7 +48,7 @@ run: fn() {
         loop time.instant() - started < 250ms {
             remaining: 250 - time.duration_as_ms(time.instant() - started)
             failed := false
-            if stream.read(8192, deadline: time.duration_ms(remaining)) == {
+            if stream.read_bytes(8192, deadline: time.duration_ms(remaining)) == {
                 .Ok(part) -> {
                     if part.len() == 0 {
                         assert(time.instant() - started >= 250ms, "reload endpoint fired without a source change")
@@ -69,7 +69,7 @@ run: fn() {
     loop !complete {
         if reload != None -> assert(time.instant() - changed < 10s, "reload response did not complete")
         remaining: 10000 - time.duration_as_ms(time.instant() - changed)
-        part: if reload == None -> net.tcp_read_bytes(stream, 8192) ?? panic("response read") else -> stream.read(8192, deadline: time.duration_ms(remaining)) ?? panic("response read")
+        part: if reload == None -> net.tcp_read_bytes(stream, 8192) ?? panic("response read") else -> stream.read_bytes(8192, deadline: time.duration_ms(remaining)) ?? panic("response read")
         if part.len() == 0 {
             complete = true
             if reload != None -> assert(time.instant() - changed <= 10s, "reload response completed after deadline")

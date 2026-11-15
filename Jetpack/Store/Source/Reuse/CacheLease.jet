@@ -556,7 +556,7 @@ CacheLease: struct {
                 input.seek(0)
                 hasher := StreamingSHA256.new()
                 loop {
-                    chunk: input.read(65536)
+                    chunk: input.read_bytes(65536)
                     if chunk.len() == 0 -> break
                     hasher.update(chunk)
                 }
@@ -623,7 +623,7 @@ CacheLease: struct {
         input := self.open_output(relative)
         bytes := [U8]{}
         loop {
-            chunk: input.read(65536)
+            chunk: input.read_bytes(65536)
             if chunk.len() == 0 -> break
             bytes.extend(chunk)
         }

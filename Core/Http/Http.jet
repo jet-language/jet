@@ -182,7 +182,7 @@ Body: struct {
     copy_to: fn(self, writer: &&FileWriter, limit: Int) -[Net, Time.Wait]> Int HTTPError! {
         raw: __body_bytes_within(self, limit) ?? return Err(err)
         out := writer.move()
-        out.write_all(raw) ?? return Err(.IO{operation: "copy body"})
+        out.write_bytes(raw) ?? return Err(.IO{operation: "copy body"})
         out.flush() ?? return Err(.IO{operation: "copy body"})
         Ok(raw.len())
     }
@@ -988,7 +988,7 @@ __body_read: fn(source: &FileReader, want: Int) -[FS.Read, Time.Wait]> Body HTTP
     out := [U8]{}
     loop out.len() < cap {
         room: cap - out.len()
-        piece: source.read(if room > C_BODY_CHUNK_BYTES -> C_BODY_CHUNK_BYTES else -> room) ?? return Err(.IO{operation: "read body"})
+        piece: source.read_bytes(if room > C_BODY_CHUNK_BYTES -> C_BODY_CHUNK_BYTES else -> room) ?? return Err(.IO{operation: "read body"})
         if piece.len() == 0 -> break
         out.extend(piece)
     }

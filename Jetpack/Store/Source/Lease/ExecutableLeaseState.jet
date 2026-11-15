@@ -690,7 +690,7 @@ store_lease_load_or_create_key: fn(service: String) -[FS, Env, Rand]> [U8] IOErr
     partial: files.join(service, ".{LEASE_AUTH_KEY_FILE}.{sys.pid()}-{token}.partial")
     secret: random.bytes(LEASE_AUTH_KEY_BYTES) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("executable lease ids require a platform CSPRNG")}))
     file := files.create(partial, if_exists: .Refuse, mode: Val(LEASE_KEY_MODE))
-    file.write_all(secret)
+    file.write_bytes(secret)
     file.fsync()
     if files.hard_link(partial, path) == {
         .Ok(_) -> {
@@ -721,7 +721,7 @@ store_lease_ensure_real_directory: fn(path: String, label: String) IOError! -[FS
 
 store_lease_write_new_synced: fn(path: String, bytes: [U8]) IOError! -[FS]> {
     file := files.create(path, if_exists: .Refuse)
-    file.write_all(bytes)
+    file.write_bytes(bytes)
     file.fsync()
 }
 
@@ -770,7 +770,7 @@ store_lease_read_bounded: fn(path: String) -[FS]> String IOError! {
     if held.size > LEASE_RECEIPT_BYTE_BOUND -> return Err(store_lease_invalid("executable lease receipt exceeds the bound"))
     bytes := [U8]{}
     loop {
-        chunk: file.read(65536)
+        chunk: file.read_bytes(65536)
         if chunk.len() == 0 -> break
         bytes.extend(chunk)
         if bytes.len() > LEASE_RECEIPT_BYTE_BOUND -> return Err(store_lease_invalid("executable lease receipt exceeds the bound"))

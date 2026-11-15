@@ -195,7 +195,7 @@ services_write_atomic: fn(path: String, contents: [U8]) IOError! -[FS, Env]> {
 
 services_replace_through: fn(temporary: String, path: String, contents: [U8]) IOError! -[FS]> {
     writer := files.create(temporary, if_exists: .Refuse)
-    writer.write_all(contents)
+    writer.write_bytes(contents)
     close(writer)
     files.rename(temporary, path)
 }

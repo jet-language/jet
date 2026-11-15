@@ -18,8 +18,8 @@ run: fn() {
         .Err(error) -> print(net.error_operation(error))
     }
     payload: [U8]{ 7 }
-    client.write_all(payload, deadline: budget) ?? panic("write")
-    print(server.read(1, deadline: budget) ?? panic("read"))
+    client.write_bytes(payload, deadline: budget) ?? panic("write")
+    print(server.read_bytes(1, deadline: budget) ?? panic("read"))
     client.close() ?? panic("close")
     client.close() ?? panic("second close")
 }

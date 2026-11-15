@@ -45,7 +45,7 @@ get_address: fn(port: String, path: String) -> Answer {
         }
     }
     stream := connected ?? panic("connected stream")
-    stream.write_all("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".bytes()) ?? panic("request write")
+    stream.write_bytes("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".bytes()) ?? panic("request write")
     net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
     bytes := [U8]{}
     loop {

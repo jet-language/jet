@@ -592,7 +592,7 @@ image_read_regular_bounded: fn(path: String, limit: Int) -[FS]> [U8] ImageError!
     reader := files.open(path, links: .Refuse)
     bytes := [U8]{}
     loop {
-        chunk: reader.read(65536)
+        chunk: reader.read_bytes(65536)
         if chunk.len() == 0 -> break
         bytes.extend(chunk)
         if bytes.len() > limit -> return Err(image_invalid("OCI input exceeded its bound while being read"))
@@ -643,7 +643,7 @@ image_remove_stale_temporary: fn(path: String) ImageError! -[FS]> {
 // Create `path`, refusing an existing entry or a final link, and sync it.
 image_write_new_file: fn(path: String, bytes: [U8]) ImageError! -[FS]> {
     writer := files.create(path, if_exists: .Refuse, links: .Refuse)
-    writer.write_all(bytes)
+    writer.write_bytes(bytes)
     writer.fsync()
 }
 

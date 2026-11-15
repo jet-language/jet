@@ -92,7 +92,7 @@ record: fn(session: Session, graph: String) -[Env, Exec, FS, IO]> () Err! {
     script: files.join(out, "perf.script")
     writer := files.create(script)
     child: Sh{"{session.perf} script -i {data} --demangle --no-inline --max-stack 256 -F comm,pid,tid,time,event,ip,sym,dso"}.spec().stdin(.Inherit).stdout(.Stream).stderr(.Inherit).spawn()
-    loop chunk in child.stdout.chunks(65536) -> writer.write_all(chunk)
+    loop chunk in child.stdout.chunks(65536) -> writer.write_bytes(chunk)
     writer.flush()
     step(process.exit_status(child.wait()))
     step(profile(session, [String]{"analyze", script, session.map.copy(), session.repo.copy(), out.copy(), graph.copy()}))  // copy: the session keeps its paths

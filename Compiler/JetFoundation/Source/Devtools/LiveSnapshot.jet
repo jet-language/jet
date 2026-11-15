@@ -298,7 +298,7 @@ jet_live_process_stat: fn(pid: Int) -[FS, Time.Wait]> String JetLiveSnapshotErro
     reader := live_files.open("/proc/{pid}/stat") ?? return Err(jet_live_error("cannot verify process {pid} identity"))
     bytes := [U8]{}
     loop {
-        chunk: reader.read(65537 - bytes.len()) ?? return Err(jet_live_error("cannot verify process {pid} identity"))
+        chunk: reader.read_bytes(65537 - bytes.len()) ?? return Err(jet_live_error("cannot verify process {pid} identity"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > 65536 -> return Err(jet_live_error("process identity exceeds its bound"))
@@ -326,7 +326,7 @@ jet_live_read: fn(pid: Int, path: String) -[FS, Env, Time]> JetLiveSnapshot JetL
     bytes.try_reserve(if before.size < 65536 -> before.size else -> 65536) ?? panic("live snapshot allocation failed")
     loop {
         room: 1048577 - bytes.len()
-        chunk: reader.read(if room < 65536 -> room else -> 65536) ?? return Err(jet_live_error("cannot read live runtime snapshot: {err}"))
+        chunk: reader.read_bytes(if room < 65536 -> room else -> 65536) ?? return Err(jet_live_error("cannot read live runtime snapshot: {err}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > 1048576 -> return Err(jet_live_error("live runtime snapshot exceeds the 1 MiB safety limit"))

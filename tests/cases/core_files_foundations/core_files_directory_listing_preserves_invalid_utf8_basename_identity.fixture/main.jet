@@ -6,7 +6,7 @@ make_names: fn() {
     directory: files.open_directory("names") ?? panic("cannot hold names/")
     loop raw in ([[U8]]{[U8]{97, 255}, [U8]{97, 128}}) {
         writer := directory.create_raw(raw) ?? panic("cannot create a raw name")
-        writer.write_all([U8]{raw[1]}) ?? panic("cannot write a raw name")
+        writer.write_bytes([U8]{raw[1]}) ?? panic("cannot write a raw name")
     }
 }
 
@@ -26,7 +26,7 @@ verify_names: fn() {
     assert((directory.list() ?? panic("cannot list names/")).len() == 2)
     loop entry in entries {
         reader := directory.open_raw(entry.raw_name) ?? panic("cannot open a raw name")
-        assert((reader.read(16) ?? panic("cannot read a raw name")) == [U8]{entry.raw_name[1]})
+        assert((reader.read_bytes(16) ?? panic("cannot read a raw name")) == [U8]{entry.raw_name[1]})
     }
 }
 

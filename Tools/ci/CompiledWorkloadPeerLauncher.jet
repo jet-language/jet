@@ -450,7 +450,7 @@ run_linux: fn(invocation: Invocation) -[FS, Env, Exec, IO, Time, Time.Wait]> Chi
             files.remove(status_file).drop("the signal status file is scratch")
             return Err(launch_error("Linux peer isolation seccomp socket filter cannot be created at `{filter_path}`: {err}"))
         }
-        staged.write_all(filter) ?? {
+        staged.write_bytes(filter) ?? {
             files.remove(status_file).drop("the signal status file is scratch")
             return Err(launch_error("Linux peer isolation seccomp socket filter cannot be written to `{filter_path}`: {err}"))
         }

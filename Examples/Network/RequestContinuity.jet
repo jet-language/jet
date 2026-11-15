@@ -70,7 +70,7 @@ crlf: fn() -> String { "\r\n" }
 send: fn(addr: String, who: String, mode: String, deadline: Int) -> TCPStream NetError! {
     client: net.tcp_connect(addr) ?? return Err(err)
     limit: if deadline > 0 -> "x-deadline-ms: {deadline}{crlf()}" else -> ""
-    client.write_all("POST /pay HTTP/1.1{crlf()}Host: local{crlf()}x-user: {who}{crlf()}{limit}Content-Length: {mode.bytes().len()}{crlf()}Connection: close{crlf()}{crlf()}{mode}".bytes()) ?? return Err(err)
+    client.write_bytes("POST /pay HTTP/1.1{crlf()}Host: local{crlf()}x-user: {who}{crlf()}{limit}Content-Length: {mode.bytes().len()}{crlf()}Connection: close{crlf()}{crlf()}{mode}".bytes()) ?? return Err(err)
     Ok(client)
 }
 

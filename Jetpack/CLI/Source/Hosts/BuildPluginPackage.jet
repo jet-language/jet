@@ -195,7 +195,7 @@ cli_read_packaged_file_bounded: fn(path: String, label: String, limit: Int) -[FS
     if !opened.is_file -> return Err(cli_build_plugin_error("plugin {label} must be a regular file"))
     bytes := [U8]{}
     loop {
-        chunk: reader.read(65536) ?? return Err(cli_build_plugin_error("could not read plugin {label}: {err}"))
+        chunk: reader.read_bytes(65536) ?? return Err(cli_build_plugin_error("could not read plugin {label}: {err}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(cli_build_plugin_error("plugin {label} exceeds {limit} bytes"))

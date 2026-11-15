@@ -220,7 +220,7 @@ store_build_write_last_run: fn(root: String, program: String, key: String) Artif
 }
 
 store_build_last_run_fill: fn(writer: &files.FileWriter, bytes: [U8]) IOError! -[FS, Time.Wait]> {
-    writer.write_all(bytes)
+    writer.write_bytes(bytes)
     writer.fsync()
 }
 
@@ -232,7 +232,7 @@ store_build_last_run: fn(root: String, program: String) -[FS, Env, Time.Wait]> S
     if !info.is_file || info.size > STORE_LAST_RUN_MAX_BYTES -> return None
     bytes := [U8]{}
     loop {
-        chunk: reader.read(65536) ?? return None
+        chunk: reader.read_bytes(65536) ?? return None
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > STORE_LAST_RUN_MAX_BYTES -> return None

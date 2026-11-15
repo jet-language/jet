@@ -27,7 +27,7 @@ request_head: fn(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: 5s per read,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
-        block: stream.read(512, deadline: 5s) ?? panic("request read")
+        block: stream.read_bytes(512, deadline: 5s) ?? panic("request read")
         assert(block.len() > 0)
         loop byte in block { request.push(byte) }
         assert(request.len() <= 65536)
@@ -80,7 +80,7 @@ run: fn() {
     assert(contains_bytes(initial, "cookie: session=secret{PEER_CRLF}".bytes(), true))
     assert(!contains_bytes(initial, "proxy-authorization:".bytes(), true))
     assert(starts_casefold(initial, "get /start ".bytes()))
-    first.write_all("HTTP/1.1 302 Found{PEER_CRLF}Location: http://{second_addr}/next{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
+    first.write_bytes("HTTP/1.1 302 Found{PEER_CRLF}Location: http://{second_addr}/next{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
     _: first.close()
     second := second_listener.accept() ?? panic("second accept")
     redirected: request_head(second)
@@ -88,6 +88,6 @@ run: fn() {
     assert(!contains_bytes(redirected, "authorization:".bytes(), true))
     assert(!contains_bytes(redirected, "proxy-authorization:".bytes(), true))
     assert(!contains_bytes(redirected, "cookie:".bytes(), true))
-    second.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 2{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}ok".bytes()) ?? panic("response write")
+    second.write_bytes("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 2{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}ok".bytes()) ?? panic("response write")
     assert(!(forbidden.join() ?? panic("forbidden join")))
 }

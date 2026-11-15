@@ -43,14 +43,14 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     held := [TCPStream]{}
     loop _ in 0..<256 {
         stream: net.tcp_connect(addr)
-        stream.write_all("GET /hi HTTP/1.1{crlf()}".bytes())
+        stream.write_bytes("GET /hi HTTP/1.1{crlf()}".bytes())
         held.push(stream)
     }
     time.sleep(500ms)
     extra: net.tcp_connect(addr)
     print("connection 257: {status_of(read_all(extra))}")
     loop stream in held {
-        stream.write_all("Host: test{crlf()}{crlf()}".bytes())
+        stream.write_bytes("Host: test{crlf()}{crlf()}".bytes())
         _: read_all(stream)
     }
     after: client.get("http://{addr}/hi")

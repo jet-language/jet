@@ -1000,7 +1000,7 @@ provider_registry_extract_tar: fn(path: String, gzipped: Bool, destination: Stri
             .Ok(writer) -> writer
             .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
         }
-        out.write_all(stream[member.start..<(member.start + entry.size)]) ?? return Err(RegistryError.Reason("could not write `{entry.name}`"))
+        out.write_bytes(stream[member.start..<(member.start + entry.size)]) ?? return Err(RegistryError.Reason("could not write `{entry.name}`"))
     }
 }
 

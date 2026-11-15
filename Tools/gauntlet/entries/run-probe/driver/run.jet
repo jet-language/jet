@@ -105,7 +105,7 @@ serve: fn(listener: TCPListener, routes: Dyn, connections: Int) {
         }
         delay: if route == .Val(found) -> int_at(found, "delayMs") ?? 0 else -> 0
         if delay > 0 -> time.sleep(Duration{ns: delay * 1000000})
-        stream.write_all(response(route, asked).bytes()) ?? ()
+        stream.write_bytes(response(route, asked).bytes()) ?? ()
         stream.close() ?? ()
     }
 }

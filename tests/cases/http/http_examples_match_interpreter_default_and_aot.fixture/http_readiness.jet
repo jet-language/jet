@@ -77,7 +77,7 @@ run: fn() (Closed | NetError | RangeError | TaskFailure)! {
             111,
             107
         }
-        stream.write_all(response, deadline: budget) ?? panic("response")
+        stream.write_bytes(response, deadline: budget) ?? panic("response")
     }
     address: ch.receive() ?? panic("address")
     client: net.tcp_connect(address) ?? panic("connect")
@@ -136,7 +136,7 @@ run: fn() (Closed | NetError | RangeError | TaskFailure)! {
         13,
         10
     }
-    client.write_all(request, deadline: budget) ?? panic("request")
+    client.write_bytes(request, deadline: budget) ?? panic("request")
     response: client.read_text(8192, deadline: budget) ?? panic("response")
     print(response.starts_with("HTTP/1.1 200 OK"))
     print(response.ends_with("ok"))

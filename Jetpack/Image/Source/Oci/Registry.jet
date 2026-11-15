@@ -254,7 +254,7 @@ image_registry_request: fn(request: RegistryRequest) -[Env, Exec, Time.Wait]> Re
     if request.body != None -> spec = spec.stdin(.Stream)
     child := spec.spawn() ?? return Err(image_invalid("OCI registry adapter could not start: {err}"))
     if request.body == .Val(body) {
-        if child.stdin.write_all(body) == .Err(error) {
+        if child.stdin.write_bytes(body) == .Err(error) {
             image_abandon_registry_child(child)
             return Err(ImageError.IO(error))
         }
@@ -262,7 +262,7 @@ image_registry_request: fn(request: RegistryRequest) -[Env, Exec, Time.Wait]> Re
     }
     stdout := [U8]{}
     loop {
-        chunk: child.stdout.read(65536) ?? {
+        chunk: child.stdout.read_bytes(65536) ?? {
             image_abandon_registry_child(child)
             return Err(ImageError.IO(err))
         }

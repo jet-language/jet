@@ -15,7 +15,7 @@ s5_trickle_reset: fn(error: NetError) -> Bool {
     loop index in 0..<32 {
         net.tcp_write_all_bytes(client, "x".bytes()) ?? panic("every trickle write must succeed")
         sent = sent + 1
-        if client.read(8192, deadline: time.duration_ms(200)) == {
+        if client.read_bytes(8192, deadline: time.duration_ms(200)) == {
             .Ok(part) -> {
                 response_bytes = response_bytes + part.len()
                 assert(part.is_empty(), "incomplete request received response bytes")
@@ -35,7 +35,7 @@ s5_trickle_reset: fn(error: NetError) -> Bool {
     if !closed {
         remaining: 12000000000 - time.elapsed(started).ns
         assert(remaining > 0, "trickle exhausted original twelve-second read timeout")
-        if client.read(8192, deadline: time.duration_ns(remaining)) == {
+        if client.read_bytes(8192, deadline: time.duration_ns(remaining)) == {
             .Ok(part) -> {
                 response_bytes = response_bytes + part.len()
                 closed = part.is_empty()

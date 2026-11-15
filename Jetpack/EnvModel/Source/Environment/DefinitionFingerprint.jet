@@ -199,7 +199,7 @@ env_hook_read_nofollow: fn(path: String, limit: Int) -[FS]> [U8]? IOError! {
     if info.size > limit -> return Ok(None)
     bytes := [U8]{}
     loop {
-        chunk: reader.read(65536)
+        chunk: reader.read_bytes(65536)
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Ok(None)

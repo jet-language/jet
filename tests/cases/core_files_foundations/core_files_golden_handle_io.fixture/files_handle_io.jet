@@ -15,8 +15,8 @@ run: fn() {
     path: files.join(scratch.path, "blob.bin")
 
     writer := files.create(path, if_exists: .Refuse)
-    writer.write_all("hello ".bytes())
-    writer.write_all("world, bytes".bytes())
+    writer.write_bytes("hello ".bytes())
+    writer.write_bytes("world, bytes".bytes())
     writer.fsync()
     writer.set_mode(0o640)
     written: writer.stat()
@@ -32,14 +32,14 @@ run: fn() {
     total := 0
     chunks := 0
     loop {
-        chunk: reader.read(5)
+        chunk: reader.read_bytes(5)
         if chunk.len() == 0 -> break
         total += chunk.len()
         chunks += 1
     }
     print("read {total} bytes in {chunks} chunks")
-    print("eof read is empty: {reader.read(5).len() == 0}")
-    if reader.read(0) == {
+    print("eof read is empty: {reader.read_bytes(5).len() == 0}")
+    if reader.read_bytes(0) == {
         .Ok(_) -> print("read(0): accepted")
         .Err(_) -> print("read(0): InvalidInput")
     }

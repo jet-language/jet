@@ -492,7 +492,7 @@ pkg_envelope_read_file_stable: fn(path: String, expected: Stat, allow_hardlink_m
     content := crypto.Hasher.new()
     // Fixed-size reads keep hashing bounded by the chunk plus metadata.
     loop {
-        chunk: reader.read(ENVELOPE_READ_CHUNK) ?? return Err(EnvelopeError.ReadEntries{path: path, detail: "{err}"})
+        chunk: reader.read_bytes(ENVELOPE_READ_CHUNK) ?? return Err(EnvelopeError.ReadEntries{path: path, detail: "{err}"})
         if chunk.len() == 0 -> break
         envelope_archive.update(chunk)
         if want_content -> content.update(chunk)

@@ -3077,7 +3077,7 @@ redacted receipt output.
 | `child.wait()` | `ProcessReceipt IOError!` | Wait for completion and return the receipt. |
 | `child.exited()` | `Bool IOError!` | Poll without waiting. |
 | `child.kill()` / `.terminate()` / `.interrupt()` | `Unit IOError!` | Send the corresponding termination request. |
-| `child.stdin.write(bytes)` | `Int IOError!` | Write once to a streamed child input and return how many bytes the pipe took. |
+| `child.stdin.write(bytes)` / `child.stdin.write(text)` | `Int IOError!` / `Unit IOError!` | Given bytes, write once to a streamed child input and return how many bytes the pipe took; given text, write every UTF-8 byte of it. |
 | `child.stdin.write_all(bytes)` / `.write_text(text)` | `Unit IOError!` | Write every byte, or the UTF-8 bytes of the text. |
 | `child.stdin.write_some(bytes)` / `child.stdin.write_bytes(bytes)` | `Int IOError!` / `Unit IOError!` | The byte names of `write` and `write_all`: one partial write that returns the count taken, or every byte. |
 | `child.stdin.close()` | `Unit` | Close a streamed child input; repeated close is harmless. |
@@ -6146,7 +6146,7 @@ connect, byte transfer, DNS, and the other listed waiting operations retain
 their existing `Time.Wait` leaf. Reserved raw aliases mirror those same rows;
 moving public validation into Jet does not widen the authority contract.
 TCP reply is Jet end to end: it frames the plain-text HTTP/1.1 reply and
-writes it with the stream's own `write_all`, then shuts down the write half.
+writes it with the stream's own `write_bytes`, then shuts down the write half.
 TCP option access and UDP bind enter their Jet public functions before the
 corresponding reserved `__set_*`, `__nodelay`, `__ttl`, and `__udp_bind*`
 leaves. Raw leaves retain existing native error mapping, borrow/move

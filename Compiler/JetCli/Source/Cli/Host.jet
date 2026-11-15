@@ -3651,7 +3651,7 @@ jet_cli_completion_program: fn(shell: String, program: String, name: String) -> 
     bytes.try_reserve(metadata.size) ?? panic("program metadata allocation failed")
     loop bytes.len() <= JET_CLI_COMPLETION_PROGRAM_MAX {
         want: JET_CLI_COMPLETION_PROGRAM_MAX + 1 - bytes.len()
-        chunk: reader.read(if want < JET_CLI_COMPLETION_READ_CHUNK -> want else -> JET_CLI_COMPLETION_READ_CHUNK) ?? return jet_cli_program_completion_error(program, "the opened program could not be read ({jet_cli_io_error_text(err)})")
+        chunk: reader.read_bytes(if want < JET_CLI_COMPLETION_READ_CHUNK -> want else -> JET_CLI_COMPLETION_READ_CHUNK) ?? return jet_cli_program_completion_error(program, "the opened program could not be read ({jet_cli_io_error_text(err)})")
         if chunk.len() == 0 -> break
         bytes.extend(chunk)
     }

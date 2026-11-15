@@ -125,7 +125,7 @@ PinnedRecipeDirectory: struct {
         recipe_validate_component(temporary)
         recipe_validate_component(final)
         out := self.directory.create(temporary, if_exists: .Refuse)
-        out.write_all(bytes)
+        out.write_bytes(bytes)
         out.fsync()
         if self.directory.rename(temporary, final) == {
             .Ok(_) -> {}
@@ -383,9 +383,9 @@ recipe_copy_regular_file_nofollow: fn(src: String, dst: String, expected: Stat) 
     }
     destination := files.create(dst, links: .Refuse)
     loop {
-        chunk: source.read(RECIPE_COPY_CHUNK)
+        chunk: source.read_bytes(RECIPE_COPY_CHUNK)
         if chunk.len() == 0 -> break
-        destination.write_all(chunk)
+        destination.write_bytes(chunk)
     }
     destination.fsync()
     after: files.stat(src)
@@ -415,7 +415,7 @@ recipe_read_file_nofollow: fn(path: String, limit: Int) -[FS]> [U8] RecipeError!
     loop {
         remaining: limit + 1 - content.len()
         if remaining <= 0 -> break
-        chunk: file.read(if remaining < RECIPE_COPY_CHUNK -> remaining else -> RECIPE_COPY_CHUNK)
+        chunk: file.read_bytes(if remaining < RECIPE_COPY_CHUNK -> remaining else -> RECIPE_COPY_CHUNK)
         if chunk.len() == 0 -> break
         loop byte in chunk -> content.push(byte)
     }

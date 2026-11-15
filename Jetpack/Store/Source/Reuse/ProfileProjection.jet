@@ -30,10 +30,10 @@ store_reuse_copy_open_profile_file: fn(input: &FileReader, destination: String) 
     output := files.create(destination, if_exists: .Refuse)
     hasher := StreamingSHA256.new()
     loop {
-        chunk: input.read(65536)
+        chunk: input.read_bytes(65536)
         if chunk.len() == 0 -> break
         hasher.update(chunk)
-        output.write_all(chunk)
+        output.write_bytes(chunk)
     }
     mode: if sys.is_unix() -> (info.mode).bit_and(0o777) else -> 0
     if sys.is_unix() -> files.set_mode(destination, mode)

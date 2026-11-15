@@ -1461,7 +1461,7 @@ JetCLIBuildInputs: struct {
             bytes.try_reserve(if expected.size < 65536 -> expected.size else -> 65536) ?? return Err(JetDriverBuildInputError{message: "cannot reserve file read buffer: {err}"})
             loop {
                 remaining: limit + 1 - bytes.len()
-                chunk: reader.read(if remaining < 65536 -> remaining else -> 65536) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
+                chunk: reader.read_bytes(if remaining < 65536 -> remaining else -> 65536) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
                 if chunk.len() == 0 -> break
                 bytes.extend(chunk)
                 if bytes.len() > limit -> return Err(JetDriverBuildInputError{message: "file exceeds its read bound"})
@@ -1554,7 +1554,7 @@ jet_cli_read_held_source: fn(directory: cli_files.Directory, name: String, limit
     bytes.try_reserve(if expected.size < 65536 -> expected.size else -> 65536) ?? return Err(jet_cli_read_error("cannot reserve file read buffer: {err}"))
     loop {
         remaining: limit + 1 - bytes.len()
-        chunk: reader.read(if remaining < 65536 -> remaining else -> 65536) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+        chunk: reader.read_bytes(if remaining < 65536 -> remaining else -> 65536) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
         if chunk.len() == 0 -> break
         bytes.extend(chunk)
         if bytes.len() > limit -> return Err(jet_cli_read_error("file exceeds its read bound"))
@@ -2079,7 +2079,7 @@ jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetCLIOverlay]) -[FS,
         if jet_cli_overlay_path(overlay.path) == entry_path -> return jet_cli_is_script(overlay.source)
     }
     reader := cli_files.open(entry_path, .Refuse) ?? return false
-    head: reader.read(3) ?? return false
+    head: reader.read_bytes(3) ?? return false
     head == "#!/".bytes()
 }
 
@@ -2837,7 +2837,7 @@ jet_cli_trace_write: fn(target: String, state: &JetCLITraceState, text: String) 
 }
 
 jet_cli_trace_put: fn(writer: &cli_files.FileWriter, text: String) -> String? Never! {
-    writer.write_all(text.bytes()) ?? return Val("{err}")
+    writer.write_bytes(text.bytes()) ?? return Val("{err}")
     writer.flush() ?? return Val("{err}")
     None
 }
@@ -2848,7 +2848,7 @@ jet_cli_trace_put: fn(writer: &cli_files.FileWriter, text: String) -> String? Ne
 // writer routes; it has no whole-file append route).
 jet_cli_trace_append: fn(target: String, text: String) -> String? Never! {
     writer := cli_files.append(target) ?? return Val("{err}")
-    writer.write_all(text.bytes()) ?? return Val("{err}")
+    writer.write_bytes(text.bytes()) ?? return Val("{err}")
     writer.flush() ?? return Val("{err}")
     None
 }

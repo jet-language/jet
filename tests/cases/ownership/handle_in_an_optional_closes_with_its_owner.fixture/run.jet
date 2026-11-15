@@ -90,12 +90,12 @@ run: fn() {
     print("enum leaked {open_fds() - before}")
     moved := take_payload(path)
     print("moved open {open_fds() - before}")
-    print("moved reads {moved.read(3).len()}")
+    print("moved reads {moved.read_bytes(3).len()}")
     drop_reader(moved)
     print("moved leaked {open_fds() - before}")
 }
 
 drop_reader: fn(file: &&FileReader) {
     held := file
-    print("dropping {held.read(2).len()}")
+    print("dropping {held.read_bytes(2).len()}")
 }

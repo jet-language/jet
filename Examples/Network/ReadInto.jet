@@ -28,7 +28,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
         server_side := listener.move()
         ready_tx.send(addr_text) ?? panic("ready")
         stream: server_side.accept() ?? panic("accept")
-        stream.write_all(C_PAYLOAD.bytes()) ?? panic("tcp write")
+        stream.write_bytes(C_PAYLOAD.bytes()) ?? panic("tcp write")
         stream.close() ?? panic("tcp close")
     }
     addr: ready_rx.receive() ?? panic("ready")

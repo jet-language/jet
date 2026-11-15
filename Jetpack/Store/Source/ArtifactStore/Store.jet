@@ -1115,7 +1115,7 @@ ArtifactStore: struct {
             if files.create(path, if_exists: .Refuse) == {
                 .Ok(created) -> {
                     writer := created
-                    writer.write_all(owner_line.bytes())
+                    writer.write_bytes(owner_line.bytes())
                     close(writer)
                     return Ok(ArtifactStoreLock{path, owner_line: owner_line.bytes()})
                 }

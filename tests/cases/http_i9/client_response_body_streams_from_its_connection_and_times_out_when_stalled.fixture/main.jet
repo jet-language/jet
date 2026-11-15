@@ -17,7 +17,7 @@ use {
 answer: fn(listener: TCPListener, head: String, body: String) {
     stream: listener.accept() ?? panic("accept")
     _request: stream.read_text(8192) ?? panic("request")
-    stream.write_all("{head}\r\n\r\n{body}".bytes()) ?? panic("write")
+    stream.write_bytes("{head}\r\n\r\n{body}".bytes()) ?? panic("write")
 }
 
 run: fn() (Closed | HTTPError | NetError | TaskFailure)! {
@@ -35,13 +35,13 @@ run: fn() (Closed | HTTPError | NetError | TaskFailure)! {
         // would time out instead.
         half: listener.accept() ?? panic("accept")
         _half_request: half.read_text(8192) ?? panic("request")
-        half.write_all("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nfirst".bytes()) ?? panic("write")
+        half.write_bytes("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nfirst".bytes()) ?? panic("write")
         _ := go.receive() ?? panic("go")
-        half.write_all("-last".bytes()) ?? panic("write")
+        half.write_bytes("-last".bytes()) ?? panic("write")
         // A body that stalls after three of its ten bytes.
         stalled: listener.accept() ?? panic("accept")
         _stalled_request: stalled.read_text(8192) ?? panic("request")
-        stalled.write_all("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc".bytes()) ?? panic("write")
+        stalled.write_bytes("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc".bytes()) ?? panic("write")
         _ := done.receive() ?? panic("done")
     }
     addr: address.receive() ?? panic("address")

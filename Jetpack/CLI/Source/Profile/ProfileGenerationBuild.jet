@@ -425,7 +425,7 @@ cli_collect_output_nodes_inner: fn(lease: &CacheLease, prefix: String, package: 
                 input := lease.open_output(path)
                 hasher := StreamingSHA256.new()
                 loop {
-                    chunk: input.read(65536)
+                    chunk: input.read_bytes(65536)
                     if chunk.len() == 0 -> break
                     hasher.update(chunk)
                 }

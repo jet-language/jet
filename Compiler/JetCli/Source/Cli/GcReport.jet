@@ -171,7 +171,7 @@ jet_cli_gc_read: fn(path: String) -[FS, Env, Time.Wait]> String JetCLIGCError! {
     if metadata.size > 4194304 -> return Err(jet_cli_gc_error("oversized", "GC trace exceeds the 4 MiB safety limit"))
     bytes := [U8]{}
     loop {
-        chunk: reader.read(jet_cli_table_min(65536, 4194305 - bytes.len())) ?? return Err(jet_cli_gc_error("malformed", "cannot read GC trace: {jet_cli_io_error_text(err)}"))
+        chunk: reader.read_bytes(jet_cli_table_min(65536, 4194305 - bytes.len())) ?? return Err(jet_cli_gc_error("malformed", "cannot read GC trace: {jet_cli_io_error_text(err)}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > 4194304 -> return Err(jet_cli_gc_error("oversized", "GC trace exceeds the 4 MiB safety limit"))

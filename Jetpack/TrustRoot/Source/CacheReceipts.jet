@@ -289,7 +289,7 @@ trust_pin_cache_key: fn(roots_dir: String, role: String, key: TrustKey) TrustRoo
     if files.create(path, if_exists: .Refuse) == {
         .Ok(created) -> {
             writer := created
-            writer.write_all(trust_cache_key_pin_body(key).bytes())
+            writer.write_bytes(trust_cache_key_pin_body(key).bytes())
             writer.fsync()
         }
         .Err(error) -> {

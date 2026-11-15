@@ -27,7 +27,7 @@ write_in_arm: fn(path: String, round: Int) -> Bool {
     if files.create(path, if_exists: .Refuse) == {
         .Ok(created) -> {
             writer := created
-            writer.write_all("round {round}".bytes())
+            writer.write_bytes("round {round}".bytes())
             close(writer)
             wrote = true
         }
@@ -42,7 +42,7 @@ write_and_return: fn(path: String) -> Int {
         if files.create(path, if_exists: .Refuse) == {
             .Ok(created) -> {
                 writer := created
-                writer.write_all("returned".bytes())
+                writer.write_bytes("returned".bytes())
                 close(writer)
                 return 1
             }
@@ -58,7 +58,7 @@ read_in_arm: fn(path: String) -> Int {
     if maybe_reader(path) == {
         .Val(opened) -> {
             reader := opened
-            count = reader.read(64).len()
+            count = reader.read_bytes(64).len()
             consume(reader)
         }
         None -> {}

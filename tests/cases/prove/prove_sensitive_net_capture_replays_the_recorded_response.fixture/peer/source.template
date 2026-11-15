@@ -11,10 +11,10 @@ run: fn() {
     peer := listener.accept() ?? panic("accept")
     request := [U8]{}
     loop request.len() < 4 || request[request.len() - 4] != (U8{13}) || request[request.len() - 1] != (U8{10}) {
-        block: peer.read(512, deadline: 5s) ?? panic("request read")
+        block: peer.read_bytes(512, deadline: 5s) ?? panic("request read")
         assert(block.len() > 0)
         loop byte in block { request.push(byte) }
         assert(request.len() <= 65536)
     }
-    peer.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 13{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}replayed-text".bytes()) ?? panic("response")
+    peer.write_bytes("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 13{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}replayed-text".bytes()) ?? panic("response")
 }

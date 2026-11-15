@@ -45,7 +45,7 @@ read_all: fn(stream: TCPStream) -> String {
 // `GET /__jet/ready`, or a refused connect.
 probe: fn(addr: String) -> String {
     stream: net.tcp_connect(addr) ?? return "connect refused"
-    stream.write_all("GET /__jet/ready HTTP/1.1{crlf()}Host: local{crlf()}{crlf()}".bytes()) ?? return "write failed"
+    stream.write_bytes("GET /__jet/ready HTTP/1.1{crlf()}Host: local{crlf()}{crlf()}".bytes()) ?? return "write failed"
     raw: read_all(stream)
     status: raw.split(" ").to_list()
     body: raw.split("{crlf()}{crlf()}").to_list()
@@ -76,7 +76,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     print("3. serving: readiness {listening.readiness()}, probe {probe(addr)}")
 
     client: net.tcp_connect(addr)
-    client.write_all("GET /order HTTP/1.1{crlf()}Host: local{crlf()}{crlf()}".bytes())
+    client.write_bytes("GET /order HTTP/1.1{crlf()}Host: local{crlf()}{crlf()}".bytes())
     polls = 0
     loop pool.receipt().leased == 0 && polls < 400 {
         time.sleep(5ms)

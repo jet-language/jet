@@ -11,12 +11,12 @@ run: fn() {
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     client := net.tcp_connect(address) ?? panic("connect")
     server := listener.accept() ?? panic("accept")
-    if server.read(1, deadline: expired) == {
+    if server.read_bytes(1, deadline: expired) == {
         .Ok(_) -> panic("expired read succeeded")
         .Err(error) -> print(net.error_operation(error))
     }
     byte: [U8]{ 1 }
-    if client.write(byte, deadline: expired) == {
+    if client.write_some(byte, deadline: expired) == {
         .Ok(_) -> panic("expired write succeeded")
         .Err(error) -> print(net.error_operation(error))
     }

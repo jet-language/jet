@@ -616,7 +616,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     root: files.join(fixture, "new/nested")
     authority: foundation_open_directory_authority(root, true) ?? panic("hold created chain")
     writer := authority.create_exclusive("checkpoint.lock", 384) ?? panic("create lock")
-    writer.write_all("lock".bytes()) ?? panic("write lock")
+    writer.write_bytes("lock".bytes()) ?? panic("write lock")
     writer.fsync() ?? panic("fsync lock")
     if authority.create_exclusive("checkpoint.lock", 384) == {
         .Err(error) -> assert(error == .AlreadyExists(_))
