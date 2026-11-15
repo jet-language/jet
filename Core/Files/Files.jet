@@ -1988,7 +1988,7 @@ walk_validate: fn(context: Int, directory: Int, root: String) IOError! -[FS]> {
 // yields every path in order without sorting the whole tree. Both lists are
 // in reverse, so the next one is the last. Every slot the batch is done with
 // is released; a child directory keeps its slot until it is read.
-__walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool, skip: [String]) -[FS]> __WalkFrame IOError! {
+priv walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool, skip: [String]) -[FS]> __WalkFrame IOError! {
     walk_validate(context, directory, root)
     if ignore != None {
         rules: rt.walk_rules(context, directory, ignore)
@@ -2081,8 +2081,8 @@ __WalkCursor: struct {
         next: fn(&self) -[FS]> (WalkEntry IOError!)? {
             if self.done -> return None
             if self.context == 0 {
-                if __walk_open(self) == .Err(error) {
-                    __walk_finish(self)
+                if walk_open(self) == .Err(error) {
+                    walk_finish(self)
                     return Val(Err(error))
                 }
             }
@@ -2093,7 +2093,7 @@ __WalkCursor: struct {
                 if children > 0 && (entries == 0 || self.frames[top].children[children - 1].key < self.frames[top].entries[entries - 1].path) {
                     child: self.frames[top].children.pop() ?? panic("walk child")
                     depth: self.frames[top].depth + 1
-                    if __walk_batch(self.context, child.directory, depth, self.root, self.ignore, self.files_only, self.skip) == {
+                    if walk_batch(self.context, child.directory, depth, self.root, self.ignore, self.files_only, self.skip) == {
                         .Ok(frame) -> {
                             rt.walk_release(self.context, child.directory)
                             self.frames.push(frame)
@@ -2108,7 +2108,7 @@ __WalkCursor: struct {
                 if self.frames[top].entries.pop() == .Val(entry) -> return Val(Ok(entry))
                 _ := self.frames.pop()
             }
-            __walk_finish(self)
+            walk_finish(self)
             None
         }
     }
@@ -2120,17 +2120,17 @@ __WalkCursor: struct {
     }
 }
 
-__walk_open: fn(cursor: &__WalkCursor) IOError! -[FS]> {
+priv walk_open: fn(cursor: &__WalkCursor) IOError! -[FS]> {
     files8_preflight("FS.Read", .Read, cursor.root)
     cursor.context = rt.walk_context(cursor.root, cursor.ignore ?? "", cursor.ignore != None)
     walk_validate(cursor.context, 0, cursor.root)
     if cursor.ignore != None -> rt.walk_matcher_new(cursor.context)
-    cursor.frames.push(__walk_batch(cursor.context, 0, 0, cursor.root, cursor.ignore, cursor.files_only, cursor.skip))
+    cursor.frames.push(walk_batch(cursor.context, 0, 0, cursor.root, cursor.ignore, cursor.files_only, cursor.skip))
     Ok()
 }
 
 // The walk is over: close its context so no descriptor or slot outlives it.
-__walk_finish: fn(cursor: &__WalkCursor) -[FS]> {
+priv walk_finish: fn(cursor: &__WalkCursor) -[FS]> {
     cursor.done = true
     cursor.frames = [__WalkFrame]{}
     if cursor.context != 0 -> rt.walk_close(cursor.context)

@@ -33,16 +33,16 @@ kind_session: fn() -> String Never! { "session" }
 // The World's entries for `store`; None outside a World.
 __world_entries: fn(store: String) -> [String:String]? {
     raw: world_rt.world_store_load(store) ?? return None
-    Val(__world_decode(raw))
+    Val(world_decode(raw))
 }
 
 // Sets `key` to `value` in the World's `store`; false outside a World.
 __world_set: fn(store: String, key: String, value: String) -> Bool {
     loop {
         seen: world_rt.world_store_load(store) ?? return false
-        entries := __world_decode(seen)
+        entries := world_decode(seen)
         _: entries.add(key.copy(), value.copy())
-        if world_rt.world_store_replace(store, seen, __world_encode(entries)) ?? false -> return true
+        if world_rt.world_store_replace(store, seen, world_encode(entries)) ?? false -> return true
     }
 }
 
@@ -50,9 +50,9 @@ __world_set: fn(store: String, key: String, value: String) -> Bool {
 __world_remove: fn(store: String, key: String) -> Bool {
     loop {
         seen: world_rt.world_store_load(store) ?? return false
-        entries := __world_decode(seen)
+        entries := world_decode(seen)
         _: entries.remove(key)
-        if world_rt.world_store_replace(store, seen, __world_encode(entries)) ?? false -> return true
+        if world_rt.world_store_replace(store, seen, world_encode(entries)) ?? false -> return true
     }
 }
 
@@ -64,16 +64,16 @@ __world_clear: fn(store: String) -> Bool {
     }
 }
 
-__world_encode: fn(entries: [String:String]) -> [U8] {
+priv world_encode: fn(entries: [String:String]) -> [U8] {
     out := [U8]{}
     loop key in entries.keys() {
-        __world_put(out, key)
-        __world_put(out, entries.get(key) ?? "")
+        world_put(out, key)
+        world_put(out, entries.get(key) ?? "")
     }
     out
 }
 
-__world_put: fn(out: &[U8], text: String) {
+priv world_put: fn(out: &[U8], text: String) {
     raw: text.bytes()
     n: raw.len()
     out.push(wrapping(U8{n}))
@@ -83,27 +83,27 @@ __world_put: fn(out: &[U8], text: String) {
     loop b in raw -> out.push(b)
 }
 
-// The entries `__world_encode` wrote; only this file writes the World's bytes.
-__world_decode: fn(raw: [U8]) -> [String:String] {
+// The entries `world_encode` wrote; only this file writes the World's bytes.
+priv world_decode: fn(raw: [U8]) -> [String:String] {
     entries := [String:String]{}
     pos := 0
     loop pos + 4 <= raw.len() {
-        key_length: __world_length(raw, pos)
-        key: __world_text(raw, pos + 4, key_length)
+        key_length: world_length(raw, pos)
+        key: world_text(raw, pos + 4, key_length)
         pos = pos + 4 + key_length
-        value_length: __world_length(raw, pos)
-        value: __world_text(raw, pos + 4, value_length)
+        value_length: world_length(raw, pos)
+        value: world_text(raw, pos + 4, value_length)
         pos = pos + 4 + value_length
         _: entries.add(key, value)
     }
     entries
 }
 
-__world_length: fn(raw: [U8], pos: Int) -> Int {
+priv world_length: fn(raw: [U8], pos: Int) -> Int {
     Int{raw[pos]}.bit_or((Int{raw[pos + 1]} << 8)).bit_or((Int{raw[pos + 2]} << 16)).bit_or((Int{raw[pos + 3]} << 24))
 }
 
-__world_text: fn(raw: [U8], start: Int, length: Int) -> String {
+priv world_text: fn(raw: [U8], start: Int, length: Int) -> String {
     bytes := [U8]{}
     loop at in start..<start + length -> bytes.push(raw[at])
     String.from_bytes(bytes) ?? ""

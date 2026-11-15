@@ -854,23 +854,23 @@ phc_b64_encode: fn(bytes: [U8]) -> String Never! {
     i := 0
     loop i + 3 <= bytes.len() {
         n: ((U32{bytes[i]} << 16).bit_or(U32{bytes[i + 1]} << 8)).bit_or(U32{bytes[i + 2]})
-        out.push(__b64_digit(n >> 18))
-        out.push(__b64_digit(n >> 12))
-        out.push(__b64_digit(n >> 6))
-        out.push(__b64_digit(n))
+        out.push(b64_digit(n >> 18))
+        out.push(b64_digit(n >> 12))
+        out.push(b64_digit(n >> 6))
+        out.push(b64_digit(n))
         i += 3
     }
     rest: bytes.len() - i
     if rest == 1 {
         n: U32{bytes[i]} << 16
-        out.push(__b64_digit(n >> 18))
-        out.push(__b64_digit(n >> 12))
+        out.push(b64_digit(n >> 18))
+        out.push(b64_digit(n >> 12))
     }
     if rest == 2 {
         n: (U32{bytes[i]} << 16).bit_or(U32{bytes[i + 1]} << 8)
-        out.push(__b64_digit(n >> 18))
-        out.push(__b64_digit(n >> 12))
-        out.push(__b64_digit(n >> 6))
+        out.push(b64_digit(n >> 18))
+        out.push(b64_digit(n >> 12))
+        out.push(b64_digit(n >> 6))
     }
     String.from_bytes_lossy(out)
 }
@@ -879,7 +879,7 @@ phc_b64_encode: fn(bytes: [U8]) -> String Never! {
 /// `+`, `/`, computed as `A` plus the offsets of the ranges `v` is past, each
 /// a mask from the borrow of a wrapping subtraction.
 #Overflow(.Wrapping)
-__b64_digit: fn(n: U32) -> U8 Never! {
+priv b64_digit: fn(n: U32) -> U8 Never! {
     v: n.bit_and(U32{63})
     c := v + U32{65}
     c += ((U32{25} - v) >> 8).bit_and(U32{6})
@@ -949,8 +949,8 @@ hex_encode: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop b in bytes {
         n: U32{b}
-        out.push(__hex_digit(n >> 4))
-        out.push(__hex_digit(n.bit_and(U32{15})))
+        out.push(hex_digit(n >> 4))
+        out.push(hex_digit(n.bit_and(U32{15})))
     }
     String.from_bytes_lossy(out)
 }
@@ -958,7 +958,7 @@ hex_encode: fn(bytes: [U8]) -> String Never! {
 /// The lowercase hex digit of `n` (0 to 15): `0` plus `n`, and the 39 from
 /// `9` to `a` when `n` is past 9, a mask from the borrow of `9 - n`.
 #Overflow(.Wrapping)
-__hex_digit: fn(n: U32) -> U8 Never! {
+priv hex_digit: fn(n: U32) -> U8 Never! {
     wrapping(U8{n + U32{48} + ((U32{9} - n) >> 8).bit_and(U32{39})})
 }
 
@@ -1375,7 +1375,7 @@ blake3_raw: fn(input: [U8]) -> [U8] {
         if i >= input.len() -> break
         end := i + 1024
         if end > input.len() -> end = input.len()
-        cv: __blake3_chunk(slice_u8(input, i, end), idx, i + 1024 >= input.len() && (idx == 0 || end - i < 1024) && idx == 0)
+        cv: blake3_chunk(slice_u8(input, i, end), idx, i + 1024 >= input.len() && (idx == 0 || end - i < 1024) && idx == 0)
         loop w in cv -> chunks.push(w)
         i = end
         idx = idx + 1
@@ -1399,7 +1399,7 @@ blake3_raw: fn(input: [U8]) -> [U8] {
                 loop k in 0..<8 -> left.push(cvs[p + k])
                 loop k in 0..<8 -> right.push(cvs[p + 8 + k])
                 is_root := p + 16 >= cvs.len() && next.len() == 0 && (cvs.len() - p) == 16
-                cv: __blake3_parent(left, right, is_root)
+                cv: blake3_parent(left, right, is_root)
                 loop w in cv -> next.push(w)
                 p = p + 16
             } else {
@@ -1412,7 +1412,7 @@ blake3_raw: fn(input: [U8]) -> [U8] {
     }
 }
 
-__blake3_chunk: fn(data: [U8], chunk_index: Int, is_root: Bool) -> [U32] {
+priv blake3_chunk: fn(data: [U8], chunk_index: Int, is_root: Bool) -> [U32] {
     cv := C_BLAKE3_IV
     blocks := (data.len() + 63) /% 64
     if blocks == 0 -> blocks = 1
@@ -1430,29 +1430,29 @@ __blake3_chunk: fn(data: [U8], chunk_index: Int, is_root: Bool) -> [U32] {
         if i == 0 -> flags = (flags).bit_or(1)
         if i == blocks - 1 -> flags = (flags).bit_or(2)
         if is_root && i == blocks - 1 -> flags = (flags).bit_or(8)
-        cv = __blake3_compress(cv, block, chunk_index, end - start, flags)
+        cv = blake3_compress(cv, block, chunk_index, end - start, flags)
     }
     cv
 }
 
 blake3_root_chunk: fn(data: [U8]) -> [U8] {
-    cv: __blake3_chunk(data, 0, true)
+    cv: blake3_chunk(data, 0, true)
     out := [U8]{}
     loop k in 0..<8 -> push_le32(out, cv[k])
     out
 }
 
-__blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
+priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
     block := [U8]{}
     loop w in left -> push_le32(block, w)
     loop w in right -> push_le32(block, w)
     flags := 4
     if is_root -> flags = (flags).bit_or(8)
-    __blake3_compress(C_BLAKE3_IV, block, 0, 64, flags)
+    blake3_compress(C_BLAKE3_IV, block, 0, 64, flags)
 }
 
 #Overflow(.Wrapping)
-__blake3_compress: fn(cv: [U32], block: [U8], counter: Int, block_len: Int, flags: Int) -> [U32] {
+priv blake3_compress: fn(cv: [U32], block: [U8], counter: Int, block_len: Int, flags: Int) -> [U32] {
     m := [U32]{}
     loop i in 0..<16 -> m.push(load_le32(block, i * 4))
     s := [U32]{
@@ -1475,14 +1475,14 @@ __blake3_compress: fn(cv: [U32], block: [U8], counter: Int, block_len: Int, flag
     }
     loop r in 0..<7 {
         base: r * 16
-        __blake3_g(s, 0, 4, 8, 12, m[C_BLAKE3_MSG[base + 0]], m[C_BLAKE3_MSG[base + 1]])
-        __blake3_g(s, 1, 5, 9, 13, m[C_BLAKE3_MSG[base + 2]], m[C_BLAKE3_MSG[base + 3]])
-        __blake3_g(s, 2, 6, 10, 14, m[C_BLAKE3_MSG[base + 4]], m[C_BLAKE3_MSG[base + 5]])
-        __blake3_g(s, 3, 7, 11, 15, m[C_BLAKE3_MSG[base + 6]], m[C_BLAKE3_MSG[base + 7]])
-        __blake3_g(s, 0, 5, 10, 15, m[C_BLAKE3_MSG[base + 8]], m[C_BLAKE3_MSG[base + 9]])
-        __blake3_g(s, 1, 6, 11, 12, m[C_BLAKE3_MSG[base + 10]], m[C_BLAKE3_MSG[base + 11]])
-        __blake3_g(s, 2, 7, 8, 13, m[C_BLAKE3_MSG[base + 12]], m[C_BLAKE3_MSG[base + 13]])
-        __blake3_g(s, 3, 4, 9, 14, m[C_BLAKE3_MSG[base + 14]], m[C_BLAKE3_MSG[base + 15]])
+        blake3_g(s, 0, 4, 8, 12, m[C_BLAKE3_MSG[base + 0]], m[C_BLAKE3_MSG[base + 1]])
+        blake3_g(s, 1, 5, 9, 13, m[C_BLAKE3_MSG[base + 2]], m[C_BLAKE3_MSG[base + 3]])
+        blake3_g(s, 2, 6, 10, 14, m[C_BLAKE3_MSG[base + 4]], m[C_BLAKE3_MSG[base + 5]])
+        blake3_g(s, 3, 7, 11, 15, m[C_BLAKE3_MSG[base + 6]], m[C_BLAKE3_MSG[base + 7]])
+        blake3_g(s, 0, 5, 10, 15, m[C_BLAKE3_MSG[base + 8]], m[C_BLAKE3_MSG[base + 9]])
+        blake3_g(s, 1, 6, 11, 12, m[C_BLAKE3_MSG[base + 10]], m[C_BLAKE3_MSG[base + 11]])
+        blake3_g(s, 2, 7, 8, 13, m[C_BLAKE3_MSG[base + 12]], m[C_BLAKE3_MSG[base + 13]])
+        blake3_g(s, 3, 4, 9, 14, m[C_BLAKE3_MSG[base + 14]], m[C_BLAKE3_MSG[base + 15]])
     }
     out := [U32]{}
     loop i in 0..<8 -> out.push(s[i].bit_xor(s[i + 8]))
@@ -1491,7 +1491,7 @@ __blake3_compress: fn(cv: [U32], block: [U8], counter: Int, block_len: Int, flag
 
 /// BLAKE3 quarter-round G: right rotations by 16, 12, 8 and 7.
 #Overflow(.Wrapping)
-__blake3_g: fn(s: &[U32], a: Int, b: Int, c: Int, d: Int, mx: U32, my: U32) {
+priv blake3_g: fn(s: &[U32], a: Int, b: Int, c: Int, d: Int, mx: U32, my: U32) {
     s[a] = s[a] + s[b] + mx
     s[d] = (s[d].bit_xor(s[a])).rotate_right(16)
     s[c] = s[c] + s[d]
@@ -1532,7 +1532,7 @@ __blake3_g: fn(s: &[U32], a: Int, b: Int, c: Int, d: Int, mx: U32, my: U32) {
         assert_eq(hex[2 * i + 1], digits[i %% 16])
     }
     alphabet: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".bytes()
-    loop v in 0..<64 -> assert_eq(__b64_digit(wrapping(U32{v})), alphabet[v])
+    loop v in 0..<64 -> assert_eq(b64_digit(wrapping(U32{v})), alphabet[v])
     assert_eq(phc_b64_encode("abcd".bytes()), "YWJjZA")
     assert_eq(phc_b64_decode(phc_b64_encode(bytes)) ?? panic("decode"), bytes)
 }

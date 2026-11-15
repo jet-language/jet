@@ -468,8 +468,8 @@ EventID: struct {
 HistoryRNG: struct {
     __state: Shared<__HistoryRngState>
 
-    next_u64: fn(self) -> Int Never! { __history_rng_next(self) }
-    below: fn(self, bound: Int) -> Int Never! { __history_rng_below(self, bound) }
+    next_u64: fn(self) -> Int Never! { history_rng_next(self) }
+    below: fn(self, bound: Int) -> Int Never! { history_rng_below(self, bound) }
 }
 
 __HistoryRngState: struct {
@@ -477,11 +477,11 @@ __HistoryRngState: struct {
 }
 
 // A generator seeded by the low 64 bits of a non-negative seed.
-__history_rng_new: fn(seed: Int) -> HistoryRNG Never! {
+priv history_rng_new: fn(seed: Int) -> HistoryRNG Never! {
     HistoryRNG{__state: Shared{__HistoryRngState{word: checked(U64{seed % 18446744073709551616}) ?? U64{0}}}}
 }
 
-__history_rng_draw: fn(rng: HistoryRNG) -> U64 Never! {
+priv history_rng_draw: fn(rng: HistoryRNG) -> U64 Never! {
     guard := rng.__state.guard_edit()
     guard.value.word = wrapping(guard.value.word + U64{11400714819323198485})
     value := guard.value.word
@@ -490,23 +490,23 @@ __history_rng_draw: fn(rng: HistoryRNG) -> U64 Never! {
     value.bit_xor(value >> U64{31})
 }
 
-__history_rng_next: fn(rng: HistoryRNG) -> Int Never! { Int{__history_rng_draw(rng)} }
+priv history_rng_next: fn(rng: HistoryRNG) -> Int Never! { Int{history_rng_draw(rng)} }
 
-__history_rng_below: fn(rng: HistoryRNG, bound: Int) -> Int Never! {
+priv history_rng_below: fn(rng: HistoryRNG, bound: Int) -> Int Never! {
     if bound <= 0 -> return 0
-    limit: checked(U64{bound}) ?? return __history_rng_next(rng)
-    Int{__history_rng_draw(rng) % limit}
+    limit: checked(U64{bound}) ?? return history_rng_next(rng)
+    Int{history_rng_draw(rng) % limit}
 }
 
 // Expected draws: an independent SplitMix64 model (BigInt, Node) from seed 41.
 #Test("HistoryRNG draws SplitMix64 from its seed and every copy shares the stream") {
-    rng: __history_rng_new(41)
+    rng: history_rng_new(41)
     shared_copy: rng.copy()
-    assert_eq(__history_rng_next(rng), 1265094156158224713)
-    assert_eq(__history_rng_next(shared_copy), 11038316942610582860)
-    assert_eq(__history_rng_below(rng, 0), 0)
-    assert_eq(__history_rng_next(rng), 1990246801145950849)
-    assert_eq(__history_rng_below(shared_copy, 17), 6)
+    assert_eq(history_rng_next(rng), 1265094156158224713)
+    assert_eq(history_rng_next(shared_copy), 11038316942610582860)
+    assert_eq(history_rng_below(rng, 0), 0)
+    assert_eq(history_rng_next(rng), 1990246801145950849)
+    assert_eq(history_rng_below(shared_copy, 17), 6)
 }
 
 /// A value carried by one history operation. A secret enters only as
@@ -702,7 +702,7 @@ testing_history_campaign: fn<T>(
     config: testing_history_config_error(cases, bounds, strategy.distributions, command_type)
     if config != "" -> return Err(testing_history_err("invalid history config: {config}"))
     generate: strategy.generate
-    rng: __history_rng_new(seed)
+    rng: history_rng_new(seed)
     discarded := 0
     explored := 0
     samples := [TestingHistorySample]{}
@@ -1268,20 +1268,20 @@ testing_history_derived: fn<T>(&&command_type: String, variants: [String], &&mak
 // the first depends on its predecessor.
 testing_history_derived_generate: fn<T>(rng: HistoryRNG, case_index: Int, max_steps: Int, command_type: String, names: [String], kinds: [[String]], make: fn(Int, [Int], [Bool], [String]) -[]> T Never!) -> TypedHistoryCase<T>? {
     if max_steps <= 0 || names.len() == 0 -> return None
-    case_seed: __history_rng_next(rng)
-    local: __history_rng_new(case_seed)
-    step_count: 1 + __history_rng_below(local, if max_steps < 8 -> max_steps else -> 8)
+    case_seed: history_rng_next(rng)
+    local: history_rng_new(case_seed)
+    step_count: 1 + history_rng_below(local, if max_steps < 8 -> max_steps else -> 8)
     operations := [HistoryOperation]{}
     loop index in 0..<step_count {
-        choice: __history_rng_below(local, names.len())
+        choice: history_rng_below(local, names.len())
         arguments := [HistoryValue]{}
         loop kind in kinds[choice] {
             if kind == "i" {
-                arguments.push(HistoryValue.Integer(__history_rng_below(local, 17) - 8))
+                arguments.push(HistoryValue.Integer(history_rng_below(local, 17) - 8))
             } else if kind == "b" {
-                arguments.push(HistoryValue.Boolean(__history_rng_below(local, 2) != 0))
+                arguments.push(HistoryValue.Boolean(history_rng_below(local, 2) != 0))
             } else {
-                arguments.push(HistoryValue.Text("history-{__history_rng_below(local, 17)}"))
+                arguments.push(HistoryValue.Text("history-{history_rng_below(local, 17)}"))
             }
         }
         preconditions := [HistoryPrecondition]{}

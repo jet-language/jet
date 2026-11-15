@@ -713,7 +713,7 @@ __query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&
     Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{__QueryState{consumed: false}}, __cell: Shared{__QueryCell<T>{run: run.move()}}}
 }
 
-__query_steps: fn(steps: [String], step: String) -> [String] Never! {
+priv query_steps: fn(steps: [String], step: String) -> [String] Never! {
     out := steps.copy()
     out.push(step.copy())
     out
@@ -721,7 +721,7 @@ __query_steps: fn(steps: [String], step: String) -> [String] Never! {
 
 // The rows a query produces, without the output bound of `collect`; a
 // one-shot computation runs at most once.
-__query_rows: fn<T>(query: Query<T>) -> [T] DataError! {
+priv query_rows: fn<T>(query: Query<T>) -> [T] DataError! {
     if query.__one_shot {
         state := query.__state.guard_edit()
         if state.value.consumed -> return Err(data_error(DataErrorKind.State, "query has already been collected", "query.collect"))
@@ -925,22 +925,22 @@ __PendingWindow: struct<T> {
 
 // `stream.with_event_time(f)` with an `Int` result: Unix seconds.
 __stream_with_event_time: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
-    StreamEventTime<T>{events: __stream_stamp_seconds<T>(stream.move(), event_time)}
+    StreamEventTime<T>{events: stream_stamp_seconds<T>(stream.move(), event_time)}
 }
 
 // `stream.with_event_time(f)` with a `DateTime` result.
 __stream_with_event_datetime: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
-    StreamEventTime<T>{events: __stream_stamp_datetime<T>(stream.move(), event_time)}
+    StreamEventTime<T>{events: stream_stamp_datetime<T>(stream.move(), event_time)}
 }
 
-__stream_stamp_seconds: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> Int Never!) -> Stream<StreamEvent<T>> {
+priv stream_stamp_seconds: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> Int Never!) -> Stream<StreamEvent<T>> {
     loop value in stream {
         at: time.from_unix_seconds(event_time(value))
         yield StreamEvent<T>{value: value, event_time: at}
     }
 }
 
-__stream_stamp_datetime: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> DateTime Never!) -> Stream<StreamEvent<T>> {
+priv stream_stamp_datetime: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> DateTime Never!) -> Stream<StreamEvent<T>> {
     loop value in stream {
         at: event_time(value)
         yield StreamEvent<T>{value: value, event_time: at}
@@ -948,10 +948,10 @@ __stream_stamp_datetime: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> DateT
 }
 
 __stream_key_by: fn<K, T>(&&source: StreamEventTime<T>, key: &&fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
-    KeyedStream<K, T>{events: __stream_keyed<K, T>(source.events.move(), key)}
+    KeyedStream<K, T>{events: stream_keyed<K, T>(source.events.move(), key)}
 }
 
-__stream_keyed: fn<K, T>(&&stream: Stream<StreamEvent<T>>, key: &&fn(T) -> K Never!) -> Stream<__KeyedEvent<K, T>> {
+priv stream_keyed: fn<K, T>(&&stream: Stream<StreamEvent<T>>, key: &&fn(T) -> K Never!) -> Stream<__KeyedEvent<K, T>> {
     loop event in stream {
         yield __KeyedEvent<K, T>{key: key(event.value), event: event}
     }
@@ -971,7 +971,7 @@ __stream_window: fn<K: Equatable, T>(&&source: KeyedStream<K, T>, width: time.Du
     has_mark := false
     stream := source.events.move()
     loop keyed in stream {
-        event_ns: __stream_event_ns(keyed.event.event_time)
+        event_ns: stream_event_ns(keyed.event.event_time)
         // `.Drop` is the one late-event disposition: a late event joins no window.
         was_late: has_mark && event_ns < mark && late == LateEventDisposition.Drop
         candidate: event_ns - lateness_ns
@@ -1008,17 +1008,17 @@ __stream_window: fn<K: Equatable, T>(&&source: KeyedStream<K, T>, width: time.Du
                 pending.insert(position, __PendingWindow<T>{key_index: key_index, start_ns: start_ns, events: [StreamEvent<T>]{keyed.event}})
             }
         }
-        loop ready in __stream_windows_ready<K, T>(keys, pending, width_ns, mark, false) -> yield ready
+        loop ready in stream_windows_ready<K, T>(keys, pending, width_ns, mark, false) -> yield ready
     }
-    loop ready in __stream_windows_ready<K, T>(keys, pending, width_ns, mark, true) -> yield ready
+    loop ready in stream_windows_ready<K, T>(keys, pending, width_ns, mark, true) -> yield ready
 }
 
 // Event time as Unix nanoseconds; the window arithmetic is exact `Int`.
-__stream_event_ns: fn(at: DateTime) -> Int Never! {
+priv stream_event_ns: fn(at: DateTime) -> Int Never! {
     at.to_unix_ns() ?? panic("stream event time {at} is outside the Unix nanosecond range")
 }
 
-__stream_windows_ready: fn<K, T>(keys: [K], pending: &[__PendingWindow<T>], width_ns: Int, watermark_ns: Int, flush: Bool) -> [Window<K, T>] Never! {
+priv stream_windows_ready: fn<K, T>(keys: [K], pending: &[__PendingWindow<T>], width_ns: Int, watermark_ns: Int, flush: Bool) -> [Window<K, T>] Never! {
     ready := [Window<K, T>]{}
     kept := [__PendingWindow<T>]{}
     loop open in pending {
@@ -1041,15 +1041,15 @@ __query_tracked: fn<T, K>(tracked: DataTracked<T, K>) -> Query<T> Never! {
 __query_plan: fn<T>(query: Query<T>) -> [String] Never! { query.__steps.copy() }
 
 __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
-    rows: __query_rows<T>(query) ?? return Err(err)
+    rows: query_rows<T>(query) ?? return Err(err)
     limits: query.__limits.copy()
     if rows.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.collect"))
     Ok(rows)
 }
 
 __query_filter: fn<T>(query: Query<T>, predicate: &&fn(T) -> Bool) -> Query<T> Never! {
-    __query_make<T>(__query_steps(query.__steps, "filter"), false, query.__limits.copy(), fn() {
-        rows: __query_rows<T>(query) ?? return Err(err)
+    __query_make<T>(query_steps(query.__steps, "filter"), false, query.__limits.copy(), fn() {
+        rows: query_rows<T>(query) ?? return Err(err)
         out := [T]{}
         loop row in rows {
             keep: predicate(row.copy()) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
@@ -1061,8 +1061,8 @@ __query_filter: fn<T>(query: Query<T>, predicate: &&fn(T) -> Bool) -> Query<T> N
 
 // A stable sort by the String key, bounded by `max_sort_rows`.
 __query_sort_by: fn<T>(query: Query<T>, key: &&fn(T) -> String) -> Query<T> Never! {
-    __query_make<T>(__query_steps(query.__steps, "sort_by"), false, query.__limits.copy(), fn() {
-        rows: __query_rows<T>(query) ?? return Err(err)
+    __query_make<T>(query_steps(query.__steps, "sort_by"), false, query.__limits.copy(), fn() {
+        rows: query_rows<T>(query) ?? return Err(err)
         limits: query.__limits.copy()
         if rows.len() > limits.max_sort_rows -> return Err(data_error(DataErrorKind.Limit, "max_sort_rows {limits.max_sort_rows} exceeded", "query.sort_by"))
         keys := [String]{}
@@ -1080,11 +1080,11 @@ __query_sort_by: fn<T>(query: Query<T>, key: &&fn(T) -> String) -> Query<T> Neve
 // its String keys and keeps equal keys in row order. An SQL ORDER BY compares
 // two numeric cells as numbers and any other pair as text, breaks ties by row
 // position, and reverses that whole order when descending.
-__query_order_before: fn(keys: [String], left: Int, right: Int, sql_order: Bool, descending: Bool) -> Bool Never! {
+priv query_order_before: fn(keys: [String], left: Int, right: Int, sql_order: Bool, descending: Bool) -> Bool Never! {
     if !sql_order -> return keys[left] <= keys[right]
     order := 0
-    left_number: __query_number(keys[left])
-    right_number: __query_number(keys[right])
+    left_number: query_number(keys[left])
+    right_number: query_number(keys[right])
     numeric := false
     if left_number == .Val(a) {
         if right_number == .Val(b) {
@@ -1102,7 +1102,7 @@ __query_order_before: fn(keys: [String], left: Int, right: Int, sql_order: Bool,
     order < 0
 }
 
-__query_number: fn(text: String) -> Float? Never! { Val(Float.parse(text) ?? return None) }
+priv query_number: fn(text: String) -> Float? Never! { Val(Float.parse(text) ?? return None) }
 
 // A bottom-up merge sort of the key positions.
 __query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) -> [Int] Never! {
@@ -1122,7 +1122,7 @@ __query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) -> [I
             right := middle
             loop left < middle || right < end {
                 take_left := right >= end
-                if !take_left && left < middle -> take_left = __query_order_before(keys, order[left], order[right], sql_order, descending)
+                if !take_left && left < middle -> take_left = query_order_before(keys, order[left], order[right], sql_order, descending)
                 if take_left {
                     merged.push(order[left])
                     left = left + 1
@@ -1140,8 +1140,8 @@ __query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) -> [I
 }
 
 __query_map: fn<T, U>(query: Query<T>, mapper: &&fn(T) -> U) -> Query<U> Never! {
-    __query_make<U>(__query_steps(query.__steps, "map"), true, query.__limits.copy(), fn() {
-        rows: __query_rows<T>(query) ?? return Err(err)
+    __query_make<U>(query_steps(query.__steps, "map"), true, query.__limits.copy(), fn() {
+        rows: query_rows<T>(query) ?? return Err(err)
         out := [U]{}
         loop row in rows {
             value: mapper(row.copy()) ?? return Err(data_error(DataErrorKind.State, "map callback failed", "query.map"))
@@ -1152,11 +1152,11 @@ __query_map: fn<T, U>(query: Query<T>, mapper: &&fn(T) -> U) -> Query<U> Never! 
 }
 
 // The first minimum or maximum key in row order; an empty query has none.
-__query_extreme: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V, maximum: Bool) -> Query<V> Never! {
+priv query_extreme: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V, maximum: Bool) -> Query<V> Never! {
     step: if maximum -> "max" else -> "min"
     operation: "query.{step}"
-    __query_make<V>(__query_steps(query.__steps, step), true, query.__limits.copy(), fn() {
-        rows: __query_rows<T>(query) ?? return Err(err)
+    __query_make<V>(query_steps(query.__steps, step), true, query.__limits.copy(), fn() {
+        rows: query_rows<T>(query) ?? return Err(err)
         selected := [V]{}
         loop row in rows {
             candidate: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "extreme key callback failed", operation))
@@ -1172,22 +1172,22 @@ __query_extreme: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V, maximu
     })
 }
 
-__query_min: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, key, false) }
+__query_min: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! { query_extreme<T, V>(query, key, false) }
 
-__query_max: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, key, true) }
+__query_max: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! { query_extreme<T, V>(query, key, true) }
 
 __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -> String, right_key: &&fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
-    __query_make<DataJoin<T, U>>(__query_steps(left.__steps, "inner_join"), true, left.__limits.copy(), fn() {
-        left_rows: __query_rows<T>(left) ?? return Err(err)
-        right_rows: __query_rows<U>(right) ?? return Err(err)
+    __query_make<DataJoin<T, U>>(query_steps(left.__steps, "inner_join"), true, left.__limits.copy(), fn() {
+        left_rows: query_rows<T>(left) ?? return Err(err)
+        right_rows: query_rows<U>(right) ?? return Err(err)
         inner_join<T, U>(left_rows, right_rows, left_key, right_key)
     })
 }
 
 __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -> String, right_key: &&fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
-    __query_make<DataJoin<T, U?>>(__query_steps(left.__steps, "left_join"), true, left.__limits.copy(), fn() {
-        left_rows: __query_rows<T>(left) ?? return Err(err)
-        right_rows: __query_rows<U>(right) ?? return Err(err)
+    __query_make<DataJoin<T, U?>>(query_steps(left.__steps, "left_join"), true, left.__limits.copy(), fn() {
+        left_rows: query_rows<T>(left) ?? return Err(err)
+        right_rows: query_rows<U>(right) ?? return Err(err)
         left_join<T, U>(left_rows, right_rows, left_key, right_key)
     })
 }
@@ -1199,16 +1199,16 @@ __query_group_by: fn<T, K>(query: Query<T>, key: &&fn(T) -> K) -> DataGroupedQue
     }}}}
 }
 
-__group_steps: fn<T, K>(grouped: DataGroupedQuery<T, K>, step: String) -> [String] Never! {
-    __query_steps(__query_steps(grouped.__query.__steps, "group_by"), step)
+priv group_steps: fn<T, K>(grouped: DataGroupedQuery<T, K>, step: String) -> [String] Never! {
+    query_steps(query_steps(grouped.__query.__steps, "group_by"), step)
 }
 
 // Groups come out in ascending key order (a stable sort of the first-seen
 // groups); reaching `max_groups` fails before a new group is retained.
 // `order` holds the positions of `keys` sorted by key, so a row's lookup is a
 // binary search: the key's position in `keys`, else -1 - the slot in `order`
-// where a new group's position goes (__group_add).
-__group_find: fn<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never! {
+// where a new group's position goes (group_add).
+priv group_find: fn<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never! {
     low := 0
     high := order.len()
     loop low < high {
@@ -1224,20 +1224,20 @@ __group_find: fn<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never! {
     -1 - low
 }
 
-__group_add: fn<K>(keys: &[K], order: &[Int], found: Int, key: K) Never! {
+priv group_add: fn<K>(keys: &[K], order: &[Int], found: Int, key: K) Never! {
     order.insert(-1 - found, keys.len())
     keys.push(key.copy())
 }
 
-__group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] Never! {
+priv group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] Never! {
     out := groups
     out.sort_by(fn(left: Group<K, V>, right: Group<K, V>) { left.key <=> right.key })
     out
 }
 
 __group_count: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Group<K, Int>> Never! {
-    __query_make<Group<K, Int>>(__group_steps<T, K>(grouped, "count"), true, grouped.__query.__limits.copy(), fn() {
-        rows: __query_rows<T>(grouped.__query) ?? return Err(err)
+    __query_make<Group<K, Int>>(group_steps<T, K>(grouped, "count"), true, grouped.__query.__limits.copy(), fn() {
+        rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
         cell: grouped.__key.guard_read()
         keys := [K]{}
@@ -1245,26 +1245,26 @@ __group_count: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Gr
         counts := [Int]{}
         loop row in rows {
             group_key: cell.value.key(row.copy()) ?? return Err(err)
-            found: __group_find<K>(keys, order, group_key)
+            found: group_find<K>(keys, order, group_key)
             if found >= 0 {
                 counts[found] = counts[found] + 1
             } else {
                 if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.count"))
-                __group_add<K>(keys, order, found, group_key)
+                group_add<K>(keys, order, found, group_key)
                 counts.push(1)
             }
         }
         out := [Group<K, Int>]{}
         loop index in 0..<keys.len() -> out.push(Group<K, Int>{key: keys[index].copy(), value: counts[index]})
-        Ok(__group_sorted<K, Int>(out))
+        Ok(group_sorted<K, Int>(out))
     })
 }
 
 // Group sums keep the value callback's numeric type; each numeric domain
 // supplies its own addition to the shared reducer.
 __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> V, add: &&fn(V, V) -> V) -> Query<Group<K, V>> Never! {
-    __query_make<Group<K, V>>(__group_steps<T, K>(grouped, "sum"), true, grouped.__query.__limits.copy(), fn() {
-        rows: __query_rows<T>(grouped.__query) ?? return Err(err)
+    __query_make<Group<K, V>>(group_steps<T, K>(grouped, "sum"), true, grouped.__query.__limits.copy(), fn() {
+        rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
         cell: grouped.__key.guard_read()
         keys := [K]{}
@@ -1273,20 +1273,20 @@ __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: &&f
         loop row in rows {
             group_key: cell.value.key(row.copy()) ?? return Err(err)
             group_value: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.sum"))
-            found: __group_find<K>(keys, order, group_key)
+            found: group_find<K>(keys, order, group_key)
             if found >= 0 {
                 total: add(totals[found].copy(), group_value) ?? return Err(data_error(DataErrorKind.Overflow, "group sum overflowed", "query.group_by.sum"))
                 totals[found] = total
             } else {
                 if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.sum"))
-                __group_add<K>(keys, order, found, group_key)
+                group_add<K>(keys, order, found, group_key)
                 totals.push(group_value)
             }
         }
         if keys.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.group_by.sum"))
         out := [Group<K, V>]{}
         loop index in 0..<keys.len() -> out.push(Group<K, V>{key: keys[index].copy(), value: totals[index].copy()})
-        Ok(__group_sorted<K, V>(out))
+        Ok(group_sorted<K, V>(out))
     })
 }
 
@@ -1303,8 +1303,8 @@ __group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&
 __group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U64) -> Query<Group<K, U64>> Never! { __group_sum<T, K, U64>(grouped, value, fn(left: U64, right: U64) { left + right }) }
 
 __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Float) -> Query<Group<K, Float>> Never! {
-    __query_make<Group<K, Float>>(__group_steps<T, K>(grouped, "mean"), true, grouped.__query.__limits.copy(), fn() {
-        rows: __query_rows<T>(grouped.__query) ?? return Err(err)
+    __query_make<Group<K, Float>>(group_steps<T, K>(grouped, "mean"), true, grouped.__query.__limits.copy(), fn() {
+        rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
         cell: grouped.__key.guard_read()
         keys := [K]{}
@@ -1315,20 +1315,20 @@ __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(
             group_key: cell.value.key(row.copy()) ?? return Err(err)
             group_value: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.mean"))
             if nonfinite(group_value) -> return Err(data_error(DataErrorKind.NonFinite, "group values must be finite", "query.group_by.mean"))
-            found: __group_find<K>(keys, order, group_key)
+            found: group_find<K>(keys, order, group_key)
             if found >= 0 {
                 totals[found] = totals[found] + group_value
                 counts[found] = counts[found] + 1
             } else {
                 if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.mean"))
-                __group_add<K>(keys, order, found, group_key)
+                group_add<K>(keys, order, found, group_key)
                 totals.push(group_value)
                 counts.push(1)
             }
         }
         out := [Group<K, Float>]{}
         loop index in 0..<keys.len() -> out.push(Group<K, Float>{key: keys[index].copy(), value: totals[index] / Float{counts[index]}})
-        Ok(__group_sorted<K, Float>(out))
+        Ok(group_sorted<K, Float>(out))
     })
 }
 
@@ -1338,14 +1338,14 @@ __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(
 __schema: fn<T>(_rows: [T], names: [String], types: [String]) -> [DataColumn] Never! {
     columns := [DataColumn]{}
     loop index in 0..<names.len() {
-        columns.push(DataColumn{id: __column_identity(names[index], types[index]), name: names[index].copy(), type_name: types[index].copy(), nullable: types[index].ends_with("?")})
+        columns.push(DataColumn{id: column_identity(names[index], types[index]), name: names[index].copy(), type_name: types[index].copy(), nullable: types[index].ends_with("?")})
     }
     columns
 }
 
 // A column identity: FNV-1a 64 over the length-delimited `name:type` key,
 // spelled `column-` and 16 lowercase hex digits.
-__column_identity: fn(name: String, type_name: String) -> String Never! {
+priv column_identity: fn(name: String, type_name: String) -> String Never! {
     key: "{name.bytes().len()}:{type_name}"
     hash := U64{14695981039346656037}
     loop byte in key.bytes() -> hash = wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211})
