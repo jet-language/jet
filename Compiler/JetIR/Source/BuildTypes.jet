@@ -2,7 +2,7 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
-    jet_foundation.[CORE_ENUM_ROWS, IRRuntimeHandle, IR_RUNTIME_HANDLES, ModuleID, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_payload, type_union_member_tag]
+    jet_foundation.[CORE_ENUM_ROWS, IRRuntimeHandle, IR_RUNTIME_HANDLES, ModuleID, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_payload, type_union_member_tag]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -3727,11 +3727,60 @@ ir_compiler_owned_type_rows: fn() -> [IRCompilerOwnedTypeRow] Never! {
     loop record in IR_COMPILER_OWNED_CORE_RECORDS -> records.push(record.name)
     loop record in IR_COMPILER_OWNED_MATH_RECORDS -> records.push(record.name)
     core: ir_compiler_owned_core_fields()
-    loop name in records {
-        fields: ir_compiler_owned_record_fields(name, core) ?? panic("compiler-owned record `{name}` has no field rows")
-        rows.push(IRCompilerOwnedTypeRow{class: .Record, definition: ir_compiler_owned_def(module_none(), name, TTypeDefKind.Struct{fields: ir_compiler_owned_fields(fields), methods: [String]{}})})
+    record_fields: loop name in records -> ir_compiler_owned_record_fields(name, core) ?? panic("compiler-owned record `{name}` has no field rows")
+    boxed: ir_compiler_owned_boxed_edges(records, record_fields)
+    loop (index, name) in records {
+        definition := ir_compiler_owned_def(module_none(), name, TTypeDefKind.Struct{fields: ir_compiler_owned_fields(record_fields[index]), methods: [String]{}})
+        definition.boxed_edges = boxed[index]
+        rows.push(IRCompilerOwnedTypeRow{class: .Record, definition: definition})
     }
     rows
+}
+
+// The members of each compiler-owned record of `names` that hold a record
+// inline and close a cycle of records: a TypeId holds its signature, whose
+// ParamInfo holds a TypeId. A record reached again inline has no finite size,
+// so each such member is a recursive edge (TTypeDef.boxed_edges) held in a
+// wrapper box, as a checked declaration's is. A cycle that passes an Option or
+// a List already passes a pointer and boxes nothing.
+ir_compiler_owned_boxed_edges: fn(names: [String], fields: [[TypeTupleField]]) -> [[String]] Never! {
+    targets := [[Int]]{}
+    loop record in fields {
+        held := [String]{}
+        loop field in record -> core_record_layout_names(field.ty, held)
+        found := [Int]{}
+        loop name in held {
+            if names.index_of(name) == .Val(row) -> found.push(row)
+        }
+        targets.push(found)
+    }
+    out := [[String]]{}
+    loop (index, record) in fields {
+        edges := [String]{}
+        loop field in record {
+            target: ir_nominal_name(ir_untag(field.ty)) ?? next
+            row: names.index_of(target) ?? next
+            if ir_compiler_owned_reaches(targets, row, index) -> edges.push(field.name)
+        }
+        out.push(edges)
+    }
+    out
+}
+
+// Whether record row `to` is reachable from record row `from` through the
+// records each holds (`targets`).
+ir_compiler_owned_reaches: fn(targets: [[Int]], from: Int, to: Int) -> Bool Never! {
+    seen := [Bool]{}
+    loop _ in 0..<targets.len() -> seen.push(false)
+    pending := [Int]{from}
+    loop pending.len() > 0 {
+        row: pending.pop() ?? return false
+        if row == to -> return true
+        if seen[row] -> next
+        seen[row] = true
+        loop target in targets[row] -> pending.push(target)
+    }
+    false
 }
 
 // The compiler-owned rows no checked module declares, in

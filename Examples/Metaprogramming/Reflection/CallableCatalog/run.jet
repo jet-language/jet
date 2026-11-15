@@ -162,8 +162,8 @@ run: fn() {
         if param.type.signature == None -> print("apply {param.name} takes {param.type.name}, no function")
         callee: param.type.signature ?? next
         takes: (loop inner in callee.params -> inner.type.name).join(", ")
-        bound: if callee.effects.declared == .Val(row) -> "[{row.join(", ")}]" else -> "no row"
-        print("apply {param.name} takes a function of ({takes}) -> {callee.return_type?.name ?? "nothing"} bounded by {bound}")
+        callee_row: if callee.effects.declared == .Val(row) -> "[{row.join(", ")}]" else -> "no row"
+        print("apply {param.name} takes a function of ({takes}) -> {callee.return_type?.name ?? "nothing"} bounded by {callee_row}")
     }
     print("apply 4 gives {apply(4, fn(n: Int) -> String { "{n}!" })}")
 }
