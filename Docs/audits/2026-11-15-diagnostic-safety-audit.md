@@ -91,7 +91,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0227 | MarkedFunctionValue | Compiler/JetSema/Source/Sema/Expressions.jet:1360 | a function type with the same marks reaches the program |
 | E0231 | InvalidReceiverFootprint | Compiler/JetSema/Source/Sema/Footprint.jet:217 | the footprint must name the fields the body touches |
 | E0301 | ImplOnBuiltinType | Compiler/JetSema/Source/Sema/CheckProgram.jet:1974 | an operator hook belongs to the package that declares an operand type |
-| E0302 | UnknownField | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:603 | no opt-in reaches a field the type does not declare |
+| E0302 | UnknownField | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:610 | no opt-in reaches a field the type does not declare |
 | E0303 | InvalidConstructionField | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:658 | a value is built from exactly its declared fields |
 | E0304 | UnknownEnumCase | Compiler/JetSema/Source/Sema/Calls/Data.jet:1033 | an enum holds only its declared variants |
 | E0305 | PatternTypeMismatch | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:217 | an explicit conversion reaches the program; nothing reinterprets the value |
