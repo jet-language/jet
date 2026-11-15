@@ -37,13 +37,13 @@
 <p class="diag-copy fix" data-registry-field="fix">Remove `#Builtin.Role(.{role})` from one of the two functions.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1014</code>: <code>tests/ui/core_role_duplicate/stderr</code>.</p>
-<pre class="diag">Error [jet.DuplicateCoreRole]: `duplicate_role_second` fills role `DuplicateRoleProbe`, which `duplicate_role_first` already fills
-  --&gt; &lt;corelib&gt;/Core/Builtins/Builtins.jet:17:28
+<pre class="diag">Error [jet.DuplicateCoreRole]: `duplicate_abs_f32` fills role `AbsF32`, which `abs_f32` already fills
+  --&gt; &lt;corelib&gt;/Core/Math/Stats.jet:6:24
     |
- 17 | #Role(.DuplicateRoleProbe) duplicate_role_second: fn() -&gt; Int { 2 }
-    |                            ^^^^^^^^^^^^^^^^^^^^^
+  6 | #Builtin.Role(.AbsF32) duplicate_abs_f32: fn(n: F32) -&gt; F32 { n }
+    |                        ^^^^^^^^^^^^^^^^^
  Why: The compiler runs the one Core function that fills a role, so each role is filled exactly once.
- Fix: Remove `#Builtin.Role(.DuplicateRoleProbe)` from one of the two functions.
+ Fix: Remove `#Builtin.Role(.AbsF32)` from one of the two functions.
 More: jet-lang.dev/e/E1014
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
