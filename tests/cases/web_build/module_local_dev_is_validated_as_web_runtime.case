@@ -1,8 +1,14 @@
-# HAND-PORT tests/web_build.rs:3953-3971 module_local_dev_is_validated_as_web_runtime
-# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
-# Original build rejection and exact same-diagnostic predicates, unchanged sources.
+# Only a top-level `dev` is the host's development entry. A module-local `dev`
+# is ordinary web runtime code: the build checks and lowers it with the rest
+# of the program, and the page runs it.
+requires: tool:node
 fixture: module_local_dev_is_validated_as_web_runtime.fixture
 env: NO_COLOR=1
-step: jet build --target web --json main.jet
-exit: nonzero
-json: stdout doc $.reports[?code="E-WEB-UNSUPPORTED"][?what~="`dev`"] #>= 1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "hello\nhello web\n"
+stderr: empty

@@ -4179,8 +4179,9 @@ admission. `task.group name(stack: bytes) { ... }` gives each child at least
 they name their own; every other task gets the system's stack size (the soft
 `RLIMIT_STACK`), at least 8 MiB. The runtime caps a request at 8 GiB, and
 under a finite address-space limit at a hundredth of it; a constant `stack:`
-outside 1 byte to 8 GiB is **E0112**, and any `stack:` on a web target is
-**E-WEB-UNSUPPORTED**, since a browser task has no stack of its own. Both
+outside 1 byte to 8 GiB is **E0112**, and a web target refuses any task group
+(so any `stack:`) with **E-WEB-UNSUPPORTED**, since a browser task has no
+thread or stack of its own. Both
 arguments may be given, in either order, at most once each
 (D-THREAD-STACK1=A). The group owns and joins every child created in its
 body. A cancel of the task that opened a group reaches the group's unfinished

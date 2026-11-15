@@ -42,7 +42,8 @@ Every change to the package's sources rebuilds it; a failed rebuild prints its
 report and keeps the last good build served. A full-stack
 `App` entry is a server, and `jet dev` runs it natively. Under node the host
 file system is the program's; a page has none, so file calls fail with
-ENOSYS. The host runs one thread: a program that starts a `task` stops with
+ENOSYS. The host runs one thread: the build refuses a `task.group` with
+`E-WEB-UNSUPPORTED`, and a program that starts any other `task` stops with
 E3001 (`tasks are not available on the web target yet`).
 
 When the page has a `document`, the host shows what the program's `core.ui`
