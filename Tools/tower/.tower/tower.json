@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6870,
-    "rev": 103225,
+    "rev": 103237,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49708,12 +49708,12 @@
         },
         {
           "n": 3,
-          "text": "The build action store opt-in for web image variants (D-WEB-IMAGE1 caching clause) is decided by an owner ballot on how a build run opts into reusing saved action work (BUILD_REUSE_SAVED_WORK, BuildOptions.jet:810), and the variant cache is built to it: a second `jet build` with unchanged sources encodes nothing (trace count 0).",
+          "text": "The web image variant cache follows the one on/off build cache setting (D-BUILD-REUSESET1=A, with reuse on by default per D-EFF-BUILD-REUSE1=B): a second `jet build` with unchanged sources encodes nothing (trace count 0). Proof: `jet test Compiler --profile cases --filter web_build/image_variants_reuse_cache`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T05:51:14.069Z"
+          "at": "2026-11-15T02:55:43.079Z"
         },
         {
           "n": 4,
@@ -49735,8 +49735,8 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-06T01:21:52.615Z",
-      "updated": "2026-11-14T12:50:00.452Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:55:43.079Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G9"
       ],
@@ -57254,12 +57254,12 @@
         },
         {
           "n": 6,
-          "text": "(was #6348) On the web host, .Auto placement uses a GPU when one is available and otherwise fails or reports exactly as the native host does (one meaning, I9), proved by a web test and the native golden.",
+          "text": "On the web host, `.Auto` placement uses a GPU when one is available and otherwise fails or reports exactly as the native host does (one meaning, I9). Proof: `jet test Compiler --profile cases --filter web_build/auto_placement_matches_native` and the native golden pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:39:16.730Z"
+          "at": "2026-11-15T02:55:41.334Z"
         },
         {
           "n": 7,
@@ -57272,12 +57272,12 @@
         },
         {
           "n": 18,
-          "text": "(was #2230 c1) ui.button on the web DOM runtime measures real content height instead of the 2px null_backend stub; label no longer overflows [precut audit: failing on 9c7ddf1359: C:web_build/web_click_counter_dom_roundtrip KNOWN-FAILING #5201 pins the retired JS emitter's build (manifest `\"status\": \"m2\"`, JS output and exports); the wasm build writes none of it: file byte predicat (known-failing…]",
+          "text": "On the web DOM runtime, ui.button measures its real content height (not the old 2px stub) and its label fits inside it. Proof: `jet test Compiler --profile cases --filter web_build/ui_button_measures_content_height`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:42:54.079Z"
+          "at": "2026-11-15T02:55:42.211Z"
         },
         {
           "n": 20,
@@ -57350,8 +57350,8 @@
       "parentId": "c022g7qw",
       "needsAcceptance": false,
       "created": "2026-10-23T04:11:56.439Z",
-      "updated": "2026-11-15T00:48:01.419Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:55:42.211Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G9"
       ],
@@ -71573,11 +71573,12 @@
         {
           "n": 8,
           "text": "(was #5962) The report runs in the Tower test suite against a fixture board.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:27:34.940Z"
+          "evidence": "Merged into #6311 c7: the suite run is c7's proof",
+          "at": "2026-11-15T02:55:47.600Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -71588,7 +71589,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:20:40.809Z",
-      "updated": "2026-11-15T02:55:40.272Z",
+      "updated": "2026-11-15T02:55:47.600Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 54
     },
@@ -97680,7 +97681,7 @@
     {
       "id": "c0vc9b8r",
       "num": 6824,
-      "title": "Language: bound method values (D-BOUND-METHOD1, ballot needed)",
+      "title": "Language: a method passes as a function value where a function type is expected (D-BOUND-METHOD1=A)",
       "body": "Gap card N1 from the #6792 r3 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md, section 7.12 interim forms; 3.9). Its language surface needs ballot D-BOUND-METHOD1 (drafted in the r3 gap file; posted with D-WEBAPP-SHAPE1 after review).",
       "kind": "feature",
       "track": "sidequest",
@@ -97732,66 +97733,69 @@
         },
         {
           "n": 3,
-          "text": "A closure passed where an optional function type is expected (a (fn(Int) -> String)? slot) type-checks; today it gets E0108 (D-BOUND-METHOD1 v3 review probe q02, gate-p66). Proof: a tests/cases row with a closure in an optional fn slot runs on O0, O1 and O2.",
+          "text": "A closure or a method passed where an optional function type is expected (a `(fn(Int) -> String)?` slot) type-checks (D-BOUND-METHOD1=A); today it gets E0108. Proof: `jet test Compiler --profile cases --filter lang/optional_fn_slot_accepts_closure_and_method` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T14:42:56.433Z"
+          "at": "2026-11-15T02:55:43.948Z"
         },
         {
           "n": 4,
-          "text": "A union with a function member (Int | fn() -> Int) is usable or refused with a registered diagnostic and UI snapshot; today it is unusable (D-BOUND-METHOD1 v3 review probe q01, gate-p66). Proof: the tests/cases or tests/ui row that pins the chosen behavior.",
+          "text": "A read of a method without parentheses where a union with a function member is expected (`Int | fn() -> Int`) is the registered error that suggests the call (D-BOUND-METHOD1=A), with a UI snapshot. Proof: `jet test Compiler --profile ui --filter bound_method_union_suggests_call`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T14:42:57.709Z"
+          "at": "2026-11-15T02:55:44.839Z"
         },
         {
           "n": 5,
-          "text": "A type that declares a field and a method with the same name cannot let a bare value use silently pick one. Today, adding a fn field tell beside the method tell makes each([1, 2], crew.tell) compile and pass the field (D-BOUND-METHOD1 v4 probe u4, gate-p66). Once the ballot is ratified, the result follows its outcome (option A refuses the clash). Proof: a tests/ui row pinning that behavior.",
+          "text": "Where a function type is expected and the type has both a field and a method of that name, the read is an error naming both and offering the closure for each (D-BOUND-METHOD1=A); `each([1, 2], crew.tell)` with a `tell` field beside the method no longer compiles. Proof: `jet test Compiler --profile ui --filter bound_method_field_method_clash`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T15:10:56.147Z"
+          "at": "2026-11-15T02:55:45.747Z"
         },
         {
           "n": 6,
-          "text": "Data/Syntax registry entry updated",
+          "text": "The bound-method rule has its syntax registry row, its syntax-decisions.md entry, regenerated editor grammars (`jet self devtools grammars`) and re-blessed snapshots. Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T18:13:40.736Z"
+          "at": "2026-11-15T02:55:46.676Z"
         },
         {
           "n": 7,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T18:13:40.736Z"
+          "evidence": "Merged into #6824 c6: one documentation criterion",
+          "at": "2026-11-15T02:55:48.599Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
           "text": "editor grammars regenerated (jet self devtools grammars)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T18:13:40.736Z"
+          "evidence": "Merged into #6824 c6: one documentation criterion",
+          "at": "2026-11-15T02:55:49.588Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T18:13:40.736Z"
+          "evidence": "Merged into #6824 c6: one documentation criterion",
+          "at": "2026-11-15T02:55:50.514Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -97802,8 +97806,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:03.329Z",
-      "updated": "2026-11-14T18:13:40.736Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-15T02:55:52.043Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 9
     },
     {
@@ -207062,6 +207066,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:55:52.043Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0vc9b8r",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T02:55:50.514Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vc9b8r",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T02:55:49.588Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vc9b8r",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T02:55:48.599Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vc9b8r",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T02:55:47.600Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c059ge5n",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T02:55:46.677Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vc9b8r",
+      "note": "#6: merged c7-c9 into one documentation criterion with a proof; was: Data/Syntax registry entry updated"
+    },
+    {
+      "at": "2026-11-15T02:55:45.747Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vc9b8r",
+      "note": "#5: D-BOUND-METHOD1=A ratified 2026-11-14 decides it; was: A type that declares a field and a method with the same name cannot let a bare value use silently pick one. Today, adding a fn field tell beside the method tell makes each([1, 2], crew.tell) compile a"
+    },
+    {
+      "at": "2026-11-15T02:55:44.839Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vc9b8r",
+      "note": "#4: D-BOUND-METHOD1=A ratified 2026-11-14 decides it: a union never counts; was: A union with a function member (Int | fn() -> Int) is usable or refused with a registered diagnostic and UI snapshot; today it is unusable (D-BOUND-METHOD1 v3 review probe q01, gate-p66). Proof: the t"
+    },
+    {
+      "at": "2026-11-15T02:55:43.948Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vc9b8r",
+      "note": "#3: D-BOUND-METHOD1=A ratified 2026-11-14 decides it; was: A closure passed where an optional function type is expected (a (fn(Int) -> String)? slot) type-checks; today it gets E0108 (D-BOUND-METHOD1 v3 review probe q02, gate-p66). Proof: a tests/cases row wi"
+    },
+    {
+      "at": "2026-11-15T02:55:43.079Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0q6gm05",
+      "note": "#3: the build-reuse ballot it waited on is answered by D-BUILD-REUSESET1=A and D-EFF-BUILD-REUSE1=B; add proof; was: The build action store opt-in for web image variants (D-WEB-IMAGE1 caching clause) is decided by an owner ballot on how a build run opts into reusing saved action work (BUILD_REUSE_SAVED_WORK, BuildOp"
+    },
+    {
+      "at": "2026-11-15T02:55:42.211Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m58g8t",
+      "note": "#18: strip debris (the precut note cites a case that pins the retired JS emitter); add proof; was: (was #2230 c1) ui.button on the web DOM runtime measures real content height instead of the 2px null_backend stub; label no longer overflows [precut audit: failing on 9c7ddf1359: C:web_build/web_click"
+    },
+    {
+      "at": "2026-11-15T02:55:41.334Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m58g8t",
+      "note": "#6: strip debris; add proof; was: (was #6348) On the web host, .Auto placement uses a GPU when one is available and otherwise fails or reports exactly as the native host does (one meaning, I9), proved by a web test and the native gold"
+    },
     {
       "at": "2026-11-15T02:55:40.272Z",
       "by": "TowerKeeper-1",
