@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6975,
-    "rev": 106114,
+    "nextNum": 6976,
+    "rev": 106121,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101010,7 +101010,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -101019,6 +101019,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Closed 2026-11-15 by Main. All 12 remaining criteria are met with exercised evidence (c1-c5 and c7-c10, c12-c14). The two performance criteria (c6 zero cost, c11 ceiling) moved to #6975 (G11) under the owner order of 2026-11-15. #Unsafe count over the kernel cutover, lines with a #Unsafe(...) region, dev e1ef911ec1 (2026-11-14 16:55) against 604cc6eb7a (2026-11-15 06:15): runtime 643 to 488 (-155), Core/Crypto -5, Core/Encoding -2, Core/Testing -1, Core/Mem +4 (the kernel itself), JetBackend +13 and JetFoundation +3 (non-kernel work tonight), tests and UI fixtures +56, Examples/Memory +3, Tools/perf +6. Whole repository 1426 to 1348. Shipped code (runtime, Core, Compiler) net -143."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -101177,15 +101182,6 @@
           "at": "2026-11-15T09:32:45.097Z"
         },
         {
-          "n": 6,
-          "text": "Zero cost: kernel primitives inline at O1/O2. A paired two-program cell (kernel primitives against the direct spelling) and the cold self-compile show no wall or peak-memory regression on the reference machine; any loss is fixed before ratification. Proof: a committed receipt of the paired cell and the cold self-compile on the reference machine.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:47:38.569Z"
-        },
-        {
           "n": 7,
           "text": "Each primitive has a test per stated precondition, plus a fuzz run over allocate, resize and free sequences, and O0, O1, O2 and web agree on every kernel test (I9). Proof: `jet test Compiler --profile cases --filter memory_kernel/` on O0, O1, O2 and web, including `memory_kernel/alloc_resize_free_fuzz`.",
           "status": "met",
@@ -101220,15 +101216,6 @@
           "verifiedBy": null,
           "evidence": "Batch compiler p162 (dev b80809b698), 2026-11-15 03:55: jet test Compiler --profile cases --filter resource_close/pattern_bound_resource_closes PASS 1 (a resource bound through an if/match pattern is closed on O0/O1/O2 and checked); --filter single_use/pattern_binding_owes_consume PASS 1 (E0140 twice for an unconsumed pattern-bound owner); --filter single_use/pattern_binding_consumed_runs PASS 1 (O0/O1/O2). CardCloser-3's review probe e7_autoclose prints closed for both forms on p160.",
           "at": "2026-11-15T08:55:39.242Z"
-        },
-        {
-          "n": 11,
-          "text": "Owner order 2026-11-14: the kernel is safe and at the theoretical maximum performance for machine code, so the ceiling stage is open for it now. Each kernel primitive (allocate, free, resize, raw read and write, pointer offset, byte copy, move, fill and compare, atomics, mapping) has an asm-parity ceiling cell in Tools/perf/asm-parity. Each cell uses the best known technique for its workload: SIMD copy, fill and compare chosen by size class and CPU features, branch-light fast paths for allocation and free, no redundant checks on paths sema has proved. Jet/ceiling is at most 1.00 in both cycles and code bytes at O2, measured live. Any safety check the kernel keeps appears in the reference at its smallest hand-written cost, and no check is removed to meet the ceiling. Any loss is fixed in the general lowering, not per cell. Proof: asm-parity `--gate` reports ok for every kernel primitive cell (as logged for rawword on p146).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:47:40.346Z"
         },
         {
           "n": 12,
@@ -101266,9 +101253,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T11:12:08.188Z",
+      "updated": "2026-11-15T11:21:21.639Z",
       "updatedBy": "Main",
-      "criteriaLastN": 14
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-15T11:21:21.639Z"
     },
     {
       "id": "c0in2dft",
@@ -113592,6 +113580,58 @@
       "updated": "2026-11-15T10:30:22.933Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0ssfud5",
+      "num": 6975,
+      "title": "Memory kernel performance: zero cost against the plain spelling, and the machine-code ceiling for every kernel primitive",
+      "body": "The memory kernel (#6842, D-MEM-CHOKEPOINT1=A) is built: one audited chokepoint for every raw memory action, with the address rule, single-use values, windows, sentry-tracked mappings and the runtime cutover proven there. Its two performance criteria move here under the owner's 2026-11-15 order that speed and size work belongs to G11 and does not block other goals. Work in flight: the inline-under-auto SUBs (kernel owner methods and from_addr inline under the default policy, constant divisors no longer stop inlining, the E0917 false positive for same-named calls) and the zero-cost paired cell (Tools/perf/ZeroCostPair.jet, 64 losses on p171). Ceiling cells measured on p160r (Jet/ceiling cycles): mapping 4.73x, allocfree 2.77x, compare 3.19x, resize 1.88x, rawword 1.35x, atomics 1.00x. Planned roots: an inlined call's Result boxes kept in the frame (landed 6595a58009), the allocator header cut from 24 B to 8 B, finer size classes.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "(was #6842 c6, moved to G11 by owner order 2026-11-15: speed and size work moves to G11 so it does not block) Zero cost: kernel primitives inline at O1/O2. A paired two-program cell (kernel primitives against the direct spelling) and the cold self-compile show no wall or peak-memory regression on the reference machine; any loss is fixed before ratification. Proof: a committed receipt of the paired cell and the cold self-compile on the reference machine.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:21:07.223Z"
+        },
+        {
+          "n": 2,
+          "text": "(was #6842 c11, moved to G11 by owner order 2026-11-15: speed and size work moves to G11 so it does not block) Owner order 2026-11-14: the kernel is safe and at the theoretical maximum performance for machine code, so the ceiling stage is open for it now. Each kernel primitive (allocate, free, resize, raw read and write, pointer offset, byte copy, move, fill and compare, atomics, mapping) has an asm-parity ceiling cell in Tools/perf/asm-parity. Each cell uses the best known technique for its workload: SIMD copy, fill and compare chosen by size class and CPU features, branch-light fast paths for allocation and free, no redundant checks on paths sema has proved. Jet/ceiling is at most 1.00 in both cycles and code bytes at O2, measured live. Any safety check the kernel keeps appears in the reference at its smallest hand-written cost, and no check is removed to meet the ceiling. Any loss is fixed in the general lowering, not per cell. Proof: asm-parity `--gate` reports ok for every kernel primitive cell (as logged for rawword on p146).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:21:08.208Z"
+        }
+      ],
+      "refs": [
+        "6842"
+      ],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T11:21:06.022Z",
+      "updated": "2026-11-15T11:21:08.208Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -217487,6 +217527,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T11:21:21.639Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T11:21:19.271Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T11:21:10.949Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0oo8eeq",
+      "note": "#6: moved to #6975 under the owner order of 2026-11-15 (speed and size work moves to G11); was [open]: Zero cost: kernel primitives inline at O1/O2. A paired two-program cell (kernel primitives against the direct spelling) and the cold self-compile show no wall or peak-memory regression on the referenc"
+    },
+    {
+      "at": "2026-11-15T11:21:09.433Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0oo8eeq",
+      "note": "#11: moved to #6975 under the owner order of 2026-11-15 (speed and size work moves to G11); was [open]: Owner order 2026-11-14: the kernel is safe and at the theoretical maximum performance for machine code, so the ceiling stage is open for it now. Each kernel primitive (allocate, free, resize, raw read"
+    },
+    {
+      "at": "2026-11-15T11:21:08.208Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ssfud5",
+      "note": "#2 (was #6842 c11, moved to G11 by owner order 2026-11-15: spee"
+    },
+    {
+      "at": "2026-11-15T11:21:07.223Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ssfud5",
+      "note": "#1 (was #6842 c6, moved to G11 by owner order 2026-11-15: speed"
+    },
+    {
+      "at": "2026-11-15T11:21:06.022Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ssfud5",
+      "note": "Memory kernel performance: zero cost against the plain spelling, and the machine-code ceiling for every kernel primitive"
+    },
     {
       "at": "2026-11-15T11:18:31.300Z",
       "by": "Main",
