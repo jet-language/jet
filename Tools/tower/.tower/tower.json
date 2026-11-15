@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6895,
-    "rev": 103970,
+    "nextNum": 6898,
+    "rev": 103975,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22009,6 +22009,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-28T21:07:50.550Z"
+        },
+        {
+          "n": 10,
+          "text": "The rerun task set predeclares paired tasks for early guard versus positive branch, named selection versus manual loop, one deep interface versus shallow helper splitting, and necessary why-comments versus redundant how-narration, so readability is measured in context rather than by metrics. Proof: the task manifest in the rerun report lists each pair.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:57.768Z"
         }
       ],
       "refs": [
@@ -22030,14 +22039,14 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-08-30T13:46:08.995Z",
-      "updated": "2026-11-13T01:55:11.633Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:50:57.768Z",
+      "updatedBy": "TowerKeeper-1",
       "probe": null,
       "visualMedia": [],
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 9
+      "criteriaLastN": 10
     },
     {
       "id": "c00jysua",
@@ -101364,6 +101373,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:10:45.678Z"
+        },
+        {
+          "n": 4,
+          "text": "`jet fmt` rewrites the old arm-table shapes (adds an explicit `else` arm, removes redundant returns and fallback tails), keeping comments, bindings, order, effects and spans, and reports nothing. Proof: `jet test Compiler --profile cases --filter fmt_arm_table_rewrite`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:56.848Z"
         }
       ],
       "refs": [],
@@ -101377,8 +101395,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:45.678Z",
-      "updated": "2026-11-15T02:10:45.678Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:50:56.848Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 4
     },
     {
       "id": "c0e6znz4",
@@ -105399,6 +105418,263 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:47:59.470Z",
       "updated": "2026-11-15T03:47:59.470Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0jt78qz",
+      "num": 6895,
+      "title": "Likely bugs are tidy errors: dead constant ranges, unconditional recursion, discarded pure results, N+1 queries and misleading loop and type shapes",
+      "body": "Destination: each likely-bug pattern below is a registered tidy error (D-NO-WARNINGS1=A, #6858): `jet check` and `jet build` list it with what/why/fix text and exit non-zero; `jet run` and `jet dev` never stop on it or print it. Each has a UI snapshot for the firing program and for the accepted fix.\n\nWhy it matters: these shapes compile today and do the wrong thing quietly.\n\nDecisions: D-NO-WARNINGS1=A, D-RANGE-BACKWARD1=A, D-DISCARD1=A, D-TUPLE-ORDER1=A, D-SQL-CLASS1=A (Query class). The two-binding pairs loop has no decision yet (owner-gates.tsv).\n\nSource: Map card #6006 (Lints), batch D05 of the 2026-10-28 consolidation.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A loop over a constant range that can never run (`10..1`, or a step pointing away from the end) is a tidy error that offers the minus step (D-RANGE-BACKWARD1=A); a computed backward range stays empty; the stride rule is in the spec. Proof: `jet test Compiler --profile ui --filter range_backward_constant`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:53.787Z"
+        },
+        {
+          "n": 2,
+          "text": "A function whose every path calls itself again with no exit is a tidy error at the call, found over call-graph cycles. Proof: `jet test Compiler --profile ui --filter unconditional_recursion`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:53.787Z"
+        },
+        {
+          "n": 3,
+          "text": "A Float binding seeded with infinity but only ever assigned Int values is a tidy error naming the Int form. Proof: `jet test Compiler --profile ui --filter float_infinity_seed_int_only`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:53.787Z"
+        },
+        {
+          "n": 4,
+          "text": "A field-less struct holding only static functions is a tidy error whose fix makes it a module, and a constructor that does not return its owner type is an error. Proof: `jet test Compiler --profile ui --filter static_only_struct` and `jet test Compiler --profile ui --filter constructor_wrong_owner`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:53.787Z"
+        },
+        {
+          "n": 5,
+          "text": "Named tuples sort by label order (D-TUPLE-ORDER1=A): S73 in Docs/spec/syntax-decisions.md says so, the List.sort and sort_desc docs say so, and an example shows label order and the sort_by spelling. Proof: `jet test Compiler --profile golden --filter Collections/NamedTupleOrder` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:53.787Z"
+        },
+        {
+          "n": 6,
+          "text": "A Query-class SQL statement run inside a loop over rows is one tidy error at the query line naming the batched form (an IN list or a join); a query outside any loop reports nothing. Proof: `jet test Compiler --profile ui --filter sql_query_in_row_loop` with its negative fixture.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:53.787Z"
+        },
+        {
+          "n": 7,
+          "text": "A two-binding loop over a list of 2-tuples (`loop (a, b) in pairs`, which binds index and tuple, not the pair) gets the treatment the owner chooses (no decision yet; owner-gates.tsv). Proof: `jet test Compiler --profile ui --filter loop_two_bindings_over_pairs`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:53.787Z"
+        },
+        {
+          "n": 8,
+          "text": "Under D-DISCARD1=A, a non-unit last line in a function with no written return type and an ignored non-unit result of a pure call are errors (L0508 re-registered as a tidy error), while unit-returning arrow-loop bodies report nothing. Proof: `jet test Compiler --profile ui --filter discarded_pure_result` and its no-fire pair.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:53.787Z"
+        },
+        {
+          "n": 9,
+          "text": "A compiler-discovered `build` function is a liveness root, so it and BuildError are never reported unused, and BuildError is excluded from the Display migration error. Proof: `jet test Compiler --profile ui --filter build_fn_liveness_root`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:53.787Z"
+        },
+        {
+          "n": 10,
+          "text": "The structural printing example (`{g:Debug}` on a struct with no hand-written display) prints the same on O0, O1 and O2 with no report, and Display interpolation, explicit Debug, manual overrides, negative derive controls and redaction keep their distinct contracts. Proof: `jet test Compiler --profile golden --filter Text/StructuralPrinting` and `jet test Compiler --profile cases --filter print_branch_tiers/`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:53.787Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "lints"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:50:53.787Z",
+      "updated": "2026-11-15T03:50:53.787Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c00gioxt",
+      "num": 6896,
+      "title": "No name silently wins: every shadowing and prelude-alias case is a tidy error with a rename fix",
+      "body": "Destination: wherever two declarations could answer to one name and one silently wins (a local over a prelude alias, an import over a local, and the rest), `jet check` lists a registered tidy error with what/why/fix text and a `jet fix` rename; Core, Examples and the compiler are clean.\n\nWhy it matters: a silent winner changes meaning without a trace.\n\nDecisions: D-NO-WARNINGS1=A (no warnings; L codes become tidy errors or fmt rewrites, #6858 c3).\n\nSource: Map card #6006 c11-c13.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every case where one name silently wins is a registered tidy error with what/why/fix text, a `jet fix` rename, and a UI snapshot per case. Proof: `jet test Compiler --profile ui --filter name_wins_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:54.793Z"
+        },
+        {
+          "n": 2,
+          "text": "The prelude-alias shadow check (formerly L0510 prelude_alias_shadow) has a real emitter as a tidy error, and its fixtures pass on O0, O1 and O2. Proof: `jet test Compiler --profile ui --filter prelude_alias_shadow`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:54.793Z"
+        },
+        {
+          "n": 3,
+          "text": "Core, Examples and the compiler have no name-wins error (each hit renamed). Proof: `jet check` over Core, Examples and Compiler reports no name-wins code.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:54.793Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "lints",
+        "names"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:50:54.793Z",
+      "updated": "2026-11-15T03:50:54.793Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0i4ehbt",
+      "num": 6897,
+      "title": "Hidden costs are visible: one fact per hidden-cost site, a tidy error for hidden copies in loops, and the per-line cost view (D-COSTLAW1=A)",
+      "body": "Destination: D-COSTLAW1=A on the self-hosted toolchain. Every hidden-cost site (implicit copy, collection clone-on-write, packed-Int fallback, per-call outcome construction) has one sema or JetIR fact row; a hidden copy, clone or representation fallback inside a loop is a tidy error naming the repair (an advisory in the decision, a tidy error under D-NO-WARNINGS1=A); and `jet explain --cost` annotates each line with its hidden allocations, copies, fallbacks and Int boxing.\n\nWhy it matters: no construct may ship an invisible super-linear cost without a matching surface.\n\nThe cost producer port itself is #6652 c2.\n\nSource: Map card #6006 c23-c24; #6312 c10-c12 (G11 mashup).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every hidden-cost site has one sema or JetIR fact row: implicit copy, collection clone-on-write, packed-Int fallback and per-call outcome construction. Proof: `jet test Compiler --profile cases --filter cost_cli_surfaces`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:55.861Z"
+        },
+        {
+          "n": 2,
+          "text": "A hidden copy, clone or representation fallback inside a loop is a tidy error listed by `jet check` and `jet build` with the repair named (never stopping `jet run` or `jet dev`), and an optimizer-proven removal reports nothing. Proof: `jet test Compiler --profile ui --filter cost_hidden_copy_in_loop` and its no-fire pair.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:55.861Z"
+        },
+        {
+          "n": 3,
+          "text": "`jet explain --cost` on the D-COSTLAW1 example (`out.push(log.lines().first())` in a loop) reports the String copy repeating per loop turn on that line. Proof: `jet test Compiler --profile golden --filter Tooling/ExplainCost`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:55.861Z"
+        },
+        {
+          "n": 4,
+          "text": "The cost view shows allocations, copies, representation fallbacks and Int boxing per line: a range-proven Int loop shows no boxing and an unbounded Int loop shows it. Proof: `jet test Compiler --profile cases --filter explain_cost_int_boxing`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:50:55.861Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "cost",
+        "explain"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:50:55.861Z",
+      "updated": "2026-11-15T03:50:55.861Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -210818,6 +211094,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:50:57.768Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0wa0sjv",
+      "note": "#10 The rerun task set predeclares paired tasks for early guard "
+    },
+    {
+      "at": "2026-11-15T03:50:56.848Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0gokkbf",
+      "note": "#4 `jet fmt` rewrites the old arm-table shapes (adds an explici"
+    },
+    {
+      "at": "2026-11-15T03:50:55.862Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0i4ehbt",
+      "note": "Hidden costs are visible: one fact per hidden-cost site, a tidy error for hidden copies in loops, and the per-line cost view (D-COSTLAW1=A)"
+    },
+    {
+      "at": "2026-11-15T03:50:54.793Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c00gioxt",
+      "note": "No name silently wins: every shadowing and prelude-alias case is a tidy error with a rename fix"
+    },
+    {
+      "at": "2026-11-15T03:50:53.787Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0jt78qz",
+      "note": "Likely bugs are tidy errors: dead constant ranges, unconditional recursion, discarded pure results, N+1 queries and misleading loop and type shapes"
+    },
     {
       "at": "2026-11-15T03:48:43.196Z",
       "by": "TowerKeeper-1",
