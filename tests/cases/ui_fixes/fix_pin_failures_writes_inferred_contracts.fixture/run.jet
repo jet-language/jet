@@ -1,0 +1,26 @@
+// No function here writes a failure contract. `greet` can't fail, `lookup`
+// fails with the cases it creates, and `show` handles every failure.
+greet: fn(name: String) -> String {
+    "hello {name}"
+}
+
+lookup: fn(book: [String:Int], name: String) -> Int {
+    if name == "" -> return Err(.Blank)
+    if book.has_key(name) -> return book[name]
+    Err(.NotFound(name.copy()))
+}
+
+show: fn(book: [String:Int], name: String) -> String {
+    if lookup(book, name) == {
+        .Ok(n) -> "found {n}"
+        .Err(e) -> "failed: {e:Debug}"
+    }
+}
+
+run: fn() {
+    book: ["ada": 36]
+    print(greet("ada"))
+    print(show(book, "ada"))
+    print(show(book, "zed"))
+    print(show(book, ""))
+}

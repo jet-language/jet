@@ -343,6 +343,20 @@ journal. Rename provenance comes from uniquely matched checked before/after
 definition facts; when those checks cannot establish a rename, the receipt
 records the exact changed byte region instead.
 
+`jet fix --pin-failures <file>` writes the failure contract the checker infers
+for each function into the file, so the inferred set becomes the written one.
+It covers the unannotated top-level functions and inherent methods the
+inference reads; a written contract, a trait method and a function the
+inference skips stay as they are. A function that can't fail gets `Never!`,
+one that can gets its failure type, such as `Err!`, `ParseError!` or
+`(ParseError | Err)!`, after its return type or before its body when it writes
+none. The error type minted from a function's `Err(.Case(…))` cases is written
+as a `#Error` enum right after the top-level declaration that holds the
+function, unless the file already declares that name. A file with errors is
+refused (E2105), as is a pinned file that would check with more errors than
+the input. `--pin-failures` takes neither `--markers` nor `--style`; a second
+run finds nothing left to pin.
+
 `fix memory` uses exercised runtime witnesses, not whole-program memory proof.
 It applies only a single repair whose original byte span still matches the
 source (or recognizes that the replacement is already present). Overlapping,

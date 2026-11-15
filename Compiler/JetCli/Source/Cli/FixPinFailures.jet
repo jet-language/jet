@@ -1,0 +1,202 @@
+// `jet fix --pin-failures`: each function whose failure contract the checker
+// infers is written with that contract, so the inferred set becomes the
+// written one. A function that cannot fail gets `Never!`; one that can gets
+// its failure type, `Err!`, a union such as `(ParseError | Err)!`, or the
+// `#Error enum` the checker minted from its `Err(.Case(…))` cases, which is
+// written right after the declaration that holds the function. Only the
+// unannotated top-level functions and inherent methods the inference reads
+// are pinned; a written contract stays as written.
+use {
+    jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverVerbOutput, jet_driver_apply_edits, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[EnumDef, Func, Span, TextEdit, TFailureCarrier, Type, VariantPayload, ast_program]
+    jet_lexer.[lex, Token, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACKET, TOKEN_RPAREN]
+    jet_parser.[jfmt_fmt_error_contract, jfmt_fmt_type, jfmt_new, jfmt_out_text, parse_source]
+    jet_sema.[sema_failure_inference_candidate]
+    jet_semindex.[semindex_function_key]
+}
+
+// `Pinned` is `None` when nothing is left to pin.
+JetCLIFixPinned: enum {
+    Pinned(applied: JetCLIFixApply?)
+    Refused(output: JetDriverVerbOutput)
+}
+
+// The checked facts the pins read: each function's failure carrier under its
+// local name (`find`, `Shape.area`), and each enum the checker added to the
+// file's module.
+JetCLIPinFacts: struct {
+    carriers: [String:TFailureCarrier]
+    minted: [String:EnumDef]
+}
+
+jet_cli_fix_pin_failures: fn(file: String, before: String, color: Bool) -> JetCLIFixPinned {
+    if jet_cli_compile_file(file, false, None, JetDriverCompileMode.Doc) == {
+        .Refused(refusal) -> JetCLIFixPinned.Refused{output: refusal}
+        .Compiled(result, _) -> {
+            if jet_cli_errors(result.diagnostics).len() > 0 {
+                return JetCLIFixPinned.Refused{output: jet_cli_report_output("", "E2105", "`{file}` does not check, so its failure contracts are not inferred", jet_cli_why("E2105"), "fix the file's errors first, then run `jet fix --pin-failures` again", color, JET_DRIVER_EXIT_USER_ERROR)}
+            }
+            if result.internal_problem == .Val(problem) -> return JetCLIFixPinned.Refused{output: jet_cli_ice(problem)}
+            facts: jet_cli_pin_facts(result.doc_modules, jet_cli_sem_normalize(file))
+            JetCLIFixPinned.Pinned{applied: jet_cli_pin_apply(before, facts)}
+        }
+    }
+}
+
+jet_cli_pin_facts: fn(modules: [JetDriverDocModule], entry: String) -> JetCLIPinFacts {
+    facts := JetCLIPinFacts{carriers: [String:TFailureCarrier]{}, minted: [String:EnumDef]{}}
+    loop doc_module in modules {
+        if jet_cli_sem_normalize(doc_module.physical_path) != entry -> next
+        loop function in doc_module.functions {
+            if function.synthetic -> next
+            key: semindex_function_key(function.key) ?? next
+            facts.carriers[key.local] = function.failure_carrier
+        }
+        loop item in doc_module.items {
+            if item == .Enum(definition) -> facts.minted[definition.name] = definition
+        }
+    }
+    facts
+}
+
+// The pins of `before`: one contract after each pinned function's return
+// type (or before its body when it writes none), and each minted enum it
+// fails with after the top-level declaration holding it. `None` when
+// nothing is pinned.
+jet_cli_pin_apply: fn(before: String, facts: JetCLIPinFacts) -> JetCLIFixApply? {
+    parsed: parse_source(before.bytes())
+    if jet_cli_errors(parsed.diagnostics).len() > 0 -> return None
+    tokens: lex(before.bytes()).tokens
+    // The types the file declares; a minted enum is written only when the
+    // file has no declaration of that name.
+    declared := [String:Bool]{}
+    loop item in parsed.program.items {
+        if item == {
+            .Struct(value) -> declared[value.name] = true
+            .Enum(value) -> declared[value.name] = true
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    edits := [TextEdit]{}
+    // The enums written after a declaration, one insertion per declaration.
+    tails := [TextEdit]{}
+    loop item in parsed.program.items {
+        if item == {
+            .Func(function) -> jet_cli_pin_function(function, function.name, function.span.end, tokens, facts, declared, edits, tails)
+            .Struct(value) -> {
+                loop method in value.methods -> jet_cli_pin_function(method, "{value.name}.{method.name}", value.span.end, tokens, facts, declared, edits, tails)
+            }
+            .Enum(value) -> {
+                loop method in value.methods -> jet_cli_pin_function(method, "{value.name}.{method.name}", value.span.end, tokens, facts, declared, edits, tails)
+            }
+            .Impl(block) -> {
+                // A trait method's contract is the trait's.
+                if block.trait_name != None -> next
+                loop method in block.methods -> jet_cli_pin_function(method, "{block.type_name}.{method.name}", block.span.end, tokens, facts, declared, edits, tails)
+            }
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    if edits.len() == 0 -> return None
+    applied: edits.len()
+    loop tail in tails -> edits.push(tail)
+    text: jet_driver_apply_edits(before, edits) ?? return None
+    Val(JetCLIFixApply{source: text, applied: applied, deferred: 0})
+}
+
+// Pin `function`, named `local` among the checked functions, whose
+// top-level declaration ends at `end`.
+jet_cli_pin_function: fn(function: Func, local: String, end: Int, tokens: [Token], facts: JetCLIPinFacts, declared: &[String:Bool], edits: &[TextEdit], tails: &[TextEdit]) {
+    if !sema_failure_inference_candidate(function) -> return
+    carrier: facts.carriers.get(local) ?? return
+    error: if carrier == {
+        .Infallible -> Type.Named{name: "Never"}
+        .Result(_, failure) -> failure
+        .Optional(_) | .Diverges(_) -> return
+    }
+    contract: jet_cli_pin_contract_text(error)
+    if function.return_type_span == {
+        .Val(written) -> edits.push(TextEdit{span: Span{start: written.end, end: written.end}, new_text: " {contract}"})
+        None -> {
+            open: jet_cli_pin_body_open(tokens, function)
+            if open < 0 -> return
+            edits.push(TextEdit{span: Span{start: open, end: open}, new_text: "{contract} "})
+        }
+    }
+    if error == {
+        .Named(name) -> jet_cli_pin_mint(name, end, facts, declared, tails)
+        .Union(members) -> {
+            loop member in members {
+                if member == .Named(name) -> jet_cli_pin_mint(name, end, facts, declared, tails)
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+}
+
+// Write the enum the checker minted as `name` after the top-level
+// declaration ending at `end`, once, unless the file declares `name`.
+jet_cli_pin_mint: fn(name: String, end: Int, facts: JetCLIPinFacts, declared: &[String:Bool], tails: &[TextEdit]) {
+    if declared.has_key(name) -> return
+    definition: facts.minted.get(name) ?? return
+    text: "\n\n{jet_cli_pin_enum_text(definition)}"
+    declared[definition.name] = true
+    merged: loop index in 0..<tails.len() {
+        if tails[index].span.start == end {
+            tails[index].new_text = "{tails[index].new_text}{text}"
+            break true
+        }
+    } ?? false
+    if !merged -> tails.push(TextEdit{span: Span{start: end, end: end}, new_text: text})
+}
+
+// Where `function`'s body opens: the first `{` after its parameter list
+// outside parentheses and brackets, or -1.
+jet_cli_pin_body_open: fn(tokens: [Token], function: Func) -> Int Never! {
+    depth := 0
+    closed := false
+    loop token in tokens {
+        if token.span.start < function.name_span.end || !jet_cli_fix_meaningful(token) -> next
+        if token.span.start >= function.span.end -> return -1
+        if {
+            token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET -> depth += 1
+            token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET -> {
+                depth -= 1
+                if depth == 0 -> closed = true
+            }
+            closed && depth == 0 && token.kind == TOKEN_LBRACE -> return token.span.start
+        }
+    }
+    -1
+}
+
+// `error` as a written contract: `Never!`, `ParseError!`, `(ParseError | Err)!`.
+jet_cli_pin_contract_text: fn(error: Type) -> String {
+    formatter := jfmt_new(ast_program(), "", [Token]{}, false)
+    jfmt_fmt_error_contract(formatter, error)
+    jfmt_out_text(formatter)
+}
+
+// A minted enum as its declaration: `#Error`, then one case per line.
+jet_cli_pin_enum_text: fn(definition: EnumDef) -> String {
+    text := "#Error\n{definition.name}: enum {{\n"
+    loop variant in definition.variants -> text = "{text}    {variant.name}{jet_cli_pin_payload_text(variant.payload)}\n"
+    "{text}}}"
+}
+
+jet_cli_pin_payload_text: fn(payload: VariantPayload) -> String {
+    if payload == {
+        .Unit -> ""
+        .Single(ty, _) -> "({jet_cli_pin_type_text(ty)})"
+        .Named(fields) -> {
+            written: loop field in fields -> "{field.name}: {jet_cli_pin_type_text(field.ty)}"
+            "({written.join(", ")})"
+        }
+    }
+}
+
+jet_cli_pin_type_text: fn(ty: Type) -> String {
+    formatter := jfmt_new(ast_program(), "", [Token]{}, false)
+    jfmt_fmt_type(formatter, ty)
+    jfmt_out_text(formatter)
+}
