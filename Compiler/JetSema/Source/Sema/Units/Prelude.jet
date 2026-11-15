@@ -41,15 +41,21 @@ sema_units_local_names: fn(items: [Item], occupied: &[String:Bool], local_famili
 // What each module's unit scan reads, built once per graph from the catalog:
 // `wanted` interns the names a source mention scan looks up
 // (sema_units_source_mentions), every catalog family name and member type
-// name, and `type_names[family][member]` is each catalog member's type name
-// (sema_registration_unit_type_name).
+// name; `members` interns every catalog member name, and `member_lengths`
+// holds their distinct byte lengths, shortest first, so a scan keeps only the
+// suffixes a member name prefixes; and `type_names[family][member]` is each
+// catalog member's type name (sema_registration_unit_type_name).
 SemaUnitsCatalogNames: struct {
     wanted: NameTable
+    members: NameTable
+    member_lengths: [Int]
     type_names: [[String]]
 }
 
 sema_units_catalog_names: fn(catalog: [UnitFamilyDef]) -> SemaUnitsCatalogNames Never! {
     wanted := name_table()
+    members_named := name_table()
+    member_lengths := [Int]{}
     type_names := [[String]]{}
     loop family in catalog {
         _ := name_intern(wanted, family.family)
@@ -57,11 +63,15 @@ sema_units_catalog_names: fn(catalog: [UnitFamilyDef]) -> SemaUnitsCatalogNames 
         loop member in family.members {
             type_name: sema_registration_unit_type_name(member.name)
             _ := name_intern(wanted, type_name)
+            _ := name_intern(members_named, member.name)
+            length: member.name.bytes().len()
+            if length > 0 && !member_lengths.contains(length) -> member_lengths.push(length)
             members.push(type_name)
         }
         type_names.push(members)
     }
-    SemaUnitsCatalogNames{wanted: wanted.move(), type_names: type_names.move()}
+    member_lengths.sort()
+    SemaUnitsCatalogNames{wanted: wanted.move(), members: members_named.move(), member_lengths: member_lengths.move(), type_names: type_names.move()}
 }
 
 // Whether `mentions` names any catalog family or member, the test
@@ -92,7 +102,7 @@ sema_units_scanned: fn(inputs: [SemaRegistrationModuleInput], index: Int, skippe
 // threads scan the sources in place, claimed largest first, and the inputs
 // move back in order. Each row lands at its input, so the rows are the same
 // for any thread count.
-sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: ModuleID, wanted: NameTable, threads: CompilerThreads) -> [SemaUnitSourceMentions] {
+sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: ModuleID, names: SemaUnitsCatalogNames, threads: CompilerThreads) -> [SemaUnitSourceMentions] {
     rows := [SemaUnitSourceMentions]{}
     jobs := [Int]{}
     weights := [Int]{}
@@ -107,13 +117,13 @@ sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: Mo
     }
     workers: compiler_threads_admit(threads, jobs.len(), work, SEMA_UNITS_SCAN_MIN_BYTES_PER_THREAD, 0, 0)
     if workers <= 1 {
-        loop index in jobs -> rows[index] = sema_units_source_mentions(inputs[index].source, wanted)
+        loop index in jobs -> rows[index] = sema_units_source_mentions(inputs[index].source, names)
         return rows
     }
     order := [Int]{}
     loop rank in compiler_threads_heaviest_first(weights) -> order.push(jobs[rank])
-    // copy: the table is catalog-sized and every scanning thread reads it.
-    shared_state: Shared{SemaUnitsScanShared{inputs: [SemaRegistrationModuleInput]{}, wanted: [NameTable]{wanted.copy()}, order: order.move()}}
+    // copy: the names are catalog-sized and every scanning thread reads them.
+    shared_state: Shared{SemaUnitsScanShared{inputs: [SemaRegistrationModuleInput]{}, names: [SemaUnitsCatalogNames]{names.copy()}, order: order.move()}}
     sema_units_scan_fill(shared_state, inputs)
     queue: Shared{SemaUnitsScanQueue{next: 0}}
     sema_units_scanners(shared_state, queue, 0, workers, rows)
@@ -122,11 +132,11 @@ sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: Mo
 }
 
 // What every scanning thread reads: the inputs (moved in and back out; each
-// source is read in place), the wanted names (the one row of its list) and
+// source is read in place), the catalog names (the one row of its list) and
 // the input index claimed at each rank.
 SemaUnitsScanShared: struct {
     inputs: [SemaRegistrationModuleInput]
-    wanted: [NameTable]
+    names: [SemaUnitsCatalogNames]
     order: [Int]
 }
 
@@ -175,7 +185,7 @@ sema_units_scan_claimed: fn(shared_state: Shared<SemaUnitsScanShared>, queue: Sh
         if rank >= inputs.value.order.len() -> break
         module_index: inputs.value.order[rank]
         // Passed straight through: a local binding of a guarded row would copy it.
-        mentions := sema_units_source_mentions(inputs.value.inputs[module_index].source, inputs.value.wanted[0])
+        mentions := sema_units_source_mentions(inputs.value.inputs[module_index].source, inputs.value.names[0])
         claimed.push(SemaUnitsScanned{module_index: module_index, mentions: mentions.move()})
     }
     claimed
