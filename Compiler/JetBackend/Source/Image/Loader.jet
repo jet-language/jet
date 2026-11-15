@@ -21,7 +21,8 @@
 //    switches to the new stack and jumps to the image's entry. In process
 //    (x64_image_exec) it needs a single-threaded jet; after a fork
 //    (x64_image_spawn) the child runs only the executor, never Jet code, so
-//    no lock another jet thread held at the fork matters.
+//    no lock another jet thread held at the fork matters. The fork copies
+//    only the image and the plan's pages (loader_fork), not jet's heap.
 //
 // Every failure before the executor runs returns its reason; the caller then
 // writes the same image to a file and executes it (x64_file_exec): when
@@ -1333,13 +1334,42 @@ x64_image_spawn: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int]) -> X64
         loader_free(plan)
         return X64Spawned{pid: -1, failure: confined}
     }
-    pid := 0
-    #Unsafe("the executor's first record forks; the child runs only the executor and enters the image, the parent returns here") {
-        pid = os_call_address(plan.executor, plan.plan)
-    }
+    pid: loader_fork(plan)
     loader_free(plan)
     if os_failed(pid) -> return X64Spawned{pid: -1, failure: "fork failed (errno {-pid})"}
     X64Spawned{pid: pid, failure: ""}
+}
+
+// The image forks this process has made. Its guard keeps one fork's window
+// open at a time (loader_fork): another spawn's plan pages lie in this
+// one's unmapped ranges, and its fork inside the window would leave them out.
+LOADER_FORKS: Shared{0}
+
+// Run the forking `plan` with every mapping its munmap records name -- all
+// this process holds but the image and the plan's own pages -- left out of
+// the child (MADV_DONTFORK), which would unmap them first thing anyway: the
+// fork copies none of the compiler heap's page tables, and this process
+// takes no copy-on-write fault writing its heap afterwards. Right after the
+// fork those mappings are copied by forks again (MADV_DOFORK). madvise over
+// a range with holes marks every mapping there and reports ENOMEM, which is
+// no failure here. The executor's result: the child's pid, or -errno.
+loader_fork: fn(plan: LoaderPlan) -> Int {
+    guard := LOADER_FORKS.guard_edit()
+    guard.value += 1
+    pid := 0
+    #Unsafe("the record block holds its count, then that many records of eight words; madvise only marks whether a fork copies the mappings the child unmaps; the executor's first record forks, and the child runs only the executor and enters the image, whose pages and the plan's it keeps") {
+        count: os_load_word(plan.plan)
+        loop k in 0..<count {
+            record: plan.plan + 8 + k * 64
+            if os_load_word(record) == OS_SYS_MUNMAP -> _ := os_syscall(OS_SYS_MADVISE, os_load_word(record + 8), os_load_word(record + 16), OS_MADV_DONTFORK, 0, 0, 0)
+        }
+        pid = os_call_address(plan.executor, plan.plan)
+        loop k in 0..<count {
+            record: plan.plan + 8 + k * 64
+            if os_load_word(record) == OS_SYS_MUNMAP -> _ := os_syscall(OS_SYS_MADVISE, os_load_word(record + 8), os_load_word(record + 16), OS_MADV_DOFORK, 0, 0, 0)
+        }
+    }
+    pid
 }
 
 // Landlock's file-system access rights (`LANDLOCK_ACCESS_FS_*`) a read
