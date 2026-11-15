@@ -1,0 +1,301 @@
+// `app.caller()` is the signed-in account, so a path that reaches it must
+// start where one is certain: at an `#App.SignedIn` method, or inside
+// `app.as_caller`'s run. Every other path is E2815, named from where it
+// starts: an `#App.Public` method, a webhook or its signing-key method, any
+// function nothing in the program calls (the entry, a test, a handler passed
+// as a value), and a `task` spawned where a caller is certain, since a
+// spawned task acts for no account.
+use jet_foundation.[
+    Diagnostic,
+    FnBody,
+    NodeKind,
+    Span,
+    SymbolID,
+    SymbolKind,
+    body_each_expr_child,
+    body_each_stmt_child,
+    body_node,
+    diagnostic_registry_row,
+    module_is_core,
+    module_text,
+    symbol_find,
+    symbol_is_local,
+    symbol_key,
+    symbol_key_text,
+    Type,
+    type_name,
+]
+
+// A checked function outside Core: its symbol and where its body is.
+SemaAppCallerFunction: struct {
+    symbol: U32
+    module_index: Int
+    function_index: Int
+}
+
+// What the walk reads beside the graph and the checked modules: the
+// functions outside Core, each one's row by symbol, the `#App.SignedIn`
+// methods, and the symbols of `app.caller` and `app.as_caller`.
+SemaAppCallerProgram: struct {
+    functions: [SemaAppCallerFunction]
+    rows: [U32:Int]
+    signed_in: [U32:Bool]
+    caller: U32
+    as_caller: U32
+}
+
+// Whether the walk is where a caller is certain: inside an `#App.SignedIn`
+// method or `app.as_caller`'s run.
+SemaAppCallerAccount: enum {
+    Uncertain
+    Certain
+}
+
+// What a walk has seen: the functions it walked (each once over all roots
+// where a caller is uncertain, and once where it is certain, so a reached
+// `app.caller()` is reported once, from the first root that reaches it),
+// where the path it is on starts, the path from there to the function it is
+// in, and the reports.
+SemaAppCallerWalk: struct {
+    visited: [U32:Bool]
+    certain_visited: [U32:Bool]
+    root: String
+    path: [String]
+    reports: [SemaAppCallerReport]
+}
+
+SemaAppCallerReport: struct {
+    module_index: Int
+    diagnostic: Diagnostic
+}
+
+// The E2815 reports of the program. A program outside Core that never
+// calls `app.caller` walks nothing.
+sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
+    app_module: loop module_row in graph.modules {
+        if module_is_core(module_row.module_identity) && module_row.module_name == SEMA_APP_MARKER_MODULE {
+            break module_row.module_identity
+        }
+    } ?? return [Diagnostic]{}
+    app_text: module_text(graph.module_table, app_module)
+    caller: symbol_find(graph.symbols, symbol_key_text(SymbolKind.Function, app_text, "", "caller")) ?? return [Diagnostic]{}
+    as_caller: symbol_find(graph.symbols, symbol_key_text(SymbolKind.Function, app_text, "", "as_caller")) ?? return [Diagnostic]{}
+    called_anywhere: loop module_row in modules {
+        if module_is_core(module_row.module_identity) -> next
+        found: loop fact in module_row.call_facts {
+            if fact.callee == .Val(callee) && callee.id == caller.id {
+                break true
+            }
+        } ?? false
+        if found {
+            break true
+        }
+    } ?? false
+    if !called_anywhere -> return [Diagnostic]{}
+    program := SemaAppCallerProgram{functions: [SemaAppCallerFunction]{}, rows: [U32:Int]{}, signed_in: [U32:Bool]{}, caller: caller.id, as_caller: as_caller.id}
+    loop module_index in 0..<modules.len() {
+        if module_is_core(modules[module_index].module_identity) -> next
+        loop function_index in 0..<modules[module_index].functions.len() {
+            symbol: symbol_find(graph.symbols, modules[module_index].functions[function_index].key) ?? next
+            program.rows[symbol.id] = program.functions.len()
+            program.functions.push(SemaAppCallerFunction{symbol: symbol.id, module_index: module_index, function_index: function_index})
+        }
+    }
+    // The marked methods: a public one, a webhook and a signing key each
+    // start a path, before the others, so a report names the marked method
+    // its path starts at; a signed-in one has its caller, so only a task it
+    // spawns starts one.
+    signed_in := [Int]{}
+    marked := [Int]{}
+    loop module_row in graph.modules {
+        if module_is_core(module_row.module_identity) -> next
+        loop nominal in module_row.nominals {
+            loop method in nominal.methods {
+                loop marker in method.declaration.markers {
+                    row: program.rows.get(method.symbol.id.id) ?? next
+                    access: sema_app_endpoint_access(marker, graph, module_row.module_identity)
+                    if {
+                        (access ?? "") == "SignedIn" -> {
+                            program.signed_in[method.symbol.id.id] = true
+                            signed_in.push(row)
+                        }
+                        access != None || sema_app_marker_is(marker, SEMA_APP_WEBHOOK_MARKER, graph, module_row.module_identity) || sema_app_marker_is(marker, SEMA_APP_SIGNING_KEY_MARKER, graph, module_row.module_identity) -> {
+                            marked.push(row)
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        }
+    }
+    called := [U32:Bool]{}
+    loop entry in program.functions {
+        sema_app_caller_collect_calls(graph, program, modules[entry.module_index].functions[entry.function_index], called)
+    }
+    walk := SemaAppCallerWalk{visited: [U32:Bool]{}, certain_visited: [U32:Bool]{}, root: "", path: [String]{}, reports: [SemaAppCallerReport]{}}
+    loop row in marked {
+        sema_app_caller_root(graph, modules, program, row, SemaAppCallerAccount.Uncertain, walk)
+    }
+    loop row in signed_in {
+        sema_app_caller_root(graph, modules, program, row, SemaAppCallerAccount.Certain, walk)
+    }
+    loop row in 0..<program.functions.len() {
+        symbol: program.functions[row].symbol
+        if called.get(symbol) != None || program.signed_in.get(symbol) != None -> next
+        sema_app_caller_root(graph, modules, program, row, SemaAppCallerAccount.Uncertain, walk)
+    }
+    diagnostics := [Diagnostic]{}
+    loop report in walk.reports.move() {
+        start: diagnostics.len()
+        diagnostics.push(report.diagnostic)
+        registration: sema_registration_module_index(graph, modules[report.module_index].module_identity) ?? next
+        sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[registration].source_segments)
+    }
+    diagnostics
+}
+
+// The run-wide symbol of the function a node calls directly, or names as a
+// value; None for any other node.
+sema_app_caller_callee: fn(graph: SemaRegistrationGraph, function: FnBody, kind: NodeKind) -> U32? Never! {
+    if kind == .Call(callee, _, _) -> return Val(graph.decls.rows[callee.row].symbol.id)
+    if kind == .MethodCall(_, method, _, _) {
+        return sema_app_caller_symbol(graph, function, method.symbol)
+    }
+    if kind == .StaticCall(_, _, method, _, _) {
+        return sema_app_caller_symbol(graph, function, method.symbol)
+    }
+    if kind == .FnValue(value) {
+        if value == .NamedFn(named, _) {
+            if named == .Val(callee) -> return Val(graph.decls.rows[callee.row].symbol.id)
+        }
+    }
+    None
+}
+
+// A method's run-wide symbol: a body-local one is found by its key.
+sema_app_caller_symbol: fn(graph: SemaRegistrationGraph, function: FnBody, symbol: SymbolID) -> U32? Never! {
+    if !symbol_is_local(symbol) -> return Val(symbol.id)
+    found: symbol_find(graph.symbols, symbol_key(graph.symbols, function.tree.symbols, symbol)) ?? return None
+    Val(found.id)
+}
+
+// The name a path shows for `function`: `Owner.name` for a method and
+// `test "name"` for a `#Test` block's function.
+sema_app_caller_name: fn(function: FnBody) -> String Never! {
+    if function.kind == {
+        .Method(_, owner) | .TraitMethod(_, _, owner, _, _) -> {
+            return "{type_name(owner)}.{function.name}"
+        }
+        .TopLevel -> {}
+    }
+    if function.synthetic && function.name.cut_last("test::") == .Val(test) {
+        if test.after.cut_last("@") == .Val(named) -> return "test \"{named.before}\""
+    }
+    "{function.name}"
+}
+
+// Adds each function outside Core that `function` calls or names to
+// `called`.
+sema_app_caller_collect_calls: fn(graph: SemaRegistrationGraph, program: SemaAppCallerProgram, function: FnBody, called: &[U32:Bool]) Never! {
+    loop statement in function.body {
+        body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_app_caller_collect_expr(graph, program, function, expression, called) })
+    }
+}
+
+sema_app_caller_collect_expr: fn(graph: SemaRegistrationGraph, program: SemaAppCallerProgram, function: FnBody, expression: Int, called: &[U32:Bool]) Never! {
+    node: body_node(function.tree, expression)
+    if sema_app_caller_callee(graph, function, node.kind) == .Val(symbol) && program.rows.get(symbol) != None {
+        called[symbol] = true
+    }
+    body_each_expr_child(function.tree, node, fn(child: Int) { sema_app_caller_collect_expr(graph, program, function, child, called) })
+}
+
+// Walks a root: one where a caller is certain (a signed-in method) only for
+// the tasks it spawns, any other as where a path starts.
+sema_app_caller_root: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, row: Int, account: SemaAppCallerAccount, walk: &SemaAppCallerWalk) Never! {
+    entry: program.functions[row]
+    walk.root = "`{sema_app_caller_name(modules[entry.module_index].functions[entry.function_index])}`"
+    sema_app_caller_function(graph, modules, program, row, account, walk)
+}
+
+// Walks function `row`'s body once for each `account`, as the next step of
+// the walk's path.
+sema_app_caller_function: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, row: Int, account: SemaAppCallerAccount, walk: &SemaAppCallerWalk) Never! {
+    entry: program.functions[row]
+    if account == {
+        .Certain -> {
+            if walk.certain_visited.get(entry.symbol) != None {
+                return
+            }
+            walk.certain_visited[entry.symbol] = true
+        }
+        .Uncertain -> {
+            if walk.visited.get(entry.symbol) != None {
+                return
+            }
+            walk.visited[entry.symbol] = true
+        }
+    }
+    function: modules[entry.module_index].functions[entry.function_index]
+    walk.path.push(sema_app_caller_name(function))
+    loop statement in function.body {
+        sema_app_caller_statement(graph, modules, program, entry.module_index, function, statement, account, walk)
+    }
+    _: walk.path.pop()
+}
+
+// One statement of a walked body. Its own function so the visitor closure
+// is the last use of the `walk` write parameter (as in PureRoot.jet).
+sema_app_caller_statement: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, module_index: Int, function: FnBody, statement: Int, account: SemaAppCallerAccount, walk: &SemaAppCallerWalk) Never! {
+    body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_app_caller_expr(graph, modules, program, module_index, function, expression, account, walk) })
+}
+
+// Where a caller is uncertain, a call to `app.caller` reports the path and
+// `app.as_caller`'s run is walked as certain. Where it is certain, a spawned
+// `task` starts a path, since it acts for no account. A call into another
+// function outside Core walks it, and a signed-in method as certain however
+// it is reached; a lambda's body is walked where it is written.
+sema_app_caller_expr: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, module_index: Int, function: FnBody, expression: Int, account: SemaAppCallerAccount, walk: &SemaAppCallerWalk) Never! {
+    node: body_node(function.tree, expression)
+    callee: sema_app_caller_callee(graph, function, node.kind) ?? U32{0}
+    certain: account == .Certain
+    if callee == program.caller {
+        if certain {
+            return
+        }
+        walk.reports.push(SemaAppCallerReport{module_index: module_index, diagnostic: sema_app_caller_report(walk.root, walk.path, node.span)})
+        return
+    }
+    if certain && sema_app_caller_spawns(node.kind) {
+        sema_app_caller_spawn(graph, modules, program, module_index, function, expression, walk)
+        return
+    }
+    inner: if certain || callee == program.as_caller -> SemaAppCallerAccount.Certain else -> SemaAppCallerAccount.Uncertain
+    if program.rows.get(callee) == .Val(row) {
+        reached: if program.signed_in.get(callee) != None -> SemaAppCallerAccount.Certain else -> inner
+        sema_app_caller_function(graph, modules, program, row, reached, walk)
+    }
+    body_each_expr_child(function.tree, node, fn(child: Int) { sema_app_caller_expr(graph, modules, program, module_index, function, child, inner, walk) })
+}
+
+// Whether a node spawns a `task`.
+sema_app_caller_spawns: fn(kind: NodeKind) -> Bool Never! {
+    if kind == .CoreClosureCall(closure) -> return closure == .Spawn(_, _, _, _)
+    false
+}
+
+// A `task` spawned where a caller is certain: its body starts a path.
+sema_app_caller_spawn: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, module_index: Int, function: FnBody, expression: Int, walk: &SemaAppCallerWalk) Never! {
+    outer: "{walk.root}"
+    walk.root = "a `task` spawned in `{sema_app_caller_name(function)}`"
+    walk.path.push("task")
+    body_each_expr_child(function.tree, body_node(function.tree, expression), fn(child: Int) { sema_app_caller_expr(graph, modules, program, module_index, function, child, SemaAppCallerAccount.Uncertain, walk) })
+    _: walk.path.pop()
+    walk.root = outer
+}
+
+sema_app_caller_report: fn(root: String, path: [String], span: Span) -> Diagnostic {
+    entry: diagnostic_registry_row("E2815") ?? panic("E2815 must have a registry row")
+    steps: "{path.join(" → ")} → app.caller()"
+    sema_error("E2815", span, entry.what.replace("{{root}}", root), entry.why.replace("{{path}}", steps), entry.fix)
+}

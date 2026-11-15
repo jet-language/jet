@@ -593,6 +593,12 @@ maybe_caller: fn() -> String? Never! {
     None
 }
 
+// The account this task acts for, where a caller is certain: the compiler
+// accepts a call only on a path that starts at an `#App.SignedIn` method or
+// inside `as_caller`. A path the compiler can't follow (a function value
+// another task runs) that reaches it acting for no account stops here.
+caller: fn() -> String Never! { maybe_caller() ?? panic("app.caller() ran acting for no account") }
+
 priv acting_within: fn<R>(acting: Acting?, run: fn() -> R Never!) -> R Never! {
     me: tasks.current_task()
     acting_begin(me, acting)
@@ -671,6 +677,7 @@ priv(package) callers: module {
     assert_eq(maybe_caller(), String?{None})
     as_caller("ben", fn() {
         assert_eq(maybe_caller(), Val("ben"))
+        assert_eq(caller(), "ben")
         assert(!callers.system())
     })
     assert_eq(maybe_caller(), String?{None})

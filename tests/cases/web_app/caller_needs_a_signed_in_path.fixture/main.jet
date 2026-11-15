@@ -1,0 +1,26 @@
+// A Crew whose signed-in `mine` reads its caller through a helper and whose
+// public `whoever` reads the optional form; a test reads the caller inside
+// `app.as_caller`. Every path to `app.caller()` starts where a caller is
+// certain, so the program checks.
+use {
+    app
+    web: core.web
+}
+
+Crew: struct {
+    #App.SignedIn mine: fn(self) -> String { owner_name() }
+
+    #App.Public whoever: fn(self) -> String { app.maybe_caller() ?? "anyone" }
+}
+
+// Reached from the signed-in `mine` and from inside `app.as_caller`.
+owner_name: fn() -> String {
+    who: app.caller()
+    "owner {who}"
+}
+
+run: fn() { _: web.app().mount(Crew{}) }
+
+#Test("a test reads its caller inside as_caller") {
+    assert_eq(app.as_caller("ben", fn() { owner_name() }), "owner ben")
+}

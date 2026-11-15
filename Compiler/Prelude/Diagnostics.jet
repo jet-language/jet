@@ -22398,6 +22398,33 @@ WebhookKeyNotSigningKey: struct {
     }
 }
 
+CallerWithoutSignedInPath: struct {
+    root: String
+    path: String
+
+    impl Diagnostic {
+        code: "E2815"
+        safety_class: .Soundness
+        safety_reason: "`app.caller()` is the signed-in account; on a path where no one signed in there is no account to give, so a run would stop instead of answering."
+        expert_path: "none: `app.maybe_caller()` is the form for a path that may act for no account"
+        stage: [.Compile]
+        meaning: "`app.caller()` on a path that does not start at an `#App.SignedIn` method or inside `app.as_caller`"
+        detail: true
+
+        what: fn(self) -> String {
+            "`app.caller()` is reached from {self.root}, which acts for no signed-in account."
+        }
+
+        why: fn(self) -> String {
+            "`app.caller()` gives the signed-in account, so it is accepted only on a path that starts at an `#App.SignedIn` method or inside `app.as_caller`; an `#App.Public` method, a webhook, a job, a schedule, a spawned task and the program's own entry act for no account. The path: {self.path}."
+        }
+
+        fix: fn(self) -> String {
+            "Read `app.maybe_caller()` and handle `None`, mark the method that starts the path `#App.SignedIn`, or in a test run the call inside `app.as_caller(account, …)`."
+        }
+    }
+}
+
 UnmountedHttpRoutes: struct {
     method: String
     type: String

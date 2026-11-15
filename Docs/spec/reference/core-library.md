@@ -5480,6 +5480,7 @@ tasks never read or change the process registry. The module source is
 | `as_caller<R>(account: String, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
 | `as_system<R>(run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for the server itself, which no row policy limits, as a job or a schedule does. |
 | `maybe_caller() -> String?` | account | The account this task acts for: `None` for the system or no one. |
+| `caller() -> String` | account | The signed-in account this task acts for. Accepted only on a path that starts at an `#App.SignedIn` method or inside `as_caller`; see below. |
 
 A source must be a named function, not a closure: its module path and name
 identify it on the wire. It may read the database, fetch over `Net` and wait
@@ -5522,6 +5523,19 @@ guarded `core.db` table asks its row policy as that caller. A binding keeps
 the caller of the task that made it and runs its source as that caller
 whoever reads it, and the caller is part of the binding's identity, so two
 callers' bindings of one source and argument list never share a result.
+
+`caller()` is the signed-in account, for code that only a signed-in caller
+reaches. The compiler follows each call path that reaches it from where the
+path starts and accepts it only when that start has a caller: an
+`#App.SignedIn` method, or the run of `as_caller` (as in a test). A path
+that starts at an `#App.Public` method, a webhook or its signing-key method,
+a `task` spawned where a caller was certain, or a function nothing in the
+program calls (the program's entry and what it schedules, a test outside
+`as_caller`, a handler passed as a value) is E2815
+(`jet.CallerWithoutSignedInPath`) at the call, and the report names the
+path. `maybe_caller()` is the form for such code. A function value that
+another task runs is a path the compiler cannot follow: a `caller()` that
+runs there acting for no account stops the task.
 
 `Remote<S>` is the client of a service `S`. It offers only the methods of `S`
 that `#App.SignedIn` (a signed-in caller) or `#App.Public` (any caller)
