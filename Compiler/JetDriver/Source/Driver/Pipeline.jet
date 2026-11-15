@@ -22,6 +22,7 @@ use {
         SemaFunctionMemoryPlan,
         SemaGraphTrail,
         SemaGraphModuleResult,
+        SemaCheckedFacts,
         SemaTotalityRow,
         SemaGraphResult,
         SemaCheckedMemoryFacts,
@@ -122,7 +123,7 @@ use {
         sema_registration_module_index,
         sema_registration_original_error_module,
         sema_registration_prepare_graph,
-        sema_graph_module_release_checked_facts,
+        sema_graph_modules_take_checked_facts,
         sema_registration_settle_modules,
         sema_unsafe_path_within,
         SEMA_PRELUDE_ERROR_SOURCE_PATH,
@@ -5704,14 +5705,22 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     checked_row := 0
     failed_stage := JetDriverStage?{None}
     runtime_semantic_modules := [SemaGraphModuleResult]{}
+    // Nothing past sema reads the modules' call, name and copy facts: they
+    // move out before the runtime copies below and, when the build releases
+    // its state aside, drop off this thread (jet_driver_release_facts_aside)
+    // while lowering and the IR build go on.
+    aside_functions := 0
+    if request.release_state_aside {
+        loop graph_module in checked_graph.modules -> aside_functions += graph_module.functions.len()
+    }
+    released_facts: sema_graph_modules_take_checked_facts(checked_graph.modules)
+    jet_driver_release_facts_aside(aside_functions, released_facts)
     loop graph_module_index in 0..<checked_graph.modules.len() {
         module_functions := [FnBody]{}
         compiler_transfer_rows<FnBody>(module_functions, checked_graph.modules[graph_module_index].functions)
-        // The module carries no functions now, and nothing past sema reads
-        // its call, name and copy facts, so the runtime copy below holds only
-        // its declarations and foreign rows, and the facts free here, before
-        // the IR build.
-        sema_graph_module_release_checked_facts(checked_graph.modules[graph_module_index])
+        // The module carries no functions now, nor the facts only sema reads,
+        // so the runtime copy below holds only its declarations and foreign
+        // rows.
         graph_module: checked_graph.modules[graph_module_index]
         // The module's row of registered key sets (-1: it registered none).
         module_keys := -1
@@ -6013,6 +6022,17 @@ jet_driver_release_aside: fn(checked: Int, state: &&JetDriverHeldState) {
     held: state.move()
     if checked < JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS -> return
     released: task &&held { held.functions.len() }
+    released.detach()
+}
+
+// Drops `facts` on a detached task, as jet_driver_release_aside drops a
+// compile's state, so lowering runs while they drop instead of after. Facts
+// drop here when fewer than JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS checked
+// functions (`checked`: 0 when the build holds its state) produced them.
+jet_driver_release_facts_aside: fn(checked: Int, facts: &&[SemaCheckedFacts]) {
+    held: facts.move()
+    if checked < JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS -> return
+    released: task &&held { held.len() }
     released.detach()
 }
 

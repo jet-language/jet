@@ -340,23 +340,65 @@ SemaGraphModuleResult: struct {
     core_bodies: [SemaCoreBody]{[SemaCoreBody]{}}
 }
 
-// Drops the facts of a checked module that only sema's whole-program passes
-// read: its call, name and copy facts, compute and failure facts, comptime
-// sites and registration impl, export and import rows. Past sema a module is
-// read only for its identity, declarations, constants, tests, injected keys
-// and foreign rows, so a driver frees the rest before it copies the module on
-// to the IR build. The nominals stay, with the positions that index them.
-sema_graph_module_release_checked_facts: fn(graph_module: &SemaGraphModuleResult) {
-    graph_module.name_references = [SemaNameReferenceFact]{}
-    graph_module.call_facts = [SemaCallSiteFact]{}
-    graph_module.comptime_requests = [SemaComptimeRequest]{}
-    graph_module.comptime_body_sources = [SemaComptimeBodySource]{}
-    graph_module.compute_facts = [SemaComputeFunctionFacts]{}
-    graph_module.copy_events = [SemaCopyEvent]{}
-    graph_module.failure_facts = [SemaFunctionFailureFacts]{}
-    graph_module.impls = [SemaRegistrationImpl]{}
-    graph_module.exports = [SemaRegistrationExport]{}
-    graph_module.imports = [SemaRegistrationImport]{}
+// The facts of a checked module that only sema's whole-program passes read:
+// its call, name and copy facts, compute and failure facts, comptime sites
+// and registration impl, export and import rows
+// (sema_graph_modules_take_checked_facts).
+SemaCheckedFacts: struct {
+    name_references: [SemaNameReferenceFact]
+    call_facts: [SemaCallSiteFact]
+    comptime_requests: [SemaComptimeRequest]
+    comptime_body_sources: [SemaComptimeBodySource]
+    compute_facts: [SemaComputeFunctionFacts]
+    copy_events: [SemaCopyEvent]
+    failure_facts: [SemaFunctionFailureFacts]
+    impls: [SemaRegistrationImpl]
+    exports: [SemaRegistrationExport]
+    imports: [SemaRegistrationImport]
+}
+
+// Moves the SemaCheckedFacts out of every module of `modules`, one row per
+// module. Past sema a module is read only for its identity, declarations,
+// constants, tests, injected keys and foreign rows, so a driver takes the
+// rest before it copies the modules on to the IR build, and drops them off
+// its own thread. The nominals stay, with the positions that index them. The
+// modules pop off whole and go back in order, so no fact moves one at a time
+// and none drops here.
+sema_graph_modules_take_checked_facts: fn(modules: &[SemaGraphModuleResult]) -> [SemaCheckedFacts] Never! {
+    taken := [SemaCheckedFacts]{}
+    kept := [SemaGraphModuleResult]{}
+    loop modules.len() > 0 {
+        graph_module := modules.pop() ?? panic("a nonempty checked module list failed to pop")
+        taken.push(SemaCheckedFacts{
+            name_references: graph_module.name_references.move(),
+            call_facts: graph_module.call_facts.move(),
+            comptime_requests: graph_module.comptime_requests.move(),
+            comptime_body_sources: graph_module.comptime_body_sources.move(),
+            compute_facts: graph_module.compute_facts.move(),
+            copy_events: graph_module.copy_events.move(),
+            failure_facts: graph_module.failure_facts.move(),
+            impls: graph_module.impls.move(),
+            exports: graph_module.exports.move(),
+            imports: graph_module.imports.move(),
+        })
+        graph_module.name_references = [SemaNameReferenceFact]{}
+        graph_module.call_facts = [SemaCallSiteFact]{}
+        graph_module.comptime_requests = [SemaComptimeRequest]{}
+        graph_module.comptime_body_sources = [SemaComptimeBodySource]{}
+        graph_module.compute_facts = [SemaComputeFunctionFacts]{}
+        graph_module.copy_events = [SemaCopyEvent]{}
+        graph_module.failure_facts = [SemaFunctionFailureFacts]{}
+        graph_module.impls = [SemaRegistrationImpl]{}
+        graph_module.exports = [SemaRegistrationExport]{}
+        graph_module.imports = [SemaRegistrationImport]{}
+        kept.push(graph_module)
+    }
+    loop kept.len() > 0 {
+        graph_module: kept.pop() ?? panic("a nonempty kept module list failed to pop")
+        modules.push(graph_module)
+    }
+    taken.reverse()
+    taken
 }
 
 // #3708: what one checked function body propagates: the keys of the declared
