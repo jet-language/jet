@@ -111,6 +111,7 @@ Each file is named here so documentation review cannot silently omit a new examp
 - `AppTypedArgs.jet`
 - `BrowserSurface.jet`
 - `FormsTable.jet`
+- `JokesAPI.jet`
 - `QueryLifecycle.jet`
 - `StateSurface.jet`
 - `StorageLocalSession.jet`
