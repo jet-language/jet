@@ -290,7 +290,8 @@ ir_priority_queue_pop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: 
 // a scratch buffer of the same length, swapping roles each pass); a merge
 // takes the right run's element only when it orders strictly before the left
 // run's (strictly after it for sort_desc), so equal elements keep their input
-// order. Elements move as bytes; nothing is cloned or dropped. A Float list
+// order. Elements move as bytes, each by one CopyBytes of the stride (inline
+// moves, no runtime call); nothing is cloned or dropped. A Float list
 // (kind "float") orders by ir_float_total_key, f64::total_cmp's order.
 // priority_queue.key_sort (`keyed`) sorts a queue header into pop order: the
 // right run's element goes first only when its `before` (the order word)
@@ -371,11 +372,11 @@ ir_list_sort_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, l
     slot_at: ir_element_address(m, a, target, k, stride)
     ir_open_if(a.f, take_right, a.line)
     right_from: ir_element_address(m, a, source, right_index, stride)
-    _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{slot_at, right_from, stride_word}, -1)
+    ir_emit(a.f, IROp.CopyBytes, -1, slot_at, right_from, stride, a.line)
     ir_emit(a.f, IROp.Add, right_index, right_index, one, IR_OVERFLOW_WRAP, a.line)
     ir_else(a.f, a.line)
     left_from: ir_element_address(m, a, source, left_index, stride)
-    _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{slot_at, left_from, stride_word}, -1)
+    ir_emit(a.f, IROp.CopyBytes, -1, slot_at, left_from, stride, a.line)
     ir_emit(a.f, IROp.Add, left_index, left_index, one, IR_OVERFLOW_WRAP, a.line)
     ir_end(a.f, a.line)
     ir_emit(a.f, IROp.Add, k, k, one, IR_OVERFLOW_WRAP, a.line)
