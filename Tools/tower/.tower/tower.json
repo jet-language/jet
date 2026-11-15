@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6844,
-    "rev": 102578,
+    "rev": 102582,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26091,6 +26091,11 @@
       "assignee": "Main",
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Main 2026-11-14: ballot D-IFHOLE2 filed (draft GoalsA-1-3, adversarial review IfholeReview-1, validator clean). Recommends A. Recount: 16,351 holeless tables in 2,724 files, 5,983 of them with a call in the header. c6 and the missing-hole part of c14 wait on it. Hole tables landed in stack135 (4010511a89, ed0fefd0d6, 0216146c95, 37707476ff)."
+        },
+        {
           "at": "2026-11-14",
           "by": "Main",
           "text": "Main, 2026-11-14: the parser and formatter slice (c3/c4/c5, hole tables additive, holeless tables unchanged) is queued as GoalsA-1-3-ifhole-parse for the stack after 134. The c6/c14 removal is held on a conflict between two ratified rulings: D-IFHOLE1=A (2026-09-11) says every dispatch header holds exactly one '_' hole, with old distributed headers removed in one cutover; D-IF3 (2026-10-01, spec S68) keeps the holeless canonical form 'if subject == { ... }'. Main files the owner ballot: (a) keep both forms, or (b) remove the holeless form and migrate every table to 'subject == _'. c6/c14 wait on it; the rest proceeds."
@@ -26249,6 +26254,24 @@
           "verifiedBy": null,
           "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: d7e52660dd (G6Meta-3067guards): case control_and_data/guarded_dispatch_tables_check_coverage_in_sema 1/0, ui guarded_arm_covers_no_case 1/0, run NestedPayloadSafety 3/0.",
           "at": "2026-11-14T01:17:53.800Z"
+        },
+        {
+          "n": 24,
+          "text": "The hole table's read count matches the ruling D-IFHOLE2 ratifies. Today the landed parser (4010511a89) maps `subject OP _` onto the comparison table, so `fetch() == _` reads its subject once, while D-IFHOLE1 says the header runs again for each arm tried. Proof: a case whose header call prints once per read, run on O0/O1/O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T00:09:12.242Z"
+        },
+        {
+          "n": 25,
+          "text": "If D-IFHOLE2 ratifies A: E0948's fix text no longer says 'write `subject == _`', and refusing `subject OP _` has its own registered code with what/why/fix and a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T00:09:13.308Z"
         }
       ],
       "refs": [
@@ -26271,13 +26294,13 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-11T12:59:34.979Z",
-      "updated": "2026-11-14T23:29:20.738Z",
+      "updated": "2026-11-15T00:09:14.389Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-14T23:29:20.738Z",
+      "claimedAt": "2026-11-15T00:09:14.389Z",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 23
+      "criteriaLastN": 25
     },
     {
       "id": "c0uasubv",
@@ -201876,6 +201899,227 @@
           "path": "Docs/audits/2026-11-14-memory-chokepoint-review.md"
         }
       ]
+    },
+    {
+      "id": "D-IFHOLE2",
+      "cardId": "c0p39lw2",
+      "group": "syntax",
+      "title": "Keep the plain table header for comparing one value, or require a hole in every table?",
+      "situation": "A decision table is an `if` that tries its arms in order and runs the first one that fits. The plain header `if light == { .Red -> 30 }` compares one value with each arm. The hole header `if n % _ == 0 { 3 -> \"Fizz\" }` is built and waiting to land; it drops each arm's value into the `_`. On 2026-09-11 you ruled that every table needs a `_` and that the plain header goes. The spec still teaches the plain header, because that change never ran. Removing it would change about 16,000 tables. About 6,000 call a function in the header, and your rule runs the header again for each arm tried, so each needs a named value first. You are asked which headers Jet keeps. We recommend keeping the plain header for comparing one value and using a hole only for shared tests.",
+      "gist": "Should a table that compares one value keep its plain header, with `_` kept for shared tests that do more?",
+      "lesson": "A decision table is an `if` whose arms are tried in order. Its header holds the shared test. A hole is a `_` in that test, and each arm's value fills it in turn. Jet has built both the plain header `if light == {` and the hole header `if n % _ == 0 {`. Whichever option wins, the rules, the formatter and the docs must name one spelling for each job.",
+      "explainer": "",
+      "story": "Maya teaches Jet to new programmers with a traffic light. Her first table is `if light == { .Red -> 30, .Amber -> 5, .Green -> 0 }`. Later she shows FizzBuzz with `if n % _ == 0 { 15 -> \"FizzBuzz\" ... }`. A student asks whether the light table should also say `light == _`, since the newer rule says every table has a hole. Another student writes `if reader.next() == _ {` and wonders why records go missing. Maya wants one answer she can teach without exceptions.",
+      "inWild": "// Rust reference: https://doc.rust-lang.org/reference/expressions/match-expr.html\n// A match reads its value once and lists the arms.\nfn wait_secs(light: Light) -> u32 {\n    match light {\n        Light::Red => 30,\n        Light::Amber => 5,\n        Light::Green => 0,\n    }\n}\n// A shared test repeats in each guard instead of using a hole.\nfn label(n: u32) -> String {\n    match () {\n        _ if n % 15 == 0 => \"FizzBuzz\".into(),\n        _ if n % 3 == 0 => \"Fizz\".into(),\n        _ => n.to_string(),\n    }\n}\n\n;; Clojure condp: https://clojuredocs.org/clojure.core/condp\n;; One shared two-input test, one value read once, candidates in order.\n(condp #(zero? (mod %2 %1)) n\n  15 \"FizzBuzz\"\n  3 \"Fizz\"\n  (str n))",
+      "detail": "The rulings. D-IFHOLE1=A (ratified 2026-09-11, card #3067) requires one typed `_` in every dispatch header and removes the holeless header in one cutover. Its terms run the header once per arm tried, with no caching even for a comparison, and say it amends D-IF3, D-IFDIST1 and S68. D-IF3 has no ballot of its own. Its only Tower trace is a bulk ratify on 2026-10-01 that quotes the S68 heading, which still shows the old header because the cutover never ran.\n\nSo the newer explicit choice is the hole rule. This ballot asks whether to keep it now that its cost is measured.\n\nWhat is built. The hole patches are queued and not in the current compiler. The parser rewrites each arm into the header with its value in the hole, then runs the ordinary guard table. A header that is exactly `subject OP _` or `_ == subject` becomes the existing comparison table instead. It reads its subject once and keeps patterns, ranges, bindings and coverage.\n\nThat once-only read departs from the ratified per-arm rule for computed subjects, so it must be fixed or ratified whichever option wins. E0946 refuses a second hole, E0947 refuses `_` outside a header, and E0948 refuses a pattern or range arm under any other header. The formatter copies a hole table as written and does not lay it out.\n\nMigration count. A lexer scan of dev e3f8a73a8b skips comments and strings and follows headers across lines. It finds 16,351 holeless tables in 2,724 files: Compiler 6,588, Core 1,530, Examples 427, tests 2,063, Jetpack 5,135, Tools 504 and Docs 104. Markdown pages hold about 117 more. Of the tables, 5,983 call a function in the subject and about 530 read through an index or borrow. In Examples, 240 of 427 tables call a function in the header.\n\nWhy computed subjects matter. Under the ratified rule, `if reader.next() == _ {` calls `next` again for each arm tried, so a miss on the first arm skips a record. A probe of the hand-written equivalent printed two fetches where the plain header printed one. The migration therefore names about 6,000 subjects first, and a table in a value position must hoist that name without reordering other effects.\n\nThe same tables in each option. The tables are `if kind == {` in Compiler ItemHeads.jet, `if parse(...) == {` in Core Toml.jet, and `if files.try_lock(path) == {` in Examples FilesRootedLifecycle.jet. A leaves all three as they are. B writes `if kind == _ {` and names `parse(...)` and `files.try_lock(path)` first, since a second `try_lock` would take the lock again. C allows either spelling of each. D writes `_` into all three, and each still reads its subject once.\n\nOne mechanism (I8). Jet already has two ways to run a table: the comparison table and the guard table. A gives each one spelling, and a `_` always means the header runs per arm. B runs every table by one per-arm rule. C gives one table two spellings with the same meaning, which I8 allows only where it helps users. D keeps one shape, but its `_` means once in some headers and per arm in others.\n\nBeginner path. A learner reads `if light == {` as \"compare light with each arm\". Under A the hole lesson invites `light == _`, which is refused, so the error must teach the split. Under B and D every table looks alike, but the `_` in a plain comparison tells the reader nothing new. Under B a learner who writes `if reader.next() == _ {` gets no warning and loses records.\n\nExpert path. An expert wants one rule and no hidden repeats. A shows the evaluation rule in the syntax. B gives one rule and makes single reads explicit through a named value. C makes each review pick a spelling. D asks the reader to recognize the header's shape to know how often it runs.\n\nFormatter and diagnostics. Under A, the fix for `light == _` deletes one token, and the parser already proves both spellings build the same table. E0948's fix text must stop suggesting `subject == _`. Under B and D the formatter must learn to lay out hole tables before the cutover, and the cutover touches files in every live lane at once.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Plain header compares one value; a hole fills a shared test",
+          "detail": "`if subject OP {` stays the one way to compare one value with each arm, and it reads the subject once. A hole is for a shared test that does more than compare, such as `n % _ == 0` or `fits(_, size)`, and that header runs once per arm tried. A header whose whole test is one comparison with `_` as one side is refused, with a fix that removes the `_`. No existing table changes.",
+          "code": "wait_secs: fn(light: Light) -> Int {\n    if light == {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\nlabel: fn(n: Int) -> String {\n    return if n % _ == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\ncontended: if files.try_lock(path) == {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// `if light == _ {` is refused: the fix removes the `_`.",
+          "technical": "Amend D-IFHOLE1: drop the rule that every table holds a hole, and drop its cutover. Keep D-IF3, D-IFDIST1 and S68 for comparison headers. The parser refuses a header whose whole test, ignoring parentheses, is `subject OP _` or `_ OP subject`. The refusal is a registered error with a machine fix that deletes the `_` and flips the operator when `_` stood on the left.\n\nThe queued rewrite of `subject == _` into the comparison table becomes that refusal. E0946 and E0947 stay. E0948 stays, with its fix changed to `if subject == {`. The spec text, the syntax row and Examples/Basics/DispatchHole.jet drop `shape == _`."
+        },
+        {
+          "key": "B",
+          "name": "Every table holds a hole, as ratified",
+          "detail": "D-IFHOLE1 as ratified. Every table header holds exactly one `_`, so `if light == {` becomes `if light == _ {`. The header runs once per arm tried, with no caching even for a comparison. A table whose header calls a function gets a named value first, so the call still runs once. The holeless header is removed after about 16,400 tables in 2,700 files migrate, about 6,000 of them with a call in the header.",
+          "code": "wait_secs: fn(light: Light) -> Int {\n    if light == _ {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\nlock: files.try_lock(path)\ncontended: if lock == _ {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}",
+          "technical": "Keep D-IFHOLE1 as written. Remove the holeless parser path and the `it` subject name, and refuse a holeless header with a registered error and a machine fix. Change the queued rewrite so a computed `subject == _` runs per arm tried and needs a named subject to omit `else`.\n\nMigrate every table with a source-aware tool that names each computed subject first and hoists it without reordering other effects. Teach the formatter to lay out hole tables. The examples, spec and teaching pages move to the hole header."
+        },
+        {
+          "key": "C",
+          "name": "Both headers stay",
+          "detail": "Keep both spellings. As built, `if light == {` and `if light == _ {` produce the same table, and both read the subject once. The formatter keeps whichever was written and copies the hole spelling without laying it out. Hole headers that do more than compare work as ratified. No existing table changes.",
+          "code": "wait_secs: fn(light: Light) -> Int {\n    if light == {\n        .Red -> 30\n        else -> 0\n    }\n}\nwait_again: fn(light: Light) -> Int {\n    if light == _ {\n        .Red -> 30\n        else -> 0\n    }\n}",
+          "technical": "Keep D-IF3 and D-IFHOLE1 side by side, and drop D-IFHOLE1's cutover. Amend D-IFHOLE1 so a hole header whose whole test is one comparison reads its subject once, as built. The formatter keeps the written spelling. The docs teach both spellings as one table."
+        },
+        {
+          "key": "D",
+          "name": "Every table holds a hole; a plain comparison still reads once",
+          "detail": "Every table header holds one `_`, as ratified. A header whose whole test is `subject OP _` still reads its subject once, as the queued parser builds it. Migration adds one token per table: `if fetch() == {` becomes `if fetch() == _ {` with no named value and no change in behavior. The holeless header is removed after about 16,400 tables change.",
+          "code": "wait_secs: fn(light: Light) -> Int {\n    if light == _ {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\ncontended: if files.try_lock(path) == _ {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// `try_lock` runs once, as today.",
+          "technical": "Keep D-IFHOLE1's required hole and its cutover. Amend its evaluation rule: a header whose whole test, ignoring parentheses, is `subject OP _` or `_ OP subject` is the comparison table over `subject`. That table reads its subject once and keeps `it`, patterns, ranges and coverage. Every other hole header runs per arm tried.\n\nA machine fix inserts the `_` in every table, and the parser already proves both spellings build the same table. The formatter learns to lay out hole tables before the cutover."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Primary reference read on 2026-11-14. A match reads its value once and lists patterns, with optional guards. A shared test such as divisibility repeats in every guard. Source: https://doc.rust-lang.org/reference/expressions/match-expr.html",
+          "code": "match light {\n    Light::Red => 30,\n    Light::Amber => 5,\n    Light::Green => 0,\n}"
+        },
+        {
+          "lang": "Clojure",
+          "note": "Primary documentation and the clojure.core source read on 2026-11-14. `condp` takes one two-input test, one value and candidate clauses, and tries the test with each candidate in order. The macro binds the value once, and plain equality uses the same form with `=`. It is the closest prior art to the hole table, and it never re-reads the value. Source: https://clojuredocs.org/clojure.core/condp",
+          "code": "(condp = light\n  :red 30\n  :amber 5\n  0)\n(condp #(zero? (mod %2 %1)) n\n  15 \"FizzBuzz\"\n  3 \"Fizz\"\n  (str n))"
+        },
+        {
+          "lang": "Scala",
+          "note": "Primary documentation read on 2026-11-14. Scala uses `_` as a placeholder for one unnamed function input, and keeps `match` for comparing one value. Source: https://docs.scala-lang.org/scala3/book/fun-anonymous-functions.html",
+          "code": "val doubled = List(1, 2, 3).map(_ * 2)\nlight match\n  case Red => 30\n  case _ => 0"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps one spelling for each job and changes no existing table. A `_` then always means the header runs again for each arm, and a plain header reads its subject once, so no call silently repeats.",
+        "tradeoff": "A reverses part of your 2026-09-11 choice. `light == _` is refused with a fix, and the plain header stays. Every other hole table works as ratified.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B changes about 16,400 tables and needs a named value before about 6,000 of them. A table written later as `if reader.next() == _ {` silently reads again for each arm."
+          },
+          {
+            "key": "C",
+            "reason": "C gives one table two spellings with the same meaning, so readers must learn both and reviews must pick one."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps the required `_` with a one-token migration, but its `_` would mean one read in some headers and a read per arm in others."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Learners meet two header shapes instead of one rule.",
+            "mitigation": "The docs teach the plain table first and show the hole only where a test repeats."
+          },
+          {
+            "loss": "The every-table-has-a-hole rule is amended.",
+            "mitigation": "Holes keep their full meaning; only the duplicate `subject OP _` spelling is refused, with a fix."
+          },
+          {
+            "loss": "The hole lesson invites `light == _`, which A refuses.",
+            "mitigation": "The error names the plain header, and its machine fix deletes the `_`."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: IfholeReview-1. A lexer recount found 16,351 holeless tables with 5,983 call subjects, and showed that the queued parser reads `subject OP _` once, against the ratified rule. Option D was added, and A still holds because only A ties the per-arm read to the visible `_` without migration."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a table that compares one value keep its plain header, with `_` kept for shared tests that do more?",
+        "lesson": "A decision table is an `if` whose arms are tried in order. A hole is a `_` in its header's shared test, and each arm's value fills it in turn. Both `if light == {` and `if n % _ == 0 {` are built. One spelling per job must be named.",
+        "trio": {
+          "current": {
+            "note": "Both headers are built. The plain one compares one value; the hole one fills a shared test.",
+            "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif n % _ == 0 {\n    3 -> \"Fizz\"\n    else -> \"{n}\"\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's match reads the value once. A shared test repeats in each guard.",
+            "code": "// doc.rust-lang.org/reference/expressions/match-expr.html\nmatch light {\n    Light::Red => 30,\n    _ => 0,\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Plain header compares; a hole fills a shared test",
+            "gist": "`if light == {` stays. A `_` is only for tests that do more than compare. `light == _` is refused with a fix.",
+            "gains": [
+              "One spelling for each job.",
+              "No existing table changes.",
+              "A `_` always means the header runs per arm."
+            ],
+            "losses": [
+              "Two header shapes to learn.",
+              "Reverses part of the required-hole rule."
+            ],
+            "proposed": {
+              "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif n % _ == 0 { 3 -> \"Fizz\", else -> \"{n}\" }\n// `if light == _ {` is refused: remove the `_`."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Every table holds a hole, as ratified",
+            "gist": "Every header holds one `_` and runs once per arm tried. About 16,400 tables change.",
+            "gains": [
+              "One header rule for every table.",
+              "A `_` always means the header runs per arm."
+            ],
+            "losses": [
+              "About 16,400 tables in 2,700 files change.",
+              "About 6,000 header calls need a named value first.",
+              "`if reader.next() == _ {` silently reads per arm."
+            ],
+            "proposed": {
+              "code": "if light == _ {\n    .Red -> 30\n    else -> 0\n}\nlock: files.try_lock(path)\nif lock == _ { .Val(_) -> run(), else -> wait() }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Both headers stay",
+            "gist": "`if light == {` and `if light == _ {` build the same table. The formatter keeps whichever was written.",
+            "gains": [
+              "No existing table changes.",
+              "Authors pick the spelling they like."
+            ],
+            "losses": [
+              "Two spellings for the same table.",
+              "Readers must learn both."
+            ],
+            "proposed": {
+              "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif light == _ {\n    .Red -> 30\n    else -> 0\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Every table holds a hole; a comparison reads once",
+            "gist": "Every header holds one `_`, but `subject == _` still reads its subject once.",
+            "gains": [
+              "One header shape for every table.",
+              "Migration adds `_` and changes no behavior."
+            ],
+            "losses": [
+              "About 16,400 tables in 2,700 files change.",
+              "`_` means one read here, a read per arm elsewhere."
+            ],
+            "proposed": {
+              "code": "if light == _ {\n    .Red -> 30\n    else -> 0\n}\nif files.try_lock(path) == _ { .Val(_) -> run(), else -> wait() }\n// `try_lock` runs once."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps one spelling per job and changes no table. A `_` always means the header runs per arm, and a plain header reads its subject once.",
+          "gains": [
+            "One spelling per job.",
+            "No migration.",
+            "A compared value is read once."
+          ],
+          "losses": [
+            {
+              "loss": "Learners meet two header shapes.",
+              "mitigation": "The docs teach the plain table first and show the hole only where a test repeats."
+            },
+            {
+              "loss": "Your required-hole rule is amended.",
+              "mitigation": "Only `subject OP _` is refused, with a fix; other holes work as ratified."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B changes about 16,400 tables, and about 6,000 header calls repeat per arm unless named first."
+            },
+            {
+              "key": "C",
+              "reason": "C gives one table two spellings, so readers learn both."
+            },
+            {
+              "key": "D",
+              "reason": "D adds `_` to 16,400 tables and gives `_` two meanings."
+            }
+          ],
+          "tradeoff": "`light == _` is refused with a fix. Every other hole table works as ratified."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-15T00:09:11.051Z"
     }
   ],
   "questions": [
@@ -205337,6 +205581,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T00:09:14.389Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0p39lw2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T00:09:13.308Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0p39lw2",
+      "note": "#25 If D-IFHOLE2 ratifies A: E0948's fix text no longer says 'wr"
+    },
+    {
+      "at": "2026-11-15T00:09:12.242Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0p39lw2",
+      "note": "#24 The hole table's read count matches the ruling D-IFHOLE2 rat"
+    },
+    {
+      "at": "2026-11-15T00:09:11.051Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-IFHOLE2",
+      "note": "Keep the plain table header for comparing one value, or require a hole in every table?"
+    },
     {
       "at": "2026-11-15T00:04:07.134Z",
       "by": "Main",
