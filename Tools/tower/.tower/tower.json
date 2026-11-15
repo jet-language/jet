@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6918,
-    "rev": 104250,
+    "rev": 104258,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41597,7 +41597,7 @@
       "id": "c0o8f1p4",
       "num": 3720,
       "title": "Diagnostic readability sweep: rewrite every active diagnostic in plain words (Opus 5.5 workers)",
-      "body": "What is wrong: many diagnostics explain grammar or internal state instead of\nthe learner's problem. A census of crates/jet-codegen/src/Prelude/\nDiagnostics.jet on 2026-09-28 found 813 active rows, of which:\n\n- 218 have the placeholder Why \"The registered <stage> rule applies here\";\n- 297 have a What that repeats the internal Meaning verbatim;\n- 287 put decision IDs (D-…, S…) in user-facing what/why/fix text.\n\nExample (report F17, probe p08): a function that returns only for `n > 0`\nand `n < 0` gets E0114: \"its final statement produces no value … statements\nand semicolon-terminated expressions yield unit\". Ordinary Jet has no\nsemicolons, \"unit\" is jargon, and the message never says \"when n is 0,\n`sign` reaches the end without a value\".\n\nResearch basis: Becker et al. 2019 guidelines (readability, low cognitive\nload, context, positive tone, hints, logical argument, right time); Barik et\nal. 2018 (argument structure plus a resolution); Ko et al. 2004\n(understanding barriers were 34/38 insurmountable).\n\nOwner direction: a comprehensive sweep, implemented by Claude Opus 5.5\n(`opus-worker` agent). The orchestrator integrates.\n\nOwner instruction (chat, 2026-09-28): the owner reviewed the learnability report and directed that this fix be carded at P0. This card records that direction; it is not a ballot.\n\nProbe sources live in the report's Appendix A. They ran from a directory with its own package.jet granting [IO, Mem.Alloc], on the working-tree debug binary of 2026-09-28 13:07 (HEAD 68e1f8fb plus another stream's uncommitted compiler edits). Re-run each probe on a fresh build before starting; a probe that no longer reproduces is recorded on the card, not silently dropped.",
+      "body": "Destination: every active diagnostic reads in plain words, enforced so it cannot regress:\n- What names the learner's specific problem, using the names in their code.\n- Why gives the reason in one or two plain sentences.\n- Fix gives a concrete edit or command.\n- No internal vocabulary: decision IDs, constant names, 'unit', byte offsets, stage names. That material lives in `jet explain CODE --verbose` and `--json`.\n\nWhy it matters: owner-directed P0 (2026-09-28, learnability report F17). A census of 813 active rows found 218 with a placeholder Why, 297 whose What repeats the internal meaning, and 287 with decision IDs in user-facing text. The research basis is Becker et al. 2019, Barik et al. 2018 and Ko et al. 2004.\n\nThe authority is the diagnostic registry; Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet is generated from it.\n\nRelated cards (2026-11-15 split): stop locations and traces #6915, error values in handlers #6916, progress output #6917, user-visible text case #6734, IOError #6881, ComputeError #6624.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e14",
@@ -41611,6 +41611,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Split 2026-11-15. Stop locations and traces (c31-c35, c41, c44) went to #6915, error values in handlers (c47, c49, c84) to #6916 and progress output (c68, c69) to #6917. Text case (c62-c65, c67) was merged into #6734 c2, and machine-output stability (c66) became #6734 c4. This card keeps the text quality, suggestion, recovery and header criteria."
+        },
         {
           "at": "2026-11-14",
           "by": "Main",
@@ -42160,20 +42165,22 @@
         {
           "n": 52,
           "text": "(was #3703) [#3582] Once the TCP carrier (#3557) lands: IOOperation resolves to the canonical Core declaration (a shadow user type is not mistaken for it), and IOError projection and Show/Debug agree on every level with original payloads. UI fixture tests/ui/ioerror_shadow_user_type.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:15:38.261Z"
+          "evidence": "Moved to #6881 c9: IOError identity and rendering belong on the IOError card #6881 (the TCP carrier #3557 condition is gone; the self-hosted IOError exists)",
+          "at": "2026-11-15T04:07:20.977Z",
+          "closure": "obsolete"
         },
         {
           "n": 53,
           "text": "(was #3703) [#3206] A handled ComputeError (e.g. `compute.eye(-1)`) shows its typed detail through the supported surface, with a golden on every level. The E0915 suggestion for ComputeError-like types passes on the next check, and suggestions are applicability-aware.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:15:39.234Z"
+          "evidence": "Moved to #6624 c9: ComputeError detail belongs on the core.compute correctness card #6624",
+          "at": "2026-11-15T04:07:21.985Z",
+          "closure": "obsolete"
         },
         {
           "n": 55,
@@ -42272,11 +42279,12 @@
         {
           "n": 66,
           "text": "(was #2206 c5) Machine output is byte-identical before and after, proven by comparing JSON from every machine door Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:20:36.498Z"
+          "evidence": "Moved to #6734 c4: machine-output stability belongs with the case rule on #6734",
+          "at": "2026-11-15T04:07:07.131Z",
+          "closure": "obsolete"
         },
         {
           "n": 67,
@@ -42433,7 +42441,7 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-15T04:07:05.878Z",
+      "updated": "2026-11-15T04:07:23.591Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -87711,6 +87719,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:44:37.445Z"
+        },
+        {
+          "n": 9,
+          "text": "A handled ComputeError (for example from `compute.eye(-1)`) shows its typed detail through the supported surface, with a golden on O0, O1 and O2; the E0915 suggestion for ComputeError-like types compiles on the next check. Proof: `jet test Compiler --profile golden --filter Compute/ComputeErrorDetail`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:07:20.024Z"
         }
       ],
       "refs": [],
@@ -87721,9 +87738,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:15.413Z",
-      "updated": "2026-11-15T03:44:54.721Z",
+      "updated": "2026-11-15T04:07:20.024Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c066t33h",
@@ -104310,6 +104327,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:14:07.479Z"
+        },
+        {
+          "n": 9,
+          "text": "IOOperation resolves to the canonical Core declaration even when a user type of the same name exists, and IOError's projection and Show/Debug agree on every tier with the original payloads. Proof: `jet test Compiler --profile ui --filter ioerror_shadow_user_type`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:07:19.128Z"
         }
       ],
       "refs": [],
@@ -104324,8 +104350,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:14:07.479Z",
-      "updated": "2026-11-15T03:14:07.479Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T04:07:19.128Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 9
     },
     {
       "id": "c00zrgpr",
@@ -213219,6 +213246,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:07:23.591Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0o8f1p4",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T04:07:21.985Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#53"
+    },
+    {
+      "at": "2026-11-15T04:07:20.977Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#52"
+    },
+    {
+      "at": "2026-11-15T04:07:20.024Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c04pj0wn",
+      "note": "#9 A handled ComputeError (for example from `compute.eye(-1)`) "
+    },
+    {
+      "at": "2026-11-15T04:07:19.128Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0zii3oj",
+      "note": "#9 IOOperation resolves to the canonical Core declaration even "
+    },
+    {
+      "at": "2026-11-15T04:07:09.587Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0o8f1p4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:07:08.653Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0o8f1p4",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T04:07:07.131Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#66"
+    },
     {
       "at": "2026-11-15T04:07:05.878Z",
       "by": "TowerKeeper-1",
