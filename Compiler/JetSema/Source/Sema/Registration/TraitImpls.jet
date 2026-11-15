@@ -161,9 +161,12 @@ sema_trait_impl_with: fn(methods: [Func], extras: &&[Func]) -> [Func]? Never! {
     Val(updated)
 }
 
-// The trait method's header as an impl method.
+// The trait method's header as an impl method. It is public, as a written
+// impl method without `priv` is, so a caller outside the impl's module reaches
+// a default the impl gains.
 sema_trait_impl_method: fn(sig: TraitMethodSig) -> Func Never! {
     function := ast_func(sig.name.copy(), sig.name_span, sig.name_span)
+    function.is_pub = true
     function.params = sig.params.copy()
     function.return_type = sig.return_type.copy()
     function.is_pure = sig.is_pure
