@@ -1,0 +1,18 @@
+# A closure method (filter, map, any, fold) called on a temporary List or Map
+# drops that receiver once the call returns. The fixture makes 300000 such
+# calls, and its resident set grows by less than 8 MiB. If each receiver
+# stayed alive, the growth would be tens of megabytes. A fold over a
+# temporary evaluates its receiver once, so `produce` prints once. The
+# result is the same at every tier.
+fixture: a_temporary_receiver_of_a_closure_method_is_dropped_after_the_call.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "steps 300000 total true\nresident growth under 8 MiB true\nreceiver made\nfold 6\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "steps 300000 total true\nresident growth under 8 MiB true\nreceiver made\nfold 6\n"
+step o2: jet run --release main.jet
+exit: 0
+stdout: = "steps 300000 total true\nresident growth under 8 MiB true\nreceiver made\nfold 6\n"

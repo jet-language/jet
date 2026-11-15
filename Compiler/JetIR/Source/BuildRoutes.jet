@@ -2292,7 +2292,9 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
         return ir_closure_map_method(m, p, b, ty, receiver, operation, args, span)
     }
     // A Float fold whose step is exactly `fn(acc, x) { acc + x }` adds in the
-    // same fixed lane tree as `sum`, with the seed in lane 0.
+    // same fixed lane tree as `sum`, with the seed in lane 0. Any other fold
+    // goes on with the receiver evaluated here, never evaluated twice.
+    evaluated := -1
     if (operation == .Fold || operation == .ViewFold) && args.len() == 2 && ir_float_add_fold_step(p, b, args[1]) {
         lent: ir_expr(m, p, b, receiver)
         if ir_failed(b) || lent < 0 -> return -1
@@ -2303,12 +2305,13 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
             if ir_failed(b) || seed < 0 -> return -1
             sum: ir_list_sum_fixed(m, p, b, folded, folded_element, seed, span)
             if folded != lent -> ir_release(m, b, folded)
-            // A pulled Iter is spent.
-            if walks -> ir_release(m, b, lent)
+            // A pulled Iter is spent; a fresh List was only lent.
+            ir_release(m, b, lent)
             return sum
         }
         if folded != lent -> ir_release(m, b, folded)
         if walks -> return ir_closure_walk_method(m, p, b, ty, lent, folded_element, operation, args, span)
+        evaluated = lent
     }
     // The in-place methods write the List's own buffer, reached as a write
     // place (ir_builtin's receiver).
@@ -2322,7 +2325,7 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
         item: ir_items_element(m, p, b, source) ?? return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver_ty)}")
         return ir_closure_walk_method(m, p, b, ty, source, item, operation, args, span)
     }
-    place: if in_place -> ir_write_base(m, p, b, receiver, span) else -> ir_expr(m, p, b, receiver)
+    place: if evaluated >= 0 -> evaluated else if in_place -> ir_write_base(m, p, b, receiver, span) else -> ir_expr(m, p, b, receiver)
     if ir_failed(b) || place < 0 -> return -1
     // An inline `[T#N]` is lent as a List copy, whose elements an in-place
     // method puts back.
@@ -2338,7 +2341,8 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     if operands.len() == 0 -> return ir_fail_slot(b, span, "closure method without a closure")
     parallel: operation == .ParaMap || operation == .ParaFilter || operation == .ParaPartition || operation == .ParaFold
     result: if parallel -> ir_closure_parallel(m, p, b, ty, list, element, operation, operands, args, span) else -> ir_closure_list_method(m, p, b, ty, list, element, operation, operands, args, span)
-    // The method only lends its closures.
+    // The method only lends its closures, and a fresh receiver it does not
+    // write: the result holds copies of the items it keeps.
     loop slot in operands -> ir_release_closure(m, b, slot)
     if list != place {
         if in_place {
@@ -2347,6 +2351,7 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
             ir_release(m, b, list)
         }
     }
+    if !in_place -> ir_release(m, b, place)
     result
 }
 
@@ -2494,8 +2499,10 @@ ir_closure_map_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
     ir_walk_close(m, b, walk)
     ir_map_ordered_end(m, b, map, ordered)
     if operation == .MapFold -> b.fresh[result] = true
-    // The method only lends its closures.
+    // The method only lends its closures, and a fresh receiver: the result
+    // holds copies of the entries it keeps.
     loop slot in operands -> ir_release_closure(m, b, slot)
+    ir_release(m, b, map)
     result
 }
 

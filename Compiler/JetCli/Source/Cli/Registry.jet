@@ -337,20 +337,22 @@ jet_cli_flag_help_for: fn(help: String, name: String) -> String Never! {
 
 // The words of a command-model form: `=` is a space.
 jet_cli_form_words: fn(form: String) -> [String] Never! {
-    form.replace("=", " ").split(" ").to_list().filter(fn(word) { word != "" })
+    form.replace("=", " ").split(" ").filter(fn(word) { word != "" }).to_list()
 }
 
-// How closely the model row `row` decides `form`: -1 when it does not; a
-// shape row decides a form that ends in its shape (`build <shape>`,
-// `inspect provenance <shape>`); otherwise more matched words win, then more
-// literal (not placeholder) words. A placeholder stands for a value or name,
-// never for a flag.
-jet_cli_form_score: fn(row: String, form: String) -> Int Never! {
+// How closely the model row `row` decides `form`, whose words are `words`: -1
+// when it does not; a shape row decides a form that ends in its shape (`build
+// <shape>`, `inspect provenance <shape>`); otherwise more matched words win,
+// then more literal (not placeholder) words. A placeholder stands for a value
+// or name, never for a flag.
+jet_cli_form_score: fn(row: String, form: String, words: [String]) -> Int Never! {
     if row.starts_with("<") {
         if form.ends_with(" {row}") -> return 1000000
         return -1
     }
-    words: jet_cli_form_words(form)
+    // A row starts with a literal word: one that does not start with the
+    // form's first word decides nothing, and its words are never split.
+    if words.len() == 0 || !row.starts_with(words[0]) -> return -1
     pattern: jet_cli_form_words(row)
     if pattern.len() > words.len() -> return -1
     literal := 0
@@ -378,10 +380,11 @@ jet_cli_form_normal: fn(form: String) -> String Never! {
 // The command-model row that decides `form`, if one does (JET_CLI_FORMS).
 jet_cli_form_row: fn(form: String) -> JetCLIFormSpec? Never! {
     normal: jet_cli_form_normal(form)
+    words: jet_cli_form_words(normal)
     best := -1
     best_score := -1
     loop index in 0..<JET_CLI_FORMS.len() {
-        score: jet_cli_form_score(JET_CLI_FORMS[index].form, normal)
+        score: jet_cli_form_score(JET_CLI_FORMS[index].form, normal, words)
         if score > best_score {
             best = index
             best_score = score
