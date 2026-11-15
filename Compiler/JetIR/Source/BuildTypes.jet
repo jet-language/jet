@@ -2128,8 +2128,9 @@ ir_nominal_name: fn(ty: Type) -> String? Never! {
 }
 
 // One stored struct member: its byte offset and type row.
-// `boxed`: a recursive edge whose storage is a wrapper box pointer holding
-// the value; `redact`: Debug display hides it.
+// `boxed`: a recursive edge to an inline value (a struct or tuple, an
+// Aggregate row) whose storage is a wrapper box pointer holding the value
+// (ir_edge_wrapped); `redact`: Debug display hides it.
 IRMember: struct {
     name: String
     offset: Int
@@ -2140,7 +2141,8 @@ IRMember: struct {
 
 // The stored members of struct declaration `row` (applied to the instance
 // arguments `args`), in declaration order. Computed fields take no bytes and a
-// recursive edge is one pointer to its wrapper box. A struct without a
+// recursive edge is one pointer: to its wrapper box (ir_edge_wrapped), or the
+// heap value's own box pointer. A struct without a
 // `#Layout` places its members by descending alignment (declaration order
 // among equals), each at its own alignment; a `#Layout` struct places them in
 // declaration order, as the foreign side declares them. None when a member
@@ -2158,8 +2160,9 @@ ir_struct_members: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> [IR
 }
 
 // ir_struct_members while the structs `laying` are being laid out. Unless
-// `resolve`, a recursive edge reaching one of them keeps type row -1: only
-// its 8 bytes count toward the layout.
+// `resolve`, a recursive edge reaching one of them keeps type row -1 and
+// stays wrapped: only its 8 bytes count toward the layout, as they do for a
+// pointer the resolved edge may hold instead.
 ir_struct_members_in: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], laying: [String], resolve: Bool) -> [IRMember]? Never! {
     definition: p.types[row]
     if definition.kind == .Struct(fields, _) {
@@ -2171,12 +2174,13 @@ ir_struct_members_in: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], lay
         loop field in fields {
             if field.computed -> next
             field_ty: sema_type_def_instance_type(p.types[row], args, field.ty)
-            boxed: definition.boxed_edges.contains(field.name)
+            edge: definition.boxed_edges.contains(field.name)
             ty := -1
-            if boxed && resolve -> ty = ir_value_type(m, p, field_ty) ?? return None else if boxed {
+            if edge && resolve -> ty = ir_value_type(m, p, field_ty) ?? return None else if edge {
                 if !ir_pointee_lays_out(m, p, field_ty, inner) -> return None
                 ty = ir_value_type_in(m, p, field_ty, inner) ?? -1
             } else { ty = ir_value_type_in(m, p, field_ty, inner) ?? return None }
+            boxed: edge && (!resolve || ir_edge_wrapped(m, ty))
             sizes.push(if boxed -> 8 else -> m.types[ty].size)
             aligns.push(if boxed || m.types[ty].kind == .Aggregate -> 8 else -> m.types[ty].align)
             members.push(IRMember{name: field.name, offset: 0, ty: ty, boxed: boxed, redact: field.redact})
@@ -2193,6 +2197,16 @@ ir_struct_members_in: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], lay
         return Val(members)
     }
     None
+}
+
+// Whether a recursive edge of type row `ty` needs a wrapper box of its own:
+// only an inline value (an Aggregate row: a struct, tuple or List header)
+// would otherwise contain itself. An enum with payloads, an Option or
+// Result box, a trait value or closure is already one pointer to a counted
+// heap box, which the edge holds directly: a wrapper around it would cost
+// each node a second allocation.
+ir_edge_wrapped: fn(m: IRModule, ty: Int) -> Bool Never! {
+    ty < 0 || m.types[ty].kind == .Aggregate || m.types[ty].size != 8
 }
 
 // The bytes of a struct of `members`, rounded to 8.
@@ -3818,10 +3832,12 @@ ir_carrier_type: fn(ty: Type) -> Bool Never! {
 
 // The payload members of variant `index` of the enum declaration `row`
 // (applied to the instance arguments `args`), laid out from byte 8; a
-// recursive edge, and a struct wider than IR_VARIANT_INLINE_BYTES in a
-// non-generic enum (ir_variant_member_outsized), hold an 8-byte wrapper box
-// pointer. Memoized in m.variant_members by the instance's arguments in the
-// terms of the instance being built, as ir_struct_members is.
+// recursive edge to an inline value (ir_edge_wrapped), and a struct wider
+// than IR_VARIANT_INLINE_BYTES in a non-generic enum
+// (ir_variant_member_outsized), hold an 8-byte wrapper box pointer; an edge
+// to a heap value holds its box pointer. Memoized in m.variant_members by
+// the instance's arguments in the terms of the instance being built, as
+// ir_struct_members is.
 ir_variant_members: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], index: Int) -> [IRMember]? Never! {
     bound: args.copy()
     identity: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
@@ -3867,7 +3883,7 @@ ir_variant_members_laid: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], 
         offset := 8
         loop (position, name) in names {
             ty: ir_value_type(m, p, sema_type_def_instance_type(p.types[row], args, types[position])) ?? return None
-            boxed: definition.boxed_edges.contains(edges[position]) || ir_variant_member_outsized(m, definition, ty)
+            boxed: (definition.boxed_edges.contains(edges[position]) && ir_edge_wrapped(m, ty)) || ir_variant_member_outsized(m, definition, ty)
             size: if boxed -> 8 else -> m.types[ty].size
             align: if boxed || m.types[ty].kind == .Aggregate -> 8 else -> m.types[ty].align
             if size > 0 && align > 0 && offset % align != 0 -> offset += align - offset % align

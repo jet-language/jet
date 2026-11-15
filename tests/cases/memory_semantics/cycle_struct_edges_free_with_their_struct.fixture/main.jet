@@ -1,9 +1,11 @@
-// A struct field on a recursive type cycle is a recursive edge: its value
-// lives in a wrapper box the struct owns, freed with the struct. Each
-// scenario runs `warm` rounds, reads the peak resident set (VmHWM), runs
-// 8 * `warm` more rounds and reads it again: a wrapper (or the value in it)
-// that outlives its struct grows the peak with the round count. The
-// checksums catch a wrapper freed while a copy still reads it. The same
+// A struct field on a recursive type cycle is a recursive edge: an inline
+// value (a struct or tuple) lives in a wrapper box the struct owns, and an
+// enum or Option value is held as its own counted box; either is released
+// with the struct. Each scenario runs `warm` rounds, reads the peak
+// resident set (VmHWM), runs 8 * `warm` more rounds and reads it again: an
+// edge's box (or the value in it) that outlives its struct grows the peak
+// with the round count. The checksums catch a box freed while a copy still
+// reads it. The same
 // scenarios run at compile time (CT_CHECKSUM).
 package: {
     name: "cycle_struct_edges_free_with_their_struct"

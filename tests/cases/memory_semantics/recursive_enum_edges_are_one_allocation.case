@@ -1,0 +1,27 @@
+# A recursive edge whose type is already a heap box (a payload enum, an
+# Option) holds that box's pointer directly, so a recursive enum's node is
+# one allocation: a million chain links cost under 80 bytes each in resident
+# memory, where a wrapper box per edge made them 96. The program also copies
+# nested enum and Option edges, writes through a copy's edges and drops it
+# all each round, and panics when a copy sees another's write or the peak
+# RSS grows with the round count.
+# The web target is not Jet-hosted yet (E2104), so no web step.
+fixture: recursive_enum_edges_are_one_allocation.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build main.jet
+exit: 0
+step aot: built
+stdin: null
+limit: time=120
+exit: 0
+stdout: = recursive_enum_edges_are_one_allocation.stdout.expected
+stderr: empty
+step: jet run main.jet
+stdin: null
+limit: time=120
+exit: 0
+stdout: = recursive_enum_edges_are_one_allocation.stdout.expected
+stderr: empty
