@@ -1,0 +1,179 @@
+use {
+    sync: core.sync
+    core.math.random
+}
+
+// One replica's values: a text, a map, a counter and a list.
+Replica: struct {
+    text: sync.SyncText
+    map: sync.SyncMap
+    counter: sync.SyncCounter
+    list: sync.SyncList
+}
+
+// A replica's whole state on its way to another replica.
+Message: struct {
+    to: Int
+    state: Replica
+}
+
+// What every replica wrote: the counter's total and each list push.
+Written: struct {
+    total: Int
+    pushes: Int
+}
+
+STEPS: 80
+
+SCHEDULES: 200
+
+merge: fn(into: Replica, from: Replica) -> Replica {
+    Replica{text: sync.text_merge(into.text, from.text), map: sync.map_merge(into.map, from.map), counter: sync.counter_merge(into.counter, from.counter), list: sync.list_merge(into.list, from.list)}
+}
+
+show: fn(replica: Replica) -> String {
+    "{sync.text_show(replica.text)} {sync.text_metadata(replica.text)} {sync.map_show(replica.map)} {sync.counter_value(replica.counter)} {sync.list_show(replica.list)}"
+}
+
+name: fn(index: Int) -> String { "r{index + 1}" }
+
+// The visible length of a text whose characters are all ASCII letters:
+// its shown form less `SyncText(` and `)`.
+visible: fn(text: sync.SyncText) -> Int { sync.text_show(text).len() - 10 }
+
+// One local write at `replica`, chosen by `rng`.
+edit: fn(replica: Replica, index: Int, step: Int, rng: &RNG, written: &Written) -> Replica {
+    who: name(index)
+    kind: rng.int(0, 4)
+    if kind == {
+        0 -> {
+            length: visible(replica.text)
+            at: rng.int(0, length)
+            most: if length - at < 2 -> length - at else -> 2
+            removed: rng.int(0, most)
+            letter: rng.int(0, 7)
+            inserted: "abcdefgh".slice(letter, letter + 1)
+            Replica{text: sync.text_edit(replica.text, who, at, removed, inserted), map: replica.map.copy(), counter: replica.counter.copy(), list: replica.list.copy()}
+        }
+        1 -> Replica{text: replica.text.copy(), map: sync.map_set(replica.map, "k{rng.int(0, 3)}", "{who}v{step}"), counter: replica.counter.copy(), list: replica.list.copy()}
+        2 -> Replica{text: replica.text.copy(), map: sync.map_delete(replica.map, "k{rng.int(0, 3)}"), counter: replica.counter.copy(), list: replica.list.copy()}
+        3 -> {
+            delta: rng.int(-3, 5)
+            written.total += delta
+            Replica{text: replica.text.copy(), map: replica.map.copy(), counter: sync.counter_inc(replica.counter, who, delta), list: replica.list.copy()}
+        }
+        else -> {
+            written.pushes += 1
+            Replica{text: replica.text.copy(), map: replica.map.copy(), counter: replica.counter.copy(), list: sync.list_push(replica.list, who, "s{step}")}
+        }
+    }
+}
+
+// Every message but the one at `skip`.
+without: fn(messages: [Message], skip: Int) -> [Message] {
+    kept := [Message]{}
+    loop index in 0..<messages.len() {
+        if index != skip -> kept.push(messages[index].copy())
+    }
+    kept
+}
+
+// One random schedule over `count` replicas. Each step is a local write, a
+// send that a cut link loses, the delivery of any message in flight (which
+// may stay in flight to arrive again), two replicas merging each other's
+// state at once, or a link cut or healed. Then the network heals: every
+// message in flight arrives, and every replica sends to every other twice.
+// The answer is the replicas' shown states, or "" when they differ or a
+// write is lost.
+schedule: fn(count: Int, seed: Int) -> String {
+    rng := random.rng(seed)
+    base: sync.text_new("r0", "seed")
+    replicas := [Replica]{}
+    loop index in 0..<count {
+        replicas.push(Replica{text: base.copy(), map: sync.map_new(), counter: sync.counter_new(name(index), 0), list: sync.list_new()})
+    }
+    cut := [Bool]{}
+    loop _ in 0..<(count * count) -> cut.push(false)
+    flight := [Message]{}
+    written := Written{total: 0, pushes: 0}
+    loop step in 0..<STEPS {
+        action: rng.int(0, 9)
+        if {
+            action <= 3 -> {
+                at: rng.int(0, count - 1)
+                changed: edit(replicas[at], at, step, rng, written)
+                replicas[at] = changed
+            }
+            action <= 5 -> {
+                from: rng.int(0, count - 1)
+                to: (from + rng.int(1, count - 1)) % count
+                if !cut[from * count + to] {
+                    flight.push(Message{to: to, state: replicas[from].copy()})
+                }
+            }
+            action <= 7 -> {
+                if flight.len() > 0 {
+                    pick: rng.int(0, flight.len() - 1)
+                    message: flight[pick].copy()
+                    merged: merge(replicas[message.to], message.state)
+                    replicas[message.to] = merged
+                    if rng.int(0, 2) != 0 -> flight = without(flight, pick)
+                }
+            }
+            action == 8 -> {
+                a: rng.int(0, count - 1)
+                b: (a + rng.int(1, count - 1)) % count
+                if !cut[a * count + b] && !cut[b * count + a] {
+                    left: merge(replicas[a], replicas[b])
+                    right: merge(replicas[b], replicas[a])
+                    replicas[a] = left
+                    replicas[b] = right
+                }
+            }
+            else -> {
+                link: rng.int(0, count * count - 1)
+                cut[link] = !cut[link]
+            }
+        }
+    }
+    loop flight.len() > 0 {
+        pick: rng.int(0, flight.len() - 1)
+        message: flight[pick].copy()
+        merged: merge(replicas[message.to], message.state)
+        replicas[message.to] = merged
+        flight = without(flight, pick)
+    }
+    loop _ in 0..<2 {
+        loop from in 0..<count {
+            loop to in 0..<count {
+                if from != to {
+                    merged: merge(replicas[to], replicas[from])
+                    replicas[to] = merged
+                }
+            }
+        }
+    }
+    shown: show(replicas[0])
+    loop index in 1..<count {
+        if show(replicas[index]) != shown -> return ""
+    }
+    if sync.counter_value(replicas[0].counter) != written.total -> return ""
+    items: sync.list_show(replicas[0].list)
+    if written.pushes > 0 && items.split("|").len() != written.pushes -> return ""
+    shown
+}
+
+run: fn() {
+    counts: [Int]{2, 3}
+    loop count in counts {
+        converged := 0
+        first := ""
+        loop seed in 1..<(SCHEDULES + 1) {
+            shown: schedule(count, seed)
+            if shown != "" -> converged += 1
+            if seed == 1 -> first = shown
+        }
+        print("replicas={count} schedules={SCHEDULES} converged={converged}")
+        print("replicas={count} seed=1 {first}")
+    }
+}
