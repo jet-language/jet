@@ -237,7 +237,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1417,
+  "total": 1419,
   "counts": {
     "Compiler": 650,
     "Core": 178,
@@ -245,7 +245,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     "Examples": 42,
     "Jetpack": 8,
     "Tools": 11,
-    "tests": 518
+    "tests": 520
   },
   "regions": [
     {
@@ -6767,6 +6767,20 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/cases/concurrency_boundaries/a_group_task_reads_a_lent_parameter_in_place.fixture/lend.jet",
+      "line": 10,
+      "column": 5,
+      "reason": "reads the address of the graph's storage, not its bytes"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/concurrency_boundaries/a_group_task_reads_a_lent_parameter_in_place.fixture/lend.jet",
+      "line": 29,
+      "column": 5,
+      "reason": "reads the address of the graph's storage, not its bytes"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/context/context_scratch_block_rewinds_and_moves_what_leaves.fixture/scratch.jet",
       "line": 18,
       "column": 5,
@@ -10181,8 +10195,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 11 |
-| tests | 518 |
-| **total** | **1417** |
+| tests | 520 |
+| **total** | **1419** |
 
 ### Regions
 
@@ -11119,6 +11133,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/comptime_core_pure_parity/crypto_expert_aead_sign_argon_aot_stdout_matches_known_answers.fixture/main.jet | 8:5 | "fixed RFC interop vectors" |
 | tests | tests/cases/comptime_core_pure_parity/crypto_values_match_aot_comptime_forced_interpreter_and_default_dev/input/o1/run.jet | 11:5 | "fixed RFC interop vectors" |
 | tests | tests/cases/comptime_core_pure_parity/crypto_values_match_aot_comptime_forced_interpreter_and_default_dev/input/o2/run.jet | 11:5 | "fixed RFC interop vectors" |
+| tests | tests/cases/concurrency_boundaries/a_group_task_reads_a_lent_parameter_in_place.fixture/lend.jet | 10:5 | "reads the address of the graph's storage, not its bytes" |
+| tests | tests/cases/concurrency_boundaries/a_group_task_reads_a_lent_parameter_in_place.fixture/lend.jet | 29:5 | "reads the address of the graph's storage, not its bytes" |
 | tests | tests/cases/context/context_scratch_block_rewinds_and_moves_what_leaves.fixture/scratch.jet | 18:5 | "only reads the address of an item the caller keeps alive" |
 | tests | tests/cases/control_and_data/explicit_exit_unmapped_keeps_101_on_every_tier.fixture/main.jet | 5:5 | "this case reports a Jet defect status on purpose" |
 | tests | tests/cases/control_and_data/explicit_process_exit_cleanup_golden_matches_all_execution_tiers.fixture/process_exit_cleanup.jet | 22:5 | "the exit callback has no captured state" |
