@@ -649,9 +649,10 @@ none is E2102 too, never ignored: a switch takes no `=value`
   WebAssembly assignment.
 - `--threads N` caps the compiler at N threads on `build`, `run`, `check`,
   `test`, `dev`, and `inspect` (D-JOBS1=A); without it the compiler admits
-  threads automatically up to one per physical core it may run on (SMT
-  siblings count once), fewer when other processes already keep its CPUs
-  busy at start (`/proc/stat`'s `procs_running` count). It never limits the
+  threads automatically up to one per CPU its affinity mask lets it run on
+  (SMT siblings count as CPUs), fewer when other processes' runnable threads
+  already sit on those CPUs at start (load on CPUs outside the mask doesn't
+  count). It never limits the
   threads of the program jet
   builds or runs, every value gives the same diagnostics and output bytes,
   and `build --verbose` reports the cap it used. No

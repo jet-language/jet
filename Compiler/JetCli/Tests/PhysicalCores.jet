@@ -1,5 +1,6 @@
-// The compiler's default thread count: Linux CPU lists and the physical-core count.
-use jet_cli.[jet_cli_cpu_list, jet_cli_physical_cores, jet_cli_threads_left]
+// The compiler's default thread count: Linux CPU lists, the affinity mask and
+// the runnable threads other processes hold on its CPUs.
+use jet_cli.[jet_cli_allowed_cpus, jet_cli_cpu_list, jet_cli_procs_running, jet_cli_task_runnable_cpu, jet_cli_threads_left]
 
 #Test("cpu_list_reads_ranges_and_single_cpus") {
     assert_eq(jet_cli_cpu_list("0-3,8-9") ?? [Int]{}, [Int]{0, 1, 2, 3, 8, 9})
@@ -8,24 +9,37 @@ use jet_cli.[jet_cli_cpu_list, jet_cli_physical_cores, jet_cli_threads_left]
     assert(jet_cli_cpu_list("x-3") == None)
 }
 
-#Test("physical_cores_stays_within_the_logical_count") {
-    cores: jet_cli_physical_cores(4096)
-    assert(cores >= 1 && cores <= 4096)
-    assert_eq(jet_cli_physical_cores(1), 1)
+#Test("allowed_cpus_lists_at_least_the_cpu_this_test_runs_on") {
+    allowed: jet_cli_allowed_cpus() ?? [Int]{}
+    assert(allowed.len() >= 1)
 }
 
-#Test("threads_left_shrinks_only_when_busy_cpus_leave_fewer_than_the_cores") {
-    // A quiet 16-core, 32-CPU host: only this thread runs.
-    assert_eq(jet_cli_threads_left(16, 32, 32, "cpu  10 0 10 900 0 0 0 0 0 0\nctxt 4242\nprocs_running 1\nprocs_blocked 0\n"), 16)
-    // 8 others running: their siblings' CPUs still leave 16 free.
-    assert_eq(jet_cli_threads_left(16, 32, 32, "procs_running 9\nprocs_blocked 0"), 16)
-    // 20 others running leave 12 CPUs.
-    assert_eq(jet_cli_threads_left(16, 32, 32, "processes 900\nprocs_running 21\n"), 12)
-    // Pinned to 12 of 32 CPUs: the others' share of those 12 counts.
-    assert_eq(jet_cli_threads_left(6, 12, 32, "procs_running 17\n"), 6)
-    assert_eq(jet_cli_threads_left(6, 12, 32, "procs_running 25\n"), 3)
-    // A saturated host still gets one thread; unreadable text keeps the cores.
-    assert_eq(jet_cli_threads_left(16, 32, 32, "procs_running 65\n"), 1)
-    assert_eq(jet_cli_threads_left(16, 32, 32, "garbage"), 16)
-    assert_eq(jet_cli_threads_left(16, 32, 32, "procs_running x\n"), 16)
+#Test("procs_running_reads_the_runnable_count") {
+    assert_eq(jet_cli_procs_running("cpu  10 0 10 900 0 0 0 0 0 0\nctxt 4242\nprocs_running 9\nprocs_blocked 0\n"), Val(9))
+    assert(jet_cli_procs_running("garbage") == None)
+    assert(jet_cli_procs_running("procs_running x\n") == None)
+}
+
+#Test("a_runnable_task_counts_against_the_cpu_it_runs_on") {
+    // Fields 3 (state) and 39 (CPU) of /proc/<pid>/task/<tid>/stat; the
+    // command name may hold spaces and parentheses.
+    running: "4242 (jet (worker) 1) R 1 4242 4242 0 -1 4194560 100 0 0 0 5 1 0 0 20 0 17 0 900 4096 100 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 26 0 0 0 0 0"
+    assert_eq(jet_cli_task_runnable_cpu(running), Val(26))
+    sleeping: "4243 (bash) S 1 4243 4243 0 -1 4194560 100 0 0 0 5 1 0 0 20 0 1 0 900 4096 100 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 3 0 0 0 0 0"
+    assert(jet_cli_task_runnable_cpu(sleeping) == None)
+    assert(jet_cli_task_runnable_cpu("4244 (short) R 1 2") == None)
+    assert(jet_cli_task_runnable_cpu("no command name") == None)
+}
+
+#Test("threads_left_is_the_mask_less_its_busy_cpus") {
+    // A quiet 32-CPU host gets every CPU, SMT siblings included.
+    assert_eq(jet_cli_threads_left(32, 32, 0), 32)
+    // Pinned to 24 CPUs while other work runs only outside them: all 24.
+    assert_eq(jet_cli_threads_left(24, 24, 0), 24)
+    // 5 runnable threads of others on the mask's CPUs leave 19.
+    assert_eq(jet_cli_threads_left(24, 24, 5), 19)
+    // A CPU quota below the mask caps the count.
+    assert_eq(jet_cli_threads_left(8, 24, 2), 8)
+    // A saturated mask still gets one thread.
+    assert_eq(jet_cli_threads_left(24, 24, 40), 1)
 }

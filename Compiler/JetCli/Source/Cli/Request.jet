@@ -1157,33 +1157,15 @@ jet_cli_cgroup_bytes: fn(file: String) -[FS]> Int? Never! {
     Val(bytes)
 }
 
-// The compiler's thread default: one thread per physical core this process
-// may run on. Linux lists the CPUs the process may use in `/proc/self/status`
-// (`Cpus_allowed_list`) and the SMT siblings of each CPU in
-// `/sys/devices/system/cpu/cpuN/topology/thread_siblings_list`; an allowed
-// CPU and its siblings are one core, so only the first allowed CPU of each
-// core is read. The default is the measured-best count: today a compile past
-// one thread per core spends more CPU time for no wall time (#5472). When
-// the per-stage SMT acceptance shows all hardware threads (32 on a 16-core
-// SMT host) beating one per core, the default becomes all hardware threads.
-// `logical`, the count of CPUs the process may use, is the answer when the
-// host can't tell, and the default never exceeds it.
-jet_cli_physical_cores: fn(logical: Int) -[FS]> Int Never! {
-    status: cli_files.read("/proc/self/status") ?? return logical
-    allowed := [Int]{}
+// The CPUs this process may run on, from `/proc/self/status`'s
+// `Cpus_allowed_list` (its sched_getaffinity mask); `None` when the host
+// doesn't list them.
+jet_cli_allowed_cpus: fn() -[FS]> [Int]? Never! {
+    status: cli_files.read("/proc/self/status") ?? return None
     loop line in status.lines() {
-        if line.starts_with("Cpus_allowed_list:") -> allowed = jet_cli_cpu_list(line.slice(18..<line.len()).trim()) ?? return logical
+        if line.starts_with("Cpus_allowed_list:") -> return jet_cli_cpu_list(line.slice(18..<line.len()).trim())
     }
-    covered := [Int]{}
-    cores := 0
-    loop cpu in allowed {
-        if covered.contains(cpu) -> next
-        siblings: cli_files.read("/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list") ?? return logical
-        covered.extend(jet_cli_cpu_list(siblings.trim()) ?? return logical)
-        cores += 1
-    }
-    if cores < 1 || cores > logical -> return logical
-    cores
+    None
 }
 
 // The CPUs of a Linux CPU list (`0-3,8-11`, `0,2`); `None` when it is not one.
@@ -1201,39 +1183,87 @@ jet_cli_cpu_list: fn(text: String) -> [Int]? Never! {
     Val(cpus)
 }
 
-// The compiler's thread default once other work is counted: one thread per
-// physical core (jet_cli_physical_cores), but never more than the CPUs other
-// processes leave free at start. `/proc/stat`'s `procs_running` line counts
-// the runnable threads at this instant, this thread among them; the others
-// spread over the host's online CPUs, so their share of the `logical` CPUs
-// this process may use counts as busy. A quiet host gets every physical
-// core; on an SMT host the default shrinks only once fewer CPUs than
-// physical cores are free, since a busy core's sibling still runs a compiler
-// thread. An unreadable file leaves the physical-core count.
+// The compiler's thread default: one thread per CPU this process may run on
+// (`logical`, its affinity mask's count under the cgroup's CPU quota), less
+// the CPUs of that mask other work keeps busy at start. A compile runs
+// faster on every hardware thread than on one per physical core, so SMT
+// siblings count as CPUs. Only load on the mask's own CPUs counts: a host
+// busy on CPUs this process may not use leaves it every CPU it may.
+// `/proc/stat`'s `procs_running` counts the runnable threads at this
+// instant, this thread among them; when no other runs, the host is quiet
+// and nothing more is read. Otherwise each runnable thread of another
+// process counts against the CPU it runs on (jet_cli_busy_cpus). An
+// unreadable file leaves `logical`.
 jet_cli_default_threads: fn(logical: Int) -[FS]> Int Never! {
-    physical: jet_cli_physical_cores(logical)
-    stat: cli_files.read("/proc/stat") ?? return physical
-    online_list: cli_files.read("/sys/devices/system/cpu/online") ?? return physical
-    online: jet_cli_cpu_list(online_list.trim()) ?? return physical
-    jet_cli_threads_left(physical, logical, online.len(), stat)
+    stat: cli_files.read("/proc/stat") ?? return logical
+    running: jet_cli_procs_running(stat) ?? return logical
+    if running <= 1 -> return logical
+    allowed: jet_cli_allowed_cpus() ?? return logical
+    busy: jet_cli_busy_cpus(allowed) ?? return logical
+    jet_cli_threads_left(logical, allowed.len(), busy)
 }
 
-// At most `physical` threads, and at most the `logical` CPUs this process may
-// use less the busy share of them that `stat` (the text of `/proc/stat`)
-// shows across `online` CPUs; at least one. `physical` when `stat` has no
-// `procs_running` count.
-jet_cli_threads_left: fn(physical: Int, logical: Int, online: Int, stat: String) -> Int Never! {
-    running := -1
+// The runnable-thread count `stat` (the text of `/proc/stat`) holds in its
+// `procs_running` line, this thread among them; `None` without one.
+jet_cli_procs_running: fn(stat: String) -> Int? Never! {
     loop line in stat.lines() {
-        if line.starts_with("procs_running ") -> running = Int.parse(line.slice(14..<line.len()).trim()) ?? -1
+        if line.starts_with("procs_running ") {
+            running: Int.parse(line.slice(14..<line.len()).trim()) ?? return None
+            return Val(running)
+        }
     }
-    if running < 0 -> return physical
-    others: if running > 1 -> running - 1 else -> 0
-    spread: if online < logical -> logical else -> online
-    free: logical - others * logical /% spread
+    None
+}
+
+// How many runnable threads of other processes sit on the CPUs of `allowed`
+// at this instant: each `/proc/<pid>/task/<tid>/stat` in state `R` counts
+// against the CPU it last ran on, the one whose run queue holds it. This
+// process's own threads don't count. `None` when `/proc` can't be listed.
+jet_cli_busy_cpus: fn(allowed: [Int]) -[FS]> Int? Never! {
+    own_stat: cli_files.read("/proc/self/stat") ?? return None
+    own: own_stat.partition(" ").head
+    in_mask := [Bool]{}
+    loop cpu in allowed {
+        loop in_mask.len() <= cpu -> in_mask.push(false)
+        in_mask[cpu] = true
+    }
+    processes: cli_files.listdir("/proc") ?? return None
+    busy := 0
+    loop process in processes {
+        if process == own -> next
+        _ := Int.parse(process) ?? next
+        tasks: cli_files.listdir("/proc/{process}/task") ?? next
+        loop task in tasks {
+            text: cli_files.read("/proc/{process}/task/{task}/stat") ?? next
+            cpu: jet_cli_task_runnable_cpu(text) ?? next
+            if cpu < in_mask.len() && in_mask[cpu] -> busy += 1
+        }
+    }
+    Val(busy)
+}
+
+// The CPU a runnable thread waits or runs on, from the text of its
+// `/proc/<pid>/task/<tid>/stat`: after the parenthesized command name, the
+// state (field 3) is `R` and the CPU is field 39. `None` for a thread in any
+// other state, or text that is not such a line.
+jet_cli_task_runnable_cpu: fn(text: String) -> Int? Never! {
+    close: text.rfind(")")
+    if close < 0 -> return None
+    fields: text.slice(close + 1, text.len()).trim().split(" ").to_list()
+    if fields.len() < 37 || fields[0] != "R" -> return None
+    cpu: Int.parse(fields[36]) ?? return None
+    Val(cpu)
+}
+
+// At most the `logical` CPUs this process may use, and at most the
+// `allowed` CPUs of its mask less the `busy` ones other processes' runnable
+// threads hold; at least one.
+jet_cli_threads_left: fn(logical: Int, allowed: Int, busy: Int) -> Int Never! {
+    free: allowed - busy
     if free < 1 -> return 1
-    if free < physical -> return free
-    physical
+    if free < logical -> return free
+    if logical < 1 -> return 1
+    logical
 }
 
 // The Core library rows of the toolchain tree (jet_cli_toolchain_root of
@@ -1412,7 +1442,7 @@ JetCLIToolchainPackages: struct {
 // The driver request for `snapshot` on this host: the Core rows, the
 // canonical effect source, the host facts, the lock's build stamp and build
 // contributions, and at most `threads` compiler threads (`None` admits
-// threads automatically, up to one per physical core).
+// threads automatically, up to one per CPU it may run on).
 jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sources: [JetDriverCoreSource], threads: Int?, mode: JetDriverCompileMode) -> JetDriverCompileRequest Never! {
     os: cli_sys.name()
     cores: cli_sys.cpu_count()
