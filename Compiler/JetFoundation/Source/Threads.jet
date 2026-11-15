@@ -42,9 +42,7 @@ compiler_threads_single: fn() -> CompilerThreads Never! {
 // copied out for their threads, say) plus `scratch_per_thread` bytes for each
 // thread.
 compiler_threads_admit: fn(threads: CompilerThreads, items: Int, work: Int, min_work_per_thread: Int, scratch_per_thread: Int, parallel_scratch: Int) -> Int Never! {
-    cores: if threads.cores < 1 -> 1 else -> threads.cores
-    limit := threads.cap ?? cores
-    if limit > cores -> limit = cores
+    limit := compiler_threads_limit(threads)
     if limit > items -> limit = items
     loop limit > 1 && limit * min_work_per_thread > work -> limit -= 1
     if threads.memory_available == .Val(free) {
@@ -52,6 +50,43 @@ compiler_threads_admit: fn(threads: CompilerThreads, items: Int, work: Int, min_
     }
     if limit < 1 -> return 1
     limit
+}
+
+// The most threads `threads` admits for any step: its cap, or its cores when
+// it has none, never more than the cores and at least one.
+compiler_threads_limit: fn(threads: CompilerThreads) -> Int Never! {
+    cores: if threads.cores < 1 -> 1 else -> threads.cores
+    limit: threads.cap ?? cores
+    if limit > cores -> return cores
+    if limit < 1 -> return 1
+    limit
+}
+
+// `threads` capped at `count` threads (at least one).
+compiler_threads_capped: fn(threads: CompilerThreads, count: Int) -> CompilerThreads Never! {
+    limit := compiler_threads_limit(threads)
+    if count < limit -> limit = count
+    if limit < 1 -> limit = 1
+    CompilerThreads{cap: Val(limit), cores: threads.cores, memory_available: threads.memory_available}
+}
+
+// The threads a step may use beside another step that holds `held` of
+// `threads`: what is left of the limit, at least one. Two steps that run
+// together and each admit the whole limit leave tasks waiting for a carrier,
+// and the runtime then asks busy threads to take turns at their loops' polls
+// (JetRuntime Scheduler.jet scheduler_checks_arm_turns), which costs CPU and
+// gains no wall time.
+compiler_threads_beside: fn(threads: CompilerThreads, held: Int) -> CompilerThreads Never! {
+    compiler_threads_capped(threads, compiler_threads_limit(threads) - held)
+}
+
+#Test("a step beside another takes what the other leaves of the limit, at least one thread") {
+    threads: CompilerThreads{cap: Val(16), cores: 32, memory_available: None}
+    assert_eq(compiler_threads_limit(threads), 16)
+    assert_eq(compiler_threads_limit(compiler_threads_beside(threads, 4)), 12)
+    assert_eq(compiler_threads_limit(compiler_threads_beside(threads, 16)), 1)
+    assert_eq(compiler_threads_limit(compiler_threads_capped(CompilerThreads{cap: None, cores: 8, memory_available: None}, 2)), 2)
+    assert_eq(compiler_threads_limit(compiler_threads_capped(CompilerThreads{cap: Val(40), cores: 8, memory_available: None}, 64)), 8)
 }
 
 // Consecutive parts for `workers` threads over jobs of the given `weights`:

@@ -96,6 +96,9 @@ use jet_foundation.[
     ViewSourceProjection,
     compiler_take_rows,
     compiler_threads_admit,
+    compiler_threads_beside,
+    compiler_threads_capped,
+    compiler_threads_limit,
     compiler_threads_failure_text,
     compiler_threads_partition,
     compiler_transfer_rows,
@@ -12083,10 +12086,13 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // the side checks' taint catalog and the bundle's E0307 reports, which
     // only body checks make. The effect pass and the late checks write none
     // of these, so the walk's threads run beside the effect pass and its
-    // reports join after the late checks, where they always read.
+    // reports join after the late checks, where they always read. The two
+    // share the threads (sema_finalize_walk_inputs): the effect pass takes
+    // what the walk leaves.
     taint_reports := [Diagnostic]{}
     taint_catalog: taint_prepared.pop() ?? panic("the side checks left no taint catalog")
     walk_inputs: sema_finalize_walk_inputs(taint_catalog, diagnostics, threads, taint_reports)
+    effect_threads: compiler_threads_beside(threads, walk_inputs.workers)
     walked := SemaFinalizeWalked{found: [[Diagnostic]]{}, masked: [[Span]]{}, fixed: [[String]]{}}
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`. It borrows the run's symbol table and hands
@@ -12095,7 +12101,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     final_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
     task.group sema_finalize_effect_walks {
         walking: task sema_finalize_walk_all(final_graph, walk_inputs)
-        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, final_graph.core_seal)
+        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, effect_threads, closed, organization_denials, organization_source, final_graph.core_seal)
         if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
         walked = walking.join() ?? panic(compiler_threads_failure_text(err))
     }
@@ -12380,8 +12386,12 @@ SEMA_CORE_JOBS_PER_THREAD: 8
 // The tag dataflow's inputs (the Rust reference's `check_fact_tags_and_states`
 // taint walk), taken from `prepared` (sema_taint_prepare of the graph): its
 // catalog, its modules heaviest source first, and the threads the walk
-// admits. Its own reports move onto `reports`; the E0307 reports among
-// `existing_diagnostics` (the bundle's reports so far) settle switch coverage
+// admits, at most a quarter of `threads`' limit since it runs beside the
+// effect pass (sema_finalize_program): on the compiler the walk is
+// about 1.6 s of CPU against the pass's 2.7 s over 570 ms, so on a quarter
+// it still ends inside the pass, which keeps the rest. Its own reports move
+// onto `reports`; the E0307 reports among `existing_diagnostics` (the
+// bundle's reports so far) settle switch coverage
 // (sema_taint_coverage_reports).
 sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaFinalizeWalkInputs {
     taken: prepared.move()
@@ -12389,7 +12399,8 @@ sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostic
     taint_weights: taken.weights.move()
     work := 0
     loop weight in taint_weights -> work += weight
-    workers: compiler_threads_admit(threads, taint_weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
+    quarter: compiler_threads_capped(threads, (compiler_threads_limit(threads) + 3) /% 4)
+    workers: compiler_threads_admit(quarter, taint_weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
     SemaFinalizeWalkInputs{catalog: taken.catalog.move(), coverage: sema_taint_coverage_reports(existing_diagnostics), taint_order: compiler_threads_heaviest_first(taint_weights), workers: workers}
 }
 
