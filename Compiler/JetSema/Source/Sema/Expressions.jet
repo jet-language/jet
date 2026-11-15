@@ -80,7 +80,7 @@ use {
         UnitFormat,
         UnitRatio,
         ast_comptime_value_type,
-        ast_empty_call_arg_flags,
+        AST_EMPTY_CALL_ARG_FLAGS,
         compute_shape_dimensions,
         compute_shape_type,
         core_module_export,
@@ -730,7 +730,7 @@ sema_expr_check_operator: fn(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs
         argument_expr = left
     }
     site: SemaOperatorSite{negated: op == BinOp.Ne, receiver: expr_span(receiver_expr), argument: expr_span(argument_expr), bare: sema_expr_operand_bare(receiver_expr)}
-    argument := CallArg{convention: AccessConvention.Read, expr: argument_expr, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    argument := CallArg{convention: AccessConvention.Read, expr: argument_expr, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     scopes.ownership_call_depth += 1
     checked := sema_call_check_method_candidate_from_value_owned(state, receiver_expr, receiver_value, resolved.candidate, [CallArg]{argument}, [SemaCallDefaultValue]{}, span, None, environment, program, scopes, tail_store, context, diagnostics)
     scopes.ownership_call_depth -= 1
@@ -6197,8 +6197,8 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
     }
     if point_method != "" {
         arguments: [CallArg]{
-            {convention: AccessConvention.Read, expr: left, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false},
-            {convention: AccessConvention.Read, expr: right, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false},
+            {convention: AccessConvention.Read, expr: left, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false},
+            {convention: AccessConvention.Read, expr: right, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false},
         }
         constructor: Expr.MethodCall{receiver: Expr.Ident{name: "Instant", span: span, id: AST_NODE_GENERATED}, method: point_method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: arguments, id: AST_NODE_GENERATED}
         return sema_check_expression(constructor, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -6292,7 +6292,7 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
     // (`Decimal`, `Fraction`) orders through its `compare` method; the
     // arithmetic and equality operators stay on the precise route below.
     if sema_expr_precise_orders_by_compare(op, lhs.ty, rhs.ty) {
-        argument: CallArg{convention: AccessConvention.Read, expr: right, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        argument: CallArg{convention: AccessConvention.Read, expr: right, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
         call: Expr.MethodCall{receiver: left, method: "compare", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
         comparison: sema_check_expression(call, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
         if op == BinOp.Compare {
@@ -6533,7 +6533,7 @@ sema_expr_copy_in_fork_function: fn(value: Expr, context: SemaCheckContext) -> B
 
 sema_expr_copy_fork_unreached: fn(span: Span) -> Expr Never! {
     message: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "a fork function ran for a type whose copy does not fork"}}, span: span, id: AST_NODE_GENERATED}
-    argument: CallArg{convention: AccessConvention.Read, expr: message, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    argument: CallArg{convention: AccessConvention.Read, expr: message, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     Expr.Call{call: Call{name: "panic", name_span: span, type_args: [Type]{}, args: [CallArg]{argument}}, id: AST_NODE_GENERATED}
 }
 
@@ -6628,7 +6628,7 @@ sema_expr_copy_fork_body: fn(subject: Expr, ty: Type, row: SemaRegistrationRowRe
         .List(_) | .Option(_) -> {
             item: "__fork_item{depth}"
             each: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: item.copy(), name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Expr{value: sema_expr_copy_fork_part(sema_expr_copy_fork_name(item, span), span)}, span: span, meta: ast_empty_lambda_meta()}
-            argument: CallArg{convention: AccessConvention.Read, expr: Expr.Lambda{lambda: each, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+            argument: CallArg{convention: AccessConvention.Read, expr: Expr.Lambda{lambda: each, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
             Val(Expr.MethodCall{receiver: subject, method: "map", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED})
         }
         .Map(_, _, _) -> Val(sema_expr_copy_fork_map(subject, depth, span))
@@ -6921,7 +6921,7 @@ sema_expr_contextual_literal: fn(expr: Expr, expected: Type?, environment: SemaS
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
     receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED}
-    call_args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: argument, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    call_args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: argument, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     Val(Expr.MethodCall{receiver: receiver, method: "from_literal", method_span: span, owner_type_args: owner_type_args, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED})
 }
 

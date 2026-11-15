@@ -253,25 +253,26 @@ StrPart: enum {
     Interp(expr: Expr, format: StrFormat)
     Byte(value: U8)
 }
-ast_empty_call_arg_flags: fn() -> CallArgFlags Never! {
-    CallArgFlags{
-        owned_last_use: false,
-        shared_access_desugar: false,
-        template_items: None,
-        c_callback_symbol: false,
-        c_callback_function_key: None,
-        c_callback_managed: false,
-        c_callback_plan_digest: None,
-        c_callback_identity: None,
-        trusted_html: false,
-        source_index: None,
-        binder_slot: None,
-        binder_label: None,
-        binder_refs: [BinderRef]{},
-        binder_site: None,
-        callable_policy: None,
-        authority_boundary: false,
-    }
+
+// The flags of an argument no pass has marked. A constant, so every argument
+// built with it borrows one static box instead of allocating its own.
+AST_EMPTY_CALL_ARG_FLAGS: CallArgFlags{
+    owned_last_use: false,
+    shared_access_desugar: false,
+    template_items: None,
+    c_callback_symbol: false,
+    c_callback_function_key: None,
+    c_callback_managed: false,
+    c_callback_plan_digest: None,
+    c_callback_identity: None,
+    trusted_html: false,
+    source_index: None,
+    binder_slot: None,
+    binder_label: None,
+    binder_refs: [BinderRef]{},
+    binder_site: None,
+    callable_policy: None,
+    authority_boundary: false,
 }
 
 ast_empty_lambda_meta: fn() -> LambdaMeta Never! {

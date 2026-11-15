@@ -31,7 +31,7 @@ use jet_foundation.[
     diagnostic_registry_row,
     diagnostic_with_edit,
     expr_span,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     checked_generated_local,
     core_input_method_member,
     core_input_method_modules,
@@ -622,7 +622,7 @@ sema_eval_entry_show: fn(program: &Program) {
             }
             if sema_eval_entry_valueless(value) -> return
             span: expr_span(value)
-            argument: CallArg{convention: AccessConvention.Read, expr: value, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+            argument: CallArg{convention: AccessConvention.Read, expr: value, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
             changed.body[count - 1] = Stmt.Expr{expr: Expr.Call{call: Call{name: "__jet_eval_show", name_span: span, type_args: [Type]{}, args: [CallArg]{argument}}, id: AST_NODE_GENERATED}}
             program.items[index] = Item.Func{value: changed}
             return
@@ -757,7 +757,7 @@ sema_call_try_ambient_input_method: fn(receiver: Expr, method: String, method_sp
     loop module_name in core_input_method_modules(method) {
         identity: sema_call_core_module_identity(environment, program, module_name) ?? next
         target: sema_call_core_source_target(environment, program, identity, member, type_args, method_span, true, diagnostics) ?? next
-        call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver.copy(), span: receiver_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}} // copy: the method call keeps its receiver.
+        call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver.copy(), span: receiver_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}} // copy: the method call keeps its receiver.
         loop argument in args -> call_args.push(argument.copy()) // copy: the method call keeps its arguments.
         scopes.ownership_call_depth += 1
         value := sema_call_core_check_source_owned(target, "input.{method}", type_args, call_args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

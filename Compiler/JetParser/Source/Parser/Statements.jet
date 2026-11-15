@@ -34,7 +34,7 @@ use {
         Type,
         TypedLitBody,
         ast_binding,
-        ast_empty_call_arg_flags,
+        AST_EMPTY_CALL_ARG_FLAGS,
         expr_span,
         marker_registered,
         pattern_binding_names,
@@ -1684,7 +1684,7 @@ parser_layout_anchor_method: fn(field: String) -> String? Never! {
 }
 
 parser_layout_text_arg: fn(state: &JetParserState, text: String, span: Span) -> CallArg Never! {
-    CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: parser_node_id(state)}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: parser_node_id(state)}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
 }
 
 parser_desugar_layout_args: fn(state: &JetParserState, layout_name: String, args: [CallArg]) -> [CallArg] Never! {
@@ -1777,7 +1777,7 @@ parser_parse_assert_names: fn(state: &JetParserState) -> Stmt {
     args := [CallArg]{}
     loop {
         name: parser_expect_name(state, "after `assert`")
-        args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: parser_value(state, name), span: name.span, id: parser_node_id(state)}, span: name.span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: parser_value(state, name), span: name.span, id: parser_node_id(state)}, span: name.span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
         if parser_current_kind(state) != TOKEN_COMMA -> break
         parser_bump(state)
         if parser_current_kind(state) == TOKEN_RPAREN -> break

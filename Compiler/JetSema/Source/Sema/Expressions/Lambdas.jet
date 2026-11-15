@@ -36,7 +36,7 @@ use jet_foundation.[
     Type,
     ViewProvenanceMap,
     access_sigil,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     ast_lambda_single_expr_span,
     expr_span,
     symbol_key_text,
@@ -1519,7 +1519,7 @@ sema_expression_lambda_http_handler: fn(lambda: Lambda, expected: Type?, environ
         return None
     }
     handler := Expr.Lambda{lambda: lambda, id: AST_NODE_GENERATED}
-    source_args: [CallArg]{CallArg{convention: AccessConvention.Move, expr: handler, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    source_args: [CallArg]{CallArg{convention: AccessConvention.Move, expr: handler, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     // `__handler` is `HTTPHandler Never!`: its proven `Never` rail unwraps
     // to the handler the slot expects.
     built: sema_call_core_check_source_owned(target, "HTTPHandler", [Type]{}, source_args, span, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None

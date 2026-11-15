@@ -22,7 +22,7 @@ use jet_foundation.[
     Type,
     core_identity_is,
     core_source_owns_type,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     core_call,
     UnOp,
     expr_span,
@@ -247,7 +247,7 @@ sema_services_check_core_method: fn(api: String, contract: SemaServiceCoreMethod
             diagnostics.push(sema_error("E0003", span, "service source receiver target is missing", "`{api}` requires its canonical source function", "load the registered Core source function"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        source_args := [CallArg]{CallArg{convention: contract.receiver_access, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+        source_args := [CallArg]{CallArg{convention: contract.receiver_access, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
         loop argument in updated_args -> source_args.push(argument)
         scopes.ownership_call_depth += 1
         value := sema_call_core_check_source_owned(target, api, [Type]{}, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

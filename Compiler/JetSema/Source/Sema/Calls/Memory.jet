@@ -20,7 +20,7 @@ use jet_foundation.[
     TagMarker,
     Type,
     TypeTupleField,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     expr_span,
     measure_literal_value,
 ]
@@ -631,7 +631,7 @@ sema_call_try_raw_pointer_step: fn(receiver: Expr, receiver_value: TExpr, method
         return rejected
     }
     target: sema_call_core_source_target(environment, program, identity, member, [Type]{element.copy()}, span, true, diagnostics) ?? return rejected
-    call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     loop argument in args -> call_args.push(argument.copy())
     scopes.ownership_call_depth += 1
     value := sema_call_core_check_source_owned(target, method, [Type]{element}, call_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

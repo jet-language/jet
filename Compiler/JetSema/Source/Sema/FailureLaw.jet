@@ -39,7 +39,7 @@ use {
         TextEdit,
         Type,
         TypeParam,
-        ast_empty_call_arg_flags,
+        AST_EMPTY_CALL_ARG_FLAGS,
         ast_func,
         core_call_typed_signature,
         core_module_export,
@@ -241,7 +241,7 @@ sema_catch_all_err_rewrite: fn(subject: Expr, name: String, name_span: Span, pat
             value := Expr.Ident{name: "{payload}", span: name_span, id: AST_NODE_GENERATED}
             if sema_expr_unwrap_tag(members[position]) != (Type.Named{name: "Err"}) {
                 shown: Expr.Str{parts: [StrPart]{StrPart.Interp{expr: value, format: StrFormat.Display}}, span: name_span, id: AST_NODE_GENERATED}
-                argument: CallArg{convention: AccessConvention.Read, expr: shown, span: name_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+                argument: CallArg{convention: AccessConvention.Read, expr: shown, span: name_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
                 value = Expr.Call{call: Call{name: "Err", name_span: name_span, type_args: [Type]{}, args: [CallArg]{argument}}, id: AST_NODE_GENERATED}
             }
             test: Expr.PatternTest{subject: Expr.Ident{name: "{hidden}", span: name_span, id: AST_NODE_GENERATED}, pattern: Pattern.Variant{variant: sema_pattern_union_tag(members[position]), bindings: [PatSlot]{PatSlot.Bind{name: "{payload}", span: name_span}}, leading_dot: true, span: name_span}, span: name_span, id: AST_NODE_GENERATED}
@@ -743,7 +743,7 @@ sema_error_conversion_plain_types: fn(items: [Item]) -> [String] Never! {
 sema_error_conversion_hook_body: fn(route: ErrorConvDef, hook: Func) -> [Stmt] Never! {
     param: hook.params[0]
     span: hook.return_type_span ?? param.name_span
-    argument: CallArg{convention: param.convention, expr: Expr.Ident{name: param.name, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    argument: CallArg{convention: param.convention, expr: Expr.Ident{name: param.name, span: span, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     call: Call{name: sema_error_conversion_routine_name(route), name_span: span, type_args: [Type]{}, args: [CallArg]{argument}}
     [Stmt]{Stmt.Expr{expr: Expr.Call{call: call, id: AST_NODE_GENERATED}}}
 }

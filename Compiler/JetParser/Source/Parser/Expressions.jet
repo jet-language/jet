@@ -39,7 +39,7 @@ use {
         UnOp,
         UnitFormat,
         LIST_TYPE_OWNER,
-        ast_empty_call_arg_flags,
+        AST_EMPTY_CALL_ARG_FLAGS,
         ast_empty_lambda_meta,
         diagnostic_from_registry,
         diagnostic_with_edit,
@@ -903,7 +903,7 @@ parser_parse_shared_cell: fn(state: &JetParserState, head: Type?, start: Span, d
 }
 
 parser_shared_cell: fn(state: &JetParserState, operand: Expr, operand_span: Span, owner_type_args: [Type], head: Span, span: Span) -> ParsedExpr {
-    flags := ast_empty_call_arg_flags()
+    flags := AST_EMPTY_CALL_ARG_FLAGS
     flags.shared_operand = true
     argument: CallArg{convention: AccessConvention.Move, expr: operand, span: operand_span, flags: flags, label: None, spread: false}
     ParsedExpr{
@@ -1563,7 +1563,7 @@ parser_task_internal: fn(name: String) -> String Never! {
 
 parser_task_call: fn(state: &JetParserState, head: Span, method: String, method_span: Span, argument: Expr, argument_span: Span) -> Expr Never! {
     receiver: Expr.Ident{name: parser_task_internal("task"), span: head, id: parser_node_id(state)}
-    Expr.MethodCall{receiver: receiver, method: parser_task_internal(method), method_span: method_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: argument, span: argument_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}, id: parser_node_id(state)}
+    Expr.MethodCall{receiver: receiver, method: parser_task_internal(method), method_span: method_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: argument, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}, id: parser_node_id(state)}
 }
 
 parser_task_spawn: fn(state: &JetParserState, head: Span, take_names: [NamedSpan], body: LambdaBody, body_span: Span) -> Expr Never! {
@@ -1850,7 +1850,7 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
                 method_name == "take_pattern" -> {
                     parser_bump(state)
                     pattern: parser_parse_take_pattern_literal(state, depth + 1)
-                    args.push(CallArg{convention: AccessConvention.Read, expr: pattern.expr, span: pattern.span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+                    args.push(CallArg{convention: AccessConvention.Read, expr: pattern.expr, span: pattern.span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
                     parser_expect(state, TOKEN_RPAREN, "`)` after the take_pattern literal")
                 }
                 else -> {
@@ -2233,7 +2233,7 @@ parser_parse_call_args: fn(state: &JetParserState, depth: Int, allow_marker_labe
                 args.push(parser_parse_marked_argument(state, depth, argument_span, label.move(), spread))
             } else {
                 argument: parser_parse_expression(state, 1, depth + 1)
-                args.push(CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: ast_empty_call_arg_flags(), label: label.move(), spread: spread})
+                args.push(CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: label.move(), spread: spread})
             }
             if parser_current_kind(state) == TOKEN_RPAREN -> break
             if parser_current_kind(state) != TOKEN_COMMA {
@@ -2259,13 +2259,13 @@ parser_parse_marked_argument: fn(state: &JetParserState, depth: Int, argument_sp
     access: if mark_token.kind == TOKEN_AMP -> PlaceAccess.Write else -> PlaceAccess.Take
     argument: parser_parse_expression(state, 1, depth + 1)
     if parser_mark_place(argument.expr) {
-        return CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: ast_empty_call_arg_flags(), label: label, spread: spread, mark: Val(CallMark{access: access, span: mark_token.span})}
+        return CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: label, spread: spread, mark: Val(CallMark{access: access, span: mark_token.span})}
     }
     marked: parser_receiver_mark(state, argument.expr, access, mark_token.span) ?? {
         parser_report_mark_not_value(state, mark_token)
-        return CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: ast_empty_call_arg_flags(), label: label, spread: spread}
+        return CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: label, spread: spread}
     }
-    CallArg{convention: AccessConvention.Read, expr: marked, span: argument_span, flags: ast_empty_call_arg_flags(), label: label, spread: spread}
+    CallArg{convention: AccessConvention.Read, expr: marked, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: label, spread: spread}
 }
 
 parser_parse_expression_fields: fn(state: &JetParserState, depth: Int) -> ParsedExprFields {

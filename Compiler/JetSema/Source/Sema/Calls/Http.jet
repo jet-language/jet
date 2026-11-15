@@ -26,7 +26,7 @@ use jet_foundation.[
     TPreludeArg,
     TStaticOwner,
     Type,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     core_call_typed_signature,
     core_unbuilt_call,
     type_identity_equal,
@@ -546,7 +546,7 @@ sema_call_http_core_signature_type: fn(signature: CoreTypedCallSignature) -> Typ
 }
 
 sema_call_http_core_synthetic_arg: fn(expression: Expr, span: Span) -> CallArg Never! {
-    CallArg{convention: AccessConvention.Read, expr: expression, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    CallArg{convention: AccessConvention.Read, expr: expression, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
 }
 
 sema_call_http_core_string: fn(value: String, span: Span) -> TExpr Never! {
@@ -909,5 +909,5 @@ sema_web_form_field_selector: fn(argument: CallArg, diagnostics: &[Diagnostic]) 
 
 sema_web_form_selector_name: fn(field: String, selector_span: Span, argument: CallArg) -> CallArg {
     CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: field}}, span: selector_span, id: AST_NODE_GENERATED},
-        span: argument.span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        span: argument.span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
 }

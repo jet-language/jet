@@ -23,7 +23,7 @@ use jet_foundation.[
     TComptimeValue,
     Type,
     ast_binding,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     ast_empty_lambda_meta,
     core_enum_variants,
     core_source_receiver_method,
@@ -1363,7 +1363,7 @@ sema_http_mux_route_handler: fn(handler: Expr, params: [SemaHTTPRouteParameter],
     if request_names.len() == 1 && request_names[0] != "_" -> request = request_names[0]
     body := [Stmt]{}
     loop parameter in typed {
-        name_arg: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: parameter.name}}, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        name_arg: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: parameter.name}}, span: span, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
         input: Expr.MethodCall{receiver: sema_http_mux_ident(request, span), method: "__route_input", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{parameter.ty}, args: [CallArg]{name_arg}, id: AST_NODE_GENERATED}
         rejected: Expr.MethodCall{receiver: sema_http_mux_ident(request, span), method: "__route_rejected", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
         decoded: Expr.OrFallback{value: input, fallback: OrFallback.Return{value: Val(Expr.Ok{value: rejected, span: span, id: AST_NODE_GENERATED}), span: span}, is_option: true, span: span, id: AST_NODE_GENERATED}
@@ -1382,7 +1382,7 @@ sema_http_mux_route_handler: fn(handler: Expr, params: [SemaHTTPRouteParameter],
     loop parameter in params {
         name := parameter.name
         if request_names.contains(parameter.name) -> name = request
-        args.push(CallArg{convention: AccessConvention.Read, expr: sema_http_mux_ident(name, span), span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        args.push(CallArg{convention: AccessConvention.Read, expr: sema_http_mux_ident(name, span), span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
     }
     body.push(Stmt.Expr{expr: Expr.Call{call: Call{name: callee, name_span: span, type_args: [Type]{}, args: args}, id: AST_NODE_GENERATED}})
     Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{request_param}, effects: None, body: LambdaBody.Block{body: body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}

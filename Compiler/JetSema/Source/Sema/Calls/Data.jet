@@ -17,7 +17,7 @@ use jet_foundation.[
     TFailureCarrier,
     Type,
     TypeTupleField,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     core_receiver_method,
     core_source_owns_type,
     expr_source_span,
@@ -426,7 +426,7 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
     if args.len() > want -> sema_data_check_discarded_arguments(args.slice(want, args.len()), environment, program, scopes, state, tail_store, context, diagnostics)
     row: parameters[0]
     data_error: Type.Named{name: sema_data_source_type_name(environment, program, "DataError")}
-    source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     argument_types := [Type]{receiver_value.ty}
     typed := [TExpr]{receiver_value}
     call_type_args := [Type]{}
@@ -652,7 +652,7 @@ sema_data_try_event_time_method: fn(receiver: Expr, receiver_value: TExpr, name:
     }
     complete := sema_data_event_time_labels(method, args, diagnostics)
     element: parameters[parameters.len() - 1]
-    source_args := [CallArg]{CallArg{convention: AccessConvention.Move, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    source_args := [CallArg]{CallArg{convention: AccessConvention.Move, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     argument_types := [Type]{receiver_value.ty}
     typed := [TExpr]{receiver_value}
     call_type_args := [Type]{element}
@@ -693,7 +693,7 @@ sema_data_try_event_time_method: fn(receiver: Expr, receiver_value: TExpr, name:
         }
         disposition: sema_data_source_type_name(environment, program, "LateEventDisposition")
         // `late:` defaults to `.Drop`.
-        late: if args.len() == 3 -> args[2] else -> CallArg{convention: AccessConvention.Read, expr: Expr.EnumLit{type_name: disposition, variant: "Drop", variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        late: if args.len() == 3 -> args[2] else -> CallArg{convention: AccessConvention.Read, expr: Expr.EnumLit{type_name: disposition, variant: "Drop", variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
         value: sema_data_expect_core_arg("window", 2, Type.Named{name: disposition}, late, environment, program, scopes, state, tail_store, context, diagnostics)
         if !sema_data_query_push_argument(late, value, source_args, argument_types, typed) -> complete = false
         call_type_args = [Type]{parameters[0], element}
@@ -743,7 +743,7 @@ sema_data_check_list_query: fn(receiver: Expr, receiver_value: TExpr, row: Type,
         diagnostics.push(sema_error("E0003", span, "checked query method `query` has no canonical receiver Core row", "every checked query method lowers onto its receiver Core row", "repair the Core registry receiver rows"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     loop argument in args -> source_args.push(argument.copy())
     result_type: Type.Result{ok: Type.Apply{name: sema_data_source_type_name(environment, program, "Query"), args: [Type]{row}}, err: sema_data_decode_error()}
     value: sema_data_core_emit(record, "query", source_args, [Type]{receiver_value.ty, sql}, [TExpr]{receiver_value, query}, [Type]{row}, result_type, span, expected, environment, program, scopes, state, context, diagnostics)
@@ -1366,7 +1366,7 @@ sema_data_csv_generic_param: fn(name: String, environment: SemaScopeEnvironment)
 sema_data_db_decode_args: fn(args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [CallArg]? {
     target: sema_data_core_target_type(type_args, "decode", span, environment, program, diagnostics) ?? return None
     bound := args
-    bound.push(CallArg{convention: AccessConvention.Read, expr: sema_data_db_names(target, environment, program, span), span: span, flags: ast_empty_call_arg_flags(), label: Val(CallLabel{name: "names", span: span}), spread: false})
+    bound.push(CallArg{convention: AccessConvention.Read, expr: sema_data_db_names(target, environment, program, span), span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: Val(CallLabel{name: "names", span: span}), spread: false})
     Val(bound)
 }
 
@@ -1505,7 +1505,7 @@ sema_data_core_try_decode: fn(module_name: String, member: String, args: [CallAr
         names_type: Type.List{element: sema_data_db_names_row_type()}
         names: sema_data_db_names(target, environment, program, span)
         value: sema_check_expression(names, Val(names_type), environment, program, scopes, state, tail_store, context, diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
-        updated_args.push(CallArg{convention: AccessConvention.Read, expr: names, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        updated_args.push(CallArg{convention: AccessConvention.Read, expr: names, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
         typed.push(value)
         checked_types.push(names_type)
     }

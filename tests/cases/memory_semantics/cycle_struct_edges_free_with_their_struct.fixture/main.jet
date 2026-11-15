@@ -65,6 +65,11 @@ Inner: struct {
     back: [Outer]
 }
 
+// An edge value written as a constant: the struct may borrow the constant's
+// one static box, so a write through the edge must copy it first and leave
+// the constant as written.
+BLANK: Inner{n: 3, tag: "blank", back: []}
+
 // Mutually recursive enums with a struct on the cycle (Left -> Middle -> Right -> Left).
 Left: enum {
     Leaf(n: String)
@@ -263,8 +268,22 @@ write_through: fn(from: Int, to: Int) -> Int {
     total
 }
 
+from_constant: fn(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        x: Outer{name: "c{i}", inner: BLANK}
+        y := x.copy()
+        bump(y.inner)
+        z := Outer{name: "d", inner: BLANK}
+        z.inner.n = 7
+        if x.inner.n != 3 || x.inner.tag != "blank" || BLANK.n != 3 || BLANK.tag != "blank" -> panic("a write through an edge built from a constant showed in the constant")
+        total += x.inner.n + y.inner.n + z.inner.n + x.name.len()
+    }
+    total
+}
+
 all_shapes: fn(rounds: Int) -> Int {
-    in_list(0, rounds) + via_option(0, rounds) + via_map(0, rounds) + via_tuple(0, rounds) + mutual(0, rounds) + only_edge(0, rounds) + write_through(0, rounds)
+    in_list(0, rounds) + via_option(0, rounds) + via_map(0, rounds) + via_tuple(0, rounds) + mutual(0, rounds) + only_edge(0, rounds) + write_through(0, rounds) + from_constant(0, rounds)
 }
 
 CT_CHECKSUM: #run all_shapes(20000)
@@ -277,5 +296,6 @@ run: fn() {
     measure("mutually recursive enums", mutual, 100000)
     measure("recursive edge as the only field", only_edge, 100000)
     measure("writes through a copy's edge", write_through, 100000)
+    measure("an edge built from a constant", from_constant, 100000)
     print("compile time: checksum {CT_CHECKSUM}, run time: checksum {all_shapes(20000)}")
 }

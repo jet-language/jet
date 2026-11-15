@@ -41,7 +41,7 @@ use jet_foundation.[
     module_is_core,
     module_none,
     module_text,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     diagnostic_with_alternative_edit,
     diagnostic_with_detail,
     diagnostic_with_edit_grade,
@@ -328,7 +328,7 @@ sema_expression_err_payload_is_err: fn(value: Expr, environment: SemaScopeEnviro
 }
 
 sema_expression_default_err_call: fn(value: Expr, span: Span, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    argument: CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    argument: CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     call: Call{name: "Err", name_span: span, type_args: [Type]{}, args: [CallArg]{argument}}
     sema_call_check_default_err(call, Val(expected), environment, program, scopes, state, tail_store, context, diagnostics)
 }

@@ -24,7 +24,7 @@ use jet_foundation.[
     StrPart,
     StructDef,
     Type,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     ast_func,
     ast_visit_expr,
     core_record_field,
@@ -192,7 +192,7 @@ sema_validate_over_rule: fn(subject: Type, args: [CallArg], span: Span, environm
         rule := args
         // copy: the field name is a payload of read parameter `args`; the rewritten rule owns its String
         rule[1] = CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: name.copy()}}, span: name_span, id: AST_NODE_GENERATED},
-            span: args[1].span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+            span: args[1].span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
         return Val(rule)
     }
     sema_validate_over_refuse(sema_validate_e0353(args[1].span), diagnostics)

@@ -196,6 +196,54 @@ ir_static_literal_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
     ir_static_read(m, p, b, ty, "literal:{sha256_hex("{value:Debug}")}", value)
 }
 
+// The wrapper box a struct literal's recursive edge of aggregate type row
+// `row` borrows for its field value `expression` (a frozen module constant
+// or compile-time literal of that type), -1 for any other value: a static
+// box holding the value as ir_static_member lays out a static struct's edge,
+// so building the struct allocates no wrapper of its own. Its immortal count
+// word keeps every copy, write (ir_wrapper_unique) and drop
+// (ir_wrapper_drop) off it, as for a static struct's own wrappers.
+ir_static_edge: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int, row: Int) -> Int Never! {
+    if m.types[row].kind != .Aggregate -> return -1
+    ty: ir_ty(p, b, expression)
+    if (ir_value_type(m, p, ty) ?? -1) != row || ir_host_value_held(p, ty) -> return -1
+    node: ir_body_node(p, b, expression)
+    if node.kind == .ConstRef(symbol) {
+        key: ir_body_symbol_key(p, b, symbol)
+        if ir_function_row(p, key) != None -> return -1
+        at: p.constants.get(key) ?? return -1
+        definition: p.constant_defs[at]
+        if definition.shared_holder || definition.is_storage -> return -1
+        return ir_static_wrapper(m, p, b, ty, row, key, definition.value)
+    }
+    if node.kind == .CtLit(value) {
+        return ir_static_wrapper(m, p, b, ty, row, "literal:{sha256_hex("{value:Debug}")}", value)
+    }
+    -1
+}
+
+// The static wrapper box of constant `key` (value `value`, type `ty`, row
+// `row`): built on first use and kept in m.constant_rows by the constant and
+// the type's content key, as ir_static_constant keeps the constant itself.
+// The address past its count word, -1 when the value does not freeze.
+ir_static_wrapper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int, key: String, value: TComptimeValue) -> Int Never! {
+    memo: "wrapper:{key}|{ir_row_key(m, row)}"
+    object := name_rows_value(m.constant_rows, memo) ?? -2
+    if object == -2 {
+        s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
+        wrapper: ir_static_box(s, m.types[row].size)
+        object = if ir_static_into(m, p, s, wrapper, IR_STATIC_BOX_HEADER, ty, row, value) -> ir_static_commit(m, s.move()) + wrapper else -> -1
+        name_rows_set(m.constant_rows, memo, object)
+    }
+    if object < 0 -> return -1
+    pointer_row: ir_pointer_row(m)
+    address: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.DataAddress, address, object, -1, -1, b.line)
+    slot: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.Offset, slot, address, IR_STATIC_BOX_HEADER, -1, b.line)
+    slot
+}
+
 // The address of module storage `definition` (a mutable module binding): one
 // data row per declaration in the object's writable data, holding the value
 // as memory holds a value of its type, that every read loads (an

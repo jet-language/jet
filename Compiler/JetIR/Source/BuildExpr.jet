@@ -2297,6 +2297,15 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
             ir_emit(b.f, IROp.StackAddress, storage, m.types[ty].size, 8, -1, b.line)
             loop field in fields {
                 member: ir_member_of(m, p, b, storage, field.field.name) ?? return ir_fail_slot(b, span, "field: struct {field.field.name}")
+                // A recursive edge given a frozen constant borrows its static
+                // wrapper box (ir_static_edge).
+                if member.boxed {
+                    shared: ir_static_edge(m, p, b, field.value, member.ty)
+                    if shared >= 0 {
+                        ir_emit(b.f, IROp.Store, -1, storage, member.offset, shared, b.line)
+                        next
+                    }
+                }
                 // A member of a field's structural union is boxed as that
                 // union, by the member's checked type: a distinct member
                 // (`Usd: distinct Int`) shares its base's value row.

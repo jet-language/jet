@@ -32,7 +32,7 @@ use jet_foundation.[
     TypeTupleField,
     TextEdit,
     ast_binding,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     ast_empty_lambda_meta,
     builtin_method_receiver_accepts,
     core_source_receiver_method,
@@ -237,7 +237,7 @@ sema_call_try_int_abs_source: fn(receiver: Expr, receiver_value: TExpr, method: 
         diagnostics.push(sema_error("E0003", span, "Int.abs source function is not available", "this receiver operation requires the canonical core.math.abs declaration", "load the registered Core math source function"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    source_args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    source_args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     scopes.ownership_call_depth += 1
     value := sema_call_core_check_source_owned(target, "Int.abs", type_args, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     scopes.ownership_call_depth -= 1
@@ -965,7 +965,7 @@ sema_app_text: fn(text: String, span: Span) -> Expr Never! {
 }
 
 sema_app_arg: fn(expr: Expr, convention: AccessConvention, span: Span) -> CallArg Never! {
-    CallArg{convention: convention, expr: expr, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    CallArg{convention: convention, expr: expr, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
 }
 
 sema_app_call_method: fn(call: String, method: String, type_args: [Type], args: [CallArg], span: Span) -> Expr Never! {

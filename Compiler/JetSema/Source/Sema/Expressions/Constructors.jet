@@ -40,7 +40,7 @@ use {
         TypeTupleField,
         TypedLitBody,
         Variant,
-        ast_empty_call_arg_flags,
+        AST_EMPTY_CALL_ARG_FLAGS,
         ast_empty_lambda_meta,
         core_enum_payload_variants,
         core_enum_variant_labels,
@@ -359,7 +359,7 @@ sema_atomic_field_inner: fn(ty: Type) -> Type? Never! {
 sema_atomic_field_initializer: fn(field_ty: Type, value: TExpr, source: Expr, program: SemaProgramTables, context: &SemaCheckContext) -> TExpr? {
     inner: sema_atomic_field_inner(field_ty) ?? return Val(value)
     row: sema_call_builtin_static_row("Atomic", "new", "") ?? return None
-    argument: CallArg{convention: row.parameter_convention, expr: source, span: expr_span(source), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    argument: CallArg{convention: row.parameter_convention, expr: source, span: expr_span(source), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     bindings: [SemaInferenceBinding]{SemaInferenceBinding{name: row.type_params[0], ty: inner, source: "atomic field initializer"}}
     kind: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{argument.move()}, bindings, value.span, 0, program, context) ?? return None
     Val(sema_tree_node(field_ty, kind.move(), value.span))
@@ -877,7 +877,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
                     return None
                 }
             }
-            call_args.push(CallArg{convention: AccessConvention.Read, expr: payload_expr, span: expr_span(payload_expr), flags: ast_empty_call_arg_flags(), label: None, spread: false})
+            call_args.push(CallArg{convention: AccessConvention.Read, expr: payload_expr, span: expr_span(payload_expr), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
         }
         checked: sema_call_try_data_literal(Type.Named{name: resolved_name}, variant, call_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         return checked.value
@@ -1936,7 +1936,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         }
     }
     encoded_body := Expr.Str{parts: encoded_parts, span: expr_span(body_value), id: AST_NODE_GENERATED}
-    check_argument := CallArg{convention: AccessConvention.Read, expr: encoded_body, span: expr_span(body_value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    check_argument := CallArg{convention: AccessConvention.Read, expr: encoded_body, span: expr_span(body_value), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     check_call := Expr.MethodCall{
         receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
         method: "check",
@@ -2046,7 +2046,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
 // `Type.encode_hole(value)` for one interpolation hole.
 sema_expression_checked_text_encoder: fn(type_name: String, value: Expr) -> Expr Never! {
     span: expr_span(value)
-    argument := CallArg{convention: AccessConvention.Read, expr: value.copy(), span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    argument := CallArg{convention: AccessConvention.Read, expr: value.copy(), span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     Expr.MethodCall{
         receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
         method: "encode_hole",
@@ -2065,7 +2065,7 @@ sema_expression_checked_text_encoder: fn(type_name: String, value: Expr) -> Expr
 // literal, as a rejected run-time check does.
 sema_expression_checked_text_stops: fn(call: Expr, message: String, span: Span) -> Expr Never! {
     text: Expr.Str{parts: [StrPart]{StrPart.Lit{text: message}}, span: span, id: AST_NODE_GENERATED}
-    argument: CallArg{convention: AccessConvention.Read, expr: text, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    argument: CallArg{convention: AccessConvention.Read, expr: text, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     stop: Expr.Call{call: Call{name: "panic", name_span: span, type_args: [Type]{}, args: [CallArg]{argument}}, id: AST_NODE_GENERATED}
     Expr.OrFallback{value: call, fallback: OrFallback.Value{value: stop}, is_option: false, span: span, id: AST_NODE_GENERATED}
 }
@@ -2091,7 +2091,7 @@ sema_expression_checked_text_build: fn(type_name: String, parts: [StrPart], span
     literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: current}}, span: span, id: AST_NODE_GENERATED})
     args := [CallArg]{}
     loop elements in ([ [Expr] ]{literal_exprs, hole_exprs}) {
-        args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
     }
     build_call: Expr.MethodCall{
         receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
@@ -2223,7 +2223,7 @@ sema_expression_typed_literal_regex: fn(value: Expr, span: Span, expected: Type?
     route: sema_call_core_resolve_route(environment, program, "core.regex", "compile", [Type]{}, 1, false, span, diagnostics) ?? return None
     if route == {
         .Source(target) -> {
-            argument: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: pattern}}, span: expr_span(value), id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+            argument: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: pattern}}, span: expr_span(value), id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
             compiled: sema_call_core_check_source_owned(target, "core.regex.compile", [Type]{}, [CallArg]{argument}, span, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
             result_type: if compiled.ty == {
                 .Result(ok, _) -> ok
@@ -2390,7 +2390,7 @@ sema_expression_conversion: fn(written_name: String, value: Expr, span: Span, ex
         }
     }
     owner: receiver ?? return None
-    argument: CallArg{convention: AccessConvention.Read, expr: value.copy(), span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    argument: CallArg{convention: AccessConvention.Read, expr: value.copy(), span: expr_span(value), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     call: Expr.MethodCall{receiver: owner, method: "from", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
     sema_check_expression(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
@@ -2465,7 +2465,7 @@ sema_expression_typed_literal_distinct_literal: fn(head: Type, value: Expr, span
     if sema_expression_typed_literal_written_integer(value) == None && !sema_expr_decimal_literal_operand(value, false) -> return SemaMethodSpecialCheck{handled: false, value: None}
     facts: sema_expr_distinct_facts(head, environment, program, scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     owner: sema_expression_type_symbol(scopes, environment, program, facts.name) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    argument: CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    argument: CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     sema_call_try_distinct_conversion(owner, facts.name, sema_call_distinct_base_method(facts.base), [CallArg]{argument}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 

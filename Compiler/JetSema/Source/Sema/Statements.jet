@@ -75,7 +75,7 @@ use jet_foundation.[
     ViewSourcePath,
     ViewSourceProjection,
     ast_binding,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     ast_visit_body,
     ast_visit_statement,
     ast_visit_expr,
@@ -7750,10 +7750,10 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
                 args := [CallArg]{}
                 loop index in 0..<count {
                     lane: (packed >> (index * 2)).bit_and(3)
-                    args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Int{value: lane, span: swizzle_span, width: None, raw: None, id: AST_NODE_GENERATED}, span: swizzle_span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+                    args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Int{value: lane, span: swizzle_span, width: None, raw: None, id: AST_NODE_GENERATED}, span: swizzle_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
                 }
                 value_span: expr_span(value)
-                args.push(CallArg{convention: AccessConvention.Read, expr: value, span: value_span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+                args.push(CallArg{convention: AccessConvention.Read, expr: value, span: value_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
                 receiver: Expr.Place{value: swizzle_base, access: PlaceAccess.Write, span: expr_span(swizzle_base), id: AST_NODE_GENERATED}
                 call: Expr.MethodCall{receiver: receiver, method: "__swizzle_set{count}", method_span: swizzle_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}
                 checked: sema_check_expression(call, Val(Type.Named{name: "Unit"}), environment, program, scopes, state, tail_store, context, diagnostics) ?? return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment swizzle set")
@@ -10128,7 +10128,7 @@ sema_stmt_context_allocator_handler: fn(field: ContextField, ty: Type, environme
         diagnostics.push(sema_error("E0003", field.span, "core.mem's allocator handler is missing", "a `#Context(allocator:)` block over a user allocator calls core.mem's `__allocator_handler`", "load the registered Core source module"))
         return None
     }
-    args := [CallArg]{CallArg{convention: AccessConvention.Write, expr: field.value, span: field.span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    args := [CallArg]{CallArg{convention: AccessConvention.Write, expr: field.value, span: field.span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     scopes.ownership_call_depth += 1
     value := sema_call_core_check_source_owned(target, "#Context(allocator:)", [Type]{ty}, args, field.span, None, environment, program, scopes, state, tail_store, context, diagnostics)
     scopes.ownership_call_depth -= 1

@@ -20,7 +20,7 @@ use jet_foundation.[
     ParamZone,
     Span,
     Type,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     type_with_effective_parameter_fn_return,
 ]
 
@@ -296,7 +296,7 @@ sema_call_mark_written: fn(arg: CallArg, source_index: Int, parameter: Int, para
 
 sema_call_make_default_arg: fn(param: SemaCallParam, parameter: Int, params: [SemaCallParam], call_span: Span) -> CallArg? {
     default_expr: param.default ?? return None
-    flags := ast_empty_call_arg_flags()
+    flags := AST_EMPTY_CALL_ARG_FLAGS
     flags.binder_slot = Val(parameter)
     flags.binder_site = Val(call_span.start)
     refs := [BinderRef]{}

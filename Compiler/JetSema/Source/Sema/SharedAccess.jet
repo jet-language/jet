@@ -21,7 +21,7 @@ use jet_foundation.[
     Stmt,
     Type,
     ast_binding,
-    ast_empty_call_arg_flags,
+    AST_EMPTY_CALL_ARG_FLAGS,
     ast_empty_lambda_meta,
     ast_visit_body,
     ast_visit_expr,
@@ -292,7 +292,7 @@ sema_shared_access_callback: fn(body: LambdaBody, span: Span, name: String) -> E
 
 sema_shared_access_call: fn(handle: Expr, method: String, body: LambdaBody, span: Span, name: String) -> Expr Never! {
     callback: sema_shared_access_callback(body, span, name)
-    flags := ast_empty_call_arg_flags()
+    flags := AST_EMPTY_CALL_ARG_FLAGS
     flags.shared_access_desugar = true
     argument: CallArg{convention: AccessConvention.Read, expr: callback, span: span, flags: flags, label: None, spread: false}
     Expr.MethodCall{receiver: handle, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
