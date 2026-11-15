@@ -290,8 +290,13 @@ back whole, so a build never ships a bodies file with a repeated or
 malformed record. A native compile already bound to the built-in Core,
 without `--deep-checks`, reads the file's header, and finds a Core
 function's record by halving the table, comparing keys in place, so its
-lookups touch the pages of the table and keys and only the records it
-loads; it loads the packet in place of checking its body when the file's
+lookups touch only the pages of the table and keys. It reads each record
+it loads from jet's own file at the record's offset into memory of its
+own (`JetCli/Cli/CoreSources.jet` `JetCLICoreBodiesRecords`), so no
+record page of the part is mapped: the records one compile loads lie all
+through the part, and a mapped page stays mapped once touched, 2 MiB at a
+time where the kernel maps file pages huge. It
+loads the packet in place of checking its body when the file's
 facts are its own and every key resolves, reading every packet's strings
 into one pool so each spelling is one String across the loads; it records
 again the codecs and derived methods the check demanded, and counts the

@@ -102,7 +102,7 @@ use {
         jet_eval_default_config,
         jet_eval_native_session,
     ]
-    jet_backend.[X64ImageFile, x64_image_file_read, x64_link_runtime_image, x64_link_runtime_pack]
+    jet_backend.[X64ImageFile, x64_image_file_read, x64_image_part_file, x64_link_runtime_image, x64_link_runtime_pack]
     jet_ir.[IRLibraryExportRow, IRLibraryResult, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent, sema_core_bodies_read]
@@ -2206,15 +2206,24 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
 
 // A compile bound to the Core built into this jet loads the Core library's
 // function checks (JetSema CoreBodies.jet) in place of checking them from
-// text, unless `--deep-checks` keeps bodies that check did not. The
-// problem, when this jet's bodies part has no header a compile reads: the
-// compiler build refuses a bodies file that does not read back
-// (CoreLibrary.jet), so that is jet's own defect.
+// text, unless `--deep-checks` keeps bodies that check did not. Its lookups
+// read the bodies part lent from this jet's mapped image; its records are
+// read from this jet's file (JetCLICoreBodiesRecords) when the part found
+// there is the one lent, else from the lent bytes. The problem, when this
+// jet's bodies part has no header a compile reads: the compiler build
+// refuses a bodies file that does not read back (CoreLibrary.jet), so that
+// is jet's own defect.
 jet_cli_core_bodies_lend: fn(request: JetDriverCompileRequest) -> String? {
     if request.deep_checks.all || request.deep_checks.scopes.len() > 0 -> return None
-    bodies: sema_core_bodies_read(jet_cli_runtime_part(JET_CLI_CORE_BODIES_FILE)) ?? return Val("this jet's Core bodies part `{JET_CLI_CORE_BODIES_FILE}` has no header a compile reads")
+    lent: jet_cli_runtime_part(JET_CLI_CORE_BODIES_FILE)
+    size: lent.len()
+    bodies: sema_core_bodies_read(lent.move()) ?? return Val("this jet's Core bodies part `{JET_CLI_CORE_BODIES_FILE}` has no header a compile reads")
+    part: x64_image_part_file(JET_CLI_SELF_EXECUTABLE, "{JET_CLI_RUNTIME_PART_PREFIX}{JET_CLI_CORE_BODIES_FILE}")
     hooks: request.eval_config.host_hooks.guard_edit()
     hooks.value.core_bodies = Val(bodies)
+    if part == .Val(found) && found.size == size {
+        hooks.value.core_bodies_records = Val(JetCLICoreBodiesRecords{at: found.at})
+    }
     None
 }
 

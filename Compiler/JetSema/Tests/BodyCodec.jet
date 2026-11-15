@@ -26,6 +26,7 @@ use {
         SemaParallelBody,
         SemaRegistrationForeignHandleFacts,
         SemaRegistrationHostHooks,
+        SemaCoreBodiesRecords,
         SemaRegistrationImportEdge,
         SemaRegistrationModuleInput,
         SemaRegistrationPackagePolicy,
@@ -493,6 +494,25 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
     body_codec_load("core", true)
 }
 
+#Test("a Core function check whose record the host reads from its file is the check from text") {
+    body_codec_load("core", true, through_file: true)
+}
+
+// The records of a bodies file read from bytes of their own, as a host
+// reads them from its file (SemaCoreBodiesRecords).
+BodyCodecRecords: struct {
+    bytes: [U8]
+
+    impl SemaCoreBodiesRecords {
+        read: fn(self, at: Int, size: Int) -[FS]> [U8]? {
+            if at < 0 || size < 0 || at + size > self.bytes.len() -> return None
+            record := [U8]{}
+            loop index in at..<at + size -> record.push(self.bytes[index])
+            Val(record)
+        }
+    }
+}
+
 // A `jet build` loads the Core library's function checks as a run does, so
 // that check refuses a `debug` trace in Core as a build would (E3405); a
 // program's own check outside a build does not.
@@ -515,13 +535,28 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
 // Checks `main` (body_codec_check of `package`, `core`) as the Core
 // library's check does, then again with the bodies file that check wrote:
 // every function check is loaded, and each module's result and the
-// compile's diagnostics are those of the check from text.
-body_codec_load: fn(package: String, core: Bool) {
+// compile's diagnostics are those of the check from text. With
+// `through_file`, the records are read through a host's read
+// (BodyCodecRecords) of the file a second check wrote, and the lent file's
+// records are blanked, so a record read from the lent bytes would not load.
+body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     failures := [String]{}
     captured := body_codec_check(failures, package, body_codec_hooks(), core) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
-    bodies: sema_core_bodies_read(captured.core_bodies.move()) ?? panic("BodyCodec: the bodies file does not read back")
+    bodies := sema_core_bodies_read(captured.core_bodies.move()) ?? panic("BodyCodec: the bodies file does not read back")
     count: bodies.head.count
+    file := [U8]{}
+    if through_file {
+        again := body_codec_check(failures, package, body_codec_hooks(), core) ?? panic("BodyCodec could not check module `main` again:\n{failures.join("\n")}")
+        file = again.core_bodies.move()
+        loop index in sema_core_bodies_offset(bodies.bytes, bodies.head, 0)..<bodies.bytes.len() {
+            bodies.bytes[index] = U8{0}
+        }
+    }
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, core_bodies: Val(bodies)}}
+    if through_file {
+        edit: hooks.guard_edit()
+        edit.value.core_bodies_records = Val(BodyCodecRecords{bytes: file.move()})
+    }
     loaded := body_codec_check(failures, package, hooks, core) ?? panic("BodyCodec could not load module `main`:\n{failures.join("\n")}")
     permit: hooks.guard_read()
     loaded_count := 0
