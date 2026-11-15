@@ -7,6 +7,7 @@ use {
     interface_sys: core.sys
     jet_cli.[jet_cli_driver_request]
     jet_driver.[
+        JET_DRIVER_CORE_READY_BYTES_PER_THREAD,
         JetDriverAuthorizedSourceFile,
         JetDriverAuthorizedSourceRoot,
         JetDriverAuthorizedSourceSnapshot,
@@ -213,10 +214,10 @@ InterfaceTestTrace: struct {
 
 interface_test_sink: fn(trace: &&InterfaceTestTrace) -> CompilerTraceSink Never! { trace.move() }
 
-// The check request of the one user file `source` over Core `rows`,
-// reading the interface file `interface` when it has one, its counters
-// going to `path`.
-interface_test_request: fn(source: String, rows: [JetDriverCoreSource], interface: [U8], path: String) -> JetDriverCompileRequest {
+// The check request of the one user file `source` over Core `rows`, on at
+// most `threads` compiler threads, reading the interface file `interface`
+// when it has one, its counters going to `path`.
+interface_test_request: fn(source: String, rows: [JetDriverCoreSource], interface: [U8], threads: Int, path: String) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{
             JetDriverAuthorizedSourceRoot{
@@ -230,7 +231,7 @@ interface_test_request: fn(source: String, rows: [JetDriverCoreSource], interfac
         entry_root_identity: "interface-root",
         entry_path: "/interface-fixture/main.jet",
     }
-    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(4), JetDriverCompileMode.Check)
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(threads), JetDriverCompileMode.Check)
     request.core_sources = rows
     request.core_interface = if interface.len() > 0 -> Val(InterfaceTestReader{bytes: interface}) else -> None
     request.trace_sink = Val(interface_test_sink(InterfaceTestTrace{path: path}))
@@ -243,13 +244,21 @@ InterfaceTestLoad: struct {
     counters: [String:Int]
 }
 
-// The load of `source` over Core `rows`, reading `interface` (none when
-// empty), and the counters it traced, `name = value` each, a counter traced
-// more than once (a delta) summed.
+// The load of `source` over Core `rows` on four compiler threads, reading
+// `interface` (none when empty), and the counters it traced
+// (interface_test_load_on).
 interface_test_load: fn(source: String, rows: [JetDriverCoreSource], interface: [U8]) -> InterfaceTestLoad {
+    interface_test_load_on(source, rows, interface, 4)
+}
+
+// The load of `source` over Core `rows` on at most `threads` compiler
+// threads, reading `interface` (none when empty), and the counters it
+// traced, `name = value` each, a counter traced more than once (a delta)
+// summed.
+interface_test_load_on: fn(source: String, rows: [JetDriverCoreSource], interface: [U8], threads: Int) -> InterfaceTestLoad {
     path: fs.join(interface_sys.temp_dir(), "jet-core-interface-{interface_process.current_pid()}.trace")
     fs.write(path, "") ?? panic("cannot start the trace: {err}")
-    load: jet_driver_load(interface_test_request(source, rows, interface, path))
+    load: jet_driver_load(interface_test_request(source, rows, interface, threads, path))
     trace: fs.read(path) ?? panic("cannot read the trace: {err}")
     counters := [String:Int]{}
     loop line in trace.split("\n") {
@@ -448,6 +457,27 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
         }
     }
     assert(carried > 0)
+}
+
+// A load decodes the ready parses it reads on its compiler threads, each
+// thread a consecutive part of them: the program, its side tables and the
+// counters are those of a load that decodes them in turn on one thread.
+#Test("a load that decodes the Core interface's ready parses on several threads gives the program of one that decodes them on one") {
+    source: "use {{\n    files: core.files\n    sys: core.sys\n    process: core.process\n}}\n\nrun: fn() {{\n    path: files.join(sys.temp_dir(), \"probe-{{process.current_pid()}}\")\n    text: files.read(path) ?? \"none\"\n    print(\"{{text.len()}} {{path}} {{[Int]{{3, 1, 2}}.sorted()}}\")\n}}\n"
+    units: jet_driver_core_interface_units(interface_test_core_rows(), compiler_threads_single())
+    interface: jet_driver_core_interface_bytes(units)
+    one: interface_test_load_on(source, interface_test_core_rows(), interface, 1)
+    many: interface_test_load_on(source, interface_test_core_rows(), interface, 8)
+    assert(one.load.complete)
+    assert(one.load.internal_problem == None)
+    // Enough ready parses for the decode to admit more than one thread.
+    assert((many.counters.get("counters.load.core_fragment_bytes") ?? 0) >= 2 * JET_DRIVER_CORE_READY_BYTES_PER_THREAD)
+    assert_eq(interface_test_differ(one.load, many.load, units), [String]{})
+    loop (index, module_row) in one.load.modules {
+        assert(interface_test_tables(module_row.program, [Span]{}) == interface_test_tables(many.load.modules[index].program, [Span]{}), module_row.module_name)
+    }
+    counted: [String]{"counters.load.core_fragments", "counters.load.core_fragment_bytes", "counters.load.core_held_parsed", "counters.load.core_bodies_restored"}
+    loop name in counted { assert_eq(one.counters.get(name), many.counters.get(name)) }
 }
 
 // The interface is part of the compiler: a lazy load whose ready parses

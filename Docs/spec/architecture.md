@@ -279,8 +279,10 @@ and reads its heads' program from it, lexing none of its text (a block
 whose heads don't read back parses the heads from the text, each body's
 interior blanked); once reach is done, each held declaration it reached
 and each region whose kept bodies it needs come from the unit's ready
-parses, read in place from the lent part, and take their stubs' and
-functions' places (`jet_driver_reach_parse_held`,
+parses, read from the lent part in runs (one read serves the many parses
+of a run) and decoded on the compiler threads, each thread a consecutive
+run of them, and take their stubs' and
+functions' places in order (`jet_driver_reach_parse_held`,
 `jet_driver_core_restore_bodies`). The part is built with the compiler and
 is part of its identity, so a ready parse missing or unreadable, or a kept
 function the restore leaves without its body, stops the compile as an
