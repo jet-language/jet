@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6920,
-    "rev": 104306,
+    "nextNum": 6922,
+    "rev": 104325,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -79484,21 +79484,21 @@
         },
         {
           "n": 8,
-          "text": "(moved from #4717 c38) (was #4766) The census is checked into the gate as a guard, every MISSING row is carded or fixed, and nothing is silently dropped.",
+          "text": "The no-diagnostic census is checked in and runs as a guard, and every MISSING row is fixed or carded with nothing silently dropped. Proof: `jet test tests/guards --filter ui_nodiag_census`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:57:39.701Z"
+          "at": "2026-11-15T04:11:48.412Z"
         },
         {
           "n": 9,
-          "text": "(moved from #4717 c39) (was #4766) (was #3898) Parity: Item-level declaration rules missing in JetSema: [#4023] carry over #3899 (#Test scope and test-runner rules), #3900 (task detach/freeze) and #3905 (doctest E2901).",
+          "text": "JetSema reports the #Test scope and test-runner rules the Rust checker had (#3899). Proof: `jet test Compiler --profile ui --filter test_scope_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:40:01.377Z"
+          "at": "2026-11-15T04:11:49.412Z"
         },
         {
           "n": 10,
@@ -79511,39 +79511,39 @@
         },
         {
           "n": 11,
-          "text": "(moved from #4717 c49) (was #4766) (was #3893) [#4024] carry over the criteria of #3903 (assert_eq(x, None); L0528 on generated bodies), #3904 (nested-pattern coverage beyond single-slot payloads) and #3907 (serde E2408/E2414/E2415).",
+          "text": "`assert_eq(x, None)` gets its registered error, and L0528 does not fire on generated bodies (#3903). Proof: `jet test Compiler --profile ui --filter assert_eq_none` and `--filter L0528_generated`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:40:05.314Z"
+          "at": "2026-11-15T04:11:50.325Z"
         },
         {
           "n": 12,
-          "text": "(moved from #4717 c50) (was #4766) (was #3893) [#4030] run the paired fixtures for six written ports with the admitted `jet` (stage-2 output of `jet build Compiler`): #3887 E0433, #3896 Display/Debug interpolation checks, #3910 module-graph diagnostics, #3957 test/fuzz/coverage harness artifacts, #3979 Shared owner methods, and #3981 JetEval core.encoding and edition binding.",
+          "text": "The paired fixtures of six written ports pass: #3887 E0433, #3896 Display and Debug interpolation checks, #3910 module-graph errors, #3957 test, fuzz and coverage harness artifacts, #3979 Shared owner methods, and #3981 core.encoding and edition binding. Proof: `jet test Compiler --profile ui --filter E0433` and the named fixtures of each port, run with gate-p141 or newer.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:40:07.346Z"
+          "at": "2026-11-15T04:11:51.306Z"
         },
         {
           "n": 13,
-          "text": "(moved from #4717 c55) (was #4766) (was #3913) [#3913] the remaining effect-system codes (package purity, determinism, policy) on the Jet fixture matrix.",
+          "text": "The remaining effect-system codes for package purity, determinism and policy are reported on the fixture matrix. Proof: `jet test Compiler --profile ui --filter effect_policy_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:40:09.356Z"
+          "at": "2026-11-15T04:11:52.288Z"
         },
         {
           "n": 14,
-          "text": "(moved from #4717 c58) (was #4766) (was #3913) [#3977] A path dependency under the project folder is not checked against the root's policy.unsafe, policy.effects or policy.expert (one fixture each). Module-to-package attribution uses one shared longest-dep-root helper.",
+          "text": "A path dependency under the project folder is not checked against the root's policy.unsafe, policy.effects or policy.expert (one fixture each), and one shared longest-dependency-root helper attributes modules to packages. Proof: `jet test Compiler --profile cases --filter policy/path_dependency_not_root_policy`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:40:11.372Z"
+          "at": "2026-11-15T04:11:53.366Z"
         },
         {
           "n": 15,
@@ -79625,6 +79625,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-12T21:28:19.083Z"
+        },
+        {
+          "n": 24,
+          "text": "JetSema reports the task detach and freeze rules the Rust checker had (#3900). Proof: `jet test Compiler --profile ui --filter task_detach_` and `--filter task_freeze_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:44.570Z"
+        },
+        {
+          "n": 25,
+          "text": "JetSema reports doctest E2901 (#3905). Proof: `jet test Compiler --profile ui --filter E2901`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:45.484Z"
+        },
+        {
+          "n": 26,
+          "text": "Pattern coverage checks nested patterns beyond single-slot payloads, as #3904 required. Proof: `jet test Compiler --profile ui --filter nested_pattern_coverage`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:46.418Z"
+        },
+        {
+          "n": 27,
+          "text": "JetSema reports the serde errors E2408, E2414 and E2415 (#3907). Proof: `jet test Compiler --profile ui --filter E2408`, `--filter E2414` and `--filter E2415`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:47.379Z"
         }
       ],
       "refs": [
@@ -79639,9 +79675,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T07:25:24.208Z",
-      "updated": "2026-11-13T02:22:55.066Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 23
+      "updated": "2026-11-15T04:11:53.367Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 27
     },
     {
       "id": "c00w7rum",
@@ -88161,66 +88197,66 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Type dossier: a type dossier query with its status envelope, JSON and text forms (old SemIndex/Queries.jet:138, SemIndex/Facts.jet:114, Codec/Dossier.jet:9-141), with members sorted as semindex_sort_members did (Queries.jet:196-206); JetLSP Tests/Integration/SemindexTests.jet:79,157,564-599 pass against it.",
+          "text": "A type dossier query returns its status envelope in JSON and text forms, with members sorted as semindex_sort_members did (old SemIndex/Queries.jet:138, Facts.jet:114, Codec/Dossier.jet:9-141, Queries.jet:196-206), and JetLSP's Tests/Integration/SemindexTests.jet dossier tests (lines 79, 157 and 564-599) pass. Proof: `jet test Compiler/JetLSP --filter Semindex`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T01:32:08.131Z"
+          "at": "2026-11-15T04:11:54.281Z"
         },
         {
           "n": 2,
-          "text": "Structural audit: added, removed and changed declarations between two indexes (old Queries.jet:172 structural_audit, :217 semindex_structural_signature).",
+          "text": "A structural audit lists added, removed and changed declarations between two indexes (old Queries.jet:172 structural_audit, :217 semindex_structural_signature). Proof: `jet test Compiler --profile cases --filter semindex/structural_audit`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T01:32:09.036Z"
+          "at": "2026-11-15T04:11:55.198Z"
         },
         {
           "n": 3,
-          "text": "Package facts and workspace overlays: package_facts_for_entry, E1215, the overlay policy and the E1202 stale-lock check (old Queries.jet:76,83; Open.jet:58-128); SemIndexJSON.jet stops writing null for package facts; Rust parity rows tests.tsv:3170-3176 pass.",
+          "text": "package_facts_for_entry, E1215, the overlay policy and the E1202 stale-lock check work (old Queries.jet:76,83, Open.jet:58-128), and SemIndexJSON.jet stops writing null for package facts. Proof: `jet test Compiler --profile cases --filter semindex/package_facts_and_stale_lock`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T01:32:09.931Z"
+          "at": "2026-11-15T04:11:56.089Z"
         },
         {
           "n": 4,
-          "text": "Overlay-based open: opening an index over unsaved editor overlays (old Entry.jet:23-96, Open.jet:146-185).",
+          "text": "An index opens over unsaved editor overlays (old Entry.jet:23-96, Open.jet:146-185). Proof: `jet test Compiler --profile cases --filter semindex/open_over_overlays`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T01:32:10.813Z"
+          "at": "2026-11-15T04:11:57.002Z"
         },
         {
           "n": 5,
-          "text": "Query API: derivation windows, invalidate_derivations, references_to, call_sites, effect_of, lookup and lookup_identity (old Queries.jet:54-134).",
+          "text": "The query API offers derivation windows, invalidate_derivations, references_to, call_sites, effect_of, lookup and lookup_identity (old Queries.jet:54-134). Proof: `jet test Compiler/JetSemIndex --filter query_api`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T01:32:11.693Z"
+          "at": "2026-11-15T04:11:57.932Z"
         },
         {
           "n": 6,
-          "text": "LSP symbol database and hover: build_symbol_db, propagation hints, state-graph hovers, the inferred hover tail and breadcrumb hints (old Finalize.jet:64-299, Structure.jet:427); Rust parity row tests.tsv:3177 passes.",
+          "text": "The LSP symbol database and hover come back: build_symbol_db, propagation hints, state-graph hovers, the inferred hover tail and breadcrumb hints (old Finalize.jet:64-299, Structure.jet:427). Proof: `jet test Compiler --profile cases --filter lsp/lsp_hover_projects_typestate_graph_facts` and `--filter semindex/state_symbols_keep_their_struct_owner`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T01:32:12.637Z"
+          "at": "2026-11-15T04:11:58.817Z"
         },
         {
           "n": 7,
-          "text": "Semantic blame (old Receipts/SemanticOps.jet:265,281) is reachable from a jet command, or a ratified decision drops it.",
+          "text": "Semantic blame (old Receipts/SemanticOps.jet:265,281) is reachable from a jet command. Dropping it instead needs a ratified decision first. Proof: `jet test Compiler --profile cases --filter semindex/semantic_blame`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T01:32:13.518Z"
+          "at": "2026-11-15T04:11:59.688Z"
         },
         {
           "n": 8,
@@ -88330,7 +88366,7 @@
       "parentId": "c0ozzmvc",
       "needsAcceptance": false,
       "created": "2026-11-07T01:32:07.215Z",
-      "updated": "2026-11-15T03:58:28.737Z",
+      "updated": "2026-11-15T04:11:59.688Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 18
     },
@@ -108054,6 +108090,236 @@
       "needsAcceptance": false,
       "created": "2026-11-15T04:09:16.617Z",
       "updated": "2026-11-15T04:09:16.617Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c09hk13a",
+      "num": 6920,
+      "title": "The Rust-era lint checks exist again under D-NO-WARNINGS1: each is a tidy error, a jet fmt rewrite or a jet lint report, with exact spans",
+      "body": "Destination: every lint check that the Rust checker had and the Jet checker lacks exists again in the form D-NO-WARNINGS1=A gives it:\n- a tidy error (listed by jet check and jet build, never stopping jet run, jet dev or jet test);\n- a `jet fmt` rewrite; or\n- a `jet lint` report.\n\nEach comes with paired positive and negative fixtures and reports its construct's own span.\n\nWhy it matters: these checks caught real bugs, and their ui fixtures still expect them.\n\nRelated: #6858 (no L code stays active as a warning; it owns the form each code takes) and #6895 (new likely-bug checks).\n\nSource: #6425 c15-c23 (from #3919, #4111, #3920-#3922, #3716, #3734, #3554, #4207).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "L0501-L0506 and L0508-L0510 (L0507 is #3681's) each exist as a tidy error, a `jet fmt` rewrite or a `jet lint` report (D-NO-WARNINGS1=A), with paired positive and negative fixtures. Proof: `jet test Compiler --profile ui --filter ui_lint/L050` and `--filter ui_lint/L0510`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:42.635Z"
+        },
+        {
+          "n": 2,
+          "text": "L0511-L0520 each exist as a tidy error, a `jet fmt` rewrite or a `jet lint` report, with paired positive and negative fixtures. Proof: `jet test Compiler --profile ui --filter ui_lint/L051` and `--filter ui_lint/L0520`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:42.635Z"
+        },
+        {
+          "n": 3,
+          "text": "L0521-L0531 and L2510 each exist as a tidy error, a `jet fmt` rewrite or a `jet lint` report, with paired positive and negative fixtures. Proof: `jet test Compiler --profile ui --filter ui_lint/L052`, `--filter ui_lint/L053` and `--filter ui_lint/L2510`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:42.635Z"
+        },
+        {
+          "n": 4,
+          "text": "The unused-name checks (L0103, L0104, L0105) are package-aware, and alias use from an impl head counts as a use. Proof: `jet test Compiler --profile ui --filter unused_import_package_aware` and `--filter unused_alias_in_impl_head`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:42.635Z"
+        },
+        {
+          "n": 5,
+          "text": "L0301 exists as a tidy error with fixtures, and L0302 follows the state-machine design gate on #6326 c4. Proof: `jet test Compiler --profile ui --filter ui_lint/L0301`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:42.635Z"
+        },
+        {
+          "n": 6,
+          "text": "L0202, L0206, L0207, L1101 and L1141 each exist as a tidy error, a `jet fmt` rewrite or a `jet lint` report, with fixtures. Proof: `jet test Compiler --profile ui --filter ui_lint/L020` and `--filter ui_lint/L11`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:42.635Z"
+        },
+        {
+          "n": 7,
+          "text": "An `else` arm after exhaustive arms (L0303) gets a safe delete edit, and open-set and non-exhaustive matches stay quiet. The E0307 fix names the missing arms, and pattern_matching.jet and the other triggers are migrated. Proof: `jet test Compiler --profile ui --filter else_after_exhaustive` and `--filter E0307`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:42.635Z"
+        },
+        {
+          "n": 8,
+          "text": "Each lint reports its construct's own span: L0507 on comment, lambda and end-of-file shapes; L0530 on a non-return final call; L0528 never on loop reassignment; no lint located in Core sources. Proof: `jet test Compiler --profile ui --filter lint_span_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:42.635Z"
+        },
+        {
+          "n": 9,
+          "text": "one_shot_mut_adjacent is reported once as a registered tidy error with no machine edit, and read-between, capture, later-write and loop cases stay quiet. Proof: `jet test Compiler --profile ui --filter one_shot_mut_adjacent`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:42.635Z"
+        },
+        {
+          "n": 10,
+          "text": "A write to a local after an escaping lambda copied it is a registered tidy error, and read-only captures are quiet. Proof: `jet test Compiler --profile ui --filter escaping_capture_write`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:42.635Z"
+        },
+        {
+          "n": 11,
+          "text": "L0514 skips bodies a derive generates: a #CLI program with three or more options checks with no L0514 on `__r`, `__n` or `__command`, while a user-written function of the same three-guard shape in that file still gets exactly one L0514. The skip keys on the derive origin the compiler records on the function, not on the binding name. Proof: `jet test Compiler --profile cases --filter same_subject_dispatch/cli_options_are_not_a_dispatch`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:42.635Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "lints"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:11:42.636Z",
+      "updated": "2026-11-15T04:11:42.636Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0ozqnbt",
+      "num": 6921,
+      "title": "Impact and hierarchy views agree with the checked graph: body-only versus signature edits, identity, scope and provenance",
+      "body": "Destination: the impact, navigation and hierarchy views in the CLI and the LSP derive from the checked graph and agree with it. A body-only edit and a public signature change give separately checkable checker-work and dependency results. Definition identity, snapshot, build identity, target scope and provenance agree across views. Imported, generated and external nodes keep their origins. Unsupported modes say so instead of returning complete-looking empty results.\n\nWhy it matters: the retired Rust tests structure_fact_plane::three_module_projections_match_checked_facts and lsp::impact_and_hierarchy_match_checked_graph pinned this. Their Jet replacements do not exist yet.\n\nSource: #6630 c9-c16 (from #3191).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "On a three-module fixture, a representation-only body change and a public signature change produce separately checkable checker-work and semantic-dependency results, and neither is labelled complete runtime reachability. Proof: `jet test Compiler --profile cases --filter semindex/body_versus_signature_impact`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:43.573Z"
+        },
+        {
+          "n": 2,
+          "text": "Definition identity, source snapshot, build identity, target scope and static-versus-observed provenance agree across the CLI and LSP views. Proof: `jet test Compiler --profile cases --filter semindex/views_agree_on_identity`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:43.573Z"
+        },
+        {
+          "n": 3,
+          "text": "Type and implementation navigation and the call and type hierarchy views keep the same declaration relationships as the checked graph, before and after the body-only and signature edits, and no passive label contradicts them. Proof: `jet test Compiler --profile cases --filter lsp/lsp_type_hierarchy_trait_impls` and `--filter semindex/hierarchy_matches_checked_graph`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:43.573Z"
+        },
+        {
+          "n": 4,
+          "text": "Static, live and replay results each keep their own observation scope, and an unsupported mode returns an explicit status, never an empty complete-looking result. Proof: `jet test Compiler --profile cases --filter semindex/observation_scope_explicit`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:43.573Z"
+        },
+        {
+          "n": 5,
+          "text": "Imported, generated and external nodes keep their origins and exclusions, and an unknown scope is explicit. Proof: `jet test Compiler --profile cases --filter semindex/origins_and_exclusions`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:43.573Z"
+        },
+        {
+          "n": 6,
+          "text": "Impact reports record the exact command, binary and input hashes and payloads they came from. Proof: `jet test Compiler --profile cases --filter semindex/impact_report_provenance`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:43.573Z"
+        },
+        {
+          "n": 7,
+          "text": "The typed build-graph query agrees with the CLI build graph on nodes, dependencies and provenance. Proof: `jet test Compiler --profile cases --filter semindex/build_graph_query_matches_cli`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:11:43.573Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "semindex",
+        "impact"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:11:43.573Z",
+      "updated": "2026-11-15T04:11:43.573Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -213473,6 +213739,139 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:11:59.688Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0y05z3o",
+      "note": "#7: proof; was: Semantic blame (old Receipts/SemanticOps.jet:265,281) is reachable from a jet command, or a ratified decision drops it."
+    },
+    {
+      "at": "2026-11-15T04:11:58.817Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0y05z3o",
+      "note": "#6: proof; was: LSP symbol database and hover: build_symbol_db, propagation hints, state-graph hovers, the inferred hover tail and breadcrumb hints (old Finalize.jet:64-299, Structure.jet:427); Rust parity row tests."
+    },
+    {
+      "at": "2026-11-15T04:11:57.932Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0y05z3o",
+      "note": "#5: proof; was: Query API: derivation windows, invalidate_derivations, references_to, call_sites, effect_of, lookup and lookup_identity (old Queries.jet:54-134)."
+    },
+    {
+      "at": "2026-11-15T04:11:57.002Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0y05z3o",
+      "note": "#4: proof; was: Overlay-based open: opening an index over unsaved editor overlays (old Entry.jet:23-96, Open.jet:146-185)."
+    },
+    {
+      "at": "2026-11-15T04:11:56.089Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0y05z3o",
+      "note": "#3: proof; was: Package facts and workspace overlays: package_facts_for_entry, E1215, the overlay policy and the E1202 stale-lock check (old Queries.jet:76,83; Open.jet:58-128); SemIndexJSON.jet stops writing null fo"
+    },
+    {
+      "at": "2026-11-15T04:11:55.198Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0y05z3o",
+      "note": "#2: proof; was: Structural audit: added, removed and changed declarations between two indexes (old Queries.jet:172 structural_audit, :217 semindex_structural_signature)."
+    },
+    {
+      "at": "2026-11-15T04:11:54.281Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0y05z3o",
+      "note": "#1: proof; was: Type dossier: a type dossier query with its status envelope, JSON and text forms (old SemIndex/Queries.jet:138, SemIndex/Facts.jet:114, Codec/Dossier.jet:9-141), with members sorted as semindex_sort_m"
+    },
+    {
+      "at": "2026-11-15T04:11:53.367Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c01oyhqk",
+      "note": "#14: strip debris; proof; was: (moved from #4717 c58) (was #4766) (was #3913) [#3977] A path dependency under the project folder is not checked against the root's policy.unsafe, policy.effects or policy.expert (one fixture each). M"
+    },
+    {
+      "at": "2026-11-15T04:11:52.288Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c01oyhqk",
+      "note": "#13: strip debris; proof; was: (moved from #4717 c55) (was #4766) (was #3913) [#3913] the remaining effect-system codes (package purity, determinism, policy) on the Jet fixture matrix."
+    },
+    {
+      "at": "2026-11-15T04:11:51.306Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c01oyhqk",
+      "note": "#12: strip debris; proof; was: (moved from #4717 c50) (was #4766) (was #3893) [#4030] run the paired fixtures for six written ports with the admitted `jet` (stage-2 output of `jet build Compiler`): #3887 E0433, #3896 Display/Debug "
+    },
+    {
+      "at": "2026-11-15T04:11:50.325Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c01oyhqk",
+      "note": "#11: split: nested patterns and serde are their own criteria; was: (moved from #4717 c49) (was #4766) (was #3893) [#4024] carry over the criteria of #3903 (assert_eq(x, None); L0528 on generated bodies), #3904 (nested-pattern coverage beyond single-slot payloads) and"
+    },
+    {
+      "at": "2026-11-15T04:11:49.413Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c01oyhqk",
+      "note": "#9: split: task rules and doctest are their own criteria; was: (moved from #4717 c39) (was #4766) (was #3898) Parity: Item-level declaration rules missing in JetSema: [#4023] carry over #3899 (#Test scope and test-runner rules), #3900 (task detach/freeze) and #39"
+    },
+    {
+      "at": "2026-11-15T04:11:48.412Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c01oyhqk",
+      "note": "#8: strip debris; proof; was: (moved from #4717 c38) (was #4766) The census is checked into the gate as a guard, every MISSING row is carded or fixed, and nothing is silently dropped."
+    },
+    {
+      "at": "2026-11-15T04:11:47.379Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#27 JetSema reports the serde errors E2408, E2414 and E2415 (#39"
+    },
+    {
+      "at": "2026-11-15T04:11:46.419Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#26 Pattern coverage checks nested patterns beyond single-slot p"
+    },
+    {
+      "at": "2026-11-15T04:11:45.484Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#25 JetSema reports doctest E2901 (#3905). Proof: `jet test Comp"
+    },
+    {
+      "at": "2026-11-15T04:11:44.570Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#24 JetSema reports the task detach and freeze rules the Rust ch"
+    },
+    {
+      "at": "2026-11-15T04:11:43.573Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0ozqnbt",
+      "note": "Impact and hierarchy views agree with the checked graph: body-only versus signature edits, identity, scope and provenance"
+    },
+    {
+      "at": "2026-11-15T04:11:42.636Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c09hk13a",
+      "note": "The Rust-era lint checks exist again under D-NO-WARNINGS1: each is a tidy error, a jet fmt rewrite or a jet lint report, with exact spans"
+    },
     {
       "at": "2026-11-15T04:10:11.647Z",
       "by": "TowerKeeper-1",
