@@ -501,6 +501,14 @@ and each route export and runtime handle helper missing from that runtime's
 `runtime.exports`
 (`jet run Compiler/JetIR/Tests/Lint/LintPlanted.jet -- --route-gaps <path>`).
 
+A compiled program's IR Lint runs once, over the module x86-64 selection
+reads. At O1 and O2 that is the optimized module, after the passes. At O0 the
+per-function checks run in one pass over the bodies,
+`ir_opt_o0_bodies` in [`Opt.jet`](../../Compiler/JetIR/Source/Opt.jet).
+For each body that pass runs the inline Int facts, then IR Lint, then the
+early Drops. Each thread claims the largest body left and runs all three
+on it, so no thread waits for a whole pass to end.
+
 The contract the lint checks also admits a few word-level forms. A general
 word `Move`/`Copy` may change its slot's type row (the word is
 reinterpreted), and `Compare` may compare raw words. A valueless `Return` is

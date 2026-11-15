@@ -150,6 +150,7 @@ use {
         compiler_transfer_rows,
         compiler_threads_failure_text,
         CompilerThreads,
+        CompilerTraceSink,
         name_rows_value,
         TConstantDef,
         TImplDef,
@@ -184,7 +185,13 @@ use {
         ir_program_new,
         ir_build_tests,
         ir_test_override_key,
+        IRLintFinding,
+        IROptOptions,
+        ir_lint_context,
         ir_lint_module,
+        ir_lint_types,
+        ir_opt_module_start,
+        ir_opt_o0_bodies,
         ir_optimize_module,
         ir_x64_compile_module_logged,
         ir_x64_hot_order,
@@ -1505,23 +1512,23 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     }
     // The memory term is read now: the compile before this holds most of it.
     threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
-    // At O0 only the return slots and the inline Int facts run (Opt.jet
-    // ir_optimize_module). The span is named by the level it optimizes at
-    // (`O2`).
-    if trace_sink == .Val(sink) -> sink.begin("ir.opt", "O{level}", -1, -1)
-    report: ir_optimize_module(built.program, jet_cli_opt_options(level, options), threads)
-    // With `--opt-verify`, the lint of each body as the passes get it
-    // (`ir.opt.prepare`) and after each pass (`ir.opt.<pass>`).
-    loop finding in report.lint -> jet_cli_ice_trap(census, built.program, finding.key, finding.pass, finding.rule, finding.message)
-    if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
-    // IR Lint (Lint.jet) runs once, over the module x86-64 selection reads:
-    // the built module with its return slots and inline Int facts at O0,
-    // the optimized one at O1 and O2. Each finding is an ICE row and traps
-    // its function.
-    if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
-    lint: ir_lint_module(built.program, if level > 0 -> "ir.opt" else -> "ir.build", threads)
-    loop finding in lint -> jet_cli_ice_trap(census, built.program, finding.key, finding.pass, finding.rule, finding.message)
-    if trace_sink == .Val(sink) -> sink.end("ir.lint", function_count)
+    opt: jet_cli_opt_options(level, options)
+    if level <= 0 -> jet_cli_native_o0(built.program, opt, threads, census, trace_sink)
+    if level > 0 {
+        // The span is named by the level it optimizes at (`O2`).
+        if trace_sink == .Val(sink) -> sink.begin("ir.opt", "O{level}", -1, -1)
+        report: ir_optimize_module(built.program, opt, threads)
+        // With `--opt-verify`, the lint of each body as the passes get it
+        // (`ir.opt.prepare`) and after each pass (`ir.opt.<pass>`).
+        loop finding in report.lint -> jet_cli_ice_trap(census, built.program, finding.key, finding.pass, finding.rule, finding.message)
+        if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
+        // IR Lint (Lint.jet) runs once, over the optimized module x86-64
+        // selection reads. Each finding is an ICE row and traps its function.
+        if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
+        lint: ir_lint_module(built.program, "ir.opt", threads)
+        loop finding in lint -> jet_cli_ice_trap(census, built.program, finding.key, finding.pass, finding.rule, finding.message)
+        if trace_sink == .Val(sink) -> sink.end("ir.lint", function_count)
+    }
     built.program.single_thread = jet_cli_single_thread(built.program, runtime, closure_symbols)
     built.program.debug_directory = jet_cli_debug_directory(file, entry_source, cli_files.cwd() ?? "")
     // A field move shares the module's rows with `built`, which would keep
@@ -1531,6 +1538,33 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     program := built.program.move()
     built.program = ir_module_new()
     JetCLINativeProgram{program: program.move(), failure: None}
+}
+
+// O0's IR before selection (JetIR Opt.jet ir_opt_o0_bodies): the return
+// slots (`ir.opt`), IR Lint's type rows and context (`ir.lint`), then one
+// pass over the bodies that runs each one's inline Int facts, IR Lint after
+// `ir.build` and early Drops on the thread that claims it (`ir.opt` again),
+// so no thread waits for a whole pass to end. Each finding is an ICE row and
+// traps its function: `--opt-verify`'s first, then IR Lint's.
+jet_cli_native_o0: fn(program: &IRModule, options: IROptOptions, threads: CompilerThreads, census: &[JetDriverIceRow], trace_sink: CompilerTraceSink?) -[FS, Time]> Never! {
+    count: program.functions.len()
+    if trace_sink == .Val(sink) -> sink.begin("ir.opt", "O0", -1, -1)
+    report := ir_opt_module_start(program, options, threads)
+    if trace_sink == .Val(sink) {
+        sink.end("ir.opt", count)
+        sink.begin("ir.lint", "", -1, -1)
+    }
+    found := [IRLintFinding]{}
+    ir_lint_types(program, "ir.build", found)
+    lint: ir_lint_context(program)
+    if trace_sink == .Val(sink) {
+        sink.end("ir.lint", count)
+        sink.begin("ir.opt", "O0", -1, -1)
+    }
+    ir_opt_o0_bodies(program, options, lint, "ir.build", threads, report, found)
+    if trace_sink == .Val(sink) -> sink.end("ir.opt", count)
+    loop finding in report.lint -> jet_cli_ice_trap(census, program, finding.key, finding.pass, finding.rule, finding.message)
+    loop finding in found -> jet_cli_ice_trap(census, program, finding.key, finding.pass, finding.rule, finding.message)
 }
 
 // JET_X64_EMIT_LOG: the comma-separated function names (or, holding a `/`,

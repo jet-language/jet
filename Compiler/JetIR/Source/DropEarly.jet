@@ -2,7 +2,9 @@
 // included, a String's Drop moves back to just after the last instruction
 // that reads or writes the String, so its memory goes back before the code
 // that follows runs. ir_drop_early runs on the module just before selection,
-// ahead of ir_tail_calls.
+// ahead of ir_tail_calls; at O0 each body's Drops move in the one pass over
+// the bodies after its inline Int facts and IR Lint (Opt.jet
+// ir_opt_o0_bodies) instead.
 //
 // A String is memory only: its Drop frees bytes and nothing can observe when.
 // Close values, #MustFinish values, guards, task handles and defers are never
@@ -45,8 +47,11 @@ IRDropPlan: struct {
 // (compiler_threads_partition by size), one thread each, as many as
 // `threads` admits for the module's instructions. Every thread reads the
 // module's other rows, which none writes, and owns its part; the parts come
-// back in order, so every body is the same for any thread count.
+// back in order, so every body is the same for any thread count. A module
+// whose bodies already dropped early (IRModule.dropped_early) stays as it is.
 ir_drop_early: fn(m: &IRModule, threads: CompilerThreads) Never! {
+    if m.dropped_early -> return
+    m.dropped_early = true
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
