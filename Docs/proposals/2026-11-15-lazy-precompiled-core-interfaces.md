@@ -516,6 +516,20 @@ owns. That cost is real, and it is measured:
   the median. If it costs more, B1 does not land in that form. The record
   failed at exactly this point.
 
+**The codec.** A checked body is written and read by a generated binary
+codec, `Compiler/JetFoundation/Source/Facts/BodyCodec.jet`, written by
+the tool package `Compiler/Toolchain/BodyCodec` from the struct and enum
+shapes `FnBody` and `BodyExpr` reach (`--check` is a land ratchet). Each
+struct writes its fields in declaration order, each enum its variant's
+position first; integers are LEB128 uvarints, an `Int` zigzagged. The
+hand-written half, `BodyCodecRows.jet`, writes each `SymbolID`, `DeclID`
+and `ModuleID` as its position in a list kept beside the bytes, so the
+caller resolves ids to keys once per body, not once per use. A body-local
+symbol is written as it is. A read past the end or of a malformed value
+sets `failed` and later reads give zeros and fallback variants, so a bad
+part ends the read without a panic. `Compiler/JetSema/Tests/BodyCodec.jet`
+round-trips every checked body of a program.
+
 #### 3.3.1 Fields that whole-program passes write (H10)
 
 These `FnBody` fields are written after a body's own check by passes that

@@ -1,0 +1,165 @@
+// The checked-body codec (JetFoundation Facts/BodyCodec.jet and
+// BodyCodecRows.jet): every checked body of a program reads back from the
+// bytes its put wrote as the body it was, and writes the same bytes again; a
+// read cut short fails and still ends.
+use {
+    jet_sema.[
+        SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
+        sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_has_error_since, sema_registration_prepare_graph,
+    ]
+    jet_parser.[parse_source]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_foundation.[
+        BodyCodecIn, FnBody, Span, body_codec_get_fnbody, body_codec_out, body_codec_put_fnbody,
+        compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table,
+    ]
+}
+
+// A program whose bodies hold enums with payloads, matches, loops, options,
+// generics, maps, string parts and a lambda that captures.
+body_codec_source: fn() -> String {
+    lines: [String]{
+        "Shape: enum {{",
+        "    Circle(radius: Float)",
+        "    Rect(width: Int, height: Int)",
+        "    Empty",
+        "}}",
+        "",
+        "Point: struct {{",
+        "    x: Int",
+        "    y: Int",
+        "}}",
+        "",
+        "area: fn(shape: Shape) -> Float {{",
+        "    if shape == {{",
+        "        .Circle(radius) -> radius * radius * 3.5",
+        "        .Rect(width, height) -> 1.5 * 2.0",
+        "        .Empty -> 0.0",
+        "    }}",
+        "}}",
+        "",
+        "first_even: fn(values: [Int]) -> Int? {{",
+        "    loop value in values {{",
+        "        if value % 2 == 0 -> return Val(value)",
+        "    }}",
+        "    None",
+        "}}",
+        "",
+        "pair: fn<T>(left: T, right: T) -> [T] {{",
+        "    [T]{{left, right}}",
+        "}}",
+        "",
+        "totals: fn(points: [Point]) -> [String:Int] {{",
+        "    sums := [String:Int]{{}}",
+        "    loop point in points {{",
+        "        key: if point.x > point.y -> \"x\" else -> \"y\"",
+        "        sums[key] = (sums.get(key) ?? 0) + point.x + point.y",
+        "    }}",
+        "    sums",
+        "}}",
+        "",
+        "apply: fn(values: [Int], f: fn(Int) -> Int) -> Int {{",
+        "    total := 0",
+        "    loop value in values -> total += f(value)",
+        "    total",
+        "}}",
+        "",
+        "run: fn() {{",
+        "    points: [Point]{{Point{{x: 1, y: 2}}, Point{{x: 4, y: 3}}}}",
+        "    shapes: [Shape]{{Shape.Circle{{radius: 1.5}}, Shape.Rect{{width: 2, height: 3}}, Shape.Empty}}",
+        "    sum := 0.0",
+        "    loop shape in shapes -> sum += area(shape)",
+        "    even: first_even([Int]{{1, 3, 4}}) ?? 0",
+        "    words: pair(\"a\", \"b\")",
+        "    offset: 7",
+        "    print(\"{{sum}} {{even}} {{words.len()}} {{totals(points).len()}} {{apply([Int]{{1, 2}}, fn(value: Int) {{ value + offset }})}}\")",
+        "}}",
+    }
+    lines.join("\n")
+}
+
+// The checked functions of body_codec_source(), every module's.
+body_codec_functions: fn(failures: &[String]) -> [FnBody] {
+    source: body_codec_source()
+    threads: compiler_threads_single()
+    parsed := parse_source(source.bytes())
+    if sema_has_error_since(parsed.diagnostics, 0) {
+        failures.push("source parsing failed: {parsed.diagnostics:Debug}")
+        return [FnBody]{}
+    }
+    table := module_table()
+    main_id: module_intern(table, "body-codec::main")
+    canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
+        failures.push("canonical effect module declares no effects")
+        return [FnBody]{}
+    }
+    canonical_id: canonical.module_identity
+    facts: SemaBuildFacts{package_name: "body-codec", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    input: SemaRegistrationModuleInput{package_identity: "body-codec", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "body-codec", main_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, threads) ?? {
+        failures.push("registration failed: {err}")
+        return [FnBody]{}
+    }
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    // Declaration checking loans the graph to its stage, which returns it.
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, threads, None)
+    declared := stage.graph.move()
+    stage.graph = None
+    graph = declared.move() ?? {
+        failures.push("the declaration pass lost its registration graph")
+        return [FnBody]{}
+    }
+    checked := sema_finalize_registration_graph(graph, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, None)
+    if !checked.complete {
+        failures.push("checking failed {checked.diagnostics:Debug}")
+        return [FnBody]{}
+    }
+    functions := [FnBody]{}
+    loop module_row in checked.modules.move() {
+        loop function in module_row.functions.move() -> functions.push(function.move())
+    }
+    functions
+}
+
+#Test("a checked body reads back from its bytes as it was") {
+    failures := [String]{}
+    functions: body_codec_functions(failures)
+    if functions.len() < 8 -> failures.push("only {functions.len()} functions were checked")
+    loop function in functions {
+        out := body_codec_out()
+        body_codec_put_fnbody(out, function)
+        input := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move()}
+        read: body_codec_get_fnbody(out.bytes, input)
+        if input.failed || input.at != input.end {
+            failures.push("{function.key}: the read failed at byte {input.at} of {input.end}")
+            next
+        }
+        if "{read:Debug}" != "{function:Debug}" -> failures.push("{function.key}: the body read back differs")
+        again := body_codec_out()
+        body_codec_put_fnbody(again, read)
+        if again.bytes != out.bytes -> failures.push("{function.key}: the body read back writes other bytes")
+    }
+    if failures.len() > 0 -> panic("BodyCodec collected {failures.len()} failures:\n{failures.join("\n")}")
+}
+
+#Test("a checked body read cut short fails and ends") {
+    failures := [String]{}
+    functions: body_codec_functions(failures)
+    loop function in functions {
+        whole := body_codec_out()
+        body_codec_put_fnbody(whole, function)
+        size: whole.bytes.len()
+        cuts: [Int]{0, 1, size /% 2, size - 1}
+        loop cut in cuts {
+            out := body_codec_out()
+            body_codec_put_fnbody(out, function)
+            input := BodyCodecIn{at: 0, end: cut, failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move()}
+            body_codec_get_fnbody(out.bytes, input)
+            if !input.failed -> failures.push("{function.key}: a read of {cut} of {size} bytes did not fail")
+        }
+    }
+    if failures.len() > 0 -> panic("BodyCodec collected {failures.len()} failures:\n{failures.join("\n")}")
+}

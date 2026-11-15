@@ -1,0 +1,304 @@
+// The hand-written half of the checked-body codec; BodyCodec.jet, generated
+// by Compiler/Toolchain/BodyCodec, holds a put and a get for each struct and
+// enum a checked body holds, built on these.
+//
+// Every integer is an unsigned LEB128 uvarint in its minimal form: a count,
+// a variant's position, and an Int zigzagged first (0, -1, 1, -2, ...). A
+// Bool is one byte, a String its byte length and its UTF-8 bytes, a Float
+// the zigzagged Int of its IEEE 754 binary64 bits.
+//
+// A body's ids name rows of the compile that checked it, so the codec writes
+// each one as its position in a list the writer keeps beside the bytes
+// (BodyCodecOut.symbols, decls, modules): the first id met is 0, the next new
+// one 1, and so on. The caller resolves each listed id to its key in that
+// compile, and a reader (BodyCodecIn) takes the same lists resolved to the ids
+// of the compile it reads into. A SymbolID local to the body (SYMBOL_LOCAL_BIT,
+// a row of the body's own BodyTree.symbols) and id 0 are written as they are.
+use body_codec_math: core.math
+
+// The bytes a put wrote, and the ids they name by position.
+BodyCodecOut: struct {
+    bytes: [U8]
+    symbols: [SymbolID]
+    decls: [DeclID]
+    modules: [ModuleID]
+    // Each listed id's position, by its id.
+    symbol_at: [U32:Int]
+    decl_at: [Int:Int]
+    module_at: [U32:Int]
+}
+
+body_codec_out: fn() -> BodyCodecOut Never! {
+    BodyCodecOut{bytes: [U8]{}, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}, symbol_at: [U32:Int]{}, decl_at: [Int:Int]{}, module_at: [U32:Int]{}}
+}
+
+// Where a get is in the bytes it reads (up to `end`), whether a read ran past
+// `end` or met a malformed value, and the ids the bytes name by position.
+// Once a read fails every later one reads a zero, an empty value or an
+// enum's fallback variant, so a failed get still ends; the caller checks
+// `failed`.
+BodyCodecIn: struct {
+    at: Int
+    end: Int
+    failed: Bool
+    symbols: [SymbolID]
+    decls: [DeclID]
+    modules: [ModuleID]
+}
+
+body_codec_put_uvarint: fn(out: &BodyCodecOut, value: Int) Never! {
+    rest := value
+    loop {
+        low: rest.bit_and(127)
+        rest = rest >> 7
+        if rest == 0 {
+            out.bytes.push(U8{low})
+            return
+        }
+        out.bytes.push(U8{low.bit_or(128)})
+    }
+}
+
+body_codec_get_uvarint: fn(bytes: [U8], input: &BodyCodecIn) -> Int Never! {
+    if input.failed -> return 0
+    value := 0
+    shift := 0
+    loop {
+        if input.at >= input.end {
+            input.failed = true
+            return 0
+        }
+        byte: Int{bytes[input.at]}
+        input.at += 1
+        value = value.bit_or(byte.bit_and(127) << shift)
+        if byte < 128 -> return value
+        shift += 7
+    }
+}
+
+body_codec_put_count: fn(out: &BodyCodecOut, count: Int) Never! {
+    body_codec_put_uvarint(out, count)
+}
+
+// A list's length, each element at least `least` bytes: a length the rest of
+// the bytes can't hold fails the read.
+body_codec_get_count: fn(bytes: [U8], input: &BodyCodecIn, least: Int) -> Int Never! {
+    count: body_codec_get_uvarint(bytes, input)
+    if count * least > input.end - input.at {
+        input.failed = true
+        return 0
+    }
+    count
+}
+
+body_codec_put_tag: fn(out: &BodyCodecOut, position: Int) Never! {
+    body_codec_put_uvarint(out, position)
+}
+
+// A variant's position among `count`; a position past the last, or a read
+// once one failed, is `fallback`.
+body_codec_get_tag: fn(bytes: [U8], input: &BodyCodecIn, count: Int, fallback: Int) -> Int Never! {
+    position: body_codec_get_uvarint(bytes, input)
+    if input.failed -> return fallback
+    if position >= count {
+        input.failed = true
+        return fallback
+    }
+    position
+}
+
+// The position of an enum's one variant, which must be 0.
+body_codec_skip_tag: fn(bytes: [U8], input: &BodyCodecIn, count: Int) Never! {
+    body_codec_get_tag(bytes, input, count, 0)
+}
+
+body_codec_put_int: fn(out: &BodyCodecOut, value: Int) Never! {
+    body_codec_put_uvarint(out, if value >= 0 -> value * 2 else -> (0 - value) * 2 - 1)
+}
+
+body_codec_get_int: fn(bytes: [U8], input: &BodyCodecIn) -> Int Never! {
+    value: body_codec_get_uvarint(bytes, input)
+    if value.bit_and(1) == 0 -> value >> 1 else -> 0 - (value >> 1) - 1
+}
+
+body_codec_put_bool: fn(out: &BodyCodecOut, value: Bool) Never! {
+    out.bytes.push(if value -> U8{1} else -> U8{0})
+}
+
+body_codec_get_bool: fn(bytes: [U8], input: &BodyCodecIn) -> Bool Never! {
+    if input.failed -> return false
+    if input.at >= input.end || bytes[input.at] > 1 {
+        input.failed = true
+        return false
+    }
+    input.at += 1
+    bytes[input.at - 1] == U8{1}
+}
+
+body_codec_put_string: fn(out: &BodyCodecOut, value: String) Never! {
+    bytes: value.bytes()
+    body_codec_put_uvarint(out, bytes.len())
+    out.bytes.extend(bytes)
+}
+
+body_codec_get_string: fn(bytes: [U8], input: &BodyCodecIn) -> String Never! {
+    size: body_codec_get_count(bytes, input, 1)
+    if input.failed || size == 0 -> return ""
+    at: input.at
+    input.at = at + size
+    text: String.from_bytes(bytes[at..<at + size]) ?? return body_codec_malformed(input)
+    text
+}
+
+// A string that is not UTF-8: the read fails.
+body_codec_malformed: fn(input: &BodyCodecIn) -> String Never! {
+    input.failed = true
+    ""
+}
+
+body_codec_put_float: fn(out: &BodyCodecOut, value: Float) Never! {
+    body_codec_put_int(out, body_codec_math.to_bits(value))
+}
+
+body_codec_get_float: fn(bytes: [U8], input: &BodyCodecIn) -> Float Never! {
+    body_codec_math.from_bits(body_codec_get_int(bytes, input))
+}
+
+body_codec_put_u8: fn(out: &BodyCodecOut, value: U8) Never! { body_codec_put_uvarint(out, Int{value}) }
+body_codec_put_u16: fn(out: &BodyCodecOut, value: U16) Never! { body_codec_put_uvarint(out, Int{value}) }
+body_codec_put_u32: fn(out: &BodyCodecOut, value: U32) Never! { body_codec_put_uvarint(out, Int{value}) }
+body_codec_put_u64: fn(out: &BodyCodecOut, value: U64) Never! { body_codec_put_uvarint(out, Int{value}) }
+body_codec_put_i8: fn(out: &BodyCodecOut, value: I8) Never! { body_codec_put_int(out, Int{value}) }
+body_codec_put_i16: fn(out: &BodyCodecOut, value: I16) Never! { body_codec_put_int(out, Int{value}) }
+body_codec_put_i32: fn(out: &BodyCodecOut, value: I32) Never! { body_codec_put_int(out, Int{value}) }
+body_codec_put_i64: fn(out: &BodyCodecOut, value: I64) Never! { body_codec_put_int(out, Int{value}) }
+
+// A value too wide for its integer type: the read fails.
+body_codec_too_wide: fn(input: &BodyCodecIn) -> Int Never! {
+    input.failed = true
+    0
+}
+
+body_codec_get_u8: fn(bytes: [U8], input: &BodyCodecIn) -> U8 Never! {
+    value: body_codec_get_uvarint(bytes, input)
+    checked(U8{value}) ?? U8{body_codec_too_wide(input)}
+}
+
+body_codec_get_u16: fn(bytes: [U8], input: &BodyCodecIn) -> U16 Never! {
+    value: body_codec_get_uvarint(bytes, input)
+    checked(U16{value}) ?? U16{body_codec_too_wide(input)}
+}
+
+body_codec_get_u32: fn(bytes: [U8], input: &BodyCodecIn) -> U32 Never! {
+    value: body_codec_get_uvarint(bytes, input)
+    checked(U32{value}) ?? U32{body_codec_too_wide(input)}
+}
+
+body_codec_get_u64: fn(bytes: [U8], input: &BodyCodecIn) -> U64 Never! {
+    value: body_codec_get_uvarint(bytes, input)
+    checked(U64{value}) ?? U64{body_codec_too_wide(input)}
+}
+
+body_codec_get_i8: fn(bytes: [U8], input: &BodyCodecIn) -> I8 Never! {
+    value: body_codec_get_int(bytes, input)
+    checked(I8{value}) ?? I8{body_codec_too_wide(input)}
+}
+
+body_codec_get_i16: fn(bytes: [U8], input: &BodyCodecIn) -> I16 Never! {
+    value: body_codec_get_int(bytes, input)
+    checked(I16{value}) ?? I16{body_codec_too_wide(input)}
+}
+
+body_codec_get_i32: fn(bytes: [U8], input: &BodyCodecIn) -> I32 Never! {
+    value: body_codec_get_int(bytes, input)
+    checked(I32{value}) ?? I32{body_codec_too_wide(input)}
+}
+
+body_codec_get_i64: fn(bytes: [U8], input: &BodyCodecIn) -> I64 Never! {
+    value: body_codec_get_int(bytes, input)
+    checked(I64{value}) ?? I64{body_codec_too_wide(input)}
+}
+
+// A symbol: a local one (SYMBOL_LOCAL_BIT) and id 0 as `id * 2 + 1`, any
+// other as its position in `out.symbols` times 2.
+body_codec_put_symbolid: fn(out: &BodyCodecOut, value: SymbolID) Never! {
+    if value.id == 0 || value.id.bit_and(SYMBOL_LOCAL_BIT) != 0 {
+        body_codec_put_uvarint(out, Int{value.id} * 2 + 1)
+        return
+    }
+    if out.symbol_at.get(value.id) == .Val(at) {
+        body_codec_put_uvarint(out, at * 2)
+        return
+    }
+    at: out.symbols.len()
+    out.symbol_at[value.id] = at
+    out.symbols.push(SymbolID{id: value.id})
+    body_codec_put_uvarint(out, at * 2)
+}
+
+body_codec_get_symbolid: fn(bytes: [U8], input: &BodyCodecIn) -> SymbolID Never! {
+    value: body_codec_get_uvarint(bytes, input)
+    if value.bit_and(1) == 1 -> return SymbolID{id: body_codec_get_u32_of(value >> 1, input)}
+    at: value >> 1
+    if at >= input.symbols.len() {
+        input.failed = true
+        return SymbolID{id: U32{0}}
+    }
+    input.symbols[at]
+}
+
+body_codec_get_u32_of: fn(value: Int, input: &BodyCodecIn) -> U32 Never! {
+    checked(U32{value}) ?? U32{body_codec_too_wide(input)}
+}
+
+// A declaration: its position in `out.decls`.
+body_codec_put_declid: fn(out: &BodyCodecOut, value: DeclID) Never! {
+    row: value.row.index()
+    if out.decl_at.get(row) == .Val(at) {
+        body_codec_put_uvarint(out, at)
+        return
+    }
+    at: out.decls.len()
+    out.decl_at[row] = at
+    out.decls.push(DeclID{row: value.row})
+    body_codec_put_uvarint(out, at)
+}
+
+body_codec_get_declid: fn(bytes: [U8], input: &BodyCodecIn) -> DeclID Never! {
+    at: body_codec_get_uvarint(bytes, input)
+    if at >= input.decls.len() {
+        // Only a read that failed has no declaration, and its body is never
+        // used: the first row of an empty table stands in.
+        input.failed = true
+        rows := Rows<DeclRow>{}
+        return DeclID{row: rows.add(DeclRow{symbol: SymbolID{id: U32{0}}, kind: SymbolKind.Function})}
+    }
+    input.decls[at]
+}
+
+// A module: id 0 (no module) as 0, any other as its position in
+// `out.modules` plus 1.
+body_codec_put_moduleid: fn(out: &BodyCodecOut, value: ModuleID) Never! {
+    if value.id == 0 {
+        body_codec_put_uvarint(out, 0)
+        return
+    }
+    if out.module_at.get(value.id) == .Val(at) {
+        body_codec_put_uvarint(out, at + 1)
+        return
+    }
+    at: out.modules.len()
+    out.module_at[value.id] = at
+    out.modules.push(ModuleID{id: value.id})
+    body_codec_put_uvarint(out, at + 1)
+}
+
+body_codec_get_moduleid: fn(bytes: [U8], input: &BodyCodecIn) -> ModuleID Never! {
+    at: body_codec_get_uvarint(bytes, input)
+    if at == 0 -> return ModuleID{id: U32{0}}
+    if at > input.modules.len() {
+        input.failed = true
+        return ModuleID{id: U32{0}}
+    }
+    input.modules[at - 1]
+}
