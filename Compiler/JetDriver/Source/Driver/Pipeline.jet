@@ -2275,18 +2275,19 @@ jet_driver_module_values_refused: fn(
 }
 
 // Whether an item's check or closure, which ran while a batch held its
-// values back, settled: it reported nothing (`reported`) and it completed
-// or waits on values (`waiting`), so it neither stops nor reports. A
-// settled one named no batch constant, and then the batch landing first
-// changes nothing, or it waits on that constant's key (a constant without a
-// value is a dependency, sema_comptime_dependencies_from_references) and is
-// checked again once the value lands. An unsettled one stops or reports,
-// which the run does only after the batch's values and reports. A local
-// value's check and closure always settle: whatever they report is
+// values back, settled: it reported no error (`failed`) and it completed or
+// waits on values (`waiting`), so it does not stop. A settled one named no
+// batch constant, and then the batch landing first changes nothing, or it
+// waits on that constant's key (a constant without a value is a dependency,
+// sema_comptime_dependencies_from_references) and is checked again once the
+// value lands. Its warnings (a multiline HTML text's, say) are reported
+// ahead of the batch's own reports. An unsettled one stops or reports
+// errors, which the run does only after the batch's values and reports. A
+// local value's check and closure always settle: whatever they report is
 // withdrawn, and one that fails or does not complete stays run-time code,
 // which no other item reads.
-jet_driver_comptime_settled: fn(local_value: Bool, reported: Bool, complete: Bool, waiting: [String]) -> Bool Never! {
-    local_value || (!reported && (complete || waiting.len() > 0))
+jet_driver_comptime_settled: fn(local_value: Bool, failed: Bool, complete: Bool, waiting: [String]) -> Bool Never! {
+    local_value || (!failed && (complete || waiting.len() > 0))
 }
 
 // Adds to `found` the key of each body site other than item `own` that a
@@ -3053,7 +3054,7 @@ jet_driver_comptime_run: fn(
                 precheck = None
                 counters.items_checked += 1
                 // A settled check that waits on a batch key waits below.
-                if batch.entries.len() > 0 && !jet_driver_comptime_settled(source.local_value, checked_item.diagnostics.len() > 0, checked_item.complete, checked_item.waiting_dependencies) {
+                if batch.entries.len() > 0 && !jet_driver_comptime_settled(source.local_value, jet_driver_has_errors(checked_item.diagnostics), checked_item.complete, checked_item.waiting_dependencies) {
                     flushed := jet_driver_comptime_staged_flush(request, batch, values, checked_functions, trace, programs, staging, counters, diagnostics)
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
@@ -3221,7 +3222,7 @@ jet_driver_comptime_run: fn(
                 // A settled closure that waits on a batch key waits below. One
                 // that checked the owner body of a site the batch holds starts
                 // over once the batch has landed.
-                if batch.entries.len() > 0 && (!jet_driver_comptime_settled(source.local_value, diagnostics.len() > item_diagnostic_start, closure.complete, closure.waiting_dependencies) || jet_driver_comptime_batch_holds(batch, unlanded)) {
+                if batch.entries.len() > 0 && (!jet_driver_comptime_settled(source.local_value, jet_driver_has_errors_since(diagnostics, item_diagnostic_start), closure.complete, closure.waiting_dependencies) || jet_driver_comptime_batch_holds(batch, unlanded)) {
                     loop diagnostics.len() > item_diagnostic_start -> _ := diagnostics.pop()
                     jet_driver_comptime_forget_functions(checked_functions, run_index, checked_mark)
                     flushed := jet_driver_comptime_staged_flush(request, batch, values, checked_functions, trace, programs, staging, counters, diagnostics)
