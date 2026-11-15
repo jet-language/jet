@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6885,
-    "rev": 103575,
+    "rev": 103600,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40510,83 +40510,88 @@
         {
           "n": 1,
           "text": "Every semantic item listed in the body lives in its Core/*.jet home; the runtime keeps only policy-free provider leaves (`git grep -n 'HTTPClientNew\\|jet_http_client_new_impl' -- Compiler Core` is empty, as c11 states).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:53:24.031Z"
+          "evidence": "Merged into #3665 c11: every semantic item in Core is c11's grep plus the per-mechanism rows",
+          "at": "2026-11-15T03:23:13.321Z",
+          "closure": "obsolete"
         },
         {
           "n": 2,
-          "text": "Every route (O0, O1, O2 and web where applicable) calls the one Jet meaning, proven by a golden example with identical output on each applicable tier.",
+          "text": "One documented retry rule (today Core/Http/Client.jet retries PUT and DELETE while the old runtime retried only safe methods), and every route calls the one Jet meaning: golden net/http_client shows a PUT retry and a POST non-retry with identical output on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter net/http_client`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-28T11:08:59.127Z"
+          "at": "2026-11-15T03:23:04.045Z"
         },
         {
           "n": 3,
           "text": "Listed divergences and silent fallbacks are resolved to one rule with a registered diagnostic where users can hit them.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-28T11:08:59.736Z"
+          "evidence": "Merged into #3665 c2: the retry divergence is c2's one rule",
+          "at": "2026-11-15T03:23:14.246Z",
+          "closure": "obsolete"
         },
         {
           "n": 4,
-          "text": "`jet test Compiler --profile cases http_client_law/` (all 40 tests, e.g. `pooled_h1_reuses_only_after_drain_and_decodes_gzip_natively`, `h1_rejects_request_target_controls_before_connecting`, `session_request_rejects_invalid_proxy_before_transport`) and `jet test Compiler --profile cases http_i9/` pass after `crates/jet-pkg-model/src/Prelude/HTTP.rs` shrinks to socket/TLS/gzip leaves. `jet test Compiler --profile golden net/http_client` passes and shows a PUT retry and a POST non-retry under the one documented rule.",
+          "text": "Pool reuse and decoding: pooled_h1_reuses_only_after_drain_and_decodes_gzip_natively, h1_skips_early_hints_reuses_final_response_and_rejects_upgrade, gzip_decoding_streams_before_the_response_finishes, custom_client_clones_share_pool_cookie_jar_and_transport_facts and public_client_policy_exposes_pool_cookie_timeouts_and_facts pass and leave tests/known-failing.tsv. Proof: `jet test Compiler --profile cases --filter http_client_law/` on those rows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:22:25.991Z"
+          "at": "2026-11-15T03:23:04.982Z"
         },
         {
           "n": 5,
-          "text": "[#3595] Capped streaming fetch, redirect target policy and destination pinning (D-CORE-HTTPBODYLIMIT1, HTTPREDIRECT1, HTTPDEST1). `.Public` follows the dated IANA table (D-CORE-NETPUBLIC1). Inherited listeners and Unix peer credentials work (D-CORE-NETINHERIT1, NETPEER1).",
+          "text": "Capped streaming fetch, redirect target policy and destination pinning (D-CORE-HTTPBODYLIMIT1, D-CORE-HTTPREDIRECT1, D-CORE-HTTPDEST1); `.Public` follows the dated IANA table (D-CORE-NETPUBLIC1); inherited listeners and Unix peer credentials work (D-CORE-NETINHERIT1, D-CORE-NETPEER1). Proof: `jet test Compiler --profile cases --filter net/public_destination_` and `--filter net/inherited_listener`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:13.736Z"
+          "at": "2026-11-15T03:23:11.405Z"
         },
         {
           "n": 6,
           "text": "[#3666] HTTP/1 server framing, session policy and PEM/X.509 parsing are in Jet with real TLS on every applicable level. http_server_tls, core_net_tls and golden net/tls_peer_identity pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:25:14.474Z"
+          "evidence": "Moved to #6878 c6: server framing and server TLS belong on the HTTP server card",
+          "at": "2026-11-15T03:23:16.089Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
           "text": "[#3227] Socket and DNS lifecycle: TCP, Unix and TLS share positive-limit, partial-write and EOF semantics. UDP keeps packet source, original length and truncation. Host DNS stays distinct from the wire resolver. Cancellation, deadline, half-close and use-after-close follow ratified law.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:25:15.141Z"
+          "evidence": "Moved to #6884 c1: socket lifecycle is its own card; split into NETSOCK c1-c3",
+          "at": "2026-11-15T03:23:17.922Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
           "text": "[#3305] Golden net/http_policy_order: CORS never authorizes, security headers survive errors, untrusted forwarded identity cannot bypass rate or auth, and malformed or oversized input is rejected before handler mutation.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:25:16.655Z"
+          "evidence": "Moved to #6878 c7: server policy order belongs on the HTTP server card",
+          "at": "2026-11-15T03:23:17.018Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
-          "text": "D-HTTP-HEADER-BAD1=A: HeaderName/HeaderValue are checked text types with RFC token/field-value literal validation; all listed setters/builders require them; dynamic parse returns HTTPError.InvalidHeader and no second runtime validation; invalid written character is actionable compile error; session_retries bounds fail; no silent unchanged-header fallback; valid behavior and all original HTTP client framing/transport acceptance remain.",
+          "text": "HeaderName and HeaderValue are checked text types (D-HTTP-HEADER-BAD1=A): every header setter and builder takes them, dynamic parse returns HTTPError.InvalidHeader with no second runtime validation, an invalid written character is a compile error with a fix, session_retries bounds fail, and there is no silent unchanged-header fallback. Proof: `jet test Compiler --profile ui --filter http_header_` and `jet test Compiler --profile cases --filter http_client_law/`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-07T21:05:00.765Z"
+          "at": "2026-11-15T03:23:05.930Z"
         },
         {
           "n": 10,
@@ -40599,120 +40604,127 @@
         },
         {
           "n": 11,
-          "text": "(was #6033) `http.Client.new()` and every builder method in core-library.md:1048-1057 are Jet functions in Core/Http/Client.jet, and `git grep -n 'HTTPClientNew\\|jet_http_client_new_impl' -- Compiler Core` is empty.",
+          "text": "`http.Client.new()` and every builder method in core-library.md are Jet functions in Core/Http/Client.jet, and every semantic item from the old runtime HTTP policy has its Core home with only socket, TLS and gzip provider leaves left. Proof: `git grep -n 'HTTPClientNew\\|jet_http_client_new_impl' -- Compiler Core` prints nothing (on dev 168e1e9e92 it matches 16 lines in 10 Compiler files).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:41:18.360Z"
+          "at": "2026-11-15T03:23:06.853Z"
         },
         {
           "n": 12,
-          "text": "(was #6033) The http_client_law fixtures that call Client.new() run on default and --release tiers, and the 2 #5454 KNOWN-FAILING rows pass or are re-filed with a reason.",
+          "text": "The http_client_law fixtures that call Client.new() typecheck and run: public_client_allow_http_downgrade_method_typechecks and public_client_retries_method_typechecks pass and leave tests/known-failing.tsv (both name #6843). Proof: `jet test Compiler --profile cases --filter http_client_law/public_client_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:41:19.151Z"
+          "at": "2026-11-15T03:23:07.745Z"
         },
         {
           "n": 14,
           "text": "The Jet runtime parses resolver servers from resolv.conf text through a text-taking function; Core #Tests cover native fixtures and reject noise and malformed lines (`jet test Compiler --profile core --filter resolv`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:53:25.423Z"
+          "evidence": "Merged into #6884 c3: resolv.conf parsing is NETSOCK c3",
+          "at": "2026-11-15T03:23:18.826Z",
+          "closure": "obsolete"
         },
         {
           "n": 15,
-          "text": "Jetpack/Foundation/Tests/PublicDestination.jet's three tests (all DNS answers must be public; comptime_http_fetch rejects loopback; the pinned stream rejects an empty set) compile and pass under jet test against the implemented native bridges (foundation_addresses_are_public, foundation_resolve_public_addresses, foundation_fetch, foundation_get_stream_pinned). (merged from #3595 c6)",
+          "text": "Jetpack/Foundation/Tests/PublicDestination.jet's three tests pass: every DNS answer must be public, comptime_http_fetch rejects loopback, and the pinned stream rejects an empty set. Proof: `jet test Jetpack/Foundation --filter PublicDestination`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:35.964Z"
+          "at": "2026-11-15T03:23:12.322Z"
         },
         {
           "n": 16,
-          "text": "(was #2382 c2) Incoming request and received response text projections delegate to the one body lifecycle and canonical one-MiB default-cap identity; default, explicit-limit, over-limit, consumed-body, error-identity, binary, and streaming cases are tier-proven [precut audit: failing on 9c7ddf1359: C:http_i9/http_request_text_projections_preserve_body_contract_on_all_supported_tiers FAIL exit 1; expected 0; C:http_i9/http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers FAIL exit 1; expected 0] (merged from #3595 c7)",
+          "text": "Incoming request and received response text projections use the one body lifecycle and the one-MiB default cap: default, explicit-limit, over-limit, consumed-body, error-identity, binary and streaming cases pass, and hostile streamed overruns report InvalidFraming. Proof: `jet test Compiler --profile cases --filter http_i9/` (http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers and hostile_http_response_sinks_reject_streamed_overruns_on_both_dev_tiers leave tests/known-failing.tsv).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:37.259Z"
+          "at": "2026-11-15T03:23:08.636Z"
         },
         {
           "n": 17,
-          "text": "(was #2382 c3) The client request builder json(value) accepts Codable values, uses the existing typed encoder, sets JSON framing, does not conflict with decode-side inference, and replaces the audited hand-escaped request example with malformed/error tests [precut audit: failing on 9c7ddf1359: C:http_i9/http_request_text_projections_preserve_body_contract_on_all_supported_tiers FAIL exit 1; expected 0; C:http_i9/http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers FAIL exit 1; expected 0] (merged from #3595 c8)",
+          "text": "The request builder's json(value) takes a Codable value, uses the typed encoder, sets JSON framing and does not conflict with decode-side inference; the hand-escaped request example is replaced by malformed and error tests. Proof: `jet test Compiler --profile cases --filter http_request_json_body`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:38.510Z"
+          "at": "2026-11-15T03:23:09.534Z"
         },
         {
           "n": 18,
           "text": "(was #3080 c1) Request is sent exactly when the public API says it is [precut audit: no dev test, golden, case or snapshot proves this today] (merged from #3595 c9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:39.714Z"
+          "evidence": "Moved to #6884 c6: TCP call states belong on the sockets card",
+          "at": "2026-11-15T03:23:19.756Z",
+          "closure": "obsolete"
         },
         {
           "n": 19,
           "text": "(was #3080 c2) Timeout/lost reply after possible mutation reports uncertainty [precut audit: no dev test, golden, case or snapshot proves this today] (merged from #3595 c10)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:40.931Z"
+          "evidence": "Merged into #6884 c6: uncertainty after a lost reply is part of NETSOCK c6",
+          "at": "2026-11-15T03:23:20.682Z",
+          "closure": "obsolete"
         },
         {
           "n": 20,
           "text": "(was #3080 c3) Event publication does not fabricate a handler result [precut audit: no dev test, golden, case or snapshot proves this today] (merged from #3595 c11)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:42.152Z"
+          "evidence": "Merged into #6884 c6: event publication is part of NETSOCK c6",
+          "at": "2026-11-15T03:23:21.632Z",
+          "closure": "obsolete"
         },
         {
           "n": 21,
           "text": "(was #3444 c1) The checked tcp_listener.accept Prelude metadata is valid through MIR legality verification, and the focused concurrency-service service sequence completes without an ICE [precut audit: no dev test, golden, case or snapshot proves this today] (merged from #3595 c12)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:43.411Z"
+          "evidence": "Moved to #6884 c4: accept and write_text routes belong on the sockets card",
+          "at": "2026-11-15T03:23:22.553Z",
+          "closure": "obsolete"
         },
         {
           "n": 22,
           "text": "(was #3445 c1) The checked tcp_stream.write_text Prelude metadata is valid through MIR legality verification, and the focused concurrency-service service sequence completes without an ICE [precut audit: no dev test, golden, case or snapshot proves this today] (merged from #3595 c13)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:44.640Z"
+          "evidence": "Merged into #6884 c4: same service build as NETSOCK c4",
+          "at": "2026-11-15T03:23:23.490Z",
+          "closure": "obsolete"
         },
         {
           "n": 23,
-          "text": "A one-shot HTTP response's second body().text returns Err(.BodyConsumed) and never yields the body again. Found 11-07 by the same case; drop its known-failing row when both 3595 rows pass. (merged from #3595 c15)",
+          "text": "A one-shot HTTP response's second body().text returns Err(.BodyConsumed) and never yields the body again. Proof: `jet test Compiler --profile cases --filter http_i9/` (the BodyConsumed row passes and leaves tests/known-failing.tsv).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:45.921Z"
+          "at": "2026-11-15T03:23:10.445Z"
         },
         {
           "n": 24,
           "text": "TCP writes have one spelling and never drop bytes: a write either writes everything or returns the short count to a caller that must handle it; the five write spellings collapse to one. Proof: `jet test Compiler --profile cases --filter net/tcp_write_short_count`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:03:33.768Z"
+          "evidence": "Moved to #6884 c5: TCP writes belong on the sockets card",
+          "at": "2026-11-15T03:23:24.417Z",
+          "closure": "obsolete"
         },
         {
           "n": 25,
@@ -40726,11 +40738,12 @@
         {
           "n": 26,
           "text": "The client law holds over loopback: a second body consumption, early drop, cancel during read or upload, limits and pool reuse; separate phase, idle and total deadlines; redirect, cookie, auth, proxy and TLS policy; default-trust TLS rejects bad certificates; status, size, JSON and schema errors stay distinct. Proof: `jet test Compiler --profile cases --filter http_client_law`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:19:46.919Z"
+          "evidence": "Merged into #3665 c4: same loopback client law, now split by mechanism across c4 and HK2-HK8",
+          "at": "2026-11-15T03:23:15.161Z",
+          "closure": "obsolete"
         },
         {
           "n": 27,
@@ -40824,7 +40837,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-28T11:08:58.002Z",
-      "updated": "2026-11-15T03:23:01.225Z",
+      "updated": "2026-11-15T03:23:24.417Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -103114,6 +103127,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:19:48.782Z"
+        },
+        {
+          "n": 6,
+          "text": "HTTP/1 server framing, session policy and PEM/X.509 parsing are in Jet, with a real TLS server stream on every applicable tier (today Core TLS is client-only: #6317 refuses the core-tls-server cases). Proof: `jet test Compiler --profile cases --filter http_server_tls` and `--filter core_net_tls`, and `jet test Compiler --profile golden --filter net/tls_peer_identity`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:23:02.281Z"
+        },
+        {
+          "n": 7,
+          "text": "Server policy order: CORS never authorizes, security headers survive errors, untrusted forwarded identity cannot bypass rate or auth limits, and malformed or oversized input is rejected before any handler mutation. Proof: `jet test Compiler --profile golden --filter net/http_policy_order` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:23:03.170Z"
         }
       ],
       "refs": [],
@@ -103128,9 +103159,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:13.176Z",
-      "updated": "2026-11-15T03:19:48.782Z",
+      "updated": "2026-11-15T03:23:03.170Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 5
+      "criteriaLastN": 7
     },
     {
       "id": "c0t02esm",
@@ -209197,6 +209228,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:23:24.417Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-15T03:23:23.491Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-15T03:23:22.554Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-15T03:23:21.632Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T03:23:20.682Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-15T03:23:19.756Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-15T03:23:18.826Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T03:23:17.923Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T03:23:17.019Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T03:23:16.090Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T03:23:15.161Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-15T03:23:14.246Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T03:23:13.321Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c047t3lg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T03:23:12.322Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#15: strip debris; proof; was: Jetpack/Foundation/Tests/PublicDestination.jet's three tests (all DNS answers must be public; comptime_http_fetch rejects loopback; the pinned stream rejects an empty set) compile and pass under jet t"
+    },
+    {
+      "at": "2026-11-15T03:23:11.405Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#5: strip debris; proof; was: [#3595] Capped streaming fetch, redirect target policy and destination pinning (D-CORE-HTTPBODYLIMIT1, HTTPREDIRECT1, HTTPDEST1). `.Public` follows the dated IANA table (D-CORE-NETPUBLIC1). Inherited "
+    },
+    {
+      "at": "2026-11-15T03:23:10.446Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#23: strip debris; proof; was: A one-shot HTTP response's second body().text returns Err(.BodyConsumed) and never yields the body again. Found 11-07 by the same case; drop its known-failing row when both 3595 rows pass. (merged fro"
+    },
+    {
+      "at": "2026-11-15T03:23:09.534Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#17: strip debris; proof; was: (was #2382 c3) The client request builder json(value) accepts Codable values, uses the existing typed encoder, sets JSON framing, does not conflict with decode-side inference, and replaces the audited"
+    },
+    {
+      "at": "2026-11-15T03:23:08.637Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#16: strip debris; current rows; was: (was #2382 c2) Incoming request and received response text projections delegate to the one body lifecycle and canonical one-MiB default-cap identity; default, explicit-limit, over-limit, consumed-body"
+    },
+    {
+      "at": "2026-11-15T03:23:07.745Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#12: strip debris; current rows; was: (was #6033) The http_client_law fixtures that call Client.new() run on default and --release tiers, and the 2 #5454 KNOWN-FAILING rows pass or are re-filed with a reason."
+    },
+    {
+      "at": "2026-11-15T03:23:06.853Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#11: strip debris; absorbs c1; was: (was #6033) `http.Client.new()` and every builder method in core-library.md:1048-1057 are Jet functions in Core/Http/Client.jet, and `git grep -n 'HTTPClientNew\\|jet_http_client_new_impl' -- Compiler "
+    },
+    {
+      "at": "2026-11-15T03:23:05.930Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#9: add proof; was: D-HTTP-HEADER-BAD1=A: HeaderName/HeaderValue are checked text types with RFC token/field-value literal validation; all listed setters/builders require them; dynamic parse returns HTTPError.InvalidHead"
+    },
+    {
+      "at": "2026-11-15T03:23:04.982Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#4: split the 40-case umbrella into one criterion per mechanism (HK2-HK8, HK10); was: `jet test Compiler --profile cases http_client_law/` (all 40 tests, e.g. `pooled_h1_reuses_only_after_drain_and_decodes_gzip_natively`, `h1_rejects_request_target_controls_before_connecting`, `session"
+    },
+    {
+      "at": "2026-11-15T03:23:04.045Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#2: absorbs c3 and c4's golden part; was: Every route (O0, O1, O2 and web where applicable) calls the one Jet meaning, proven by a golden example with identical output on each applicable tier."
+    },
+    {
+      "at": "2026-11-15T03:23:03.170Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0ejfsdq",
+      "note": "#7 Server policy order: CORS never authorizes, security headers"
+    },
+    {
+      "at": "2026-11-15T03:23:02.281Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0ejfsdq",
+      "note": "#6 HTTP/1 server framing, session policy and PEM/X.509 parsing "
+    },
     {
       "at": "2026-11-15T03:23:01.225Z",
       "by": "TowerKeeper-1",
