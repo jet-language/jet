@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6953,
-    "rev": 105275,
+    "rev": 105287,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -66613,39 +66613,39 @@
         },
         {
           "n": 2,
-          "text": "With a remote builder bound by `jet remote bind`, `jet build` runs actions on a stock Remote Execution API server and its cache, and the outputs are byte-identical to a local build (CI test with a containerised server).",
+          "text": "With a remote builder bound by `jet remote bind`, `jet build` runs actions on a stock Remote Execution API server and its cache through the farm adapter (D-REAPI1=A), and outputs are byte-identical to a local build. Proof: `jet test Compiler --profile cases --filter remote_build/reapi_adapter_byte_identical` against a containerised server.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:57:41.451Z"
+          "at": "2026-11-15T05:09:56.694Z"
         },
         {
           "n": 3,
-          "text": "Remote use still needs the D-JPK-REMOTE1 grants: a project cannot force remote execution or name an endpoint (test).",
+          "text": "Remote use still needs the D-JPK-REMOTE1=D grants: a project can neither force remote execution nor name an endpoint. Proof: `jet test Compiler --profile cases --filter remote_build/project_cannot_force_remote`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:57:41.451Z"
+          "at": "2026-11-15T05:09:57.582Z"
         },
         {
           "n": 5,
-          "text": "(was #693 c2, #1043 c2) Local and remote action identity, inputs, outputs, worker platform, sandbox, signatures, provenance, cache publication, and consumed build result are identical in meaning [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Local and remote action identity, inputs, outputs, worker platform, sandbox, signatures, provenance, cache publication and the consumed build result mean the same. Proof: `jet test Compiler --profile packages --filter remote_build/local_remote_identity_agree`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:46:43.977Z"
+          "at": "2026-11-15T05:09:58.467Z"
         },
         {
           "n": 6,
-          "text": "(was #693 c3, #1043 c3) Corrupt or mismatched entries, malicious workers, lost connections, cancellation, timeout, replay, partial upload, and sandbox failure cannot become local truth or publish partial outputs [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Corrupt or mismatched entries, malicious workers, lost connections, cancellation, timeout, replay, partial upload and sandbox failure never become local truth or publish partial outputs. Proof: `jet test Compiler --profile packages --filter remote_build/hostile_remote_`, one case per failure.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:46:44.672Z"
+          "at": "2026-11-15T05:09:59.378Z"
         },
         {
           "n": 13,
@@ -66671,7 +66671,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:41.451Z",
-      "updated": "2026-11-15T04:52:40.630Z",
+      "updated": "2026-11-15T05:09:59.378Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
@@ -68026,21 +68026,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A release guard checks out the previous release's Examples/ and a fixed corpus of 200 scripts (the ScriptBench programs plus Examples/features), runs `jet fix --all` then `jet check` with the new toolchain, and fails on any error; the guard is blocking.",
+          "text": "A blocking release guard checks out the previous release's Examples/ and a fixed corpus of 200 scripts (the ScriptBench programs plus Examples), runs `jet fix --all` and then `jet check` with the new toolchain, and fails on any error. Proof: `jet test tests/guards --filter release_upgrade_corpus`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:59:13.749Z"
+          "at": "2026-11-15T05:10:03.991Z"
         },
         {
           "n": 2,
-          "text": "A change that makes previously accepted source fail `jet check` without registering a `jet fix` rewrite fails the guard (planted-break test).",
+          "text": "A change that makes previously accepted source fail `jet check` without registering a `jet fix` rewrite fails the guard (a planted-break test). Proof: `jet test tests/guards --filter release_upgrade_corpus_planted_break`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:41.283Z"
+          "at": "2026-11-15T05:10:05.005Z"
         },
         {
           "n": 3,
@@ -68053,21 +68053,21 @@
         },
         {
           "n": 4,
-          "text": "Across every release since the guard turned blocking, the number of hand edits needed to move the corpus forward is 0; the count is logged on this card per release.",
+          "text": "Across every release since the guard turned blocking, moving the corpus forward needs 0 hand edits, logged on this card per release. Proof: the per-release log entries citing the guard's receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:41.283Z"
+          "at": "2026-11-15T05:10:06.297Z"
         },
         {
           "n": 5,
-          "text": "The `1.0 compatibility policy` line of `jet --version` reads from Docs/spec/release-policy.md, and the policy names the release in which the guard became blocking.",
+          "text": "The `1.0 compatibility policy` line of `jet --version` reads from Docs/spec/release-policy.md, and the policy names the release in which the guard became blocking. Proof: `jet test Compiler --profile cases --filter cli/version_compat_policy_line`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:41.283Z"
+          "at": "2026-11-15T05:10:07.740Z"
         },
         {
           "n": 10,
@@ -68112,7 +68112,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T21:05:41.283Z",
-      "updated": "2026-11-15T02:29:55.554Z",
+      "updated": "2026-11-15T05:10:07.740Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
@@ -88388,39 +88388,39 @@
       "criteria": [
         {
           "n": 2,
-          "text": "(was #690 c2, #1038 c2) Each build unit receives only its declared Tier-1 inputs and explicitly named Tier-2 grants; dependency order, computed package facts, plan, execution, lock, and explain output agree (moved from #5454 c17)",
+          "text": "Each build unit receives only its declared Tier-1 inputs and explicitly named Tier-2 grants, and dependency order, computed package facts, plan, execution, lock and explain output agree. Proof: `jet test Compiler --profile packages --filter build_scope/declared_inputs_only`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:24:49.709Z"
+          "at": "2026-11-15T05:10:00.297Z"
         },
         {
           "n": 3,
-          "text": "(was #690 c3, #1038 c3) Unlisted dependency authority, grant escalation, cycles, outside-root paths, read/write failure, and stale computed facts reject before effects with the correct registered diagnostic and exact UI snapshot (moved from #5454 c18)",
+          "text": "Unlisted dependency authority, grant escalation, cycles, outside-root paths, read or write failure and stale computed facts are refused before any effect, each with its registered error and UI snapshot. Proof: `jet test Compiler --profile ui --filter build_scope_refused_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:24:50.505Z"
+          "at": "2026-11-15T05:10:01.240Z"
         },
         {
           "n": 4,
-          "text": "(was #690 c4, #1038 c4) Focused multi-member workspace tests prove grant non-inheritance, explicit dependency grants, order, root-layer boundaries, diagnostic snapshots, and rollback of failed builds (moved from #5454 c19)",
+          "text": "In a multi-member workspace, grants are not inherited, dependency grants are explicit, order and root-layer boundaries hold, and a failed build rolls back. Proof: `jet test Compiler --profile cases --filter build_scope/workspace_grants_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:24:51.406Z"
+          "at": "2026-11-15T05:10:02.153Z"
         },
         {
           "n": 6,
-          "text": "(was #3947) Parity: Package-default authority floor (#3718) not in JetDriver package facts [precut audit: no dev test, golden, case or snapshot proves this today] (was #4275 c147)",
+          "text": "The package-default authority floor (#3718) is part of the JetDriver package facts. Proof: `jet test Compiler --profile packages --filter package_facts/default_authority_floor`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:37:53.412Z"
+          "at": "2026-11-15T05:10:03.072Z"
         },
         {
           "n": 7,
@@ -88476,7 +88476,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:24:48.017Z",
-      "updated": "2026-11-15T04:52:39.679Z",
+      "updated": "2026-11-15T05:10:03.072Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 11
     },
@@ -216208,6 +216208,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:10:07.740Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0810bga",
+      "note": "#5: proof; was: The `1.0 compatibility policy` line of `jet --version` reads from Docs/spec/release-policy.md, and the policy names the release in which the guard became blocking."
+    },
+    {
+      "at": "2026-11-15T05:10:06.297Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0810bga",
+      "note": "#4: proof; was: Across every release since the guard turned blocking, the number of hand edits needed to move the corpus forward is 0; the count is logged on this card per release."
+    },
+    {
+      "at": "2026-11-15T05:10:05.006Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0810bga",
+      "note": "#2: proof; was: A change that makes previously accepted source fail `jet check` without registering a `jet fix` rewrite fails the guard (planted-break test)."
+    },
+    {
+      "at": "2026-11-15T05:10:03.991Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0810bga",
+      "note": "#1: proof; was: A release guard checks out the previous release's Examples/ and a fixed corpus of 200 scripts (the ScriptBench programs plus Examples/features), runs `jet fix --all` then `jet check` with the new tool"
+    },
+    {
+      "at": "2026-11-15T05:10:03.072Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jn187l",
+      "note": "#6: strip debris; proof; was: (was #3947) Parity: Package-default authority floor (#3718) not in JetDriver package facts [precut audit: no dev test, golden, case or snapshot proves this today] (was #4275 c147)"
+    },
+    {
+      "at": "2026-11-15T05:10:02.153Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jn187l",
+      "note": "#4: strip debris; proof; was: (was #690 c4, #1038 c4) Focused multi-member workspace tests prove grant non-inheritance, explicit dependency grants, order, root-layer boundaries, diagnostic snapshots, and rollback of failed builds "
+    },
+    {
+      "at": "2026-11-15T05:10:01.240Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jn187l",
+      "note": "#3: strip debris; proof; was: (was #690 c3, #1038 c3) Unlisted dependency authority, grant escalation, cycles, outside-root paths, read/write failure, and stale computed facts reject before effects with the correct registered diag"
+    },
+    {
+      "at": "2026-11-15T05:10:00.297Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jn187l",
+      "note": "#2: strip debris; proof; was: (was #690 c2, #1038 c2) Each build unit receives only its declared Tier-1 inputs and explicitly named Tier-2 grants; dependency order, computed package facts, plan, execution, lock, and explain output"
+    },
+    {
+      "at": "2026-11-15T05:09:59.378Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fq2ryv",
+      "note": "#6: strip debris; proof; was: (was #693 c3, #1043 c3) Corrupt or mismatched entries, malicious workers, lost connections, cancellation, timeout, replay, partial upload, and sandbox failure cannot become local truth or publish part"
+    },
+    {
+      "at": "2026-11-15T05:09:58.467Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fq2ryv",
+      "note": "#5: strip debris; proof; was: (was #693 c2, #1043 c2) Local and remote action identity, inputs, outputs, worker platform, sandbox, signatures, provenance, cache publication, and consumed build result are identical in meaning [prec"
+    },
+    {
+      "at": "2026-11-15T05:09:57.582Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fq2ryv",
+      "note": "#3: proof; was: Remote use still needs the D-JPK-REMOTE1 grants: a project cannot force remote execution or name an endpoint (test)."
+    },
+    {
+      "at": "2026-11-15T05:09:56.695Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fq2ryv",
+      "note": "#2: proof; names D-REAPI1; was: With a remote builder bound by `jet remote bind`, `jet build` runs actions on a stock Remote Execution API server and its cache, and the outputs are byte-identical to a local build (CI test with a con"
+    },
     {
       "at": "2026-11-15T05:09:55.620Z",
       "by": "TowerKeeper-1",
