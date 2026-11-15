@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6870,
-    "rev": 103200,
+    "rev": 103223,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40685,7 +40685,7 @@
     {
       "id": "c0ttcd0k",
       "num": 3709,
-      "title": "Jet sync engine: Convex/Linear-grade local-first data with proven query, mutation, and action kinds",
+      "title": "Sync engine: query, mutation and action kinds, app.live, one owning module, and the bootstrap and local-only design",
       "body": "Owner note (2026-09-28): \"I want a jet-native tool that functions like convexdb as an excellent, world class sync engine\" (linked video https://youtu.be/pRf8_40EDtM is Tom Delalande's Linear case study, not a Convex video).\n\nHarvest (mine-for-jet report mine-for-jet-2026-09-28):\n- Linear (video 4:12-8:26): the client downloads the workspace once, then every read and write is local; one observable state re-renders views; the engine turns local changes into transactions and streams remote changes over a socket, so local and remote changes look identical; the server accepts or rejects each transaction and the client rolls back on reject; large workspaces forced lazy loading and a partial bootstrap; engineers can switch sync off to prototype locally; there is no plug-and-play engine, and it takes several full-time engineers to maintain.\n- Convex (https://docs.convex.dev/functions/runtimes): queries and mutations must be deterministic (seeded Math.random, Date.now frozen per call) so the system can retry and re-run them; non-deterministic work such as fetch lives only in actions.\n\nJet already ratified most of the mechanism: D-LIVEQUERY1 (footprint-tracked live queries over -[DB.Read]> functions, #Transact write-set invalidation, pushes to Signal<T>), D-EFFDBREAD1, D-SYNC1 (CRDT values over the live channel), D-DBPOLICY1 (row policies below app code), D-DX-QUERY1 (optimistic mutation with rollback), D-DX-SERVERFN1 (typed calls derived from App actions), D-QUERY-LIVE1 (incremental maintenance). Jet's advantage Convex cannot copy: effect rows can prove at compile time that a query only reads, that a mutation is replay-safe, and that only actions touch the network; the same Jet validation code runs on client and server (I9).\n\nCurrent state is far from that: the shipped example does not compile, Core/app is string-keyed, and app/web duplicate the surface (#3700, #3701).",
       "kind": "feature",
       "track": "epoch",
@@ -40700,6 +40700,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Split: the offline queue went to #6867, live query scaling to #6868, row policies to #6869. This card keeps the effect kinds (c2), app.live (c7), the one owning module (c8) and the remaining design (c1). c10 met on the CRDT laws."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -40768,20 +40773,22 @@
         {
           "n": 5,
           "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): Query and mutation effect classes are checked: `jet test Compiler --profile ui sync_` matches the snapshots (a query that writes is rejected, and a mutation that reaches `Net` is rejected, each with a registered code and what/why/fix text). Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-29T02:15:09.509Z"
+          "evidence": "Merged into #3709 c2: c5 is c2's proof",
+          "at": "2026-11-15T02:54:16.612Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
           "text": "A tests/cases row proves the two-client example (offline edit, reconnect, server rejects one write and the client rolls back) on O0, O1 and O2 and the web tier (`jet test Compiler --profile cases --filter sync_two_clients`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:53:30.250Z"
+          "evidence": "Moved to #6867 c1: the offline queue is its own stream",
+          "at": "2026-11-15T02:54:17.493Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
@@ -40794,165 +40801,181 @@
         },
         {
           "n": 8,
-          "text": "[#3701] **[OWNER]** module-owner ballot. Exactly one Core module exports live, subscribe, invalidate, sync, auth, auth_oauth and auth_routes, and every caller migrates. The Jet body is the behavior on every level. Pure calls need no Browser authority (golden web/app_owner*).",
+          "text": "Exactly one module exports live, subscribe, invalidate and sync (the `app` package of D-WEBAPP-SHAPE1=A) and one exports the auth surface (the `auth` package); every caller migrates and Core/Web/Query.jet's live, subscribe and invalidate are gone. Proof: `git grep -n -E '^(live|subscribe|invalidate): fn' -- Core` prints nothing and `jet test Compiler --profile cases --filter web_app/` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:26:21.575Z"
+          "at": "2026-11-15T02:54:14.849Z"
         },
         {
           "n": 10,
-          "text": "(was #1159 c2) CRDT values satisfy their algebra and convergence contract; row policies are typed, compiled, and enforced on every live query/mutation path; closeout claims only shipped child behavior [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "text": "CRDT values satisfy their algebra and convergence laws (D-SYNC1=A): merge is commutative and idempotent, equal-timestamp conflicts resolve deterministically, and malformed or non-canonical input is refused.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:01.938Z"
+          "evidence": "Holds on dev 452b6443f3: `jet test Compiler --profile cases --filter sync_crdt/` PASS 3, FAIL 0 (sync_laws_hold_on_default_run, sync_laws_hold_on_aot_path, map_merge_equal_timestamp_conflicts_are_deterministic). The row-policy half moved to ROWPOL c1-c3.",
+          "at": "2026-11-15T02:54:18.396Z"
         },
         {
           "n": 11,
           "text": "(was #1159 c3) Concurrent partitions and merges, duplicate or reordered operations, invalid policies, policy bypass paths, unauthorized rows, reconnect, and rollback preserve convergence and deny access safely [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:02.539Z"
+          "evidence": "Moved to #6867 c8: convergence under partitions goes to the queue card; the policy-bypass half to ROWPOL c3",
+          "at": "2026-11-15T02:54:19.307Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
           "text": "(was #1159 c4) Focused law/property tests and production query integration checks cover success and bypass attempts; closeout cards aggregate verified child evidence instead of examples alone [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:03.149Z"
+          "evidence": "Merged into #6869 c3: law and bypass tests are the proofs of SYNCQ c8 and ROWPOL c3",
+          "at": "2026-11-15T02:54:20.358Z",
+          "closure": "obsolete"
         },
         {
           "n": 13,
           "text": "(was #2964 c1) Tracked sources maintain eligible typed queries through real deltas, cached no-op reads, transactional publication and canonical cancellation lifecycle across applicable tiers, proven by tests and goldens on every applicable tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:21:46.541Z"
+          "evidence": "Moved to #6868 c1: live query scaling is its own stream",
+          "at": "2026-11-15T02:54:21.769Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
           "text": "Every queued or retried remote write carries a request key; the server keeps (account, key) -> result for 24 hours and answers a replay with the stored result, proven by a case that drops the first response. (#6792 r2 gap K1)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T15:43:13.813Z"
+          "evidence": "Moved to #6867 c2: the offline queue is its own stream",
+          "at": "2026-11-15T02:54:23.105Z",
+          "closure": "obsolete"
         },
         {
           "n": 15,
           "text": "A second queued edit to one row carries the version the first edit predicts, so a device never conflicts with itself, proven by a two-edit offline case. (#6792 r2 gap K1)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T15:43:14.941Z"
+          "evidence": "Moved to #6867 c3: the offline queue is its own stream",
+          "at": "2026-11-15T02:54:24.334Z",
+          "closure": "obsolete"
         },
         {
           "n": 16,
           "text": "Browser tabs of one origin share one queue (IndexedDB plus a Web Lock), proven by a two-tab case that replays once. (#6792 r2 gap K1)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T15:43:15.950Z"
+          "evidence": "Moved to #6867 c4: the offline queue is its own stream",
+          "at": "2026-11-15T02:54:25.477Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
           "text": "When the session expires offline the queue is held, never sent under another account, and resumes after sign-in as the same account, proven by a case. (#6792 r2 gap K1)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T15:43:17.044Z"
+          "evidence": "Moved to #6867 c5: the offline queue is its own stream",
+          "at": "2026-11-15T02:54:26.727Z",
+          "closure": "obsolete"
         },
         {
           "n": 18,
           "text": "A live query that reads no caller-dependent input shares one result among all subscribers with the same arguments. (#6792 r2 gap K3)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T15:43:19.325Z"
+          "evidence": "Moved to #6868 c2: live query scaling is its own stream",
+          "at": "2026-11-15T02:54:28.133Z",
+          "closure": "obsolete"
         },
         {
           "n": 19,
           "text": "Per-server caps on live subscriptions and re-runs per second, with coalescing of bursts, proven by a load case. (#6792 r2 gap K3)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T15:43:20.369Z"
+          "evidence": "Moved to #6868 c3: live query scaling is its own stream",
+          "at": "2026-11-15T02:54:29.534Z",
+          "closure": "obsolete"
         },
         {
           "n": 20,
           "text": "Invalidations reach subscribers on other servers through a broker (Postgres LISTEN/NOTIFY first). (#6792 r2 gap K3)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T15:43:21.322Z"
+          "evidence": "Moved to #6868 c4: live query scaling is its own stream",
+          "at": "2026-11-15T02:54:30.874Z",
+          "closure": "obsolete"
         },
         {
           "n": 21,
           "text": "Predicates the compiler can turn into SQL narrow the read set; any other predicate falls back to table-level invalidation, and `jet inspect` shows which. (#6792 r2 gap K3)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T15:43:22.369Z"
+          "evidence": "Moved to #6868 c5: live query scaling is its own stream",
+          "at": "2026-11-15T02:54:32.176Z",
+          "closure": "obsolete"
         },
         {
           "n": 22,
           "text": "Typed row policies (D-DBPOLICY1, c10) as Table.guard(fn(db.Op, db.Who, db.Store) -> Bool), applied to every read and write for live queries, endpoints, jobs and webhooks. A read is judged on the stored row, an insert on the new row, a delete on the stored row and an update on both; the policy's reads see the transaction's earlier writes but not the write being judged. A row the caller may not read is never returned. A Member's update of its own member row to Owner is refused. The creator rule admits an Owner member insert only for a project whose row names the caller as created_by and has no members, so create_project makes the caller its owner and nothing else can. An outsider's search and my_projects return nothing. Proof: `jet test Compiler --profile cases --filter db/row_policy_judges_each_operation`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T18:43:02.366Z"
+          "evidence": "Moved to #6869 c1: row policies are their own stream; split into ROWPOL c1 and c2",
+          "at": "2026-11-15T02:54:33.570Z",
+          "closure": "obsolete"
         },
         {
           "n": 23,
           "text": "A client-made UUIDv7 ID lets an offline create open its row at once. An ID type's decoder accepts only UUIDv7 text (422 otherwise; a test sends \"t1\"). Table.add meeting a taken key answers DBError.Exists when the caller can read that row and Denied when it cannot, and the queue reports it. Proof: `jet test Compiler --profile cases --filter web_app/offline_create_with_client_id`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T18:17:31.452Z"
+          "evidence": "Moved to #6867 c6: the offline queue is its own stream",
+          "at": "2026-11-15T02:54:34.921Z",
+          "closure": "obsolete"
         },
         {
           "n": 24,
           "text": "A caller-dependent live query (one that reads app.caller() or runs under a row policy) is not shared between callers; the cost, one re-run per subscriber per write that meets the read set, is measured under the c19 caps. Proof: `jet test Compiler --profile cases --filter web_app/caller_dependent_live_query_is_not_shared`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T17:08:51.165Z"
+          "evidence": "Moved to #6868 c6: live query scaling is its own stream",
+          "at": "2026-11-15T02:54:36.324Z",
+          "closure": "obsolete"
         },
         {
           "n": 25,
           "text": "app.presence counts only accounts whose last read of that screen passed its policies: a refused reader is not counted. Proof: `jet test Compiler --profile cases --filter web_app/presence_counts_only_admitted_readers`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T18:17:32.389Z"
+          "evidence": "Moved to #6868 c7: live query scaling is its own stream",
+          "at": "2026-11-15T02:54:37.860Z",
+          "closure": "obsolete"
         },
         {
           "n": 26,
           "text": "A refused queued write whose screen is gone, or which is refused after a restart, adds a notice to the app notice list, kept until dismissed. Edits rebased on it replay with the row version each was made against, so one whose row changed since answers Conflict; each is judged on its own checks with its own notice. Proof: `jet test Compiler --profile cases --filter web_app/refused_queued_write_without_a_screen_becomes_a_kept_notice`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T18:26:02.694Z"
+          "evidence": "Moved to #6867 c7: the offline queue is its own stream",
+          "at": "2026-11-15T02:54:39.131Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [
@@ -40977,7 +41000,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-15T02:54:13.806Z",
+      "updated": "2026-11-15T02:54:43.135Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G9"
@@ -207040,6 +207063,167 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T02:54:43.135Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ttcd0k",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:54:41.679Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ttcd0k",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T02:54:39.131Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-15T02:54:37.860Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-15T02:54:36.324Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-15T02:54:34.921Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-15T02:54:33.570Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-15T02:54:32.176Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-15T02:54:30.874Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T02:54:29.535Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-15T02:54:28.133Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-15T02:54:26.727Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-15T02:54:25.477Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T02:54:24.334Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-15T02:54:23.105Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T02:54:21.769Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T02:54:20.358Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T02:54:19.308Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T02:54:18.396Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T02:54:17.493Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T02:54:16.612Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T02:54:15.703Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ttcd0k",
+      "note": "#10: split: the row-policy half moved to ROWPOL; was: (was #1159 c2) CRDT values satisfy their algebra and convergence contract; row policies are typed, compiled, and enforced on every live query/mutation path; closeout claims only shipped child behavior"
+    },
+    {
+      "at": "2026-11-15T02:54:14.850Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ttcd0k",
+      "note": "#8: the owner question is settled by D-WEBAPP-SHAPE1=A (app.live, auth.Accounts) and D-WEB-HOME1=A; strip debris; add proof; was: [#3701] **[OWNER]** module-owner ballot. Exactly one Core module exports live, subscribe, invalidate, sync, auth, auth_oauth and auth_routes, and every caller migrates. The Jet body is the behavior on"
+    },
+    {
       "at": "2026-11-15T02:54:13.806Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-edit",
@@ -210391,713 +210575,6 @@
       "action": "card.criteria-meet",
       "ref": "c0w9o2sz",
       "note": "#6"
-    },
-    {
-      "at": "2026-11-15T01:47:31.688Z",
-      "by": "Main",
-      "action": "idea.delete",
-      "ref": "b0hc41z4",
-      "note": ""
-    },
-    {
-      "at": "2026-11-15T01:47:30.782Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T01:47:29.884Z",
-      "by": "Main",
-      "action": "idea.delete",
-      "ref": "b0mfs78f",
-      "note": ""
-    },
-    {
-      "at": "2026-11-15T01:47:22.503Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#12 (was #5983 c30) (was #3254 c1) Record protocol framing, IDs,"
-    },
-    {
-      "at": "2026-11-15T01:47:21.410Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#11 (was #5983 c28) (was #3127 c2) Demonstrate or reject the exi"
-    },
-    {
-      "at": "2026-11-15T01:47:20.022Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#10 (was #5983 c18) (was #1706 c3) A check reports the count of "
-    },
-    {
-      "at": "2026-11-15T01:47:19.122Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#9 (was #5983 c16) (was #1706 c1) Every ratified decision with "
-    },
-    {
-      "at": "2026-11-15T01:47:18.174Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#8 (was #5983 c12) (was #1510 c5) D-METADEPTH1's record names D"
-    },
-    {
-      "at": "2026-11-15T01:47:17.237Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#7 (was #5983 c11) (was #1510 c4) D-CTCODEGEN1's record names D"
-    },
-    {
-      "at": "2026-11-15T01:47:16.347Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#6 (was #5983 c10) (was #1510 c2) Each of the six decisions has"
-    },
-    {
-      "at": "2026-11-15T01:47:15.398Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#5 (was #5983 c9) (was #347) Syntax gap: implement D-REFINE1 re"
-    },
-    {
-      "at": "2026-11-15T01:47:14.442Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#4 (was #5983 c8) (was #341) Language audit: reconcile dispatch"
-    },
-    {
-      "at": "2026-11-15T01:47:13.531Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#3 (was #5983 c7) (was #116) Content-addressed definitions/name"
-    },
-    {
-      "at": "2026-11-15T01:47:12.596Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#2 (was #5983 c6) (was #110) Ask-why / value provenance (where "
-    },
-    {
-      "at": "2026-11-15T01:47:11.584Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ct5o6i",
-      "note": "#1 (was #5983 c5) (was #107) Tracked uncertainty / freshness / "
-    },
-    {
-      "at": "2026-11-15T01:47:10.536Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0ct5o6i",
-      "note": "Owner-held leftovers from the ballot map (#5983): address after G11"
-    },
-    {
-      "at": "2026-11-15T01:44:56.230Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-15T01:44:56.230Z"
-    },
-    {
-      "at": "2026-11-15T01:40:57.432Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xb6zik",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T01:40:14.015Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w9o2sz",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:40:11.328Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T01:40:09.711Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-15T01:40:08.359Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b0esbept",
-      "note": "From #5983 c30 (the 2026-10-28 ballot-map card, dissolved 20"
-    },
-    {
-      "at": "2026-11-15T01:40:06.968Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-15T01:40:05.642Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b05uec97",
-      "note": "From #5983 c28 (the 2026-10-28 ballot-map card, dissolved 20"
-    },
-    {
-      "at": "2026-11-15T01:40:04.263Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T01:40:02.841Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b0visa7h",
-      "note": "From #5983 c18 (the 2026-10-28 ballot-map card, dissolved 20"
-    },
-    {
-      "at": "2026-11-15T01:40:01.351Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T01:40:00.123Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b0mkqo57",
-      "note": "From #5983 c16 (the 2026-10-28 ballot-map card, dissolved 20"
-    },
-    {
-      "at": "2026-11-15T01:39:58.984Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T01:39:57.951Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b0mnbo5h",
-      "note": "From #5983 c12 (the 2026-10-28 ballot-map card, dissolved 20"
-    },
-    {
-      "at": "2026-11-15T01:39:57.021Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T01:39:56.105Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b0s4mvra",
-      "note": "From #5983 c11 (the 2026-10-28 ballot-map card, dissolved 20"
-    },
-    {
-      "at": "2026-11-15T01:39:55.220Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T01:39:54.299Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b0y9blsf",
-      "note": "From #5983 c10 (the 2026-10-28 ballot-map card, dissolved 20"
-    },
-    {
-      "at": "2026-11-15T01:39:53.355Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T01:39:52.396Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b02s3mjp",
-      "note": "From #5983 c9 (the 2026-10-28 ballot-map card, dissolved 202"
-    },
-    {
-      "at": "2026-11-15T01:39:51.518Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T01:39:50.635Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b09nqixq",
-      "note": "From #5983 c8 (the 2026-10-28 ballot-map card, dissolved 202"
-    },
-    {
-      "at": "2026-11-15T01:39:49.759Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T01:39:48.884Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b0gp39eu",
-      "note": "From #5983 c7 (the 2026-10-28 ballot-map card, dissolved 202"
-    },
-    {
-      "at": "2026-11-15T01:39:47.993Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T01:39:46.746Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b0hc41z4",
-      "note": "From #5983 c6 (the 2026-10-28 ballot-map card, dissolved 202"
-    },
-    {
-      "at": "2026-11-15T01:39:45.850Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T01:39:44.877Z",
-      "by": "Main",
-      "action": "idea.add",
-      "ref": "b0mfs78f",
-      "note": "From #5983 c5 (the 2026-10-28 ballot-map card, dissolved 202"
-    },
-    {
-      "at": "2026-11-15T01:39:29.457Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-15T01:39:27.087Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-15T01:39:24.684Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T01:39:22.438Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T01:39:19.960Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T01:39:17.545Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T01:39:15.230Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T01:39:12.871Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T01:39:10.422Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T01:39:08.066Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T01:39:05.745Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T01:39:03.096Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w9o2sz",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T01:35:05.780Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oo8eeq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T01:35:04.883Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T01:35:03.927Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T01:35:02.998Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G13",
-      "note": "Owner order 2026-11-14 ~21:15 (standing; supersedes earlier "
-    },
-    {
-      "at": "2026-11-15T01:35:02.057Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G11",
-      "note": "Owner order 2026-11-14 ~21:15 (standing; supersedes earlier "
-    },
-    {
-      "at": "2026-11-15T01:35:01.119Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G7",
-      "note": "Owner order 2026-11-14 ~21:15 (standing; supersedes earlier "
-    },
-    {
-      "at": "2026-11-15T01:35:00.173Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G10",
-      "note": "Owner order 2026-11-14 ~21:15 (standing; supersedes earlier "
-    },
-    {
-      "at": "2026-11-15T01:34:59.192Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G5",
-      "note": "Owner order 2026-11-14 ~21:15 (standing; supersedes earlier "
-    },
-    {
-      "at": "2026-11-15T01:34:58.201Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G3",
-      "note": "Owner order 2026-11-14 ~21:15 (standing; supersedes earlier "
-    },
-    {
-      "at": "2026-11-15T01:34:57.244Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G9",
-      "note": "Owner order 2026-11-14 ~21:15 (standing; supersedes earlier "
-    },
-    {
-      "at": "2026-11-15T01:34:55.894Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G6",
-      "note": "Owner order 2026-11-14 ~21:15 (standing; supersedes earlier "
-    },
-    {
-      "at": "2026-11-15T01:31:22.142Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oo8eeq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T01:27:30.615Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T01:27:29.751Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c031o59x",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T01:26:35.695Z",
-      "by": "owner",
-      "action": "idea.delete",
-      "ref": "b2son8gl",
-      "note": ""
-    },
-    {
-      "at": "2026-11-15T01:26:19.984Z",
-      "by": "owner",
-      "action": "idea.delete",
-      "ref": "b210cj2h",
-      "note": ""
-    },
-    {
-      "at": "2026-11-15T01:23:17.832Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mf9ybj",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T01:21:41.619Z",
-      "by": "owner",
-      "action": "idea.delete",
-      "ref": "b134iapa4",
-      "note": ""
-    },
-    {
-      "at": "2026-11-15T01:21:33.195Z",
-      "by": "owner",
-      "action": "idea.delete",
-      "ref": "bw2afpdn",
-      "note": ""
-    },
-    {
-      "at": "2026-11-15T01:21:23.632Z",
-      "by": "owner",
-      "action": "idea.delete",
-      "ref": "bvcbaf51",
-      "note": ""
-    },
-    {
-      "at": "2026-11-15T01:20:10.125Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ssy5wy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T01:20:02.401Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-15T01:20:02.401Z"
-    },
-    {
-      "at": "2026-11-15T01:18:46.473Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0kz2hdf",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:18:44.392Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0kz2hdf",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T01:18:42.932Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0kz2hdf",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T01:18:28.766Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06y0cef",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:18:24.136Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06y0cef",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T01:18:22.754Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0kz2hdf",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T01:18:21.688Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0kz2hdf",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T01:17:55.455Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-15T01:17:55.455Z"
-    },
-    {
-      "at": "2026-11-15T01:11:01.671Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x3vq4p",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:10:59.933Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ayfc4w",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:10:58.369Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nxjs80",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:10:56.824Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0aqtwkf",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:10:55.274Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0d72itt",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:10:53.610Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0c3gh6u",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:10:51.945Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0x3vq4p",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T01:10:51.010Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00ys8fj",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T01:10:50.040Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ayfc4w",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T01:10:49.074Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ayfc4w",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T01:10:48.133Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nxjs80",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T01:10:47.170Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0aqtwkf",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T01:10:46.143Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0d72itt",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T01:10:45.131Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0q31aks",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T01:10:43.954Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0c3gh6u",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
