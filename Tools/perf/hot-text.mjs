@@ -8,10 +8,14 @@
 // lays them out first (Host.jet jet_cli_hot_text, JetIR ir_x64_hot_order) and
 // its data in the order they reach it (JetBackend Object.jet), so a run
 // touches few pages of the compiler's image and a start faults in fewer.
+// With `--twins <checkout>`, the functions the cold compiles of the
+// scaling-corpora and optimization twins (Tools/perf/core-cold/run.jet's
+// programs) add come next, each traced as that receipt runs it: out of
+// tree, with Core from the compiler's own records.
 // Names that no longer name a function are skipped by the build (`--trace`
 // counter ir.object.hot_missing); regenerate after large renames.
 //
-//   node Tools/perf/hot-text.mjs --jet <jet> [--out Compiler/JetCli/hot-text.list]
+//   node Tools/perf/hot-text.mjs --jet <jet> [--out Compiler/JetCli/hot-text.list] [--twins <checkout>]
 //
 // <jet> is a built compiler beside its jet-runtime/ directory. Only the
 // compiler's own functions are listed: its object is the link's first input,
@@ -25,9 +29,9 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -75,7 +79,21 @@ run: fn() {
     print("{rows.len()} rows, {total} words, {seen.len()} distinct, {longest.len()} long")
 }
 `;
-// Each trace: its program and the argv it runs with.
+// The twins' files a `--twins` trace needs, copied out of the checkout as
+// Tools/perf/core-cold/run.jet copies them.
+const TWIN_COPIED = [
+  "Tools/agent/JetEnv.jet",
+  "Tools/gauntlet/entries/optimization",
+  "Tools/gauntlet/entries/scaling-corpora",
+  "Tools/gauntlet/harness/run.mjs",
+  "Tools/gauntlet/kit",
+  "Tools/gauntlet/optimization",
+  "Tools/perf/scaling/corpora",
+];
+const TWIN_SCALING = "gauntlet/entries/scaling-corpora/driver/run.jet";
+const TWIN_OPTIMIZATION = "Tools/gauntlet/optimization/optimization/run.jet";
+// Each trace: its program and the argv it runs with, in a fresh project, or
+// (`dir`) in `dir` of the twins' copy, out of tree.
 const TRACES = [
   { file: "hello.jet", source: HELLO, argv: ["run", "hello.jet"] },
   { file: "script.jet", source: SCRIPT, argv: ["script.jet", "script.jet"] },
@@ -84,10 +102,10 @@ const TRACES = [
 ];
 
 function parseArgs(argv) {
-  const args = { jet: "", out: join(ROOT, "Compiler/JetCli/hot-text.list") };
+  const args = { jet: "", out: join(ROOT, "Compiler/JetCli/hot-text.list"), twins: "" };
   for (let i = 2; i < argv.length; i += 2) {
     const key = argv[i].replace(/^--/, "");
-    if (!(key in args) || i + 1 >= argv.length) throw new Error(`usage: node Tools/perf/hot-text.mjs --jet <jet> [--out <file>]`);
+    if (!(key in args) || i + 1 >= argv.length) throw new Error(`usage: node Tools/perf/hot-text.mjs --jet <jet> [--out <file>] [--twins <checkout>]`);
     args[key] = resolve(argv[i + 1]);
   }
   if (!args.jet) throw new Error("--jet is required");
@@ -139,16 +157,36 @@ function main() {
     execFileSync(process.env.CC || "cc", ["-O2", "-o", tracer, join(ROOT, "Tools/perf/fntrace.c")], { stdio: "inherit" });
     const addresses = join(work, "addresses");
     writeFileSync(addresses, [...byAddress.keys()].map((value) => value.toString(16)).join("\n") + "\n");
+    const traces = [...TRACES];
+    const twins = join(work, "twins");
+    if (args.twins) {
+      for (const path of TWIN_COPIED) {
+        cpSync(join(args.twins, path), join(twins, path), { recursive: true, filter: (from) => basename(from) !== ".jet" });
+      }
+      traces.push({ argv: ["check", TWIN_SCALING], dir: "Tools" });
+      traces.push({ argv: [TWIN_SCALING, "--", "shapes"], dir: "Tools" });
+      traces.push({ argv: [join(twins, TWIN_OPTIMIZATION), "--", "plan", "--manifest", "manifest.json"], dir: "Tools/gauntlet/entries/optimization/fixtures" });
+    }
     const names = [];
     const listed = new Set();
-    for (const [index, trace] of TRACES.entries()) {
-      // Each trace has a project and a user cache of its own, both empty.
-      const project = join(work, `trace-${index}`);
-      execFileSync("mkdir", ["-p", project]);
-      writeFileSync(join(project, trace.file), trace.source);
+    for (const [index, trace] of traces.entries()) {
+      // Each trace has a user cache of its own, empty, and a project of its
+      // own unless it runs in the twins' copy; that one also has an empty
+      // store and names no toolchain tree, as a cold run out of tree.
       const entered = join(work, `${index}.entered`);
       const env = { ...process.env, XDG_CACHE_HOME: join(work, `cache-${index}`) };
-      const options = { cwd: project, env, stdio: ["ignore", "ignore", "inherit"] };
+      let cwd;
+      if (trace.dir) {
+        cwd = join(twins, trace.dir);
+        env.JET_STORE_DIR = join(work, `store-${index}`);
+        delete env.JET_TOOLCHAIN_ROOT;
+        delete env.JET_SEED;
+      } else {
+        cwd = join(work, `trace-${index}`);
+        execFileSync("mkdir", ["-p", cwd]);
+        writeFileSync(join(cwd, trace.file), trace.source);
+      }
+      const options = { cwd, env, stdio: ["ignore", "ignore", "inherit"] };
       execFileSync(tracer, [addresses, entered, "--", args.jet, ...trace.argv], options);
       for (const line of readFileSync(entered, "utf8").split("\n")) {
         if (line === "") continue;
@@ -160,9 +198,10 @@ function main() {
       }
     }
     const digest = createHash("sha256").update(jetBytes).digest("hex").slice(0, 16);
+    const twinRuns = args.twins ? ", then the scaling-corpora twin's cold `jet check` and run and the optimization twin's cold run" : "";
     const header = [
       "# Generated by `node Tools/perf/hot-text.mjs`; do not edit.",
-      `# The ${names.length} functions a hello \`jet run\`, then \`jet script.jet\` and a hello \`jet check\` and \`jet build\` entered, first entry first (jet sha256 ${digest}).`,
+      `# The ${names.length} functions a hello \`jet run\`, then \`jet script.jet\` and a hello \`jet check\` and \`jet build\`${twinRuns} entered, first entry first (jet sha256 ${digest}).`,
     ];
     writeFileSync(args.out, [...header, ...names].join("\n") + "\n");
     console.log(`${args.out}: ${names.length} functions`);

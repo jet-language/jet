@@ -7,10 +7,14 @@
 // fewest pages. `jet build` of Compiler/JetCli lays them out first and its
 // data in the order they reach it, so a run touches few pages of the
 // compiler's image and a start faults in fewer.
+// With `--twins <checkout>`, the functions the cold compiles of the
+// scaling-corpora and optimization twins (Tools/perf/core-cold/run.jet's
+// programs) add come next, each traced as that receipt runs it: out of
+// tree, with Core from the compiler's own records.
 // Names that no longer name a function are skipped by the build (`--trace`
 // counter ir.object.hot_missing); regenerate after large renames.
 //
-//   jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out Compiler/JetCli/hot-text.list]
+//   jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out Compiler/JetCli/hot-text.list] [--twins <checkout>]
 //   jet Tools/perf/hot-text/run.jet --check
 //
 // `--check` needs no build: it fails, listing them, when rows of the list
@@ -32,7 +36,7 @@ use {
     core.text.fmt
 }
 
-USAGE: "usage: jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out <file>] | --check"
+USAGE: "usage: jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out <file>] [--twins <checkout>] | --check"
 
 LIST: "Compiler/JetCli/hot-text.list"
 
@@ -99,11 +103,29 @@ SCRIPT_LINES: [String]{
     "}}",
 }
 
-// One trace: its program and the argv it runs with.
+// The twins' files a `--twins` trace needs, copied out of the checkout as
+// Tools/perf/core-cold/run.jet copies them.
+TWIN_COPIED: [String]{
+    "Tools/agent/JetEnv.jet",
+    "Tools/gauntlet/entries/optimization",
+    "Tools/gauntlet/entries/scaling-corpora",
+    "Tools/gauntlet/harness/run.mjs",
+    "Tools/gauntlet/kit",
+    "Tools/gauntlet/optimization",
+    "Tools/perf/scaling/corpora",
+}
+
+TWIN_SCALING: "gauntlet/entries/scaling-corpora/driver/run.jet"
+
+TWIN_OPTIMIZATION: "Tools/gauntlet/optimization/optimization/run.jet"
+
+// One trace: its program and the argv it runs with, in a fresh project, or
+// (`dir` not empty) in `dir` of the twins' copy, out of tree.
 Trace: struct {
     file: String
     source: String
     argv: [String]
+    dir: String
 }
 
 Symbol: struct {
@@ -119,7 +141,7 @@ run: fn() -> Never Err! {
         print(check(root))
         process.exit(0)
     }
-    args := [String:String]{"jet": "", "out": files.join(root, LIST)}
+    args := [String:String]{"jet": "", "out": files.join(root, LIST), "twins": ""}
     i := 0
     loop i < argv.len() {
         key: argv[i].remove_prefix("--")
@@ -147,35 +169,72 @@ run: fn() -> Never Err! {
     process.cmd([process.env_nonempty("CC") ?? "cc", "-O2", "-o", tracer, files.join(root, "Tools/perf/fntrace.c")]).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run_checked()
     address_file: files.join(work.path, "addresses")
     files.write(address_file, "{addresses.map(fn(value) { fmt.hex(value, 1) }).join("\n")}\n")
-    traces: [Trace]{
-        {file: "hello.jet", source: HELLO, argv: [String]{"run", "hello.jet"}},
-        {file: "script.jet", source: "{SCRIPT_LINES.join("\n")}\n", argv: [String]{"script.jet", "script.jet"}},
-        {file: "hello.jet", source: HELLO, argv: [String]{"check", "hello.jet"}},
-        {file: "hello.jet", source: HELLO, argv: [String]{"build", "hello.jet"}},
+    traces := [Trace]{
+        {file: "hello.jet", source: HELLO, argv: [String]{"run", "hello.jet"}, dir: ""},
+        {file: "script.jet", source: "{SCRIPT_LINES.join("\n")}\n", argv: [String]{"script.jet", "script.jet"}, dir: ""},
+        {file: "hello.jet", source: HELLO, argv: [String]{"check", "hello.jet"}, dir: ""},
+        {file: "hello.jet", source: HELLO, argv: [String]{"build", "hello.jet"}, dir: ""},
+    }
+    twins: files.join(work.path, "twins")
+    if args["twins"] != "" {
+        loop path in TWIN_COPIED {
+            twin_copy(files.join(args["twins"], path), files.join(twins, path))
+        }
+        traces.push({file: "", source: "", argv: [String]{"check", TWIN_SCALING}, dir: "Tools"})
+        traces.push({file: "", source: "", argv: [String]{TWIN_SCALING, "--", "shapes"}, dir: "Tools"})
+        traces.push({file: "", source: "", argv: [String]{files.join(twins, TWIN_OPTIMIZATION), "--", "plan", "--manifest", "manifest.json"}, dir: "Tools/gauntlet/entries/optimization/fixtures"})
     }
     names := [String]{}
     listed := Set<String>.new()
     loop index in 0..<traces.len() {
         trace: traces[index]
-        // Each trace has a project and a user cache of its own, both empty.
-        project: files.join(work.path, "trace-{index}")
-        files.create_dir_all(project)
-        files.write(files.join(project, trace.file), trace.source)
+        // Each trace has a user cache of its own, empty, and a project of its
+        // own unless it runs in the twins' copy; that one also has an empty
+        // store and names no toolchain tree, as a cold run out of tree.
         entered: files.join(work.path, "{index}.entered")
-        process.cmd([tracer, address_file, entered, "--", jet].concat(trace.argv)).cwd(project).env("XDG_CACHE_HOME", files.join(work.path, "cache-{index}")).stdin(.Capture).stdout(.Capture).stderr(.Inherit).run_checked()
+        command := process.cmd([tracer, address_file, entered, "--", jet].concat(trace.argv)).env("XDG_CACHE_HOME", files.join(work.path, "cache-{index}"))
+        if {
+            trace.dir == "" -> {
+                project: files.join(work.path, "trace-{index}")
+                files.create_dir_all(project)
+                files.write(files.join(project, trace.file), trace.source)
+                command = command.cwd(project)
+            }
+            else -> {
+                command = command.cwd(files.join(twins, trace.dir)).env("JET_STORE_DIR", files.join(work.path, "store-{index}")).env_remove("JET_TOOLCHAIN_ROOT").env_remove("JET_SEED")
+            }
+        }
+        command.stdin(.Capture).stdout(.Capture).stderr(.Inherit).run_checked()
         loop line in files.read(entered).split("\n").filter(fn(line) { line != "" }) {
             name: by_address.get(Int.from_radix(line, 16) ?? return Err("Cannot convert 0x{line} to a BigInt")) ?? next
             if listed.add(name.copy()) -> names.push(name.copy())  // copy: the set and the list each keep the name
         }
     }
     digest: String.from_bytes_lossy(crypto.sha256(jet_bytes).hex().bytes()[0..<16])
+    twin_runs: if args["twins"] != "" -> ", then the scaling-corpora twin's cold `jet check` and run and the optimization twin's cold run" else -> ""
     lines: [String]{
         "# Generated by `node Tools/perf/hot-text.mjs`; do not edit.",
-        "# The {names.len()} functions a hello `jet run`, then `jet script.jet` and a hello `jet check` and `jet build` entered, first entry first (jet sha256 {digest}).",
+        "# The {names.len()} functions a hello `jet run`, then `jet script.jet` and a hello `jet check` and `jet build`{twin_runs} entered, first entry first (jet sha256 {digest}).",
     }.concat(names)
     files.write(args["out"], "{lines.join("\n")}\n")
     print("{args["out"]}: {names.len()} functions")
     process.exit(0)
+}
+
+// Copies `from`, a file or a directory without its `.jet` build folders, to
+// `to`.
+twin_copy: fn(from: String, to: String) Err! {
+    if !files.is_dir(from) {
+        files.create_dir_all(files.dirname(to))
+        files.copy(from, to)
+        return
+    }
+    loop walked in files.walk_files(from, skip: [String]{".jet"}) {
+        entry: walked ?? return Err("cannot walk {from}: {err}")
+        target: files.join(to, files.relative(entry.path, from))
+        files.create_dir_all(files.dirname(target))
+        files.copy(entry.path, target)
+    }
 }
 
 // `--check`: the list's rows that name no function the sources declare, as
