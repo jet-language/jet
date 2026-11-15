@@ -1,0 +1,28 @@
+// A Core frame primitive's registered access contract decides whether a frame
+// callback may schedule it. Accesses with no checked completion are refused
+// (E2967's detail); the same accesses with a synchronous completion schedule.
+// No public Core call is such a primitive (crypto.wipe is a Jet body over the
+// raw `__wipe` leaf), so the refusal is pinned here on the leaf's row.
+use {
+    jet_foundation.[
+        AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, AccessConvention, CallArg, CoreCallCompletion, CoreCallCompletionKind,
+        Expr, Span, core_call,
+    ]
+    jet_sema.[sema_frame_core_call_operation]
+}
+
+#Test("a core frame primitive with accesses but no completion is refused") {
+    record := core_call("core.crypto", "__wipe") ?? panic("core.crypto.__wipe has no Core call row")
+    assert(record.frame_accesses.len() > 0, "the raw wipe leaf declares its write access")
+    span: Span{start: 0, end: 3}
+    args: [CallArg]{CallArg{convention: AccessConvention.Write, expr: Expr.Ident{name: "key", span: span, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
+    record.frame_completion = None
+    refused: sema_frame_core_call_operation(record, "core.crypto.__wipe", args, 0)
+    assert(refused.operation == None, "a primitive with no completion is not scheduled")
+    assert_eq(refused.error ?? "", "core frame primitive `core.crypto.__wipe` has resource accesses but no checked completion metadata")
+    record.frame_completion = Val(CoreCallCompletion{kind: CoreCallCompletionKind.Synchronous, token: None, provider: "fixture"})
+    scheduled: sema_frame_core_call_operation(record, "core.crypto.__wipe", args, 0)
+    assert(scheduled.error == None, "a synchronous completion makes the accesses schedulable")
+    operation: scheduled.operation ?? panic("the completed primitive has no frame operation")
+    assert_eq(operation.accesses.len(), 1)
+}
