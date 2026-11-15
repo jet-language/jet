@@ -71,6 +71,7 @@ use jet_foundation.[
     codable_tag_field,
     codable_untagged,
     expr_span,
+    owned_trait_requested,
 ]
 
 // Rust `TypeBodyMember`: one member of a struct or enum body, tagged with
@@ -436,18 +437,27 @@ jfmt_decode_named_shapes: fn(items: [Item], name: String, args: [Type], seen: &[
     result
 }
 
+// Whether a type decodes by its own words: a `Decode` derive, or the last
+// marker that names the codec. None leaves it to the package's auto-derive
+// default; a type that default picks but can't derive is reported by the
+// field's own codec check.
+jfmt_decode_asked: fn(derives: [NamedSpan], markers: [Marker]) -> Bool? Never! {
+    if jfmt_has_name(derives, "Decode") -> return Val(true)
+    owned_trait_requested(markers, "Decode")
+}
+
 jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], seen: &[String]) -> [SerdeWireShape]? {
     loop item in items {
         if item == {
             .Struct(def) -> {
                 if def.name == name {
-                    if jfmt_has_name(def.derives, "Decode") -> return Val([SerdeWireShape]{SerdeWireShape.Object})
+                    if jfmt_decode_asked(def.derives, def.type_markers) ?? def.auto_derive_default -> return Val([SerdeWireShape]{SerdeWireShape.Object})
                     return None
                 }
             }
             .Enum(def) -> {
                 if def.name == name {
-                    if !jfmt_has_name(def.derives, "Decode") -> return None
+                    if !(jfmt_decode_asked(def.derives, def.type_markers) ?? def.auto_derive_default) -> return None
                     if codable_tag_field(def.type_markers) != None -> return Val([SerdeWireShape]{SerdeWireShape.Object})
                     shapes := [SerdeWireShape]{}
                     if !codable_untagged(def.type_markers) {
@@ -474,7 +484,9 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
             }
             .Distinct(def) -> {
                 if def.name == name {
-                    if !jfmt_has_name(def.derives, "Decode") -> return None
+                    // A distinct type codes as its base unless its markers or
+                    // its package's auto_derive policy refuse it.
+                    if !(jfmt_decode_asked(def.derives, def.type_markers) ?? def.auto_derive_default) -> return None
                     return jfmt_decode_shapes(items, def.base, seen)
                 }
             }

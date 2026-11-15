@@ -15,15 +15,15 @@ stdout: ~ "back: t1 3 4 hi" # and decodes back through its conversion
 stdout: ~ "alone: \"t2\"" # a distinct value alone codes as its base
 stdout: ~ "depth bad: [at `depth`" # a distinct Int refuses text at its own path
 stdout: ~ "level bad: [at `level`" # a range type refuses an out-of-range base
-stdout: ~ "expected Level, found out-of-range Int"
+stdout: ~ "expected Level, found out-of-range Int" # the error names the range type and the base it refused
 stderr: empty
 step refused: jet check refused/main.jet
 exit: 1
 stderr: ~ "`Secret` has no wire form" # `#!Codable` refuses the base codec
-stderr: ~ "in place of any `#!Codable`"
+stderr: ~ "in place of any `#!Codable`" # the fix says how to give `Secret` a wire form
 stderr: ~ "`Wrapped` codes as its base type `Hidden`, which has no wire form" # the fix names the base
-stderr: count "can't be serialized" = 2
-stderr: ~ "jet-lang.dev/e/E2411"
+stderr: count "can't be serialized" = 2 # one error each for `Secret` and `Wrapped`
+stderr: ~ "jet-lang.dev/e/E2411" # both are the missing-wire-form error
 step strict: jet check strict/main.jet
 exit: 1
 stderr: ~ "`Code` can't be serialized" # a package denying auto_derive marks its distinct types

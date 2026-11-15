@@ -85,6 +85,7 @@ use {
         expr_span,
         owned_trait_codec,
         owned_trait_implies,
+        owned_trait_requested,
         owned_trait_structural_names,
         type_name,
     ]
@@ -2602,16 +2603,16 @@ sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_n
         if item == {
             .Struct(definition) -> {
                 name = definition.name
-                requested = sema_type_metadata_struct_auto_ok(definition) && sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
+                requested = sema_type_metadata_struct_auto_ok(definition) && (owned_trait_requested(definition.type_markers, trait_name) ?? definition.auto_derive_default)
             }
             .Enum(definition) -> {
                 name = definition.name
-                requested = sema_type_metadata_enum_auto_ok(definition) && sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
+                requested = sema_type_metadata_enum_auto_ok(definition) && (owned_trait_requested(definition.type_markers, trait_name) ?? definition.auto_derive_default)
             }
             .Distinct(definition) -> {
                 if !owned_trait_codec(trait_name) -> next
                 name = definition.name
-                requested = sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
+                requested = owned_trait_requested(definition.type_markers, trait_name) ?? definition.auto_derive_default
             }
             .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
                 next
@@ -2717,17 +2718,17 @@ sema_derive_codec_ready: fn(readiness: &SemaDeriveReadiness, inputs: [SemaRegist
                 .Struct(definition) -> {
                     name = definition.name
                     asked = sema_derive_has_name(definition.derives, trait_name)
-                    requested = sema_type_metadata_struct_auto_ok(definition) && sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
+                    requested = sema_type_metadata_struct_auto_ok(definition) && (owned_trait_requested(definition.type_markers, trait_name) ?? definition.auto_derive_default)
                 }
                 .Enum(definition) -> {
                     name = definition.name
                     asked = sema_derive_has_name(definition.derives, trait_name)
-                    requested = sema_type_metadata_enum_auto_ok(definition) && sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
+                    requested = sema_type_metadata_enum_auto_ok(definition) && (owned_trait_requested(definition.type_markers, trait_name) ?? definition.auto_derive_default)
                 }
                 .Distinct(definition) -> {
                     name = definition.name
                     asked = sema_derive_has_name(definition.derives, trait_name)
-                    requested = sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
+                    requested = owned_trait_requested(definition.type_markers, trait_name) ?? definition.auto_derive_default
                 }
                 .TypeAlias(definition) -> {
                     name = definition.name

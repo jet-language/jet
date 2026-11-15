@@ -24,6 +24,7 @@ use jet_foundation.[
     ir_runtime_handle_row,
     diagnostic_registry_with_edit_grade,
     owned_trait_implies,
+    owned_trait_requested,
     module_is_core,
 ]
 
@@ -376,8 +377,8 @@ sema_comparability_ordering_selected: fn(program: SemaProgramTables, module_iden
         if nominal.source == .SourceAST(item) {
             declared: graph.modules[row.module_index].declared_trait_impls
             if item == {
-                .Struct(value) -> return sema_type_metadata_trait_requested(value.type_markers, "Comparable", value.auto_derive_default) || sema_type_metadata_has_trait_block(value.trait_impls, "Comparable") || sema_type_metadata_has_explicit_impl(declared, value.name, "Comparable")
-                .Enum(value) -> return sema_type_metadata_trait_requested(value.type_markers, "Comparable", value.auto_derive_default) || sema_type_metadata_has_trait_block(value.trait_impls, "Comparable") || sema_type_metadata_has_explicit_impl(declared, value.name, "Comparable")
+                .Struct(value) -> return (owned_trait_requested(value.type_markers, "Comparable") ?? value.auto_derive_default) || sema_type_metadata_has_trait_block(value.trait_impls, "Comparable") || sema_type_metadata_has_explicit_impl(declared, value.name, "Comparable")
+                .Enum(value) -> return (owned_trait_requested(value.type_markers, "Comparable") ?? value.auto_derive_default) || sema_type_metadata_has_trait_block(value.trait_impls, "Comparable") || sema_type_metadata_has_explicit_impl(declared, value.name, "Comparable")
                 .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return true
             }
         }

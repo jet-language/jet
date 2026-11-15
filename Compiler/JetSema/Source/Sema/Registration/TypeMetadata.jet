@@ -3,14 +3,12 @@
 use jet_foundation.[
     EnumDef,
     Item,
-    MARKER_CODABLE,
     Marker,
     StructDef,
     TraitImplBlock,
     Type,
     VariantPayload,
-    codable_derives,
-    owned_trait_family,
+    owned_trait_requested,
     type_name,
 ]
 
@@ -73,23 +71,6 @@ sema_type_metadata_enum_auto_ok: fn(definition: EnumDef) -> Bool Never! {
     true
 }
 
-// Rust `auto_derive_requested`: the last marker naming the trait or a family
-// holding it (`#Codable` names both codec traits) decides (`!` refuses it).
-// `#Codable(only: …)` names one codec and refuses the other. With no marker
-// the package default applies.
-sema_type_metadata_trait_requested: fn(markers: [Marker], trait_name: String, package_default: Bool) -> Bool Never! {
-    index := markers.len() - 1
-    loop index >= 0 {
-        marker: markers[index]
-        if marker.name == trait_name || owned_trait_family(marker.name).contains(trait_name) {
-            if marker.negated -> return false
-            return marker.name != MARKER_CODABLE || codable_derives(marker, trait_name)
-        }
-        index -= 1
-    }
-    package_default
-}
-
 // Only an authored block suppresses a structural selection; a
 // compiler-generated block is that selection's own expansion.
 sema_type_metadata_has_trait_block: fn(blocks: [TraitImplBlock], trait_name: String) -> Bool Never! {
@@ -108,7 +89,7 @@ sema_type_metadata_has_explicit_impl: fn(declared_trait_impls: [String:Bool], ty
 }
 
 sema_type_metadata_select_trait: fn(markers: [Marker], package_default: Bool, structurally_eligible: Bool, explicit_block: Bool, explicit_impl: Bool, trait_name: String) -> Bool Never! {
-    structurally_eligible && !explicit_block && !explicit_impl && sema_type_metadata_trait_requested(markers, trait_name, package_default)
+    structurally_eligible && !explicit_block && !explicit_impl && (owned_trait_requested(markers, trait_name) ?? package_default)
 }
 
 // `definition` supplies the complete type-marker sequence, package default,

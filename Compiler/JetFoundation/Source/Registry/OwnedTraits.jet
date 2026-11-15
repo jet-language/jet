@@ -274,6 +274,23 @@ owned_trait_auto_derive_marker: fn(marker: String) -> Bool Never! {
     owned_trait_family(marker).len() > 0
 }
 
+// Whether a type's markers ask for `trait_name`: the last marker naming the
+// trait or a family holding it (`#Codable` names both codec traits) decides
+// (`!` refuses it). `#Codable(only: …)` names one codec and refuses the
+// other. None when no marker decides, so the package default applies.
+owned_trait_requested: fn(markers: [Marker], trait_name: String) -> Bool? Never! {
+    index := markers.len() - 1
+    loop index >= 0 {
+        marker: markers[index]
+        if marker.name == trait_name || owned_trait_family(marker.name).contains(trait_name) {
+            if marker.negated -> return Val(false)
+            return Val(marker.name != MARKER_CODABLE || codable_derives(marker, trait_name))
+        }
+        index -= 1
+    }
+    None
+}
+
 // Whether `#{marker}` on a distinct type re-exposes the trait it names from
 // its base type.
 owned_trait_bundle: fn(marker: String) -> Bool Never! {
