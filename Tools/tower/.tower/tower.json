@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6885,
-    "rev": 103600,
+    "nextNum": 6887,
+    "rev": 103625,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -28809,8 +28809,8 @@
     {
       "id": "c0eymgfx",
       "num": 3236,
-      "title": "Share typed codec values, field errors and override precedence",
-      "body": "Close custom codec and reflection interoperability.\n\nCompare generated and hand-written Encode/Decode against selected Serde, Glaze and Jackson custom mappings without importing their separate reflection systems.\n\nCompare generated and hand-written Encode/Decode against selected Serde, Glaze and Jackson custom mappings without importing their separate reflection systems.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-core-f007. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.",
+      "title": "One Codable contract: options, field metadata, enum shapes, override precedence, schema and losslessness",
+      "body": "Destination: generated and hand-written codecs share one typed contract (D-ONE-CODECS1=A): one owner for field traversal, override precedence and field-error paths, decode returning [FieldError] (D-VALIDATE-DECODE1=B), the D-CODABLE-OPTIONS1=A marker forms only, and each wire format keeping its own leaves (duplicate keys, binary or text, extension tags, mixed XML, lossless numbers).\n\nWhy it matters: codecs are every program's boundary; two traversals or two marker vocabularies mean two answers for the same type.\n\nCurrent code: Compiler/JetSema/Source/Sema/Serde.jet (admissibility, wire reachability); Compiler/JetCodegen/Source/Codegen/AutoDerives.jet and EncodingCodecs.jet (generation).\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (finding core-f007), compared with selected Serde, Glaze and Jackson mappings without importing their reflection systems.\n\nOwner gate: the spelling of adjacent tagging, retained unknown variants and decode aliases under D-CODABLE-OPTIONS1 (owner-gates.tsv).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -28824,6 +28824,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: c1, c2, c7 into c4; c5 into c14; c18 into c17; c8-c10 restated without the retired marker spellings (spelling is an owner gate); c27 moved to #6060 (#6060 c13)."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -28878,146 +28883,151 @@
         {
           "n": 1,
           "text": "Account aliases/rename/skip/read-only/constraints/variants/enums/chrono/custom context and generic targets.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:30:12.813Z"
+          "evidence": "Merged into #3236 c4: the case list is part of c4",
+          "at": "2026-11-15T03:25:46.100Z",
+          "closure": "obsolete"
         },
         {
           "n": 2,
           "text": "preserve custom override precedence and error ownership.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:30:12.813Z"
+          "evidence": "Merged into #3236 c4: override precedence and error ownership are c4",
+          "at": "2026-11-15T03:25:47.062Z",
+          "closure": "obsolete"
         },
         {
           "n": 4,
-          "text": "Shared typed-field traversal, override precedence and error paths have one canonical owner under the selected explicit contract.",
+          "text": "One canonical owner does typed-field traversal, override precedence and field-error paths for generated and hand-written codecs (D-ONE-CODECS1=A), and decode returns the accumulated [FieldError] list (D-VALIDATE-DECODE1=B); aliases, rename, skip, read-only fields, constraints, variants, enums, time values, custom context and generic targets are covered. Proof: `jet test Compiler --profile golden --filter serde/codec_override_precedence` and `--filter serde/codec_field_errors` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-13T11:43:32.341Z"
+          "at": "2026-11-15T03:25:34.901Z"
         },
         {
           "n": 5,
           "text": "Every affected format/profile retains its exact wire categories, malformed/limit behavior and losslessness; selective and streaming meaning is compared with full decoding.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-13T11:43:32.341Z"
+          "evidence": "Merged into #3236 c14: format losslessness and selective meaning are c14",
+          "at": "2026-11-15T03:25:48.059Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
           "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `jet test Compiler --profile golden serde/` passes including new codec_override_precedence and codec_field_errors examples, and the capability classification table is attached. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-29T02:16:33.188Z"
+          "evidence": "Merged into #3236 c4: the codec goldens are c4's proof",
+          "at": "2026-11-15T03:25:49.098Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
-          "text": "[#3148]  • `Discriminant(\"kind\", content: \"body\")`: exact encode/decode for unit omission, shape, wrong tag and missing content. • Golden `serde/enum_adjacent`; UI `enum_adjacent_content_collides`.",
+          "text": "Adjacent enum tagging (tag field plus a separate content field) encodes and decodes exactly: unit omission, shape, a wrong tag and missing content, and a content name that collides with a field is a compile error. Its spelling under D-CODABLE-OPTIONS1 waits on an owner choice (owner-gates row). Proof: `jet test Compiler --profile golden --filter serde/enum_adjacent` and `jet test Compiler --profile ui --filter enum_adjacent_content_collides`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:27:44.676Z"
+          "at": "2026-11-15T03:25:35.848Z"
         },
         {
           "n": 9,
-          "text": "[#3149]  • Opt-in `#Unknown Retained(UnknownVariant<Self>)` keeps the parsed tree. Known-case malformed payloads still error. The strict default is unchanged. • Golden `serde/enum_unknown`. UI errors: untagged enum, two `#Unknown`, wrong payload, direct construction.",
+          "text": "An opt-in retained-unknown enum case keeps the parsed tree of an unknown variant; known-case malformed payloads still fail and the strict default is unchanged; an untagged enum, two unknown cases, a wrong payload and direct construction are compile errors. Its spelling waits on the same owner choice. Proof: `jet test Compiler --profile golden --filter serde/enum_unknown` and `jet test Compiler --profile ui --filter enum_unknown_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:27:45.352Z"
+          "at": "2026-11-15T03:25:36.787Z"
         },
         {
           "n": 10,
-          "text": "[#3150]  • `DecodeAliases` reads old names and writes only the canonical name. Collisions are a compile error before codegen. • Golden `serde/enum_decode_aliases`; UI `enum_decode_alias_collision`.",
+          "text": "Decode aliases read old variant names and write only the canonical name; an alias collision is a compile error before codegen. Its spelling waits on the same owner choice. Proof: `jet test Compiler --profile golden --filter serde/enum_decode_aliases` and `jet test Compiler --profile ui --filter enum_decode_alias_collision`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:27:46.019Z"
+          "at": "2026-11-15T03:25:37.706Z"
         },
         {
           "n": 12,
-          "text": "[#3233]  • Grouped `#[Codable, DenyUnknownFields]`, `#Flatten`, custom Decode precedence, required/default/optional. • Missing vs null vs wrong-type; unknown-field rejection and ordered retention. • Golden `serde/field_metadata`.",
+          "text": "Field metadata in the D-CODABLE-OPTIONS1=A forms: `#Codable(unknown: .Deny)`, `#Codable(.Flatten)`, custom Decode precedence and required, default and optional fields; missing, null and wrong-type values are distinct; unknown fields are rejected or retained in order. Proof: `jet test Compiler --profile golden --filter serde/field_metadata` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:27:48.363Z"
+          "at": "2026-11-15T03:25:38.653Z"
         },
         {
           "n": 13,
-          "text": "[#3238]  • `json.schema<T>()` emits draft 2020-12 from Codable metadata: required, optional and default fields, renames, variants and recursion. • Custom codecs are represented honestly. The dialect is explicit and reused at App boundaries. • Golden `serde/json_schema`.",
+          "text": "`json.schema<T>()` emits JSON Schema draft 2020-12 from Codable metadata (required, optional and default fields, renames, variants, recursion), represents custom codecs honestly, and its dialect is explicit and reused at app boundaries. Proof: `jet test Compiler --profile golden --filter serde/json_schema`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:27:49.039Z"
+          "at": "2026-11-15T03:25:39.588Z"
         },
         {
           "n": 14,
-          "text": "[#3255] a fixture table for non-string keys, tags, bytes, numbers and variants, typed vs DataTree. Golden `serde/datatree_losslessness` + table in Docs/spec/encoding-decisions.md.",
+          "text": "Every format keeps its exact wire categories, malformed and limit behaviour and lossless subset, and selective and streaming readers mean the same as full decoding: a fixture table for non-string keys, tags, bytes, numbers and variants (typed against DataTree) is in Docs/spec/encoding-decisions.md. Proof: `jet test Compiler --profile golden --filter serde/datatree_losslessness`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:27:49.702Z"
+          "at": "2026-11-15T03:25:40.578Z"
         },
         {
           "n": 15,
-          "text": "[#3276] explicit-ID graph round trip, alias duplication, rejection of input-selected types, CBOR tag 28/29 refusal. Golden `serde/graph_identity`.",
+          "text": "Explicit-ID graphs round-trip, alias duplication is handled, input-selected types are rejected, and CBOR tags 28 and 29 are refused. Proof: `jet test Compiler --profile golden --filter serde/graph_identity`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:27:51.035Z"
+          "at": "2026-11-15T03:25:41.599Z"
         },
         {
           "n": 16,
-          "text": "[#3295] shape, layout, scalar-type and tag fidelity through JSON, `compute.serialize` and CBOR. Remove the divergent ad-hoc serializer (compute.jet:647-650). Golden `serde/tensor_codec`.",
+          "text": "Tensor shape, layout, scalar type and tag survive JSON, `compute.serialize` and CBOR, and the separate ad-hoc tensor serializer in Core/Compute is removed. Proof: `jet test Compiler --profile golden --filter serde/tensor_codec`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:27:52.231Z"
+          "at": "2026-11-15T03:25:42.543Z"
         },
         {
           "n": 17,
-          "text": "(was #1813 c1) Spec defines the crossing grid with time, schema, checker, evolution, and fact columns; every new boundary feature names one cell [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Docs/spec defines the boundary crossing grid (time, schema, checker, evolution and fact columns), records the ratified literal, manifest, dependency, link, wire, validation, migration, fact, trust and error rules as grid cells with no second mechanism, and every new boundary feature names one cell. Proof: the grid table in Docs/spec and `jet test tests/guards --filter spec_links`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:45:38.738Z"
+          "at": "2026-11-15T03:25:43.416Z"
         },
         {
           "n": 18,
           "text": "(was #1813 c2) Ratified literal, manifest, dependency, link, wire, validation, migration, fact, trust, and error rules are recorded as grid instances without a second mechanism [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:39.401Z"
+          "evidence": "Merged into #3236 c17: recording ratified rules as grid cells is c17",
+          "at": "2026-11-15T03:25:50.037Z",
+          "closure": "obsolete"
         },
         {
           "n": 19,
-          "text": "(was #1813 c3) Boundary planning and focused proof show the same law through O0, O1 and O2 [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "A boundary planned on the grid behaves the same on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter serde/five_projection_shape` on every tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:45:40.079Z"
+          "at": "2026-11-15T03:25:44.302Z"
         },
         {
           "n": 20,
@@ -29057,12 +29067,12 @@
         },
         {
           "n": 24,
-          "text": "(was #2097 c2) A string containing a newline, a tab and U+0001 round-trips as valid JSON through the devserver watch payload, the WebHost payload, the jetpack trust record and the Persist store [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "A string holding a newline, a tab and U+0001 round-trips as valid JSON through the devserver watch payload, the WebHost payload, the jetpack trust record and the Persist store. Proof: `jet test Compiler --profile cases --filter json_control_chars_round_trip`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:45:43.307Z"
+          "at": "2026-11-15T03:25:45.185Z"
         },
         {
           "n": 26,
@@ -29076,11 +29086,12 @@
         {
           "n": 27,
           "text": "(was #3051 c1) Actual jet test runs, including named profile, --set and coverage cases, compile and execute their assertion without a generated JSON parser ICE; the embedded status/history parser uses the canonical Foundation contract [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:45.298Z"
+          "evidence": "Moved to #6060 c13: the jet test runner's own JSON parser belongs on the jet test card",
+          "at": "2026-11-15T03:25:51.008Z",
+          "closure": "obsolete"
         },
         {
           "n": 28,
@@ -29188,7 +29199,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:12.813Z",
-      "updated": "2026-11-15T03:19:52.440Z",
+      "updated": "2026-11-15T03:25:53.490Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 74,
       "goals": [
@@ -40431,6 +40442,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: the 40-case client law split by mechanism (c4 pool, HK2 cookies, HK3 redirects, HK4 proxy, HK5 h2/HPACK, HK6 TLS, HK7 streaming upload, HK8 deadlines, HK10 corelib fixtures), each naming its tests/known-failing.tsv rows; c1 into c11, c3 into c2, c26 into c4. Sockets, DNS and call states (c7, c14, c18-c22, c24) moved to #6884; server framing, TLS and policy order (c6, c8) to #6878."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -40837,7 +40853,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-28T11:08:58.002Z",
-      "updated": "2026-11-15T03:23:24.417Z",
+      "updated": "2026-11-15T03:23:25.508Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -66581,6 +66597,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T20:46:53.660Z"
+        },
+        {
+          "n": 13,
+          "text": "jet test runs with a named profile, --set values and coverage compile and execute their assertions with no ICE in the generated status and history JSON parser, which uses the canonical Foundation JSON contract. Proof: `jet test Compiler --profile cases --filter jet_test_profile_set_coverage`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:34.008Z"
         }
       ],
       "refs": [
@@ -66594,12 +66619,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:25:50.855Z",
-      "updated": "2026-11-09T20:46:53.660Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:25:34.008Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 12
+      "criteriaLastN": 13
     },
     {
       "id": "c0slmlyv",
@@ -80368,6 +80393,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-01T20:56:35.100Z"
+        },
+        {
+          "n": 2,
+          "text": "A `Regex{…}` literal compiles to matcher code at build time: the built binary does no regex compile for it at run time (counter test), and an invalid literal is a compile error with its column. Proof: `jet test Compiler --profile cases --filter regex_literal_compiles_at_build_time`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:56.259Z"
         }
       ],
       "refs": [],
@@ -80378,8 +80412,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T22:21:58.734Z",
-      "updated": "2026-11-11T12:45:26.238Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T03:25:56.259Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 2
     },
     {
       "id": "c0f1eda4",
@@ -103809,6 +103844,166 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:22:53.996Z",
       "updated": "2026-11-15T03:22:53.996Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0r8ohhq",
+      "num": 6885,
+      "title": "Text formatting: exact number formatting, data templates, explicit locales and text diffs",
+      "body": "Destination: Core formats numbers exactly (shortest round-trip digits, ties-to-even on the exact binary value, no crash on any tier), renders bounded data templates, formats and parses with an explicit Locale and no process-global default, and offers text diffs whose similarity, alignment, output and patch rules are stated.\n\nWhy it matters: number and template output is what users and files see; a rounding or locale surprise is a data bug.\n\nDecisions: D-FLOAT-POSITIONAL1=A, D-CORE-TEMPLATE1=A. A Locale object and new diff operations need their own ballots (owner-gates rows).\n\nSource: #3262 c6, c8, c9, c16, c17, c26 (archived #3252, #3307, #3311, #4417, #4331, #4407; via #4426).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "fmt.shortest gives the shortest round-trip digits in positional layout with the exact special-value policy (D-FLOAT-POSITIONAL1=A). Proof: `jet test Compiler --profile golden --filter TextUnicode/FmtContract` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:54.433Z"
+        },
+        {
+          "n": 2,
+          "text": "fmt.decimal never crashes on any tier, and fmt.bytes rounds binary units as selected, with the crash witnesses kept as cases. Proof: `jet test Compiler --profile cases --filter fmt_decimal_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:54.433Z"
+        },
+        {
+          "n": 3,
+          "text": "fmt.decimal and the :Fixed(N) selector round the exact binary value ties-to-even (62.5 to \"62\"; tests/run/TextUnicode/FmtContract today pins 0.125 at Fixed(2) as 0.13, half away from zero). Proof: `jet test Compiler --profile golden --filter TextUnicode/FmtContract` with the corrected rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:54.433Z"
+        },
+        {
+          "n": 4,
+          "text": "Data templates render bounded (D-CORE-TEMPLATE1=A): interpolation, sections, escaping and raw output; missing-field spans, malformed tags and depth, output and step limits; Encode renames honoured; reuse allocation measured. Proof: `jet test Compiler --profile golden --filter text/template_render`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:54.433Z"
+        },
+        {
+          "n": 5,
+          "text": "Owner choice: an explicit Locale object, its data, default and API (no decision exists; owner-gates row). Once chosen, Core/Text formats and parses en-US, de-DE, fr-FR and ja-JP number and date witnesses with an explicit Locale and no process-global default, kept separate from catalogs and normalization. Proof: `jet test Compiler --profile golden --filter text/locale_format`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:54.433Z"
+        },
+        {
+          "n": 6,
+          "text": "Text diff states similarity, alignment, unified, context and HTML output and patch application as distinct operations, with newline, tie and cost rules fixed against real consumers; a new public operation waits on its own ballot (owner-gates row). Proof: `jet test Compiler --profile golden --filter text/diff_contracts`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:54.433Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "text",
+        "fmt"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:25:54.433Z",
+      "updated": "2026-11-15T03:25:54.433Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c065br2r",
+      "num": 6886,
+      "title": "Translatable view text and the opt-in i18n package (D-I18N1=A)",
+      "body": "Destination: view text parameters take ui.Text, so a literal in a view is a typed, translatable message (with plural forms), ui.verbatim marks runtime data that is never a catalog key, and translation is an opt-in i18n package: `jet i18n --add=pt` writes a catalog for the translator, and catalogs load explicitly with no ambient locale or filesystem access.\n\nWhy it matters: translation bolted on later means rewriting every view; with typed messages from the start, adding a language is a catalog, not a code change.\n\nDecision: D-I18N1=A (ratified 2026-11-06). Nothing of it is built on dev 168e1e9e92 (no ui.verbatim, no i18n package).\n\nSource: D-I18N1=A; #3262 c7 (archived #3289, message catalogs; D-CORE-CATALOG1).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "View text parameters take ui.Text: a string literal in a view is a typed message, `ui.text(\"{count} bookings today\", one: \"{count} booking today\", plural: count)` picks the plural form, and ui.verbatim(value) passes runtime data without translation. Proof: `jet test Compiler --profile golden --filter ui/typed_view_text` on O0, O1, O2 and web.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:55.334Z"
+        },
+        {
+          "n": 2,
+          "text": "Passing a plain String where a view takes ui.Text is a registered error whose fix is ui.verbatim. Proof: `jet test Compiler --profile ui --filter view_text_needs_ui_text`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:55.334Z"
+        },
+        {
+          "n": 3,
+          "text": "`jet i18n --add=pt` in a project that uses the i18n package writes a catalog listing every view message with its plural forms, and re-running it keeps existing translations. Proof: `jet test Compiler --profile cases --filter cli/i18n_add_language`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:55.334Z"
+        },
+        {
+          "n": 4,
+          "text": "The i18n package reads explicit catalogs: message context, three plural forms, ordered fallback and two concurrent catalogs work; malformed input is bounded; there is no ambient locale or filesystem access and no secret leakage. Proof: `jet test Compiler --profile golden --filter i18n/message_catalog`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:25:55.334Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "ui",
+        "i18n"
+      ],
+      "goals": [
+        "G9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:25:55.334Z",
+      "updated": "2026-11-15T03:25:55.334Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -209229,6 +209424,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T03:25:56.259Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0wssehw",
+      "note": "#2 A `Regex{…}` literal compiles to matcher code at build time:"
+    },
+    {
+      "at": "2026-11-15T03:25:55.334Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c065br2r",
+      "note": "Translatable view text and the opt-in i18n package (D-I18N1=A)"
+    },
+    {
+      "at": "2026-11-15T03:25:54.433Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0r8ohhq",
+      "note": "Text formatting: exact number formatting, data templates, explicit locales and text diffs"
+    },
+    {
+      "at": "2026-11-15T03:25:53.490Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0eymgfx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:25:52.569Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0eymgfx",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:25:51.009Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0eymgfx",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-15T03:25:50.037Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0eymgfx",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-15T03:25:49.098Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0eymgfx",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T03:25:48.059Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0eymgfx",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T03:25:47.063Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0eymgfx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T03:25:46.100Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0eymgfx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T03:25:45.185Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#24: strip debris; proof; was: (was #2097 c2) A string containing a newline, a tab and U+0001 round-trips as valid JSON through the devserver watch payload, the WebHost payload, the jetpack trust record and the Persist store [precu"
+    },
+    {
+      "at": "2026-11-15T03:25:44.302Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#19: strip debris; proof; was: (was #1813 c3) Boundary planning and focused proof show the same law through O0, O1 and O2 [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-15T03:25:43.416Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#17: strip debris; absorbs c18; was: (was #1813 c1) Spec defines the crossing grid with time, schema, checker, evolution, and fact columns; every new boundary feature names one cell [precut audit: no dev test, golden, case or snapshot pr"
+    },
+    {
+      "at": "2026-11-15T03:25:42.543Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#16: strip debris; proof; was: [#3295] shape, layout, scalar-type and tag fidelity through JSON, `compute.serialize` and CBOR. Remove the divergent ad-hoc serializer (compute.jet:647-650). Golden `serde/tensor_codec`."
+    },
+    {
+      "at": "2026-11-15T03:25:41.599Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#15: strip debris; proof; was: [#3276] explicit-ID graph round trip, alias duplication, rejection of input-selected types, CBOR tag 28/29 refusal. Golden `serde/graph_identity`."
+    },
+    {
+      "at": "2026-11-15T03:25:40.579Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#14: strip debris; absorbs c5; was: [#3255] a fixture table for non-string keys, tags, bytes, numbers and variants, typed vs DataTree. Golden `serde/datatree_losslessness` + table in Docs/spec/encoding-decisions.md."
+    },
+    {
+      "at": "2026-11-15T03:25:39.588Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#13: strip debris; proof; was: [#3238]  • `json.schema<T>()` emits draft 2020-12 from Codable metadata: required, optional and default fields, renames, variants and recursion. • Custom codecs are represented honestly. The dialect i"
+    },
+    {
+      "at": "2026-11-15T03:25:38.654Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#12: strip debris; current syntax; was: [#3233]  • Grouped `#[Codable, DenyUnknownFields]`, `#Flatten`, custom Decode precedence, required/default/optional. • Missing vs null vs wrong-type; unknown-field rejection and ordered retention. • G"
+    },
+    {
+      "at": "2026-11-15T03:25:37.706Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#10: strip debris; spelling gated; was: [#3150]  • `DecodeAliases` reads old names and writes only the canonical name. Collisions are a compile error before codegen. • Golden `serde/enum_decode_aliases`; UI `enum_decode_alias_collision`."
+    },
+    {
+      "at": "2026-11-15T03:25:36.787Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#9: strip debris; spelling gated; was: [#3149]  • Opt-in `#Unknown Retained(UnknownVariant<Self>)` keeps the parsed tree. Known-case malformed payloads still error. The strict default is unchanged. • Golden `serde/enum_unknown`. UI errors:"
+    },
+    {
+      "at": "2026-11-15T03:25:35.848Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#8: strip debris; the retired #Discriminant spelling is not current syntax; was: [#3148]  • `Discriminant(\"kind\", content: \"body\")`: exact encode/decode for unit omission, shape, wrong tag and missing content. • Golden `serde/enum_adjacent`; UI `enum_adjacent_content_collides`."
+    },
+    {
+      "at": "2026-11-15T03:25:34.901Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eymgfx",
+      "note": "#4: absorbs c1, c2 and c7; decisions; was: Shared typed-field traversal, override precedence and error paths have one canonical owner under the selected explicit contract."
+    },
+    {
+      "at": "2026-11-15T03:25:34.008Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fvnyiq",
+      "note": "#13 jet test runs with a named profile, --set values and coverag"
+    },
+    {
+      "at": "2026-11-15T03:23:25.509Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c047t3lg",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-15T03:23:24.417Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-meet",
@@ -212552,713 +212922,6 @@
       "action": "card.criteria-add",
       "ref": "c0se7lpr",
       "note": "#8 Shutdown waits a bounded time for running jobs and leaves an"
-    },
-    {
-      "at": "2026-11-15T02:49:22.478Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0se7lpr",
-      "note": "#7 After a server restart, queued jobs (stored in the database)"
-    },
-    {
-      "at": "2026-11-15T02:49:21.473Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0se7lpr",
-      "note": "#6 A job whose worker disconnects before acknowledging it is de"
-    },
-    {
-      "at": "2026-11-15T02:49:20.341Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0xhxet9",
-      "note": "#14 The notebook app binds to loopback only unless sharing is as"
-    },
-    {
-      "at": "2026-11-15T02:49:19.034Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0xhxet9",
-      "note": "#13 Editing the notebook or one of its typed functions under `je"
-    },
-    {
-      "at": "2026-11-15T02:49:17.720Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0xhxet9",
-      "note": "#12 Two browser tabs on one notebook app get separate typed sess"
-    },
-    {
-      "at": "2026-11-15T02:49:16.041Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0xhxet9",
-      "note": "#11 `jet notebook --app` starts a loopback server that renders t"
-    },
-    {
-      "at": "2026-11-15T02:49:14.678Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c07b6pyn",
-      "note": "jet new adds services, routes, jobs and migrations to an app, with preview and undo"
-    },
-    {
-      "at": "2026-11-15T02:49:13.746Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0rwl15m",
-      "note": "Typed data loaders: deterministic snapshots, exact invalidation, no leaked credentials"
-    },
-    {
-      "at": "2026-11-15T02:47:01.266Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0bbj6h3",
-      "note": "#8: strip debris; state the outcome without self-reference; add proof; was: #6615, the D-HOST-LEAF1=E work, is done: the runtime is an ordinary library and the IR route tables (IR_RUNTIME_ROUTES, the route.export rows and the generated handle helpers) are deleted. (was #6111 "
-    },
-    {
-      "at": "2026-11-15T02:46:42.761Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0j8ez91",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:46:41.707Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0j8ez91",
-      "note": "title"
-    },
-    {
-      "at": "2026-11-15T02:46:40.186Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0p39lw2",
-      "note": "#19: strip debris; add proof; was: [retarget] Syntax registry entry, syntax-decisions log entry, regenerated `jet devtools grammars` output and re-blessed snapshots."
-    },
-    {
-      "at": "2026-11-15T02:46:39.314Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0p39lw2",
-      "note": "#14: strip debris; add proof; was: [retarget] Every dispatch table requires exactly one statically typed hole. Missing, repeated, ambiguous, wrong-type and non-Bool headers get registered diagnostics (DiagnosticRows.jet) with UI snapsh"
-    },
-    {
-      "at": "2026-11-15T02:46:38.436Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0j8ez91",
-      "note": "#7: restated against the two derived-dimension cases tests/known-failing.tsv lists for #6004 on dev 72a8142651; strip debris; was: (was #5811) Unit family and marker groups: 13 cases fail only their stream predicates (no replayable first error)"
-    },
-    {
-      "at": "2026-11-15T02:46:37.534Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0j8ez91",
-      "note": "#6: restated against the one backend case still listed for #6004 on dev 72a8142651; strip debris; was: (was #5809) Unit family: backend gaps and crashes (E2104 UnitConvert, SIGILL in exactness, two sema ICEs)"
-    },
-    {
-      "at": "2026-11-15T02:46:36.666Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0j8ez91",
-      "note": "#4: restated against the cases tests/known-failing.tsv lists for #6004 on dev 72a8142651; strip debris; was: (was #5806) Unit family: conversion checks wrong (E0112 Meter vs Millimeter, E0127 implicit rounding, E0113 [Int] vs [Int#5])"
-    },
-    {
-      "at": "2026-11-15T02:46:07.901Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0j8ez91",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T02:46:06.862Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0j8ez91",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T02:46:05.764Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0j8ez91",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T02:46:04.850Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0bbj6h3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:46:03.893Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0j8ez91",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T02:46:02.973Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0441rvj",
-      "note": "title"
-    },
-    {
-      "at": "2026-11-15T02:46:01.461Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0bbj6h3",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T02:46:00.495Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0bbj6h3",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T02:45:59.572Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0bbj6h3",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-15T02:45:58.345Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0bbj6h3",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T02:45:57.348Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0gmf0y4",
-      "note": "#4: add proof; was: `stages()` yields the same compiler.Event sequence with --threads 1 and --threads 16 on one program (test)."
-    },
-    {
-      "at": "2026-11-15T02:45:56.295Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0gmf0y4",
-      "note": "#3: split: the generated schema and its guard moved to a new criterion; was: D-COMPILER-EVENT1=A: one `compiler.Event` enum in core.compiler carries every public moment with its ratified payload; `#On` hooks, `compiler.advanced.Session.stages()`, `jet build --json` and the ses"
-    },
-    {
-      "at": "2026-11-15T02:45:55.371Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0gmf0y4",
-      "note": "#2: add proof; was: A post-link step (for example signing or embedding a resource) runs on the written artifact through the same typed action mechanism, with an executable example."
-    },
-    {
-      "at": "2026-11-15T02:45:54.418Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0gmf0y4",
-      "note": "#1: add proof; was: A package declares a custom link step for one executable target whose inputs are the compiler's object files and libraries; jet build runs it on every build and reports its failure as a registered Jet"
-    },
-    {
-      "at": "2026-11-15T02:45:53.381Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0bbj6h3",
-      "note": "#17: restated from #2300 c3 and c5 (met by source inspection only); the execution proof is what remains; was: (was #2300 c3) Applicable execution adapters use target-selected marshalling around canonical Prelude semantics, proven by tier execution tests on every applicable tier. (moved from #4741 c13)"
-    },
-    {
-      "at": "2026-11-15T02:45:52.340Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0bbj6h3",
-      "note": "#16: restated from #2300 c1 (met by source inspection only); the execution proof is what remains; was: (was #2300 c1) Sema source classifies the complete reachable Prelude closure and rejects absent runtime layers through registered diagnostics, proven by snapshot execution tests on every applicable ti"
-    },
-    {
-      "at": "2026-11-15T02:45:51.304Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0gmf0y4",
-      "note": "#7 The `jet build --json` event schema is generated from the co"
-    },
-    {
-      "at": "2026-11-15T02:45:50.027Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c06r93ai",
-      "note": "TLS host reads are effects: clock, entropy and CA bundle reads show in the effect row and obey denials (D-NET-HOSTREADS1)"
-    },
-    {
-      "at": "2026-11-15T02:45:18.232Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0e5gz4o",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T02:44:39.924Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c06m6abh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:44:38.894Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c073cvg9",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-15T02:44:37.116Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b4rnem",
-      "note": "#15: add proof; owner-gate row recorded; was: The interop question the review found (X5) is decided by an owner ballot, D-EXPORT-INTEROP1, drafted at $JET_SCRATCH_ROOT/lanes/G6Meta/c3/ballot-D-EXPORT-INTEROP1.json, after its review pass. (gap fro"
-    },
-    {
-      "at": "2026-11-15T02:44:36.197Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b4rnem",
-      "note": "#14: shorter provenance; add proof; was: A target library runs in the build sandbox and can write only its output directory (ties to #3520 c22). (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-revie"
-    },
-    {
-      "at": "2026-11-15T02:44:35.284Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b4rnem",
-      "note": "#13: shorter provenance; add proof; was: The target trait carries Jet source locations: C output writes #line, other targets write source maps where the language has them, and a fault in transpiled code names the Jet file and line. (gap from"
-    },
-    {
-      "at": "2026-11-15T02:44:34.268Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b4rnem",
-      "note": "#12: shorter provenance; add proof; was: A transpile target declares Core/Target MachineFacts, and its capability errors are the existing machine denial rows, with no second capability list. (gap from the D-EXPORT-TARGET1 adversarial review,"
-    },
-    {
-      "at": "2026-11-15T02:44:33.278Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b4rnem",
-      "note": "#11: shorter provenance; add proof; was: The program view exposes value ranges the compiler proved (Int ranges, loop bounds, proven-inline operands), so a hook may spell host arithmetic where no spill is possible; conformance covers it. (gap"
-    },
-    {
-      "at": "2026-11-15T02:44:32.226Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b4rnem",
-      "note": "#10: shorter provenance; add proof; was: A target implements a closed host-leaf table that replaces the runtime`s numbered system calls (168 os_syscall_* sites in 30 runtime files on dev 9623399213). The spec names the table; the code holds "
-    },
-    {
-      "at": "2026-11-15T02:44:31.324Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b4rnem",
-      "note": "#9: shorter provenance; add proof; was: An idiom hook may not hand copying, string encoding, Float text or map iteration order to the host unless conformance covers the hosted form. `jet test --to <target>` runs each target with its hooks a"
-    },
-    {
-      "at": "2026-11-15T02:44:30.341Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b4rnem",
-      "note": "#8: shorter provenance; add proof; was: The public program view has a version. A target library built against another version gets a registered error naming both versions before the target runs (code, what/why/fix text, ui snapshot). (gap f"
-    },
-    {
-      "at": "2026-11-15T02:44:29.316Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b4rnem",
-      "note": "#4: add proof; was: Exporting a program to C and building it with a stock C compiler gives the same stdout, stderr and exit code as jet run at O0, O1 and O2 for every executable example, with memory safety, fault reports"
-    },
-    {
-      "at": "2026-11-15T02:44:28.335Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b4rnem",
-      "note": "#3: add proof; was: A target is an ordinary Jet library that any package can write, using only public compiler-library seams. A third-party test target built outside the repository exports a program as well as a first-pa"
-    },
-    {
-      "at": "2026-11-15T02:44:27.343Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05gn07n",
-      "note": "#6: strip provenance; add proof; was: Integer lane types (`I8`..`I64`, `U8`..`U64` lanes) support element-wise `<<`, `>>` (arithmetic for signed, logical for unsigned), `.bit_and`, `.bit_or`, `.bit_xor` and `.bit_not`, with a lane or a sc"
-    },
-    {
-      "at": "2026-11-15T02:44:26.172Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05gn07n",
-      "note": "#4: add proof; was: Matrix and quaternion operations the audit marks as Odin built-ins have a Jet equivalent proven by goldens, or a linked card or ballot."
-    },
-    {
-      "at": "2026-11-15T02:44:25.201Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05gn07n",
-      "note": "#3: add the dev location and proof; was: Swizzles .xyzw and .rgba (read, write, repeated read) work on every [T#N] with N<=4 and every vector/lane type, decided by a type fact rather than hard-coded Core names; invalid lanes are E3110/E3111 "
-    },
-    {
-      "at": "2026-11-15T02:44:23.844Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05gn07n",
-      "note": "#2: add proof; was: Numeric fixed arrays [T#N] support element-wise + - * / % and bit operators with another [T#N] and with a scalar, unary minus and ==, as goldens on O0/O1/O2; length or element mismatches are registere"
-    },
-    {
-      "at": "2026-11-15T02:44:22.309Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05gn07n",
-      "note": "#1: add proof; was: A dated audit in Docs/audits lists every Odin array/matrix/quaternion/simd/soa feature with Jet status and probe; every row is PASS or has a linked card or owner ballot."
-    },
-    {
-      "at": "2026-11-15T02:44:20.866Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c06m6abh",
-      "note": "#6: the constructor, the cycle errors and the alias keyword's removal have landed; #6176 allows non-generic aliases, replacing the old E0324 clause; was: Aliases (D-DECL-COLON1=A and D-ALIAS-GENERIC1=A; supersedes D-ALIAS-BIND2=B's alias keyword): a generic alias writes its parameters on its name (Grid<T>: [[T]]) and aliases a type expression or type-v"
-    },
-    {
-      "at": "2026-11-15T02:44:19.697Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c06m6abh",
-      "note": "#5: split: the declaration form here, errors (new), docs (new) and the pub removal (new) on their own criteria; was: D-VIS-REEXPORT1=A: Every original module/field privacy criterion retained; all pub use forms migrate to bare-path re-export declarations written name: path (clamp: core.math.clamp, D-DECL-COLON1=A); u"
-    },
-    {
-      "at": "2026-11-15T02:44:18.755Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0441rvj",
-      "note": "#9: D-NO-WARNINGS1=A: tidy error, not a warning; 'If A' guard dropped; add proof; was: If A: a single name that mixes scripts to look like another word gets the same non-blocking look-alike warning (UTS #39 mixed-script check)."
-    },
-    {
-      "at": "2026-11-15T02:44:17.758Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0441rvj",
-      "note": "#8: 'If A' guard dropped; add proof; was: If A: jet fmt normalizes names only; string and comment contents are byte-identical before and after (fixture with NFD text inside quotes)."
-    },
-    {
-      "at": "2026-11-15T02:44:16.754Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0441rvj",
-      "note": "#7: 'If A' guard dropped; add proof; was: If A: the casing check (D-CASE-LAW1) reads the same character table, so uncased scripts pass as today and combining marks count as word characters; a Hindi type name and value name check clean (UI sna"
-    },
-    {
-      "at": "2026-11-15T02:44:15.748Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0441rvj",
-      "note": "#6: add proof; was: spec.md identifier rule, syntax registry, editor grammars and `jet explain` text are regenerated from the one home; obsolete hand-written ranges are deleted."
-    },
-    {
-      "at": "2026-11-15T02:44:14.751Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0441rvj",
-      "note": "#5: add proof; was: The lexer and the casing check read one generated character table; a parity fixture over boundary scalars passes (shares #4426's pinned UCD)."
-    },
-    {
-      "at": "2026-11-15T02:44:13.858Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0441rvj",
-      "note": "#3: D-NO-WARNINGS1=A (2026-11-10) leaves no warnings: the look-alike report is a tidy error; 'If A' guard dropped; was: If A: two names in one package with the same UTS #39 skeleton (Latin `a` and Cyrillic `а`) warn once, naming both declarations; the warning never blocks (D-LINTPOLICY1)."
-    },
-    {
-      "at": "2026-11-15T02:44:12.896Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0441rvj",
-      "note": "#2: D-IDENT-CHARS1=A is ratified (2026-10-05): drop the 'If A' guard; add proof; was: If A: `नमस्ते: 1` and NFD `café` both compile; NFC and NFD spellings of one name are the same binding on every engine; jet fmt rewrites the file to NFC."
-    },
-    {
-      "at": "2026-11-15T02:44:11.975Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c06m6abh",
-      "note": "#9 `pub` is removed: every `pub use` and `pub` declaration (20 "
-    },
-    {
-      "at": "2026-11-15T02:44:11.003Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c06m6abh",
-      "note": "#8 The doc and API record list each re-export's target signatur"
-    },
-    {
-      "at": "2026-11-15T02:44:09.998Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c06m6abh",
-      "note": "#7 Re-export chains resolve forward, and a rootless cycle, a du"
-    },
-    {
-      "at": "2026-11-15T02:42:20.973Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0flvd7x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:42:19.952Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0flvd7x",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T02:42:18.312Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0flvd7x",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T02:42:17.359Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0flvd7x",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T02:42:16.439Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0flvd7x",
-      "note": "#9: add proof; was: err.as<T>() recovers a typed failure from an Err carrier as T? (D-ERR-TRAIT1 A), using the typed identity recorded at conversion, with an example on O0, O1 and O2."
-    },
-    {
-      "at": "2026-11-15T02:42:15.539Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0flvd7x",
-      "note": "#5: strip debris; add proof; was: [#3740] Infallible functions (p34 build/load/run) lower to plain returns with no outcome wrapper. Fallible callers, Err returns and written contracts keep the fallible ABI (direct, transitive, recursi"
-    },
-    {
-      "at": "2026-11-15T02:42:14.666Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0flvd7x",
-      "note": "#4: strip debris; add proof; was: [#3713] Probe p25 prints the origin of `Err(\"empty input\")` and each hop (double, total, run) with file:line on every level. `--json` carries origin and hops with columns. `?(text)` frames stay in ord"
-    },
-    {
-      "at": "2026-11-15T02:42:13.760Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c09qojqz",
-      "note": "#4 package.api records each public function's failure set: infa"
-    },
-    {
-      "at": "2026-11-15T02:42:12.811Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#26 One mint conflict (one case name with two payload types, D-E"
-    },
-    {
-      "at": "2026-11-15T02:42:11.793Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#25 A minted error type prints with `{e}`, and E0915's message n"
-    },
-    {
-      "at": "2026-11-15T02:42:10.892Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#24 A match arm for a failure member that can no longer arrive i"
-    },
-    {
-      "at": "2026-11-15T02:42:09.775Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#23 A catch-all `.Err(e)` arm over an open failure union binds `"
-    },
-    {
-      "at": "2026-11-15T02:42:08.881Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#22 Typed and minted failures leave `run` and a written `Err!` c"
-    },
-    {
-      "at": "2026-11-15T02:42:07.995Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#21 A release-profile build (`jet build`, or `--release` on any "
-    },
-    {
-      "at": "2026-11-15T02:42:07.118Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#20 `dbg(expr)` returns `expr` unchanged and writes one line to "
-    },
-    {
-      "at": "2026-11-15T02:42:06.216Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#19 `jet fix --pin-failures` writes each function's inferred fai"
-    },
-    {
-      "at": "2026-11-15T02:42:05.324Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#18 A written failure contract is a ceiling: a body that can fai"
-    },
-    {
-      "at": "2026-11-15T02:42:04.430Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#17 `jet review` and `jet diff` list a change's failure points a"
-    },
-    {
-      "at": "2026-11-15T02:42:03.501Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#16 `#Policy(failures: .Explicit)` at block, function, module or"
-    },
-    {
-      "at": "2026-11-15T02:40:48.034Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c022g7qw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:40:47.089Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c022g7qw",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T02:40:45.526Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c022g7qw",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T02:40:44.593Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c022g7qw",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T02:40:43.648Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c022g7qw",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T02:40:42.640Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c022g7qw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T02:40:41.496Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c022g7qw",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T02:40:40.272Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c022g7qw",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T02:40:39.116Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c022g7qw",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-15T02:40:38.073Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c022g7qw",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T02:40:37.047Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c022g7qw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T02:40:36.012Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c022g7qw",
-      "note": "#18: adds the proof; was: Regression found 2026-11-09 (LintPlanted core routes row on dev 6a06b917cb; #6114 was met): core.plugin.load is 2 args in CORE_CALLS but jet_plugin_load takes 3, and core.crypto.vault.current is 1 arg"
-    },
-    {
-      "at": "2026-11-15T02:40:35.039Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c022g7qw",
-      "note": "#8: restated from the architecture review finding; adds the proof; was: (was #5116) Remove dangling imports and undeclared dependencies"
-    },
-    {
-      "at": "2026-11-15T02:40:33.920Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c022g7qw",
-      "note": "#6: restated from the architecture review finding; the LIR copy is gone with JetBackend; was: (was #5113) Single layout owner after cutover A"
-    },
-    {
-      "at": "2026-11-15T02:40:32.747Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c022g7qw",
-      "note": "#5: restated from the architecture review finding with the dev count; adds the proof; was: (was #5112) Shared internal module for Core and runtime helpers"
-    },
-    {
-      "at": "2026-11-15T02:40:31.734Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c022g7qw",
-      "note": "#4: restated from the architecture review finding; adds the proof; was: (was #5108) Gate or delete packages outside the build"
-    },
-    {
-      "at": "2026-11-15T02:40:30.577Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c022g7qw",
-      "note": "#2: restated from the architecture review finding; adds the proof; was: (was #5106) Generator registry with a lander freshness gate"
-    },
-    {
-      "at": "2026-11-15T02:40:29.267Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c08i9ox6",
-      "note": "#11 Keep-going has one failure-capture path per phase (the task "
     }
   ],
   "nextNum": 368,
