@@ -1,8 +1,11 @@
-// A List buffer of a power-of-two stride grows through capacities whose
-// header and slots fill a power-of-two block: no capacity leaves room for one
-// more slot in its block. Any other stride doubles from 4.
+// A List buffer's first capacity fills the smallest heap block holding 4
+// slots, or for wide elements a block of at most IR_LIST_FIRST_BLOCK bytes
+// (one slot where a slot needs more). A power-of-two stride then grows
+// through capacities whose header and slots fill a power-of-two block: no
+// capacity leaves room for one more slot in its block. Any other stride
+// doubles from its first capacity.
 use {
-    jet_ir.[IR_HEAP_BLOCK_HEADER, ir_list_growth]
+    jet_ir.[IR_HEAP_BLOCK_HEADER, IR_LIST_FIRST_BLOCK, ir_list_growth]
 }
 
 block_of: fn(bytes: Int) -> Int {
@@ -11,11 +14,23 @@ block_of: fn(bytes: Int) -> Int {
     block
 }
 
+// The first buffer fills its block, and that block is the one holding 4
+// slots or one no larger than IR_LIST_FIRST_BLOCK, unless a single slot
+// needs more.
+first_fits: fn(stride: Int, first: Int) {
+    used: first * stride + IR_HEAP_BLOCK_HEADER
+    block: block_of(used)
+    assert(first >= 1)
+    assert(used + stride > block)
+    assert(first >= 4 || block <= IR_LIST_FIRST_BLOCK || first == 1)
+    assert(block <= block_of(4 * stride + IR_HEAP_BLOCK_HEADER))
+}
+
 #Test("list growth fills its block") {
     loop stride in ([Int]{1, 2, 4, 8, 16, 32, 64, 128, 256}) {
         growth: ir_list_growth(stride)
+        first_fits(stride, growth.first)
         capacity := growth.first
-        assert(capacity >= 4)
         loop _ in 0..<20 {
             used: capacity * stride + IR_HEAP_BLOCK_HEADER
             block: block_of(used)
@@ -25,10 +40,18 @@ block_of: fn(bytes: Int) -> Int {
     }
 }
 
-#Test("list growth of other strides doubles from 4") {
-    loop stride in ([Int]{0, 3, 12, 24, 40, 72}) {
+#Test("list growth of other strides doubles from a filled first block") {
+    loop stride in ([Int]{3, 12, 24, 40, 72, 112, 300}) {
         growth: ir_list_growth(stride)
-        assert(growth.first == 4)
+        first_fits(stride, growth.first)
         assert(growth.step == 0)
     }
+    assert(ir_list_growth(0).first == 4)
+}
+
+#Test("wide elements start below four slots") {
+    assert(ir_list_growth(112).first == 2)
+    assert(ir_list_growth(128).first == 1)
+    assert(ir_list_growth(64).first == 3)
+    assert(ir_list_growth(24).first == 4)
 }

@@ -70,19 +70,32 @@ ir_heap_block_fill: fn(bytes: Int) -> Int Never! {
 
 // How a List buffer of `stride`-byte elements grows when full: a buffer
 // below `first` slots grows to `first`, any other to twice its capacity
-// plus `step`. For a power-of-two stride the header and the slots then
-// fill a power-of-two block exactly, a heap size class or whole pages,
-// from the smallest block holding 4 slots on: a block of B bytes holds
-// (B - header) / stride slots, B / stride - ceil(header / stride), and the
-// next block twice that plus the step. Any other stride doubles from 4.
+// plus `step`. The first buffer is the smallest heap block holding 4 slots,
+// or for wide elements, where that block would pass IR_LIST_FIRST_BLOCK,
+// the larger of that bound and the smallest block holding one slot: most
+// lists of wide elements (call arguments, parameters, fields) hold one or
+// two, so they need not reserve four. `first` fills that block. For a
+// power-of-two stride the header and the slots then fill a power-of-two
+// block exactly at every growth, a heap size class or whole pages: a block
+// of B bytes holds (B - header) / stride slots, B / stride - ceil(header /
+// stride), and the next block twice that plus the step. Any other stride
+// doubles from its first capacity.
 ir_list_growth: fn(stride: Int) -> (first: Int, step: Int) Never! {
-    block := 1
-    loop block < stride -> block = block * 2
-    if stride <= 0 || block != stride -> return (first: 4, step: 0)
-    block = 32
-    loop block < 4 * stride + IR_HEAP_BLOCK_HEADER -> block = block * 2
-    (first: (block - IR_HEAP_BLOCK_HEADER) /% stride, step: (IR_HEAP_BLOCK_HEADER + stride - 1) /% stride)
+    if stride <= 0 -> return (first: 4, step: 0)
+    four := 32
+    loop four < 4 * stride + IR_HEAP_BLOCK_HEADER -> four = four * 2
+    one := IR_LIST_FIRST_BLOCK
+    loop one < stride + IR_HEAP_BLOCK_HEADER -> one = one * 2
+    block: if four < one -> four else -> one
+    first: (block - IR_HEAP_BLOCK_HEADER) /% stride
+    power := 1
+    loop power < stride -> power = power * 2
+    (first: first, step: if power == stride -> (IR_HEAP_BLOCK_HEADER + stride - 1) /% stride else -> 0)
 }
+
+// The largest first List buffer that holds more than one slot
+// (ir_list_growth).
+IR_LIST_FIRST_BLOCK: 256
 
 // The address of the element after the last of the List header at `list`
 // (element row `row`), whose buffer first grows (ir_list_growth) when full,
