@@ -1,0 +1,19 @@
+use {
+    app
+    web: core.web
+}
+
+Hooks: struct {
+    #App.Webhook(path: "/hooks/:project", signature: app.Signature.GitHub, key: "webhook_secret")
+    on_event: fn(self, project: String, event: String) -> Int {
+        project.len() + event.len()
+    }
+
+    webhook_secret: fn(self, project: String) -> String? {
+        Val(project.copy())
+    }
+}
+
+run: fn() {
+    _: web.app().mount(Hooks{})
+}

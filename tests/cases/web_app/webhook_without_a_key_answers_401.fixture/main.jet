@@ -1,0 +1,58 @@
+// A webhook for GitHub deliveries whose signing key is there only for the
+// `jet` project. A delivery signed with that key runs; one signed with
+// another key, or one for a project with no key, is answered 401 before its
+// body is decoded; a signed body the webhook can't take is answered 422.
+use {
+    app
+    crypto: core.crypto
+    hex: core.encoding.hex
+    http: core.http
+    net: core.net
+    web: core.web
+}
+
+Event: struct {
+    action: String
+}
+
+Hooks: struct {
+    secret: String
+
+    #App.Webhook(path: "/hooks/github/:project", signature: app.Signature.GitHub, key: "signing_key")
+    on_event: fn(self, project: String, event: Event) -> String {
+        "{project}: {event.action}"
+    }
+
+    // Only the `jet` project has a key.
+    #App.SigningKey
+    signing_key: fn(self, project: String) -> String? {
+        if project != "jet" -> return None
+        Val(self.secret.copy())
+    }
+}
+
+// POST `body` to `project`'s hook, signed with `key` as GitHub signs.
+deliver: fn(addr: String, project: String, key: String, body: String) -> String HTTPError! {
+    mac: hex.encode(crypto.hmac_sha256(key.bytes(), body.bytes()))
+    fields: http.headers_set(http.headers(), "X-Hub-Signature-256", "sha256={mac}")
+    answer: http.send_request(http.request_with(.Post, "http://{addr}/hooks/github/{project}", fields, http.body_text(body)))
+    Ok("{answer.status} {answer.text()}")
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    secret: "It's a Secret to Everybody"
+    served: web.app().mount(Hooks{secret: secret})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        served.serve_once(listener)
+        served.serve_once(listener)
+        served.serve_once(listener)
+        served.serve_once(listener)
+    }
+    print(deliver(addr, "jet", secret, "{{\"action\":\"opened\"}}"))
+    print(deliver(addr, "jet", "a guess", "{{\"action\":\"opened\"}}"))
+    print(deliver(addr, "other", secret, "{{\"action\":\"opened\"}}"))
+    print(deliver(addr, "jet", secret, "{{\"actions\":1}}"))
+    serving.join()
+}

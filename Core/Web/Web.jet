@@ -24,6 +24,7 @@ use {
     // core.web.forms values and calls, so core.web reaches that module.
     core.web.forms.[WebFormTyped]
     core.prelude.[SourceLocation]
+    app.[Signature, __webhook_header, __webhook_signed]
     rt: jet.runtime.time
 }
 
@@ -366,6 +367,19 @@ App: struct {
             "",
             at,
         )
+        self.copy()
+    }
+
+    // An `#App.Webhook` method of `app.mount(service)` answers POST `path`
+    // (sema lowers each here). `params` names the method's path parameters,
+    // in its order, joined by commas. `key` runs the service's
+    // `#App.SigningKey` method on them, and `answer` runs the webhook on them
+    // and the delivery's body (`__app_webhook_response`).
+    __webhook: fn(self, path: String, signature: Signature, params: String, key: &&fn(__RemoteArgs) -[Net, FS.Read]> String? [FieldError]!, answer: &&fn(__RemoteArgs) -[Net, FS.Read]> String [FieldError]!, at: SourceLocation{#caller}) -> App Never! {
+        names := [String]{}
+        if params != "" -> names = params.split(",").to_list()
+        hook: __AppWebhook{signature: signature, params: names, key: key, answer: answer}
+        http_server.__route_add(__app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_webhook_response(hook, request)) }), "", at)
         self.copy()
     }
 
@@ -1316,6 +1330,43 @@ __app_remote_response: fn(endpoint: __AppRemote, request: HTTPRequest) -[Net, FS
     __app_json(200, reply)
 }
 
+// One webhook method of a mounted service: how its sender signs, the names
+// of its path parameters in the method's order, and the two calls sema
+// builds from it and its `#App.SigningKey` method.
+__AppWebhook: struct {
+    signature: Signature
+    params: [String]
+    key: fn(__RemoteArgs) -[Net, FS.Read]> String? [FieldError]!
+    answer: fn(__RemoteArgs) -[Net, FS.Read]> String [FieldError]!
+}
+
+// A delivery of a webhook. Its path parameters, as a JSON array of strings,
+// go to the signing-key method; no key, no signature header or a signature
+// that its MAC under the key does not match answers 401, all before the body
+// is decoded. Then the webhook runs on the path parameters and the decoded
+// body: 200 with its reply, 500 when it fails, or 422 with the field errors
+// when the body is no JSON the method takes.
+__app_webhook_response: fn(hook: __AppWebhook, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    unsigned: __app_json(401, __app_error_json("`{request.path}` takes only deliveries signed with its key"))
+    values := [String]{}
+    loop name in hook.params {
+        values.push(__app_json_string(request.param(name) ?? ""))
+    }
+    params: live_json.parse("[{values.join(",")}]") ?? return unsigned
+    // A path parameter the key method can't take, or no key: either is 401.
+    key: hook.key(__RemoteArgs{tree: params}) ?? return unsigned
+    sent: request.header(__webhook_header(hook.signature)) ?? return unsigned
+    text: request.text() ?? return unsigned
+    if !__webhook_signed(hook.signature, key, sent, text) -> return unsigned
+    _ := live_json.parse(text) ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
+    values.push(text)
+    delivery: live_json.parse("[{values.join(",")}]") ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
+    reply: hook.answer(__RemoteArgs{tree: delivery}) ?? return __app_json(422, __app_invalid_json(err))
+    // `__reply_err` leads a failed run's reply.
+    if reply.starts_with("{{\"err\":") -> return __app_json(500, reply)
+    __app_json(200, reply)
+}
+
 // `{"invalid": [{"path": …, "reason": …}, …]}`, the 422 body a Remote reads
 // back as `CallError.Invalid`.
 __app_invalid_json: fn(errors: [FieldError]) -> String Never! {
@@ -2211,4 +2262,40 @@ sync: fn(key: String, data: String) -> String Never! { "{key}:{data}" }
         .Err(fault) -> "{fault}"
     }
     assert(bad_route.starts_with("invalid HTTP route `/a/*rest/b`: "))
+}
+
+#Test("a webhook delivery runs only when it is signed with its key") {
+    hook: __AppWebhook{
+        signature: Signature.GitHub,
+        params: [String]{"project"},
+        key: fn(args: __RemoteArgs) {
+            project: args.__take<String>(0) ?? return Err(err)
+            if project != "jet" -> return Ok(None)
+            Ok(Val("It's a Secret to Everybody"))
+        },
+        answer: fn(args: __RemoteArgs) {
+            project: args.__take<String>(0) ?? return Err(err)
+            greeting: args.__take<String>(1) ?? return Err(err)
+            Ok(args.__reply_value<String>("{project}: {greeting}"))
+        },
+    }
+    secret: "It's a Secret to Everybody"
+    body: "\"hi\""
+    signed: "sha256={crypto.hex_encode(crypto.hmac_sha256(secret.bytes(), body.bytes()))}"
+    assert_eq(__app_webhook_test_status(hook, "jet", signed, body), 200)
+    assert_eq(__app_webhook_test_status(hook, "jet", signed, "\"bye\""), 401)
+    assert_eq(__app_webhook_test_status(hook, "jet", "", body), 401)
+    assert_eq(__app_webhook_test_status(hook, "other", signed, body), 401)
+    unparsed: "hi"
+    assert_eq(__app_webhook_test_status(hook, "jet", "sha256={crypto.hex_encode(crypto.hmac_sha256(secret.bytes(), unparsed.bytes()))}", unparsed), 422)
+}
+
+// The status `hook` answers a delivery of `body` to `/hooks/{project}`
+// signed `sent` ("" sends no signature).
+__app_webhook_test_status: fn(hook: __AppWebhook, project: String, sent: String, body: String) -[Net, FS.Read]> Int Never! {
+    fields := web_http.headers()
+    if sent != "" -> fields = web_http.headers_set(fields, "X-Hub-Signature-256", sent)
+    request := web_http.__server_request("POST", "/hooks/{project}", web_http.body_text(body), fields)
+    request.__params = [web_http.Header]{web_http.Header{name: "project", value: project}}
+    __app_webhook_response(hook, request).status
 }

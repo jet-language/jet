@@ -22295,6 +22295,33 @@ FieldErrorPathUnknown: struct {
     }
 }
 
+WebhookKeyNotSigningKey: struct {
+    key: String
+    service: String
+
+    impl Diagnostic {
+        code: "E2814"
+        safety_class: .Soundness
+        safety_reason: "A webhook with no signing-key method has no key to check a delivery's signature under, so a forged delivery would run."
+        expert_path: "none: a webhook checks each delivery under the key its `#App.SigningKey` method gives"
+        stage: [.Compile]
+        meaning: "A webhook whose `key:` names no `#App.SigningKey` method of its service"
+        detail: true
+
+        what: fn(self) -> String {
+            "`key: \"{self.key}\"` names no `#App.SigningKey` method of `{self.service}`."
+        }
+
+        why: fn(self) -> String {
+            "A webhook runs a delivery only when its signature matches the key that the service's signing-key method gives, so `key:` must name such a method."
+        }
+
+        fix: fn(self) -> String {
+            "Mark the method `{self.key}` names `#App.SigningKey`, or name one that it marks."
+        }
+    }
+}
+
 UnmountedHttpRoutes: struct {
     method: String
     type: String

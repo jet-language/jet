@@ -5468,6 +5468,25 @@ names none, or one computed elsewhere, is E2813
 at the step that failed. The error then shows beside that field, as a failed
 `validate` check does.
 
+A webhook takes deliveries from a sender that signs each one.
+`#App.Webhook(path: "/hooks/github/:project", signature: app.Signature.GitHub,
+key: "webhook_secret")` on a method of a mounted service registers POST
+`{prefix}{path}`. The method's parameters named for the path's parameters
+take them, and one more, last, takes the delivery's JSON body. `signature:`
+has no default, so a webhook with no signature rule fails to compile at its
+marker. `app.Signature` is `GitHub` (`X-Hub-Signature-256: sha256=<mac>`, the
+HMAC-SHA256 of the body) or `Stripe` (`Stripe-Signature: t=<seconds>,v1=<mac>`,
+the HMAC-SHA256 of `<seconds>.<body>`). `key:` names the service's method
+marked `#App.SigningKey`. That method takes some of the webhook's path
+parameters by name and returns the key as `String?`. A `key:` that names no
+such method is E2814 (`jet.WebhookKeyNotSigningKey`). Each delivery runs the
+signing-key method first. A None key, a missing signature header, or a
+signature that does not match the MAC is answered 401, and the body is never
+decoded. The MAC is compared in constant time. A delivery that passes runs
+the webhook: 200 with `{"ok": value}`, 500 with `{"err": error}`, or 422 when
+the body does not decode. Neither method is an endpoint, so no Remote calls
+it.
+
 ### `core.web` — server-rendered applications
 
 `core.web` builds server-rendered applications on top of `core.http`. An

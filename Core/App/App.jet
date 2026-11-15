@@ -14,6 +14,7 @@ package: {
 use {
     unicode: core.text
     http: core.http
+    crypto: core.crypto
     live_json: core.encoding.json
     core.reactive.loadable.[Loadable]
     rt: jet.runtime.time
@@ -66,6 +67,94 @@ Public: struct {
     impl Marker {
         sites: [.Method]
     }
+}
+
+// A webhook: `#App.Webhook(path: "/hooks/github/:project", signature:
+// app.Signature.GitHub, key: "webhook_secret")` makes a method of a mounted
+// service answer POST `path` for a sender that signs each delivery. Its
+// parameters are the path's parameters, then the delivery's decoded JSON
+// body. `key:` names the service's `#App.SigningKey` method, which gives the
+// delivery's key from the same path parameters. A delivery runs only when
+// that key is there and the delivery carries a valid `signature` under it,
+// checked in constant time before the body is decoded; any other is answered
+// 401. A webhook is no endpoint: no Remote calls it.
+Webhook: struct {
+    path: String
+    signature: Signature
+    key: String
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+// The method a webhook's `key:` names. It takes some of the webhook's path
+// parameters, by name, and gives the key the sender signs with, or None,
+// which answers 401. It is server-only.
+SigningKey: struct {
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+// How a webhook's sender signs a delivery: an HMAC-SHA256, hex-encoded,
+// under the webhook's key.
+Signature: enum {
+    // GitHub: `X-Hub-Signature-256: sha256=<mac>`, the MAC of the body.
+    GitHub
+    // Stripe: `Stripe-Signature: t=<seconds>,v1=<mac>`, the MAC of
+    // `<seconds>.<body>`; any one `v1` entry may match.
+    Stripe
+}
+
+// The request header that carries a delivery's `signature`.
+__webhook_header: fn(signature: Signature) -> String Never! {
+    if signature == {
+        .GitHub -> "x-hub-signature-256"
+        .Stripe -> "stripe-signature"
+    }
+}
+
+// Whether `sent`, the delivery's signature header, signs `body` under `key`
+// by `signature`. Each MAC is compared in constant time, and every `v1`
+// entry of a Stripe header is compared.
+__webhook_signed: fn(signature: Signature, key: String, sent: String, body: String) -> Bool Never! {
+    if signature == {
+        .GitHub -> {
+            expected: "sha256={crypto.hex_encode(crypto.hmac_sha256(key.bytes(), body.bytes()))}"
+            crypto.constant_time_equal_bytes(expected.bytes(), sent.bytes())
+        }
+        .Stripe -> {
+            stamp := ""
+            macs := [String]{}
+            loop part in sent.split(",") {
+                entry: part.trim()
+                if entry.starts_with("t=") -> stamp = entry.slice(2, entry.len())
+                if entry.starts_with("v1=") -> macs.push(entry.slice(3, entry.len()))
+            }
+            if stamp == "" -> return false
+            expected: crypto.hex_encode(crypto.hmac_sha256(key.bytes(), "{stamp}.{body}".bytes()))
+            matched := false
+            loop mac in macs {
+                if crypto.constant_time_equal_bytes(expected.bytes(), mac.bytes()) -> matched = true
+            }
+            matched
+        }
+    }
+}
+
+#Test("webhook signatures check the sender's MAC") {
+    // GitHub's published example delivery.
+    github: "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
+    assert(__webhook_signed(.GitHub, "It's a Secret to Everybody", github, "Hello, World!"))
+    assert(!__webhook_signed(.GitHub, "It's a Secret to Everybody", github, "Hello, World?"))
+    assert(!__webhook_signed(.GitHub, "another key", github, "Hello, World!"))
+    assert(!__webhook_signed(.GitHub, "It's a Secret to Everybody", "", "Hello, World!"))
+    mac: crypto.hex_encode(crypto.hmac_sha256("whsec".bytes(), "1700000000.{{\"id\":\"evt_1\"}}".bytes()))
+    assert(__webhook_signed(.Stripe, "whsec", "t=1700000000,v1=00,v1={mac}", "{{\"id\":\"evt_1\"}}"))
+    assert(!__webhook_signed(.Stripe, "whsec", "t=1700000001,v1={mac}", "{{\"id\":\"evt_1\"}}"))
+    assert(!__webhook_signed(.Stripe, "whsec", "v1={mac}", "{{\"id\":\"evt_1\"}}"))
+    assert_eq(__webhook_header(.Stripe), "stripe-signature")
 }
 
 // A client of the service `S`. It offers only the methods of `S` that

@@ -81,6 +81,60 @@ sema_app_endpoint_marker: fn(marker: Marker, graph: SemaRegistrationGraph, modul
     sema_app_endpoint_access(marker, graph, module_identity) != None
 }
 
+// The app markers of a webhook and of the method that gives its key. Neither
+// marks an endpoint: no Remote calls either method.
+SEMA_APP_WEBHOOK_MARKER: "Webhook"
+
+SEMA_APP_SIGNING_KEY_MARKER: "SigningKey"
+
+// Whether `marker`, written in module `module_identity`, is the app module's
+// marker `name`.
+sema_app_marker_is: fn(marker: Marker, name: String, graph: SemaRegistrationGraph, module_identity: ModuleID) -> Bool {
+    if marker.negated -> return false
+    resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
+    if resolved.status != "found" -> return false
+    declaration: resolved.declaration ?? return false
+    module_index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return false
+    graph.modules[module_index].module_name == SEMA_APP_MARKER_MODULE && declaration.name == name
+}
+
+// The index in `marker.args` of the written argument labeled `label`, else
+// of the unlabeled one at `position`.
+sema_app_marker_arg_at: fn(marker: Marker, label: String, position: Int) -> Int? {
+    loop (index, argument) in marker.args {
+        if !(argument == .Expr(_)) -> next
+        chosen := index == position
+        if index < marker.arg_labels.len() {
+            if marker.arg_labels[index] == .Val(named) -> chosen = named.name == label
+        }
+        if chosen -> return Val(index)
+    }
+    None
+}
+
+// The static String that argument `at` of `marker` gives; None when it
+// gives none.
+sema_app_marker_string: fn(marker: Marker, at: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
+    if marker.args[at] == .Expr(value) -> return sema_http_route_constant_string(value, environment, program, scopes)
+    None
+}
+
+// Where argument `at` of `marker` is written.
+sema_app_marker_span: fn(marker: Marker, at: Int) -> Span {
+    if marker.args[at] == .Expr(value) -> return expr_span(value)
+    marker.span
+}
+
+// Argument `at` of `marker`, checked as `expected`, as an argument of an App
+// registration.
+sema_app_marker_checked: fn(marker: Marker, at: Int, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+    if marker.args[at] == .Expr(value) {
+        checked: sema_check_expression(value, Val(expected), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        return Val(sema_call_http_static_tree_arg(checked, sema_http_mount_arg(value, expr_span(value))))
+    }
+    None
+}
+
 // The marker that makes method `func` an endpoint, written in module
 // `module_identity`, as written (`#App.SignedIn`,
 // `#Server.Get("/orders/:id")`), for `jet inspect choices`
@@ -446,6 +500,15 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                         }
                         break
                     }
+                    // A webhook answers POST `{prefix}{path}` for its sender.
+                    loop marker in method.markers {
+                        if !sema_app_marker_is(marker, SEMA_APP_WEBHOOK_MARKER, graph, method_module) -> next
+                        hook: sema_app_mount_webhook(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, definition.methods, method, method_module, marker, prefix, span, environment, program, scopes, state, tail_store, context, diagnostics)
+                        if hook == .Val(value) {
+                            body.push(TStmt.ExprStmt{value: value, span: span})
+                        }
+                        break
+                    }
                     loop marker in method.markers {
                         verb: sema_http_route_marker_verb(marker, graph, method_module) ?? next
                         if method.params.len() == 0 || method.params[0].name != "self" || method.params[0].convention != AccessConvention.Read || method.type_params.len() != 0 {
@@ -521,14 +584,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
 // `span`: the marker may sit in another file, or outside the function that
 // mounts, and a generated handler is a lambda of that function.
 sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method_module: ModuleID, access: String, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    graph: program.registration_graph ?? return None
-    concrete: method.params.len() > 0 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Read && method.type_params.len() == 0
-    read_only: loop index in 1..<method.params.len() {
-        if method.params[index].convention != AccessConvention.Read {
-            break false
-        }
-    } ?? true
-    if !concrete || !read_only {
+    if !sema_app_mount_concrete(method) {
         diagnostics.push(sema_error("E2805", marker.span, "endpoint method `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted endpoint decodes its arguments from the request and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
         return None
     }
@@ -540,11 +596,146 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
     if access == "SignedIn" {
         return sema_call_http_mux_source_call(mux, "__remote_signed_in", [TCallArg]{path, calls, window}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
     }
-    candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, mux.ty, "__remote_public", [Type]{}, [Type]{}, span, environment, program, diagnostics)
-    candidate: candidates.pop() ?? panic("App.__remote_public is not registered")
-    params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? panic("App.__remote_public has no parameter list")
-    declared_answer: params[1].ty ?? panic("App.__remote_public's answer has no type")
-    answer_type: sema_call_resolved_type(declared_answer, environment, program)
+    answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, "__remote_public", 1, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    sema_call_http_mux_source_call(mux, "__remote_public", [TCallArg]{path, answer, calls, window}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+}
+
+// Whether a mounted method `method` has read-only self, read parameters and
+// no method type parameters, so a request's decoded data can call it.
+sema_app_mount_concrete: fn(method: Func) -> Bool {
+    if method.params.len() == 0 || method.params[0].name != "self" || method.params[0].convention != AccessConvention.Read || method.type_params.len() != 0 {
+        return false
+    }
+    loop index in 1..<method.params.len() {
+        if method.params[index].convention != AccessConvention.Read -> return false
+    }
+    true
+}
+
+// The index in `methods`, declared in module `module_identity`, of the
+// method named `name` that `#App.SigningKey` marks; None when no method is
+// both.
+sema_app_signing_key_at: fn(methods: [Func], name: String, graph: SemaRegistrationGraph, module_identity: ModuleID) -> Int? {
+    loop (index, candidate) in methods {
+        if candidate.name != name -> next
+        loop marker in candidate.markers {
+            if sema_app_marker_is(marker, SEMA_APP_SIGNING_KEY_MARKER, graph, module_identity) -> return Val(index)
+        }
+    }
+    None
+}
+
+// The webhook method `method` of the mounted value `value_name`, of the
+// service `service`, answers POST `{prefix}{path}` on the App `mux` through
+// its `__webhook`, by its `#App.Webhook` `marker`. Its parameters named for
+// the path's parameters take them; one more, last, takes the delivery's
+// decoded body. `key:` names the method of `methods` that `#App.SigningKey`
+// marks (E2814 otherwise), whose key each delivery is checked under
+// (`sema_app_webhook_key`). The generated code is the mount call's, at
+// `span`.
+sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, methods: [Func], method: Func, method_module: ModuleID, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    graph: program.registration_graph ?? return None
+    if !sema_app_mount_concrete(method) {
+        diagnostics.push(sema_error("E2805", marker.span, "webhook method `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted webhook decodes its arguments from the delivery and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
+        return None
+    }
+    // The marker's own check reports a missing argument.
+    path_at: sema_app_marker_arg_at(marker, "path", 0) ?? return None
+    signature_at: sema_app_marker_arg_at(marker, "signature", 1) ?? return None
+    key_at: sema_app_marker_arg_at(marker, "key", 2) ?? return None
+    route: sema_app_marker_string(marker, path_at, environment, program, scopes) ?? {
+        diagnostics.push(sema_error("E2805", sema_app_marker_span(marker, path_at), "a webhook's path must be a static String", "a webhook's route is fully checked while building, mount prefix included", "use a literal or compile-time String constant"))
+        return None
+    }
+    address: "{prefix}{route}"
+    if sema_http_route_pattern_error(address) == .Val(reason) {
+        diagnostics.push(sema_http_route_invalid_diagnostic(address, reason, sema_app_marker_span(marker, path_at)))
+        return None
+    }
+    fields: sema_http_route_path_fields(address) ?? return None
+    // The indices of the method's path parameters, in its order, and their
+    // names joined by commas.
+    path_params := [Int]{}
+    joined := ""
+    loop index in 1..<method.params.len() {
+        name: method.params[index].name
+        in_path: loop field in fields {
+            if field.name == name -> break true
+        } ?? false
+        if in_path {
+            path_params.push(index)
+            if joined != "" -> joined = "{joined},"
+            joined = "{joined}{name}"
+            next
+        }
+        if index != method.params.len() - 1 {
+            diagnostics.push(sema_error("E2805", method.params[index].name_span, "webhook parameter `{name}` names no parameter of `{address}`", "a webhook's parameters take its path's parameters by name, and only its last takes the delivery's body", "rename `{name}` for a parameter of the path, or make it the last parameter"))
+            return None
+        }
+    }
+    key_name: sema_app_marker_string(marker, key_at, environment, program, scopes) ?? "…"
+    key_method_at: sema_app_signing_key_at(methods, key_name, graph, method_module) ?? {
+        entry: diagnostic_registry_row("E2814") ?? panic("E2814 must have a registry row")
+        diagnostics.push(sema_error("E2814", sema_app_marker_span(marker, key_at), entry.what.replace("{{key}}", key_name).replace("{{service}}", service), entry.why, entry.fix.replace("{{key}}", key_name)))
+        return None
+    }
+    key: sema_app_webhook_key(mux, value_name, methods[key_method_at], method, method_module, path_params, address, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    signature: sema_app_marker_checked(marker, signature_at, sema_app_mux_param_type(mux, "__webhook", 1, span, environment, program, diagnostics), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    path: sema_call_http_static_tree_arg(sema_call_http_core_string(address, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: address}}, span: span, id: AST_NODE_GENERATED}, span))
+    params: sema_call_http_static_tree_arg(sema_call_http_core_string(joined, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: joined}}, span: span, id: AST_NODE_GENERATED}, span))
+    answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, "__webhook", 4, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    sema_call_http_mux_source_call(mux, "__webhook", [TCallArg]{path, signature, params, key, answer}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+}
+
+// The checked key callback of the webhook `method`, whose path parameters
+// are `method`'s parameters at `path_params`: it decodes each parameter of
+// the signing-key method `key_method` from those, by name, and gives
+// `Ok(value.key_method(...))`.
+sema_app_webhook_key: fn(mux: TExpr, value_name: String, key_method: Func, method: Func, method_module: ModuleID, path_params: [Int], address: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+    graph: program.registration_graph ?? return None
+    if !sema_app_mount_concrete(key_method) {
+        diagnostics.push(sema_error("E2805", key_method.name_span, "signing-key method `{key_method.name}` needs read-only self, read parameters and a concrete signature", "a webhook runs its signing-key method on each delivery's path parameters, on request workers", "write `{key_method.name}: fn(self, ...)` with read parameters and without method type parameters"))
+        return None
+    }
+    args_name: "__jet_http_webhook_key_{span.start}"
+    statements := [Stmt]{}
+    reads := [CallArg]{}
+    loop index in 1..<key_method.params.len() {
+        name: key_method.params[index].name
+        position := -1
+        loop (at, param_index) in path_params {
+            if method.params[param_index].name == name -> position = at
+        }
+        if position < 0 {
+            diagnostics.push(sema_error("E2805", key_method.params[index].name_span, "signing-key parameter `{name}` names no path parameter of webhook `{method.name}`", "a signing-key method takes the webhook's path parameters by name, before the delivery's body is read", "take only parameters that `{method.name}` takes from `{address}`"))
+            return None
+        }
+        local_name: "{args_name}_{index}"
+        decoded: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__take", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{sema_type_resolve_declared(graph, key_method.params[index].ty, method_module)}, args: [CallArg]{sema_http_mount_arg(Expr.Int{value: position, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span)}, id: AST_NODE_GENERATED}
+        statements.push(Stmt.Val{binding: ast_binding(local_name, span, false, decoded, None)})
+        reads.push(sema_http_mount_arg(sema_app_remote_ident(local_name, span), span))
+    }
+    call: Expr.MethodCall{receiver: sema_app_remote_ident(value_name, span), method: key_method.name, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
+    statements.push(Stmt.Expr{expr: Expr.Ok{value: call, span: span, id: AST_NODE_GENERATED}})
+    sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__webhook", 3, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+// The type of parameter `index` of the App's registration method `name`.
+sema_app_mux_param_type: fn(mux: TExpr, name: String, index: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Type {
+    graph: program.registration_graph ?? panic("an App registration has no registration graph")
+    candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, mux.ty, name, [Type]{}, [Type]{}, span, environment, program, diagnostics)
+    candidate: candidates.pop() ?? panic("App.{name} is not registered")
+    params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? panic("App.{name} has no parameter list")
+    declared: params[index].ty ?? panic("App.{name}'s parameter {index} has no type")
+    sema_call_resolved_type(declared, environment, program)
+}
+
+// The checked callback, of type `answer_type`, that runs the mounted value
+// `value_name`'s method `method` on a call's arguments: it decodes each
+// argument from the call's JSON array in turn, runs the method, and gives its
+// encoded reply.
+sema_app_mount_answer: fn(value_name: String, method: Func, method_module: ModuleID, answer_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+    graph: program.registration_graph ?? return None
     args_name: "__jet_http_mount_args_{span.start}"
     statements := [Stmt]{}
     reads := [CallArg]{}
@@ -572,14 +763,20 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
         }
     }
     statements.push(Stmt.Expr{expr: Expr.Ok{value: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__reply_value", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{reply_type}, args: [CallArg]{sema_http_mount_arg(sema_app_remote_ident(replied, span), span)}, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}})
+    sema_app_mount_callback(args_name, statements, answer_type, span, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+// The lambda of one parameter `args_name` running `statements`, checked as
+// the escaping callback type `callback_type` an App registration takes.
+sema_app_mount_callback: fn(args_name: String, statements: [Stmt], callback_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
     handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: args_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: statements}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
-    answer_arg := sema_http_mount_arg(handler, span)
-    answer: sema_check_expression_with_lambda_escapes(answer_arg.expr, Val(answer_type), environment, program, scopes, state, tail_store, context, Val(true), diagnostics) ?? return None
-    if !sema_call_http_check_middleware_callback(answer, environment, program, scopes, state, context, diagnostics) {
+    callback_arg := sema_http_mount_arg(handler, span)
+    callback: sema_check_expression_with_lambda_escapes(callback_arg.expr, Val(callback_type), environment, program, scopes, state, tail_store, context, Val(true), diagnostics) ?? return None
+    if !sema_call_http_check_middleware_callback(callback, environment, program, scopes, state, context, diagnostics) {
         return None
     }
-    answer_arg.convention = AccessConvention.Move
-    sema_call_http_mux_source_call(mux, "__remote_public", [TCallArg]{path, sema_call_http_static_tree_arg(answer, answer_arg), calls, window}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+    callback_arg.convention = AccessConvention.Move
+    Val(sema_call_http_static_tree_arg(callback, callback_arg))
 }
 
 // The window an endpoint marker's `per:` defaults to: one minute.

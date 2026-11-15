@@ -1,0 +1,22 @@
+// A webhook whose `key:` names the service's `#App.SigningKey` method: it
+// checks.
+use {
+    app
+    web: core.web
+}
+
+Hooks: struct {
+    #App.Webhook(path: "/hooks/:project", signature: app.Signature.Stripe, key: "webhook_secret")
+    on_event: fn(self, project: String, event: String) -> Int {
+        project.len() + event.len()
+    }
+
+    #App.SigningKey
+    webhook_secret: fn(self, project: String) -> String? {
+        Val(project.copy())
+    }
+}
+
+run: fn() {
+    _: web.app().mount(Hooks{})
+}
