@@ -32,6 +32,7 @@ use jet_foundation.[
     TestSettingRow,
     test_setting_row,
     module_text,
+    module_is_core,
 ]
 
 sema_dyn_type: fn() -> Type Never! { Type.Named{name: "Dyn"} }
@@ -216,20 +217,33 @@ sema_data_check_explicit_type_args: fn(name: String, type_args: [Type], expected
     false
 }
 
-sema_data_check_encode: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+// `value.encode()`, or the storage codec's `value.encode_stored()` (`method`).
+sema_data_check_encode: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 0 || type_args.len() != 0 {
-        sema_data_arity_diagnostic("encode", 0, args.len(), span, diagnostics)
+        sema_data_arity_diagnostic(method, 0, args.len(), span, diagnostics)
         sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
-        if type_args.len() != 0 -> sema_data_check_explicit_type_args("encode", type_args, 0, span, diagnostics)
+        if type_args.len() != 0 -> sema_data_check_explicit_type_args(method, type_args, 0, span, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_serde_type_is_admissible(environment, program, receiver_value.ty, SemaSerdeDirection.Encode) {
-        diagnostics.push(sema_error("E0905", span, "`{type_name(receiver_value.ty)}` does not implement `Encode`", "`.encode()` can only call the value's Encode contract", "derive `Encode` on this type, or write its Encode implementation"))
+    stored: method == "encode_stored"
+    if stored && sema_data_stored_codec_hidden(receiver_value.ty, method, span, environment, context, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    admitted: if stored -> sema_serde_stored_is_admissible(environment, program, receiver_value.ty, SemaSerdeDirection.Encode) else -> sema_serde_type_is_admissible(environment, program, receiver_value.ty, SemaSerdeDirection.Encode)
+    if !admitted {
+        diagnostics.push(sema_error("E0905", span, "`{type_name(receiver_value.ty)}` does not implement `Encode`", "`.{method}()` can only call the value's Encode contract", "derive `Encode` on this type, or write its Encode implementation"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SerdeEncode{stored: false}, args: [TExpr]{}}, span)
+    value := sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SerdeEncode{stored: stored}, args: [TExpr]{}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// The storage codec (`value.encode_stored()`, `tree.decode_stored<T>()`)
+// keeps the `#Secret` fields the wire codec leaves off, so only Core and the
+// derived codec bodies call it; anywhere else `method` does not exist (E0102).
+sema_data_stored_codec_hidden: fn(owner: Type, method: String, span: Span, environment: SemaScopeEnvironment, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if module_is_core(environment.module_identity) || context.compiler_generated -> return false
+    diagnostics.push(sema_error("E0102", span, "`{type_name(owner)}` has no method `{method}`", "the storage codec keeps `#Secret` fields, so only Core's stored tables and derived codecs call it", "call `.encode()` or `.decode<T>()`, which leave `#Secret` fields off the wire"))
+    true
 }
 
 // (`FieldError.under`): one shared transform frames every error of a child
@@ -759,7 +773,7 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
         if stage.handled -> return stage
     }
     if method == "query" && resolved_ty == .List(row) -> return sema_data_check_list_query(receiver, receiver_value, row, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if method == "encode" && !sema_expr_declares_own_method(environment, program, receiver_value.ty, "encode") -> return sema_data_check_encode(receiver, receiver_value, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if (method == "encode" || method == "encode_stored") && !sema_expr_declares_own_method(environment, program, receiver_value.ty, method) -> return sema_data_check_encode(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if resolved_ty == {
         .Named(name) -> {
             if sema_data_is_json_name(name) {
@@ -767,20 +781,23 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                     special: sema_dyn_try_member(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                     if special.handled -> return special
                 }
-                if method == "decode" {
+                if method == "decode" || method == "decode_stored" {
                     if args.len() != 0 {
-                        sema_data_arity_diagnostic("Dyn.decode<T>", 0, args.len(), span, diagnostics)
+                        sema_data_arity_diagnostic("Dyn.{method}<T>", 0, args.len(), span, diagnostics)
                         sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
                         return SemaMethodSpecialCheck{handled: true, value: None}
                     }
-                    if !sema_data_check_explicit_type_args("Dyn.decode<T>", type_args, 1, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+                    if !sema_data_check_explicit_type_args("Dyn.{method}<T>", type_args, 1, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+                    stored: method == "decode_stored"
+                    if stored && sema_data_stored_codec_hidden(receiver_value.ty, method, span, environment, context, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
                     target := type_args[0]
                     if program.registration_graph == .Val(graph) -> target = sema_type_resolve_declared_with_generics(graph, target, environment.module_identity, environment.generic_params)
-                    if !sema_serde_type_is_admissible(environment, program, target, SemaSerdeDirection.Decode) {
-                        diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`Dyn.decode<{type_name(target)}>()` can only call the type's Decode contract", "derive `Decode` on `{type_name(target)}`, or write `impl {type_name(target)}.Decode`"))
+                    admitted: if stored -> sema_serde_stored_is_admissible(environment, program, target, SemaSerdeDirection.Decode) else -> sema_serde_type_is_admissible(environment, program, target, SemaSerdeDirection.Decode)
+                    if !admitted {
+                        diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`Dyn.{method}<{type_name(target)}>()` can only call the type's Decode contract", "derive `Decode` on `{type_name(target)}`, or write `impl {type_name(target)}.Decode`"))
                     }
                     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-                    value := sema_tree_node(sema_data_result(target, sema_data_decode_error()), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.DynDecode{ty: target, stored: false}, args: [TExpr]{}}, span)
+                    value := sema_tree_node(sema_data_result(target, sema_data_decode_error()), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.DynDecode{ty: target, stored: stored}, args: [TExpr]{}}, span)
                     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
                 }
                 return sema_data_try_accessor(receiver, receiver_value, name, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -1026,7 +1043,7 @@ sema_call_try_data_literal: fn(ty: Type, variant: String, args: [CallArg], span:
             diagnostics.push(sema_error("E0905", args[0].span, "`{type_name(value.ty)}` does not implement `Encode`", "`Dyn.from` calls the value's Encode contract", "derive or implement `Encode` on this type"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        return sema_data_check_encode(args[0].expr, value, [CallArg]{}, [Type]{}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        return sema_data_check_encode(args[0].expr, value, "encode", [CallArg]{}, [Type]{}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     private_number: sema_data_is_json_name(known_type) && variant == "Number" && context.unsafe_depth > 0
     if !private_number && !sema_data_literal_variant_valid(ty, variant) {

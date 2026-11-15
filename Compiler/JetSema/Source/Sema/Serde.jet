@@ -247,6 +247,18 @@ sema_serde_type_is_admissible: fn(environment: SemaScopeEnvironment, program: Se
     sema_serde_type_is_admissible_in(environment, program, environment.module_identity, ty, direction)
 }
 
+// Whether `ty` has the storage codec in `direction` (`value.encode_stored()`,
+// `tree.decode_stored<T>()`): what has the wire codec, and `#Secret T` when T
+// has it.
+sema_serde_stored_is_admissible: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
+    if ty == .Tagged(marker, inner) {
+        if marker == .User(name) {
+            if name == "Secret" -> return sema_serde_type_is_admissible(environment, program, inner, direction)
+        }
+    }
+    sema_serde_type_is_admissible(environment, program, ty, direction)
+}
+
 // Whether `ty`, as module `module_identity` names it, has the `direction`
 // codec; generic parameters are `environment`'s.
 sema_serde_type_is_admissible_in: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
