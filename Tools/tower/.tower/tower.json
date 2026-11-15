@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6908,
-    "rev": 104125,
+    "rev": 104138,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75611,8 +75611,8 @@
     {
       "id": "c0ozzmvc",
       "num": 6386,
-      "title": "Developer tools on the self-hosted toolchain: console attach, live view, flash watch, the embeddable engine and the devtools panels",
-      "body": "Found by ToolsJet-2 while fixing #6346 (dev 03c64ad0c4). None of these is a member of Compiler/package.jet, so nothing builds them, and each fails `jet check` on its own Source:\n- JetDevserver: 1594 errors in 40 files (E0003 1077 of mixed stale syntax, E-ERR-PROPAGATE 211, E0914 81, E0048 75, E0372 44, E0373 31, E0114 20, other 55).\n- JetLSP: 1690 errors, most through its dependency jet_devserver, about 100 in its own Source (E1001 about 40, Navigation E0003 25); its Tests hold about 1700 untranslated Rust-isms (.expect, .unwrap, OSPath.from, std.*).\n- JetSemIndex: SemIndex/Entry.jet calls check_file_with_effect_facts, check_file_with_overlays, check_file_with_overlays_and_import_root, build_index and build_symbol_db, which exist nowhere in Compiler/; it uses a Rust-style OSPath.to_string_lossy; Docs/* import the Core-private core.files.runtime.kernel_path_components (E1001 x4).\n- jet_cli_commands (Compiler/JetCli/Commands): needs pkg_fetch, PackageFetchOptions, StoreVerification and publication_emit_cyclonedx from Jetpack/Publication and Jetpack/Store, which are not packages. Its 6 test files moved to Compiler/JetCli/Commands/Tests in #6346.\nNo mechanical migration covers any of them. For each package, first decide whether it is live (what should build or call it: jet lsp, jet dev, the semantic index, the package commands) or retired residue under I9/D-EXEC2; then port it as a compiler member, or delete it, in one cutover.",
+      "title": "Attach to a running program: the live inspector, span export and the dev console",
+      "body": "Destination: a running Jet program can be attached to. `jet inspect live --attach PID` shows its task tree, channels, deadlines, effects, spans and allocations (D-OBSERVE-LIVE1=A, a viewer over the existing observability rails); spans export and replay with parent links; and the dev console attaches to the app's services, database resources and in-process router with read-only default authority, sandbox transactions and guards.\n\nWhy it matters: seeing a live program's state is the fastest way to find a stuck task or a bad request.\n\nThe tests/cases/live_inspect and event_observations rows in tests/known-failing.tsv belong to this card.\n\nHistory: this card first collected every developer tool that did not build on the self-hosted toolchain (found by ToolsJet-2 while fixing #6346). On 2026-11-15 the other tools moved to their own cards: LSP #4917 and #6901-#6904, jet dev #5931, jet debug #6730, SemIndex #6630, flash #6905, embedding #6906, records #6907, Canvas #6618.",
       "kind": "bug",
       "track": "sidequest",
       "epoch": null,
@@ -75626,6 +75626,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Split 2026-11-15: this card keeps attach (console and live inspector, c1-c4, c125, c128-c131). Moved: flash to #6905, embedding to #6906, records to #6907, c85 to #6887, c86 c114 c118 to #5931, c87 to #6898, c112 c113 to #6630, c117 to #6730, c127 to #6618; c126 merged into #6889 c6."
+        },
         {
           "at": "2026-11-12",
           "by": "Main",
@@ -75812,56 +75817,62 @@
         {
           "n": 85,
           "text": "(was #2486 c1) The live world inspector runs through the actual native host with typed scene projection, property/action routing, paused-frame evaluation and draw stepping, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:57:35.077Z"
+          "evidence": "Moved to #6887 c17: the game world inspector belongs with the game editor tools (#6887)",
+          "at": "2026-11-15T03:58:59.220Z",
+          "closure": "obsolete"
         },
         {
           "n": 86,
           "text": "(was #2497 c1) The built-in devtools dogfood package uses the public #DevPanel and explicit typed field/value publication path, its friction ledger is regenerated, and a tests/cases row proves it runs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:57:36.039Z"
+          "evidence": "Moved to #5931 c16: the devtools panels are served by jet dev (#5931)",
+          "at": "2026-11-15T03:59:00.431Z",
+          "closure": "obsolete"
         },
         {
           "n": 87,
           "text": "(was #2902 c1) The canonical syntax roundtrip census, full AST/form denominator, fmt/LSP/Canvas matrix and fail-closed new-variant coverage gate run as tests and pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:57:37.034Z"
+          "evidence": "Moved to #6898 c14: the syntax round-trip census guards the formatter and tools (#6898)",
+          "at": "2026-11-15T03:59:01.932Z",
+          "closure": "obsolete"
         },
         {
           "n": 112,
           "text": "(moved from #6418 c98) (was #2120 c2) A search by effect returns the functions that hold that authority Proof: a tests/cases row (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:22:10.756Z"
+          "evidence": "Moved to #6630 c17: search over the semantic index is SemIndex work (#6630)",
+          "at": "2026-11-15T03:59:03.362Z",
+          "closure": "obsolete"
         },
         {
           "n": 113,
           "text": "(moved from #6418 c99) (was #2120 c3) A search by input/output example returns candidates and shows why each matched Proof: a tests/cases row (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:22:12.529Z"
+          "evidence": "Moved to #6630 c18: search over the semantic index is SemIndex work (#6630)",
+          "at": "2026-11-15T03:59:04.813Z",
+          "closure": "obsolete"
         },
         {
           "n": 114,
           "text": "(moved from #6418 c109) (was #2240 c2) Works on the default tier inside the repo (no release flag, no E1355 workaround); proven against site/generate.jet [precut audit: failing on 9c7ddf1359: C:web_dev/jet_dev_static_generator_serves_reloads_and_watches_inputs KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): recv deadline exceeded after 60001.731497ms; stdout seen: (known-failing #6418: `jet dev` is not built yet (E2104))]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:28:55.330Z"
+          "evidence": "Moved to #5931 c14: jet dev is #5931",
+          "at": "2026-11-15T03:59:06.629Z",
+          "closure": "obsolete"
         },
         {
           "n": 115,
@@ -75876,20 +75887,22 @@
         {
           "n": 117,
           "text": "(moved from #6096 c11) event-observations-debugger: 5 deleted Rust tests have a Jet test covering the same behavior (tests/event_observations.rs::debugger_sees_only_executed_redacted_sync_and_hook_facts, tests/event_observations.rs::debugger_sees_pressure_drop_failure_close_and_single_terminals, tests/event_observations.rs::async_registration_and_once_removal_are_exact, tests/event_observations.rs::runtime_event_sequence_is_bounded_and_debugger_preserves_exact_sequence, …)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:29:00.503Z"
+          "evidence": "Moved to #6730 c30: debugger event observations are jet debug work (#6730)",
+          "at": "2026-11-15T03:59:07.912Z",
+          "closure": "obsolete"
         },
         {
           "n": 118,
           "text": "(moved from #5454 c34) (was #1383 c1, #1379 c1, #1377 c1, #1384 c1, #1382 c1, #1378 c1, #1381 c1) Every candidate listed in this card has a source-backed disposition in the security report [precut audit: failing on 9c7ddf1359: C:web_build/embedded_devserver_rejects_windows_absolute_static_paths KNOWN-FAILING #5454 assert not satisfied: original expect not satisfied: exit 1; expected 0 (known-failing #5454: assert not satisfied: original expect not satisfied)]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:29:02.157Z"
+          "evidence": "Moved to #5931 c15: the candidates are devserver security findings (#5931)",
+          "at": "2026-11-15T03:59:09.571Z",
+          "closure": "obsolete"
         },
         {
           "n": 121,
@@ -75943,20 +75956,22 @@
         {
           "n": 126,
           "text": "(was #4272) {\"decisionId\": \"D-DX-SQLSHELL1\", \"text\": \"Give local typed SQL one dedicated command with optional browser projection; Gains: Interactive and CI use one command.; Plans and limits are first-class.; Remote access stays explicit.. Losses: Remote engines need provider capabilities..\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_dx_sqlshell1_contract\", \"suite\": \"tests/ratified/P08.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P08/d_dx_sqlshell1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"edit pure ancestor reruns only pure descendants; effectful cells require confirmation; delete binding scrubs it; stale output labeled; bounded retained kernel state\", \"one resident game source/runtime session with identical headless/rendered events and authoritative Canvas routes\", \"typed local SQL interactive and CI command with plans/limits; optional browser projection; remote engine requires explicit provider authority\", \"local app selection shares reload/reconnect and serves real requests; local-only default; close shuts down resident process\"]}} (was #4275 c79)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:34:42.512Z"
+          "evidence": "Merged into #6889 c6: D-DX-SQLSHELL1=A (one local SQL command with optional browser projection) is the SQL console criterion",
+          "at": "2026-11-15T03:59:11.183Z",
+          "closure": "obsolete"
         },
         {
           "n": 127,
           "text": "(was #4272) [#3868] D-CODEMAP-VIEW1 treemap of the #3867 rows (#3961): • Every metric plus Blend, and all four border choices. • Click-to-source, plus zoom in and out. • The dev loop updates a rectangle live, and a saved --json snapshot opens in the same view. • First-render and hover latency on Compiler/ are logged. • An automated test proves sizes, colours and hover values come unchanged from the --json rows. • The owner accepts the visual design. (was #4275 c83)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:34:52.015Z"
+          "evidence": "Moved to #6618 c70: D-CODEMAP-VIEW1=A puts the Code Map in Canvas (#6618)",
+          "at": "2026-11-15T03:59:12.479Z",
+          "closure": "obsolete"
         },
         {
           "n": 128,
@@ -76003,7 +76018,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T20:11:53.653Z",
-      "updated": "2026-11-15T03:58:57.807Z",
+      "updated": "2026-11-15T03:59:25.693Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 131
     },
@@ -212250,6 +212265,97 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T03:59:25.693Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ozzmvc",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T03:59:15.492Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ozzmvc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:59:14.445Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ozzmvc",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:59:12.479Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ozzmvc",
+      "note": "#127"
+    },
+    {
+      "at": "2026-11-15T03:59:11.184Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ozzmvc",
+      "note": "#126"
+    },
+    {
+      "at": "2026-11-15T03:59:09.571Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ozzmvc",
+      "note": "#118"
+    },
+    {
+      "at": "2026-11-15T03:59:07.913Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ozzmvc",
+      "note": "#117"
+    },
+    {
+      "at": "2026-11-15T03:59:06.629Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ozzmvc",
+      "note": "#114"
+    },
+    {
+      "at": "2026-11-15T03:59:04.814Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ozzmvc",
+      "note": "#113"
+    },
+    {
+      "at": "2026-11-15T03:59:03.362Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ozzmvc",
+      "note": "#112"
+    },
+    {
+      "at": "2026-11-15T03:59:01.932Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ozzmvc",
+      "note": "#87"
+    },
+    {
+      "at": "2026-11-15T03:59:00.431Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ozzmvc",
+      "note": "#86"
+    },
+    {
+      "at": "2026-11-15T03:58:59.220Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ozzmvc",
+      "note": "#85"
+    },
+    {
       "at": "2026-11-15T03:58:57.807Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-meet",
@@ -215713,713 +215819,6 @@
       "action": "card.criteria-edit",
       "ref": "c0uyfbge",
       "note": "#13: strip debris; proof; was: (was #4426) [#4475] D-UNICODE-CASE1=A: generated Lowercase, Uppercase, Lt and UAX29 word facts drive istitle, is_lower and is_upper on every route."
-    },
-    {
-      "at": "2026-11-15T03:26:01.353Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uyfbge",
-      "note": "#12: strip debris; proof; was: (was #4426) [#4219] Padding targets the promised display width, not the scalar count, with wide-scalar fill goldens."
-    },
-    {
-      "at": "2026-11-15T03:26:00.473Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uyfbge",
-      "note": "#10: strip debris; proof; was: [#3370]  • UTF-8 byte, scalar and grapheme positions are distinct. • Empty delimiter, zero split limit, adjacent/trailing separators, CRLF and invalid bytes. • Borrowed substring lifetimes. • `text/co"
-    },
-    {
-      "at": "2026-11-15T03:25:59.616Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uyfbge",
-      "note": "#5: strip debris; only the ledger half remains; was: [#1471]  • Golden `text/regex` passes on every applicable tier. • The core-surface ledger check reports the closed accessor gaps (pattern/source, flags, named_captures, count, escape)."
-    },
-    {
-      "at": "2026-11-15T03:25:58.684Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uyfbge",
-      "note": "#4: state the gap; proof; was: `jet test Compiler --profile golden text/unicode_contracts` passes, with witnesses for full case folding (`Straße`→`strasse`, Greek final sigma, Turkish dotted I as the documented default), NFC/NFD/NF"
-    },
-    {
-      "at": "2026-11-15T03:25:57.775Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0sdz4q0",
-      "note": "#6 A text sink accepts only the checked text type or an audited"
-    },
-    {
-      "at": "2026-11-15T03:25:56.259Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0wssehw",
-      "note": "#2 A `Regex{…}` literal compiles to matcher code at build time:"
-    },
-    {
-      "at": "2026-11-15T03:25:55.334Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c065br2r",
-      "note": "Translatable view text and the opt-in i18n package (D-I18N1=A)"
-    },
-    {
-      "at": "2026-11-15T03:25:54.433Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0r8ohhq",
-      "note": "Text formatting: exact number formatting, data templates, explicit locales and text diffs"
-    },
-    {
-      "at": "2026-11-15T03:25:53.490Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0eymgfx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:25:52.569Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0eymgfx",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:25:51.009Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0eymgfx",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-15T03:25:50.037Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0eymgfx",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T03:25:49.098Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0eymgfx",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T03:25:48.059Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0eymgfx",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T03:25:47.063Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0eymgfx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T03:25:46.100Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0eymgfx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T03:25:45.185Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#24: strip debris; proof; was: (was #2097 c2) A string containing a newline, a tab and U+0001 round-trips as valid JSON through the devserver watch payload, the WebHost payload, the jetpack trust record and the Persist store [precu"
-    },
-    {
-      "at": "2026-11-15T03:25:44.302Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#19: strip debris; proof; was: (was #1813 c3) Boundary planning and focused proof show the same law through O0, O1 and O2 [precut audit: no dev test, golden, case or snapshot proves this today]"
-    },
-    {
-      "at": "2026-11-15T03:25:43.416Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#17: strip debris; absorbs c18; was: (was #1813 c1) Spec defines the crossing grid with time, schema, checker, evolution, and fact columns; every new boundary feature names one cell [precut audit: no dev test, golden, case or snapshot pr"
-    },
-    {
-      "at": "2026-11-15T03:25:42.543Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#16: strip debris; proof; was: [#3295] shape, layout, scalar-type and tag fidelity through JSON, `compute.serialize` and CBOR. Remove the divergent ad-hoc serializer (compute.jet:647-650). Golden `serde/tensor_codec`."
-    },
-    {
-      "at": "2026-11-15T03:25:41.599Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#15: strip debris; proof; was: [#3276] explicit-ID graph round trip, alias duplication, rejection of input-selected types, CBOR tag 28/29 refusal. Golden `serde/graph_identity`."
-    },
-    {
-      "at": "2026-11-15T03:25:40.579Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#14: strip debris; absorbs c5; was: [#3255] a fixture table for non-string keys, tags, bytes, numbers and variants, typed vs DataTree. Golden `serde/datatree_losslessness` + table in Docs/spec/encoding-decisions.md."
-    },
-    {
-      "at": "2026-11-15T03:25:39.588Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#13: strip debris; proof; was: [#3238]  • `json.schema<T>()` emits draft 2020-12 from Codable metadata: required, optional and default fields, renames, variants and recursion. • Custom codecs are represented honestly. The dialect i"
-    },
-    {
-      "at": "2026-11-15T03:25:38.654Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#12: strip debris; current syntax; was: [#3233]  • Grouped `#[Codable, DenyUnknownFields]`, `#Flatten`, custom Decode precedence, required/default/optional. • Missing vs null vs wrong-type; unknown-field rejection and ordered retention. • G"
-    },
-    {
-      "at": "2026-11-15T03:25:37.706Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#10: strip debris; spelling gated; was: [#3150]  • `DecodeAliases` reads old names and writes only the canonical name. Collisions are a compile error before codegen. • Golden `serde/enum_decode_aliases`; UI `enum_decode_alias_collision`."
-    },
-    {
-      "at": "2026-11-15T03:25:36.787Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#9: strip debris; spelling gated; was: [#3149]  • Opt-in `#Unknown Retained(UnknownVariant<Self>)` keeps the parsed tree. Known-case malformed payloads still error. The strict default is unchanged. • Golden `serde/enum_unknown`. UI errors:"
-    },
-    {
-      "at": "2026-11-15T03:25:35.848Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#8: strip debris; the retired #Discriminant spelling is not current syntax; was: [#3148]  • `Discriminant(\"kind\", content: \"body\")`: exact encode/decode for unit omission, shape, wrong tag and missing content. • Golden `serde/enum_adjacent`; UI `enum_adjacent_content_collides`."
-    },
-    {
-      "at": "2026-11-15T03:25:34.901Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0eymgfx",
-      "note": "#4: absorbs c1, c2 and c7; decisions; was: Shared typed-field traversal, override precedence and error paths have one canonical owner under the selected explicit contract."
-    },
-    {
-      "at": "2026-11-15T03:25:34.008Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0fvnyiq",
-      "note": "#13 jet test runs with a named profile, --set values and coverag"
-    },
-    {
-      "at": "2026-11-15T03:23:25.509Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c047t3lg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:23:24.417Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-15T03:23:23.491Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-15T03:23:22.554Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-15T03:23:21.632Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T03:23:20.682Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T03:23:19.756Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T03:23:18.826Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-15T03:23:17.923Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T03:23:17.019Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T03:23:16.090Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T03:23:15.161Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-15T03:23:14.246Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T03:23:13.321Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c047t3lg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T03:23:12.322Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c047t3lg",
-      "note": "#15: strip debris; proof; was: Jetpack/Foundation/Tests/PublicDestination.jet's three tests (all DNS answers must be public; comptime_http_fetch rejects loopback; the pinned stream rejects an empty set) compile and pass under jet t"
-    },
-    {
-      "at": "2026-11-15T03:23:11.405Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c047t3lg",
-      "note": "#5: strip debris; proof; was: [#3595] Capped streaming fetch, redirect target policy and destination pinning (D-CORE-HTTPBODYLIMIT1, HTTPREDIRECT1, HTTPDEST1). `.Public` follows the dated IANA table (D-CORE-NETPUBLIC1). Inherited "
-    },
-    {
-      "at": "2026-11-15T03:23:10.446Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c047t3lg",
-      "note": "#23: strip debris; proof; was: A one-shot HTTP response's second body().text returns Err(.BodyConsumed) and never yields the body again. Found 11-07 by the same case; drop its known-failing row when both 3595 rows pass. (merged fro"
-    },
-    {
-      "at": "2026-11-15T03:23:09.534Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c047t3lg",
-      "note": "#17: strip debris; proof; was: (was #2382 c3) The client request builder json(value) accepts Codable values, uses the existing typed encoder, sets JSON framing, does not conflict with decode-side inference, and replaces the audited"
-    },
-    {
-      "at": "2026-11-15T03:23:08.637Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c047t3lg",
-      "note": "#16: strip debris; current rows; was: (was #2382 c2) Incoming request and received response text projections delegate to the one body lifecycle and canonical one-MiB default-cap identity; default, explicit-limit, over-limit, consumed-body"
-    },
-    {
-      "at": "2026-11-15T03:23:07.745Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c047t3lg",
-      "note": "#12: strip debris; current rows; was: (was #6033) The http_client_law fixtures that call Client.new() run on default and --release tiers, and the 2 #5454 KNOWN-FAILING rows pass or are re-filed with a reason."
-    },
-    {
-      "at": "2026-11-15T03:23:06.853Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c047t3lg",
-      "note": "#11: strip debris; absorbs c1; was: (was #6033) `http.Client.new()` and every builder method in core-library.md:1048-1057 are Jet functions in Core/Http/Client.jet, and `git grep -n 'HTTPClientNew\\|jet_http_client_new_impl' -- Compiler "
-    },
-    {
-      "at": "2026-11-15T03:23:05.930Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c047t3lg",
-      "note": "#9: add proof; was: D-HTTP-HEADER-BAD1=A: HeaderName/HeaderValue are checked text types with RFC token/field-value literal validation; all listed setters/builders require them; dynamic parse returns HTTPError.InvalidHead"
-    },
-    {
-      "at": "2026-11-15T03:23:04.982Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c047t3lg",
-      "note": "#4: split the 40-case umbrella into one criterion per mechanism (HK2-HK8, HK10); was: `jet test Compiler --profile cases http_client_law/` (all 40 tests, e.g. `pooled_h1_reuses_only_after_drain_and_decodes_gzip_natively`, `h1_rejects_request_target_controls_before_connecting`, `session"
-    },
-    {
-      "at": "2026-11-15T03:23:04.045Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c047t3lg",
-      "note": "#2: absorbs c3 and c4's golden part; was: Every route (O0, O1, O2 and web where applicable) calls the one Jet meaning, proven by a golden example with identical output on each applicable tier."
-    },
-    {
-      "at": "2026-11-15T03:23:03.170Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0ejfsdq",
-      "note": "#7 Server policy order: CORS never authorizes, security headers"
-    },
-    {
-      "at": "2026-11-15T03:23:02.281Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0ejfsdq",
-      "note": "#6 HTTP/1 server framing, session policy and PEM/X.509 parsing "
-    },
-    {
-      "at": "2026-11-15T03:23:01.225Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c047t3lg",
-      "note": "#34 The four corelib/core_http_client_ fixtures (binary body onc"
-    },
-    {
-      "at": "2026-11-15T03:23:00.289Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c047t3lg",
-      "note": "#33 Client deadlines: request_first_byte_timeout_overrides_clien"
-    },
-    {
-      "at": "2026-11-15T03:22:59.352Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c047t3lg",
-      "note": "#32 Request bodies stream: `.body(...)` takes a byte source, and"
-    },
-    {
-      "at": "2026-11-15T03:22:58.448Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c047t3lg",
-      "note": "#31 Client TLS policy is in Core: public_client_tls_custom_only_"
-    },
-    {
-      "at": "2026-11-15T03:22:57.540Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c047t3lg",
-      "note": "#30 The h2 client and HPACK are in Core: explicit_h2c_negotiates"
-    },
-    {
-      "at": "2026-11-15T03:22:56.634Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c047t3lg",
-      "note": "#29 Proxy selection is in Core: public_client_proxy_none_ignores"
-    },
-    {
-      "at": "2026-11-15T03:22:55.748Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c047t3lg",
-      "note": "#28 Redirect policy is in Core: follow_same_origin_credentials_s"
-    },
-    {
-      "at": "2026-11-15T03:22:54.878Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c047t3lg",
-      "note": "#27 The configured client's cookie jar is in Core: http_client_l"
-    },
-    {
-      "at": "2026-11-15T03:22:53.996Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0v54mn1",
-      "note": "Core sockets and DNS: one TCP write, honest EOF and close, UDP truncation, resolv.conf, and explicit call states"
-    },
-    {
-      "at": "2026-11-15T03:22:53.105Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c02vmcbl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:22:52.248Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c02vmcbl",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:22:50.771Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c02vmcbl",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-15T03:22:49.871Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c02vmcbl",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T03:22:49.003Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c02vmcbl",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T03:22:48.127Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c02vmcbl",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T03:22:47.248Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c02vmcbl",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T03:22:46.362Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c02vmcbl",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-15T03:22:45.456Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c02vmcbl",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:22:44.559Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c02vmcbl",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T03:22:43.671Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c02vmcbl",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T03:22:42.775Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02vmcbl",
-      "note": "#12: strip debris; proof; was: (was #1204 c4) Maps use ordinary explicit construction, Sets use Set.from, lazy work uses existing iterator adapters, and no duplicate terminal or iterator mechanism appears [precut audit: no dev test"
-    },
-    {
-      "at": "2026-11-15T03:22:41.843Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02vmcbl",
-      "note": "#11: absorbs c13; was: O0, O1, O2 and compile-time evaluation preserve item order, nested List shape, filters, multiple sources and partial-list breaks for yielding loops (a golden FromIter example passes on every tier)."
-    },
-    {
-      "at": "2026-11-15T03:22:40.961Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02vmcbl",
-      "note": "#9: name the current decision; proof; was: (was #1204 c1) D-COMPREHENSION1 is reconciled with D-ARROW-CONTROL1, D-LOOPEVAL1, D-LOOPSTATE1, D-FAILCOMP1, syntax-decisions.md, core-library.md and the syntax registry."
-    },
-    {
-      "at": "2026-11-15T03:22:40.067Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02vmcbl",
-      "note": "#8: strip debris; proof; was: [#3363]  • Empty-input sum/product identities are explicit. Custom domain values, reference items, Result/Option short-circuiting and numeric wrappers are covered. • Int overflow is the same told fail"
-    },
-    {
-      "at": "2026-11-15T03:22:39.137Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02vmcbl",
-      "note": "#7: strip debris; decision; proof; was: [#3354]  • One classifier call routes each item to exactly one typed destination, through the same destination protocol. • A classifier failure is distinct from an error branch. • JP: `collections/par"
-    },
-    {
-      "at": "2026-11-15T03:22:38.052Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02vmcbl",
-      "note": "#6: strip debris; decision; proof; was: [#3330]  • Extends in place from any iterable, with no temporary List. • Uses Map last-wins, Set dedup and String/byte policy. The prefix-on-failure rule is explicit. • Golden `collections/extend_iter"
-    },
-    {
-      "at": "2026-11-15T03:22:37.159Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02vmcbl",
-      "note": "#3: one outcome with a proof; was: One construction mechanism handles ordinary and fallible input with the approved partial-result and cleanup law; failed construction does not leak resources."
-    },
-    {
-      "at": "2026-11-15T03:22:36.289Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02vmcbl",
-      "note": "#2: absorbs c5 and c10; was: The requested destination is explicit at the call; no expected type silently changes a yielding loop or a plain collection map/filter."
-    },
-    {
-      "at": "2026-11-15T03:22:35.408Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02vmcbl",
-      "note": "#1: absorbs c4; current paths; decision; was: List, Set, Map, text, tuple/product destinations, outcomes and a user-defined destination have exact ownership/order/duplicate/short-circuit contracts."
-    },
-    {
-      "at": "2026-11-15T03:22:31.230Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xb6zik",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:20:37.505Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0t54oz7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:20:36.405Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0t54oz7",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:20:34.565Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#57"
-    },
-    {
-      "at": "2026-11-15T03:20:33.399Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#55"
-    },
-    {
-      "at": "2026-11-15T03:20:31.913Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#53"
-    },
-    {
-      "at": "2026-11-15T03:20:30.675Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#52"
-    },
-    {
-      "at": "2026-11-15T03:20:29.390Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#51"
-    },
-    {
-      "at": "2026-11-15T03:20:28.108Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#49"
-    },
-    {
-      "at": "2026-11-15T03:20:26.427Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#48"
-    },
-    {
-      "at": "2026-11-15T03:20:24.867Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#47"
-    },
-    {
-      "at": "2026-11-15T03:20:23.576Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#46"
-    },
-    {
-      "at": "2026-11-15T03:20:22.374Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-15T03:20:21.156Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#37"
-    },
-    {
-      "at": "2026-11-15T03:20:19.724Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-15T03:20:18.401Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-15T03:20:17.172Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#29"
     }
   ],
   "nextNum": 368,
