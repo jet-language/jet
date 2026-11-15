@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6925,
-    "rev": 104600,
+    "rev": 104625,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40185,12 +40185,12 @@
         },
         {
           "n": 6,
-          "text": "Taking the raw address of a list element inside #Unsafe (`*list[0]`) either compiles to a pointer into the list's storage or is rejected with a registered diagnostic; today it is an internal compiler error (\"raw address of a temporary\"), which violates I2. A census probes every place-expression form under * (list, array, field, nested index, view) at O0, O1 and O2, and each lands as a case. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "text": "Taking the raw address of a list element inside #Unsafe (`*list[0]`) either compiles to a pointer into the list's storage or is refused with a registered error; on dev 0ccdff27ea it was an internal compiler error (\"raw address of a temporary\"), which violates I2. Every place-expression form under `*` (list, array, field, nested index, view) is probed at O0, O1 and O2 and lands as a case (found by the 2026-11-05 Doom port investigation). Proof: `jet test Compiler --profile cases --filter unsafe/raw_address_of_place_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T14:23:20.496Z"
+          "at": "2026-11-15T04:31:55.303Z"
         },
         {
           "n": 7,
@@ -40212,39 +40212,39 @@
         },
         {
           "n": 9,
-          "text": "D-STACKBOUND1=A is built: `jet inspect memory` prints worst-case stack and heap per entry point from backend frame sizes and the call graph; `!Mem.Stack(above: N)` enforces a stack limit and `!Mem.Alloc(above: N)` the total heap any call path may allocate; recursion needs #MaxDepth(n) and dynamic calls a sealed target set. Proof: a golden of the report and a UI snapshot per refusal. (was #3239 c35)",
+          "text": "D-STACKBOUND1=A is built: `jet inspect memory` prints the worst-case stack and heap per entry point from backend frame sizes and the call graph. `!Mem.Stack(above: N)` enforces a stack limit and `!Mem.Alloc(above: N)` the total heap any call path may allocate; recursion needs `#MaxDepth(n)`, and dynamic calls need a sealed target set. Proof: `jet test Compiler --profile golden --filter inspect_memory_report` and `jet test Compiler --profile ui --filter stack_bound_`, one snapshot per refusal.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:44:15.995Z"
+          "at": "2026-11-15T04:31:56.322Z"
         },
         {
           "n": 10,
-          "text": "Found 2026-11-09 (G6Lead, probes $JET_SCRATCH_ROOT/lanes/G6Lead/ballots/probes/cycle/s19 and s20): a strong edge hidden in a closure is accepted and leaks. A feed owns a Close stream and a listener closure captures the feed strongly; E0221 accepts it, the program prints \"end\" and never \"closed 7\". Cause: SharedCycles.jet treats a `.Lambda` as a fresh value and skips places of function type. Safe code that forms such a cycle is refused by sema (or freed, if the type opts into collection), on O0, O1, O2 and web; a case proves the refusal, the weak-capture form (s22) still runs and closes, and a UI snapshot shows the diagnostic.",
+          "text": "Found 2026-11-09 (G6Lead, probes $JET_SCRATCH_ROOT/lanes/G6Lead/ballots/probes/cycle/s19 and s20): a strong edge hidden in a closure is accepted and leaks. A feed owns a Close stream and a listener closure captures the feed strongly; E0221 accepts it, the program prints \"end\" and never \"closed 7\". Cause: SharedCycles.jet treats a `.Lambda` as a fresh value and skips places of function type. Safe code that forms such a cycle is refused by sema (or freed, if the type opts into collection), on O0, O1, O2 and web; a case proves the refusal, the weak-capture form (s22) still runs and closes, and a UI snapshot shows the diagnostic. Proof: `jet test Compiler --profile cases --filter shared_cycles/closure_strong_edge_` (refusal and the weak-capture s22 form) on O0, O1, O2 and web, and `jet test Compiler --profile ui --filter closure_strong_edge_cycle`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T22:43:48.557Z"
+          "at": "2026-11-15T04:31:57.266Z"
         },
         {
           "n": 11,
-          "text": "Found 2026-11-09 (TlsLead): `mem.address_of(shared[0])` on a mutable Shared list fails in lowering with \"ir.build unlowered: write place StaticCall of Shared<[Int]>\". Sema either accepts the program and it lowers and runs the same on O0, O1, O2 and web, or refuses it with a registered diagnostic and a UI snapshot; a case proves it.",
+          "text": "Found 2026-11-09 (TlsLead): `mem.address_of(shared[0])` on a mutable Shared list fails in lowering with \"ir.build unlowered: write place StaticCall of Shared<[Int]>\". Sema either accepts the program and it lowers and runs the same on O0, O1, O2 and web, or refuses it with a registered diagnostic and a UI snapshot; a case proves it. Proof: `jet test Compiler --profile cases --filter unsafe/address_of_shared_list_element`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T22:58:30.836Z"
+          "at": "2026-11-15T04:31:58.223Z"
         },
         {
           "n": 12,
-          "text": "A raw-pointer fault (R0801 and the other raw-access stops) is reported at the line and column of the faulting access, not at the enclosing #Unsafe gate, and its report prints the range detail (the valid range and the attempted offset) its row declares. A case shows both at O0, O1, O2 and under --profile=hardened. (Found by G10Safe-1 in seed probes q68/q69 for #3645 c8 S2/S3; Main.)",
+          "text": "A raw-pointer fault (R0801 and the other raw-access stops) is reported at the line and column of the faulting access, not at the enclosing #Unsafe gate, and its report prints the range detail (the valid range and the attempted offset) its row declares. A case shows both at O0, O1, O2 and under --profile=hardened. (Found by G10Safe-1 in seed probes q68/q69 for #3645 c8 S2/S3; Main.) Proof: `jet test Compiler --profile cases --filter unsafe/raw_fault_points_at_access` on O0, O1, O2 and `--profile=hardened`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T08:03:49.723Z"
+          "at": "2026-11-15T04:31:59.193Z"
         },
         {
           "n": 13,
@@ -40273,8 +40273,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:46:54.243Z",
-      "updated": "2026-11-13T10:46:05.301Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:31:59.193Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
@@ -42573,12 +42573,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Probe p34 `build(title, rows)` has zero copies in `jet audit copies`; the p35 builder matches inline in its paired two-program cell (builder/inline at most 1.00 on every metric).",
+          "text": "Probe p34 `build(title, rows)` has zero copies in `jet audit copies`; the p35 builder matches inline in its paired two-program cell (builder/inline at most 1.00 on every metric). Proof: `jet audit copies` on p34 lists no site, and the committed p35 paired-cell receipt shows builder/inline at most 1.00 on every metric.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-03T02:28:14.038Z"
+          "at": "2026-11-15T04:32:00.187Z"
         },
         {
           "n": 2,
@@ -42591,21 +42591,21 @@
         },
         {
           "n": 4,
-          "text": "[#3738] `jet audit copies` on p31 and p33 reports exactly the real sites (p31 7:16 and 16:37; p33 9:21) from JetSema copy events and never a struct name. `jet fmt --explicit-copies` writes parseable `.copy()` at exactly those sites, and the result checks clean under `#Policy(copies: .Explicit)`. Every audited site is a registered diagnostic with a Safe `.copy()` edit under that policy. A formatter parse failure is a compiler-defect diagnostic.",
+          "text": "`jet audit copies` on p31 and p33 reports exactly the real sites (p31 7:16 and 16:37; p33 9:21) from JetSema copy events, never a struct name. `jet fmt --explicit-copies` writes parseable `.copy()` at exactly those sites, and the result checks clean under `#Policy(copies: .Explicit)`, where every audited site is a registered error with a Safe `.copy()` edit. A formatter parse failure is a compiler-defect error. Proof: `jet test Compiler --profile cases --filter copies/audit_p31_p33` and `jet test Compiler --profile ui --filter copies_explicit_policy_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:00:16.376Z"
+          "at": "2026-11-15T04:32:01.371Z"
         },
         {
           "n": 6,
-          "text": "[#3837] p33 `Holder{xs: a}` then `a.push(9)` stores in O(1) and copies once, at the write. A `.trim()` stored in a field allocates nothing (audit and perf cell). Levels agree.",
+          "text": "In p33, `Holder{xs: a}` then `a.push(9)` stores in O(1) and copies once, at the write, and a `.trim()` stored in a field allocates nothing, the same on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter copies/holder_push_copies_once_at_write` and its paired cell.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:00:18.420Z"
+          "at": "2026-11-15T04:32:02.685Z"
         },
         {
           "n": 7,
@@ -42636,48 +42636,48 @@
         },
         {
           "n": 10,
-          "text": "(was #6392) DWARF debug info records each moved free point, and o0, o1 and o2 agree on output (I9).",
+          "text": "DWARF debug info records each moved value's free point, and O0, O1 and O2 agree on output (I9). Proof: `jet test Compiler --profile cases --filter debug/dwarf_moved_free_points`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:20:51.117Z"
+          "at": "2026-11-15T04:32:03.831Z"
         },
         {
           "n": 11,
-          "text": "Zero unjustified copies (owner order 2026-11-14). Every .copy() in Compiler, Core, Jetpack and Tools is either removed (moved at its last use, borrowed, the owner restructured, or a name made an interned id) or carries a justification row in the copy ledger. A row names the copy site and a paired two-program measurement on the reference machine showing that the copy makes that path faster, in wall time or peak memory, than the copy-free spelling. A copy that is neutral or slower is not justified. tests/guards/copy_ratchet.jet fails on any copy without a justified row, and the count of unjustified copies is 0. Baseline 2026-11-14: 6,686 explicit copies in 637 Compiler files, none justified.",
+          "text": "Zero unjustified copies (owner order 2026-11-14). Every .copy() in Compiler, Core, Jetpack and Tools is either removed (moved at its last use, borrowed, the owner restructured, or a name made an interned id) or carries a justification row in the copy ledger. A row names the copy site and a paired two-program measurement on the reference machine showing that the copy makes that path faster, in wall time or peak memory, than the copy-free spelling. A copy that is neutral or slower is not justified. tests/guards/copy_ratchet.jet fails on any copy without a justified row, and the count of unjustified copies is 0. Baseline 2026-11-14: 6,686 explicit copies in 637 Compiler files, none justified. Proof: `jet test tests/guards --filter copy_ratchet` reports 0 unjustified copies.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T22:51:46.331Z"
+          "at": "2026-11-15T04:32:05.061Z"
         },
         {
           "n": 12,
-          "text": "Implicit copies count too. The compiler reports every deep copy it inserts without a written .copy() as a site list, from jet check --trace or a lint, and the same zero-unjustified rule and guard apply to it.",
+          "text": "Implicit copies count too. The compiler reports every deep copy it inserts without a written .copy() as a site list, from jet check --trace or a lint, and the same zero-unjustified rule and guard apply to it. Proof: `jet test Compiler --profile cases --filter copies/implicit_copy_site_list`, and `jet test tests/guards --filter copy_ratchet` counts implicit copies.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T22:51:47.236Z"
+          "at": "2026-11-15T04:32:06.168Z"
         },
         {
           "n": 13,
-          "text": "No copy ceiling ever rises. No SUB, rebase or lander fix-up raises a ledger ceiling or adds a row without a justification; the guard and the lander refuse it. Main raised SerdeItems.jet to 50 in the stack127 fix-ups on 2026-11-14; that rise is undone.",
+          "text": "No copy ceiling ever rises. No SUB, rebase or lander fix-up raises a ledger ceiling or adds a row without a justification; the guard and the lander refuse it. Main raised SerdeItems.jet to 50 in the stack127 fix-ups on 2026-11-14; that rise is undone. Proof: `jet test tests/guards --filter copy_ratchet` refuses a raised ceiling or an unjustified row (a negative-control case), and the SerdeItems.jet ceiling is back below 50.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T22:51:48.150Z"
+          "at": "2026-11-15T04:32:07.273Z"
         },
         {
           "n": 14,
-          "text": "Removing copies never makes Jet slower. Each copy-removal batch shows the cold self-compile wall time and peak memory, measured on the batch compiler, at or below the batch before it.",
+          "text": "Removing copies never makes Jet slower. Each copy-removal batch shows the cold self-compile wall time and peak memory, measured on the batch compiler, at or below the batch before it. Proof: each copy-removal batch receipt lists cold self-compile wall time and peak memory, each at or below the batch before it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T22:51:49.032Z"
+          "at": "2026-11-15T04:32:08.315Z"
         },
         {
           "n": 15,
@@ -42700,7 +42700,7 @@
       "parentId": "c00e9u2p",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:08.223Z",
-      "updated": "2026-11-15T03:14:15.651Z",
+      "updated": "2026-11-15T04:32:08.315Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -64561,8 +64561,8 @@
     {
       "id": "c00e9u2p",
       "num": 5989,
-      "title": "Map: Drop glue and moves: Close always runs, fields drop in order, moves never copy",
-      "body": "Destination: Every Close/#MustFinish value is released exactly once on every exit; moves out of fields, params, patterns and destructures lower to moves.\nNotes: Batch B02 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && JET=$JET Tools/agent/jet-env jet test Tools/testkit \"suite ui\" (add each card's repro as a tests/ui fixture first; both halves: rejected program and accepted fix) ; plus goldens memory/destructure_drop_order and the Close-on-panic goldens on o0,o1. Order: #3836 #5031 #4562 #4564 #4567 #4617 #4916 #5517 #5581 #5906 #4569 #4703 #4744 #5821.\nDecisions so far: D-FIELD-DROP-ORDER1 (ratified=A) on #4567\nFog: no criteria yet on #5906 #4703 #4617 #4916 #4744 #4567 #5031 #4564 #4569 #5821 #5517 #5581 #4562 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
+      "title": "Close always runs exactly once: fields drop in order, and a Close during unwinding or cancellation follows the spec",
+      "body": "Destination: every Close and #MustFinish value is released exactly once on every exit. Fields drop in the order D-FIELD-DROP-ORDER1=A sets, a second panic during unwinding stops the process as the spec says, and a cancel never cuts a running Close short.\n\nWhy: a Close that is skipped, runs twice or is cut short leaks a resource or corrupts its protocol (a file, a lock, a connection, a flush or a commit).\n\nSource: map #5989 of the 2026-10-28 board consolidation. Its move and copy criteria went to #6923, purity check skipping to #3039, and region release to #6924. The known-failing row for the cancel case names this card.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -64576,6 +64576,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Map split 2026-11-15 by TowerKeeper-1. This card keeps Close and drop order (c5, c17, c18). Moves and copies (c1, c2, c3, c4, c7, c10, c12, c13, c20) went to #6923, c14 to #3039 (PURESKIP), and c16 to #6924."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -64646,20 +64651,22 @@
         {
           "n": 1,
           "text": "(was #4562) Task moves and borrows on the IR path (SP13): task goldens pass on the IR path, and no task argument is cloned without a sema decision.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:00:20.698Z"
+          "evidence": "Moved to #6923 c4: task argument moves",
+          "at": "2026-11-15T04:30:13.492Z",
+          "closure": "obsolete"
         },
         {
           "n": 2,
           "text": "(was #4564) Close Jet sema gaps found in stage-2 copy work: each listed case is accepted or rejected per the Jet spec, with a golden.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:00:24.570Z"
+          "evidence": "Moved to #6923 c9: stage-2 copy gaps (E0204, E0320, false L0102) named in folded #4564",
+          "at": "2026-11-15T04:30:18.480Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
@@ -64674,11 +64681,12 @@
         {
           "n": 4,
           "text": "(was #4569) Self-hosted compiler: three linear copy residues: copy-count goldens drop and no copy appears without a sema decision.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:00:41.684Z"
+          "evidence": "Moved to #6923 c6: linear copy residues",
+          "at": "2026-11-15T04:30:15.469Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
@@ -64729,11 +64737,12 @@
         {
           "n": 10,
           "text": "(was #5821) A task closure keeps its captured arguments alive after the body moves them out: an example where a task moves a large captured value out and peak RSS",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:55:27.170Z"
+          "evidence": "Moved to #6923 c5: task capture lifetime",
+          "at": "2026-11-15T04:30:14.536Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
@@ -64747,38 +64756,42 @@
         {
           "n": 12,
           "text": "The ~64 remaining dead parameter copies at O1 are gone: the entry-clone count from `jet inspect choices` over the self-hosted compiler reports them removed (receipt with command and count).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:06:37.158Z"
+          "evidence": "Moved to #6923 c7: dead parameter copies",
+          "at": "2026-11-15T04:30:16.452Z",
+          "closure": "obsolete"
         },
         {
           "n": 13,
           "text": "(was #5041) [from #4318] [#4455] #Static fixed arrays are shared addressable constants, so hot loops (SHA-256 K) emit no array copies.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:45:15.059Z"
+          "evidence": "Moved to #6923 c8: #Static array copies",
+          "at": "2026-11-15T04:30:17.467Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
           "text": "(was #5041) [from #4318] [#4246] Proven-pure calls skip generation, alias and count checks on pre-existing values. jet inspect choices lists every skipped check, and removing purity restores them. A paired cell with and without -[]> is recorded.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:45:16.607Z"
+          "evidence": "Moved to #3039 c11: purity is a sema fact consumed in JetIR, which #3039 owns",
+          "at": "2026-11-15T04:30:19.460Z",
+          "closure": "obsolete"
         },
         {
           "n": 16,
           "text": "(was #5041) [from #4318] [#4320] Plain-data graphs are released through root/phase regions in O(1), with no exit teardown. Close and scrub duties are kept.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:45:19.379Z"
+          "evidence": "Moved to #6924 c1: split into region release (REGIONREL c1) and no exit teardown (REGIONREL c2)",
+          "at": "2026-11-15T04:30:20.429Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
@@ -64820,14 +64833,13 @@
       ],
       "refs": [],
       "tags": [
-        "wayfinder:map",
         "consolidation-2026-10-28",
         "wayfinder:task"
       ],
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-28T11:41:38.387Z",
-      "updated": "2026-11-15T04:30:12.260Z",
+      "updated": "2026-11-15T04:30:30.222Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -100884,6 +100896,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c11 decisions (Main, 2026-11-14 23:35). (1) Each remaining primitive cell (mapping, compare, alloc/free, resize) lands as an honest measurement even while it fails the ceiling. (2) No easier substitute: Region.claim is an extra cell, never alloc/free's replacement. The alloc/free and resize references implement the same features at minimum size: a slab with size classes, the page map, and cross-thread free. (3) Compare adds no primitive (I8): the cell measures existing [U8] equality against a memcmp-class SIMD reference; a byte-loop loss is fixed in the general equality lowering. (4) Mapping: the runtime fix carves page-map units from one aligned VA reservation (no trim munmaps) and keeps the global lock off the fast path, general for every Region.reserve."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c11 rawword (CardCloser-3, 2026-11-14 23:25). The Int-to-word conversion for a raw pointer offset is already inline: an add/jo tag test, about 12 B per access, with the call only on the cold big-Int path. OptRange deletes it when it proves the Int inline. rawword paid it because its Op table held Int fields while ref.S holds 4-byte fields; the cell moves to U32 fields so both sides do the same work on the same data. Known general cost: a raw access indexed by an Int that OptRange can't prove inline pays the 12 B tag test."
         },
         {
@@ -101035,7 +101052,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T04:09:05.668Z",
+      "updated": "2026-11-15T04:31:26.938Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -214239,6 +214256,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:32:08.315Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jxsy7l",
+      "note": "#14: proof; was: Removing copies never makes Jet slower. Each copy-removal batch shows the cold self-compile wall time and peak memory, measured on the batch compiler, at or below the batch before it."
+    },
+    {
+      "at": "2026-11-15T04:32:07.273Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jxsy7l",
+      "note": "#13: proof; was: No copy ceiling ever rises. No SUB, rebase or lander fix-up raises a ledger ceiling or adds a row without a justification; the guard and the lander refuse it. Main raised SerdeItems.jet to 50 in the s"
+    },
+    {
+      "at": "2026-11-15T04:32:06.168Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jxsy7l",
+      "note": "#12: proof; was: Implicit copies count too. The compiler reports every deep copy it inserts without a written .copy() as a site list, from jet check --trace or a lint, and the same zero-unjustified rule and guard appl"
+    },
+    {
+      "at": "2026-11-15T04:32:05.061Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jxsy7l",
+      "note": "#11: proof; was: Zero unjustified copies (owner order 2026-11-14). Every .copy() in Compiler, Core, Jetpack and Tools is either removed (moved at its last use, borrowed, the owner restructured, or a name made an inter"
+    },
+    {
+      "at": "2026-11-15T04:32:03.831Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jxsy7l",
+      "note": "#10: strip debris; proof; was: (was #6392) DWARF debug info records each moved free point, and o0, o1 and o2 agree on output (I9)."
+    },
+    {
+      "at": "2026-11-15T04:32:02.685Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jxsy7l",
+      "note": "#6: strip debris; proof; was: [#3837] p33 `Holder{xs: a}` then `a.push(9)` stores in O(1) and copies once, at the write. A `.trim()` stored in a field allocates nothing (audit and perf cell). Levels agree."
+    },
+    {
+      "at": "2026-11-15T04:32:01.371Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jxsy7l",
+      "note": "#4: strip debris; proof; was: [#3738] `jet audit copies` on p31 and p33 reports exactly the real sites (p31 7:16 and 16:37; p33 9:21) from JetSema copy events and never a struct name. `jet fmt --explicit-copies` writes parseable `"
+    },
+    {
+      "at": "2026-11-15T04:32:00.187Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jxsy7l",
+      "note": "#1: proof; was: Probe p34 `build(title, rows)` has zero copies in `jet audit copies`; the p35 builder matches inline in its paired two-program cell (builder/inline at most 1.00 on every metric)."
+    },
+    {
+      "at": "2026-11-15T04:31:59.193Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0tgtjtu",
+      "note": "#12: proof; was: A raw-pointer fault (R0801 and the other raw-access stops) is reported at the line and column of the faulting access, not at the enclosing #Unsafe gate, and its report prints the range detail (the val"
+    },
+    {
+      "at": "2026-11-15T04:31:58.223Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0tgtjtu",
+      "note": "#11: proof; was: Found 2026-11-09 (TlsLead): `mem.address_of(shared[0])` on a mutable Shared list fails in lowering with \"ir.build unlowered: write place StaticCall of Shared<[Int]>\". Sema either accepts the program a"
+    },
+    {
+      "at": "2026-11-15T04:31:57.266Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0tgtjtu",
+      "note": "#10: proof; was: Found 2026-11-09 (G6Lead, probes $JET_SCRATCH_ROOT/lanes/G6Lead/ballots/probes/cycle/s19 and s20): a strong edge hidden in a closure is accepted and leaks. A feed owns a Close stream and a listener cl"
+    },
+    {
+      "at": "2026-11-15T04:31:56.322Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0tgtjtu",
+      "note": "#9: strip debris; proof; was: D-STACKBOUND1=A is built: `jet inspect memory` prints worst-case stack and heap per entry point from backend frame sizes and the call graph; `!Mem.Stack(above: N)` enforces a stack limit and `!Mem.All"
+    },
+    {
+      "at": "2026-11-15T04:31:55.303Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0tgtjtu",
+      "note": "#6: proof; was: Taking the raw address of a list element inside #Unsafe (`*list[0]`) either compiles to a pointer into the list's storage or is rejected with a registered diagnostic; today it is an internal compiler "
+    },
+    {
+      "at": "2026-11-15T04:31:26.938Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:30:30.222Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c00e9u2p",
+      "note": "removeTags,tags"
+    },
+    {
+      "at": "2026-11-15T04:30:22.906Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c00e9u2p",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:30:21.967Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c00e9u2p",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T04:30:20.429Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T04:30:19.461Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T04:30:18.480Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T04:30:17.467Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T04:30:16.452Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T04:30:15.469Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T04:30:14.536Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T04:30:13.492Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#1"
+    },
     {
       "at": "2026-11-15T04:30:12.260Z",
       "by": "TowerKeeper-1",
