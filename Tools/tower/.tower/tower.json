@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106066,
+    "rev": 106067,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -102123,6 +102123,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c11 allocfree root (CardCloser-3, p157 release build, disassembly and perf): both fast paths are hit (alloc_try's thread-cache path; free's cache push; 0 samples in refill, slab, validate and lock). Per operation: 361 instructions and 108 cycles; cycles: run loop 47%, alloc 42%, free 11%. Roots: (1) the Core wrapper adds a 16 B header on top of the runtime's 24 B, so a 1-byte request takes 41 B and lands in the 64 B class; (2) the alloc fast path is about 75 instructions (a class ladder, 5 callee-saved pushes, two header stores), and free recomputes the class from the size; (3) the loop carries a stop poll after every call and int_clone tests on Int. Order: (1), (2), then the Result out slot (mapping), then (3) in codegen."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c11 on p157 (dev 058d3b0303, 2026-11-15 02:21): mapping 5.31x cycles (was 6.03x on p156; the window thread stacks 4b16946457); allocfree 3.36x and resize 1.98x unchanged, although p157 links p156's runtime, which carries the raw-heap runtime half; compare 3.17x; rawword 1.36x; atomics 0.99x. Since then: region-record slab d7ac865ff3 and the page-map reference 524ed1eefd landed (seen from p158)."
         },
         {
@@ -102337,7 +102342,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T07:22:58.748Z",
+      "updated": "2026-11-15T07:25:38.113Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -218458,6 +218463,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T07:25:38.113Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T07:22:58.748Z",
       "by": "Main",
