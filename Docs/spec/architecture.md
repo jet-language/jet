@@ -284,14 +284,18 @@ modes). The library's check runs those checks on the compiler threads; each
 thread records the codecs and derived methods its checks demand in rows of
 its own, and each packet carries its check's demand. The file holds one
 record per function, the last check of it, in key order behind a table of
-record offsets; the Core library refuses to write a file that does not read
+key and record offsets and the keys, which sit together ahead of the
+records; the Core library refuses to write a file that does not read
 back whole, so a build never ships a bodies file with a repeated or
 malformed record. A native compile already bound to the built-in Core,
 without `--deep-checks`, reads the file's header, and finds a Core
-function's record by halving the table, loading its packet in place of
-checking its body when the file's facts are its own and every key resolves;
-it records again the codecs and derived methods the check demanded, and
-counts the record bytes it read (`core.bodies_read_bytes`). Any other
+function's record by halving the table, comparing keys in place, so its
+lookups touch the pages of the table and keys and only the records it
+loads; it loads the packet in place of checking its body when the file's
+facts are its own and every key resolves, reading every packet's strings
+into one pool so each spelling is one String across the loads; it records
+again the codecs and derived methods the check demanded, and counts the
+record bytes it read (`core.bodies_read_bytes`). Any other
 function is checked from text. A shipped bodies file whose header does not
 read, or whose record does not, stops the compile as an internal compiler
 error. A `jet run` whose Core is jet's built-in Core sources (a

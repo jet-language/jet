@@ -36,7 +36,9 @@ body_codec_out: fn() -> BodyCodecOut Never! {
 // `end` or met a malformed value, and the ids the bytes name by position.
 // Once a read fails every later one reads a zero, an empty value or an
 // enum's fallback variant, so a failed get still ends; the caller checks
-// `failed`.
+// `failed`. Each string a get reads is the one String `spellings` holds for
+// its spelling (body_codec_get_string), so the strings a body repeats share
+// it, and so do those of every body read with one pool the caller keeps.
 BodyCodecIn: struct {
     at: Int
     end: Int
@@ -44,6 +46,7 @@ BodyCodecIn: struct {
     symbols: [SymbolID]
     decls: [DeclID]
     modules: [ModuleID]
+    spellings: NameTable{name_table_sized(2)}
 }
 
 body_codec_put_uvarint: fn(out: &BodyCodecOut, value: Int) Never! {
@@ -141,12 +144,16 @@ body_codec_put_string: fn(out: &BodyCodecOut, value: String) Never! {
     out.bytes.extend(bytes)
 }
 
+// The string of the next bytes: the String `input.spellings` holds for
+// their spelling, interned there when it is new.
 body_codec_get_string: fn(bytes: [U8], input: &BodyCodecIn) -> String Never! {
     size: body_codec_get_count(bytes, input, 1)
     if input.failed || size == 0 -> return ""
     at: input.at
     input.at = at + size
-    text: String.from_bytes(bytes[at..<at + size]) ?? return body_codec_malformed(input)
+    // A spelling that is not UTF-8 resolves to "" (name_intern_bytes).
+    text: name_text(input.spellings, name_intern_bytes(input.spellings, bytes, at, at + size))
+    if text.len() == 0 -> return body_codec_malformed(input)
     text
 }
 

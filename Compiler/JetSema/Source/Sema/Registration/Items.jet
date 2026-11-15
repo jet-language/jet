@@ -10,6 +10,7 @@ use {
         AST_NODE_GENERATED,
         AccessConvention,
         CORE_SOURCE_OWNED_ROWS,
+        BodyCodecIn,
         CODABLE_TAG,
         CallArg,
         CallContractRow,
@@ -757,11 +758,14 @@ SemaRegistrationHostHooks: struct {
     // A compile whose Core is the Core built into the host: the Core
     // library's bodies file (CoreBodies.jet), whose Core packets a check
     // loads in place of checking from text, which of its records it so
-    // loaded, by position, and how many of the file's bytes those records
-    // hold.
+    // loaded, by position, how many of the file's bytes those records
+    // hold, and the reader every load reads its packet with, whose pool of
+    // strings (BodyCodecIn.spellings) holds one String per spelling across
+    // every load.
     core_bodies: SemaCoreBodies?{None}
     core_bodies_loaded: [Bool]{[Bool]{}}
     core_bodies_read: Int{0}
+    core_bodies_reader: BodyCodecIn{BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}}
 }
 
 // The folded build snapshot the driver

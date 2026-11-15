@@ -5,19 +5,20 @@
 // cut short fails and still ends.
 use {
     jet_sema.[
-        JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, SEMA_CORE_BODIES_HEADER, SemaBodyJob, SemaBuildFacts, SemaCallSiteFact, SemaComptimeBodySource, SemaComptimeFunctionResult, SemaComptimeItemValue,
+        JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, SEMA_CORE_BODIES_ENTRY_BYTES, SEMA_CORE_BODIES_HEADER, SEMA_CORE_BODIES_OFFSET_BYTES, SemaBodyJob, SemaBuildFacts, SemaCallSiteFact, SemaComptimeBodySource, SemaComptimeFunctionResult, SemaComptimeItemValue,
         SemaComptimeRequest, SemaCopyEvent, SemaCoreBody, SemaForeignProviderInput, SemaFunctionResult, SemaGraphModuleResult, SemaMethodInput,
         SemaNameReferenceFact, SemaParallelBody, SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks,
         SemaRegistrationImportEdge, SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin,
         SemaGraphResult, SemaSourceSegment, body_codec_get_semaparallelbody, body_codec_put_semaparallelbody, sema_core_body_was_loaded, sema_core_bodies_bytes, sema_core_bodies_keys,
-        sema_core_bodies_offset, sema_core_bodies_position, sema_core_bodies_problem, sema_core_bodies_read, sema_core_bodies_record, sema_hardware_empty_use,
+        sema_core_bodies_key_at, sema_core_bodies_offset, sema_core_bodies_position, sema_core_bodies_problem, sema_core_bodies_read, sema_core_bodies_record, sema_hardware_empty_use,
         sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_has_error_since, sema_registration_prepare_graph,
     ]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_foundation.[
         BodyCodecIn, DeclID, DeclRow, Diagnostic, FnBody, ModuleID, Span, SymbolID, SymbolKind, TFuncKind, TGenericParam, Type, body_codec_get_count, body_codec_get_fnbody, body_codec_get_string,
-        body_codec_out, body_codec_put_count, body_codec_put_fnbody, body_codec_put_string, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table,
+        body_codec_out, body_codec_put_count, body_codec_put_fnbody, body_codec_put_string, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table, name_count,
+        name_table_sized,
     ]
 }
 
@@ -282,8 +283,9 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
     stand_rows := Rows<DeclRow>{}
     stand: DeclID{row: stand_rows.add(DeclRow{symbol: SymbolID{id: U32{0}}, kind: SymbolKind.Function})}
     loop position in 0..<count {
+        key_input := sema_core_bodies_record(bodies.bytes, sema_core_bodies_key_at(bodies.bytes, bodies.head, position))
+        key: body_codec_get_string(bodies.bytes, key_input)
         record := sema_core_bodies_record(bodies.bytes, sema_core_bodies_offset(bodies.bytes, bodies.head, position))
-        key: body_codec_get_string(bodies.bytes, record)
         symbols: sema_core_bodies_keys(bodies.bytes, record)
         decls: sema_core_bodies_keys(bodies.bytes, record)
         modules: sema_core_bodies_keys(bodies.bytes, record)
@@ -332,7 +334,6 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
     if sema_core_bodies_position(bodies, "core.c") != None -> panic("BodyCodec: `core.c` has a record")
     if bodies == .Val(read) {
         record := sema_core_bodies_record(read.bytes, sema_core_bodies_offset(read.bytes, read.head, position))
-        _: body_codec_get_string(read.bytes, record)
         symbols: sema_core_bodies_keys(read.bytes, record)
         _: sema_core_bodies_keys(read.bytes, record)
         _: sema_core_bodies_keys(read.bytes, record)
@@ -348,10 +349,13 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
     body_codec_put_string(out, "context")
     body_codec_put_count(out, 2)
     table: out.bytes.len()
-    loop _ in 0..<16 -> out.bytes.push(U8{0})
+    loop _ in 0..<2 * SEMA_CORE_BODIES_ENTRY_BYTES -> out.bytes.push(U8{0})
     loop entry in 0..<2 {
-        out.bytes[table + entry * 8] = U8{out.bytes.len()}
+        out.bytes[table + entry * SEMA_CORE_BODIES_ENTRY_BYTES] = U8{out.bytes.len()}
         body_codec_put_string(out, "core.a")
+    }
+    loop entry in 0..<2 {
+        out.bytes[table + entry * SEMA_CORE_BODIES_ENTRY_BYTES + SEMA_CORE_BODIES_OFFSET_BYTES] = U8{out.bytes.len()}
         loop _ in 0..<3 -> body_codec_put_count(out, 0)
         body_codec_put_count(out, 1)
         out.bytes.push(U8{entry})
@@ -362,6 +366,26 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
         }
         .None -> panic("BodyCodec: a bodies file with two records of one function reads back whole")
     }
+}
+
+// A compile keeps one pool of the strings it loads
+// (SemaRegistrationHostHooks.core_bodies_spellings): a spelling read again,
+// in the same packet or a later one, is the String the pool holds.
+#Test("the strings of packets read with one pool are interned once") {
+    out := body_codec_out()
+    loop _ in 0..<2 {
+        body_codec_put_string(out, "param")
+        body_codec_put_string(out, "local")
+    }
+    spellings := name_table_sized(2)
+    loop _ in 0..<2 {
+        input := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}, spellings: spellings.move()}
+        texts := [String]{}
+        loop _ in 0..<4 -> texts.push(body_codec_get_string(out.bytes, input))
+        spellings = input.spellings.move()
+        if input.failed || texts != ([String]{"param", "local", "param", "local"}) -> panic("BodyCodec: the strings read back as {texts}")
+    }
+    if name_count(spellings) != 3 -> panic("BodyCodec: the pool holds {name_count(spellings)} spellings, not the empty one, `param` and `local`")
 }
 
 #Test("a Prelude function check loaded from the Core library's check is the check from text") {
