@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6905,
-    "rev": 104092,
+    "nextNum": 6908,
+    "rev": 104100,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60687,6 +60687,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T19:42:37.747Z"
+        },
+        {
+          "n": 14,
+          "text": "`jet dev` works on the default tier inside the repository (no release flag, no E1355 workaround) on site/generate.jet. Proof: `jet test Compiler --profile cases --filter web_dev/jet_dev_static_generator_serves_reloads_and_watches_inputs`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:29.622Z"
+        },
+        {
+          "n": 15,
+          "text": "Every devserver security candidate (#1377-#1384) has a source-backed disposition in the security report, and the embedded devserver refuses Windows absolute static paths. Proof: `jet test Compiler --profile cases --filter web_build/embedded_devserver_rejects_windows_absolute_static_paths` and `--filter web_dev/embedded_devserver_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:30.483Z"
         }
       ],
       "refs": [],
@@ -60696,12 +60714,12 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-24T19:25:14.992Z",
-      "updated": "2026-11-13T22:32:12.960Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:58:30.483Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 13
+      "criteriaLastN": 15
     },
     {
       "id": "c0wi8ere",
@@ -88192,6 +88210,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:33:43.907Z"
+        },
+        {
+          "n": 17,
+          "text": "A search by effect returns the functions that hold that authority. Proof: `jet test Compiler --profile cases --filter semindex/search_by_effect`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:27.809Z"
+        },
+        {
+          "n": 18,
+          "text": "A search by input/output example returns candidates and shows why each matched. Proof: `jet test Compiler --profile cases --filter semindex/search_by_example`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:28.737Z"
         }
       ],
       "refs": [],
@@ -88202,9 +88238,9 @@
       "parentId": "c0ozzmvc",
       "needsAcceptance": false,
       "created": "2026-11-07T01:32:07.215Z",
-      "updated": "2026-11-09T19:33:43.907Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 16
+      "updated": "2026-11-15T03:58:28.737Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 18
     },
     {
       "id": "c00tcdfc",
@@ -105957,6 +105993,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:55:54.034Z"
+        },
+        {
+          "n": 14,
+          "text": "The canonical syntax round-trip census, the full AST and form denominator, the fmt, LSP and Canvas coverage matrix, and the fail-closed gate for new syntax variants run as tests and pass. Proof: `jet test tests/guards --filter syntax_roundtrip_census`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:26.935Z"
         }
       ],
       "refs": [],
@@ -105970,9 +106015,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:52:54.075Z",
-      "updated": "2026-11-15T03:55:54.034Z",
+      "updated": "2026-11-15T03:58:26.935Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 13
+      "criteriaLastN": 14
     },
     {
       "id": "c0aha21c",
@@ -106526,6 +106571,217 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:53.089Z",
       "updated": "2026-11-15T03:55:53.089Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0hzex6k",
+      "num": 6905,
+      "title": "jet flash: watch, rebuild and flash a board, show flash and RAM budgets, and fail by name with no probe",
+      "body": "Destination: for a supported board, `jet flash --watch` rebuilds on save, flashes and streams the board log; `jet build` for a board target prints flash and RAM use per section against the board budget; the programmer comes from canonical TargetMachine facts and every flash writes one typed receipt binding the image digest and the programmer invocation; a missing board or probe is a named error.\n\nWhy it matters: the embedded edit loop should be one command, and a budget overrun should fail the build, not the device.\n\nDecisions: D-HW-DECLARE1=A (boards are typed values), D-TARGET-SURFACE1.\n\nSource: #6386 c10-c12, c115 (from #6022, #2856).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "For a supported board, `jet flash --watch` rebuilds on save, flashes and streams the board log until stopped. Proof: `jet test Compiler --profile cases --filter flash/watch_edit_cycle_qemu` runs one edit cycle against an emulated board.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:24.270Z"
+        },
+        {
+          "n": 2,
+          "text": "`jet build` for a board target prints flash and RAM use per section against the board budget and fails with a named error when a budget is exceeded. Proof: `jet test Compiler --profile cases --filter flash/over_budget`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:24.270Z"
+        },
+        {
+          "n": 3,
+          "text": "With no board or probe attached, `jet flash` fails with a named error listing what it looked for. Proof: `jet test Compiler --profile ui --filter flash_no_probe`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:24.270Z"
+        },
+        {
+          "n": 4,
+          "text": "`jet flash` takes its programmer from canonical TargetMachine facts, binds the image digest and programmer invocation into one typed receipt, and reports an unavailable or failed programming through the registered command error. Proof: `jet test Compiler --profile cases --filter flash/receipt_binds_image_and_programmer` against an emulated board.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:24.270Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "embedded",
+        "cli"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:58:24.270Z",
+      "updated": "2026-11-15T03:58:24.270Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0wowe4m",
+      "num": 6906,
+      "title": "Jet embeds in a C host and as a wasm component from one export surface, with authority checked at load (D-EMBED1=E, D-EMBED2=C)",
+      "body": "Destination: one typed export surface lowers to a native C-ABI libjet and a WASM component (D-EMBED1=E) from one capability contract (D-EMBED2=C): a C host links libjet, loads a Jet module, calls a function and gets its result; the component runs the same module in wasmtime with the same output; the embedding header is generated with a runnable C example; and the host passes an Authority value so a guest lacking a grant is refused at load, before any guest code runs.\n\nWhy it matters: embedding Jet in an existing C or C++ program is how many teams would first adopt it; load-time authority beats Lua's run-time global removal.\n\nSource: #6386 c16-c18, c20 (from #6023, the acceptance checks of #1915).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A C host links libjet, loads a Jet module, calls a function and gets its result with the self-hosted `jet`. Proof: `jet test Compiler --profile cases --filter embed/c_host_calls_jet_function`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:25.159Z"
+        },
+        {
+          "n": 2,
+          "text": "The wasm component runs the same module in wasmtime with the same output. Proof: `jet test Compiler --profile cases --filter embed/wasm_component_same_output`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:25.159Z"
+        },
+        {
+          "n": 3,
+          "text": "The embedding header is generated, and its doc page carries a runnable C example checked by a test. Proof: `jet test Compiler --profile cases --filter embed/header_doc_example_runs`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:25.159Z"
+        },
+        {
+          "n": 4,
+          "text": "The host passes an Authority value: a guest module that calls files.read without an FS.Read grant is refused at load time with a named error before any guest code runs. Proof: `jet test Compiler --profile cases --filter embed/guest_refused_at_load_without_grant`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:25.159Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "embedding",
+        "ffi"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:58:25.159Z",
+      "updated": "2026-11-15T03:58:25.159Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0bd75d8",
+      "num": 6907,
+      "title": "One record index: canonical identity, build verify, safe capture by default in dev, and indexed replay (D-RECORD1=B)",
+      "body": "Destination: D-RECORD1=B on the self-hosted toolchain. One index under .jet/records lists every ratified record artifact with one identity key (target inputSha256, tool, engine) and cross-links a proof to the replay it consumed and the receipt it produced; build verify resolves indexed inputs and compares rebuilt output; jet dev captures the safe replay (clock only) on every run within a retention budget; replay resolves indexed IDs and paths.\n\nWhy it matters: a failure seen once should be replayable by ID, and a build should be verifiable from its record.\n\nSource: #6386 c121-c124 (from #2506).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The records index and receipt and proof sources use canonical target identity and consumed/produced links, with authenticated admission of sensitive records. Proof: `jet test Compiler --profile cases --filter records/index_identity_links`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:26.047Z"
+        },
+        {
+          "n": 2,
+          "text": "Build verify resolves indexed inputs and compares rebuilt output, with explicit mismatch and error outcomes and native byte identity. Proof: `jet test Compiler --profile cases --filter records/build_verify_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:26.047Z"
+        },
+        {
+          "n": 3,
+          "text": "jet dev captures the safe clock replay by default with bounded retention, explicit opt-outs and recorded skipped-capture reasons, measured on a corpus. Proof: `jet test Compiler --profile cases --filter records/dev_safe_capture_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:26.047Z"
+        },
+        {
+          "n": 4,
+          "text": "Replay resolves indexed IDs and paths, runs saved claims first, handles stale saves and deduplicates, with no backward-stepping implementation added here. Proof: `jet test Compiler --profile cases --filter records/replay_by_index`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:58:26.047Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "records",
+        "replay",
+        "dev"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:58:26.047Z",
+      "updated": "2026-11-15T03:58:26.047Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -211945,6 +212201,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:58:30.483Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0c209zc",
+      "note": "#15 Every devserver security candidate (#1377-#1384) has a sourc"
+    },
+    {
+      "at": "2026-11-15T03:58:29.622Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0c209zc",
+      "note": "#14 `jet dev` works on the default tier inside the repository (n"
+    },
+    {
+      "at": "2026-11-15T03:58:28.737Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0y05z3o",
+      "note": "#18 A search by input/output example returns candidates and show"
+    },
+    {
+      "at": "2026-11-15T03:58:27.809Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0y05z3o",
+      "note": "#17 A search by effect returns the functions that hold that auth"
+    },
+    {
+      "at": "2026-11-15T03:58:26.935Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0t5gnhs",
+      "note": "#14 The canonical syntax round-trip census, the full AST and for"
+    },
+    {
+      "at": "2026-11-15T03:58:26.047Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0bd75d8",
+      "note": "One record index: canonical identity, build verify, safe capture by default in dev, and indexed replay (D-RECORD1=B)"
+    },
+    {
+      "at": "2026-11-15T03:58:25.160Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0wowe4m",
+      "note": "Jet embeds in a C host and as a wasm component from one export surface, with authority checked at load (D-EMBED1=E, D-EMBED2=C)"
+    },
+    {
+      "at": "2026-11-15T03:58:24.270Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0hzex6k",
+      "note": "jet flash: watch, rebuild and flash a board, show flash and RAM budgets, and fail by name with no probe"
+    },
     {
       "at": "2026-11-15T03:57:27.157Z",
       "by": "Main",
