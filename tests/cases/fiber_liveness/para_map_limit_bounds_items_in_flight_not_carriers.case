@@ -1,8 +1,10 @@
 # With two carrier threads, para_map(f, limit: 16) keeps items parked in a
 # sleep in flight past the two carriers and never past 16 (the limit, not
 # the carriers, bounds them), and limit 1 keeps one; items that never park
-# run at most two at once, with or without a limit. Results keep source
-# order. Same output on jet run and at O0, O1 and O2.
+# run on the two carriers, with or without a limit: 64 items of 2 ms task
+# CPU take at least 64 ms of wall time (a busy item past its time slice gives
+# its carrier to another, so their wall intervals may overlap). Results keep
+# source order. Same output on jet run and at O0, O1 and O2.
 fixture: fixtures/para
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache

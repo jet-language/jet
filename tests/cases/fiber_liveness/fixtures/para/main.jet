@@ -1,16 +1,21 @@
 // para_map's `limit` bounds the items in flight, not the carriers: with two
 // carriers (JET_SCHEDULER_THREADS=2), items parked in a sleep under limit 16
 // overlap far beyond two, never beyond 16, and under limit 1 never overlap.
-// Items that never park hold their carrier, so no more than two of them
-// overlap, with or without a limit. Each item reports its monotonic
-// interval, and the overlaps are counted afterwards: no lock inside an item
-// can park it mid-measurement.
+// Items that never park run on the two carriers, with or without a limit. A
+// busy item past its time slice gives its carrier to another, so their
+// intervals can overlap; their CPU time cannot: 64 items of 2 ms CPU each
+// take at least 64 ms on two carriers. Each parked item reports its
+// monotonic interval, and the overlaps are counted afterwards: no lock inside
+// an item can park it mid-measurement.
 package: {
     name: "para_limit"
     authority: { allow: [IO, Mem.Alloc, Time, Time.Wait] }
 }
 
-use time: core.time
+use {
+    tasks: core.tasks
+    time: core.time
+}
 
 Span: struct {
     start: Int
@@ -23,11 +28,11 @@ parked: fn(origin: Instant) -> Span {
     Span{start: start, end: time.instant().difference(origin).ns}
 }
 
-// About 2 ms of work that never waits.
-busy: fn(origin: Instant) -> Span {
-    start: time.instant().difference(origin).ns
-    loop time.instant().difference(origin).ns - start < 2_000_000 {}
-    Span{start: start, end: time.instant().difference(origin).ns}
+// 2 ms of the item's own CPU time: the task clock counts only while it runs.
+busy: fn(n: Int) -> Int {
+    before: tasks.cpu_ns()
+    loop tasks.cpu_ns() - before < 2_000_000 {}
+    n
 }
 
 // The most spans open at one instant: at each span's start, those that
@@ -55,9 +60,15 @@ run: fn() {
     one: overlap(few.para_map(fn(n: Int) { parked(origin) }, limit: 1))
     print("limit 1: parked items overlap {one}")
 
-    worked: overlap(values.para_map(fn(n: Int) { busy(origin) }))
-    capped: overlap(values.para_map(fn(n: Int) { busy(origin) }, limit: 16))
-    print("busy items: at most 2 at once {worked <= 2 && capped <= 2}")
+    // 128 ms of CPU on at most two carriers: 64 ms of wall time or more,
+    // less 4 ms for the clock reads around the items.
+    unlimited: time.instant()
+    _ := values.para_map(fn(n: Int) { busy(n) })
+    worked: time.instant().difference(unlimited).ns
+    limited: time.instant()
+    _ := values.para_map(fn(n: Int) { busy(n) }, limit: 16)
+    capped: time.instant().difference(limited).ns
+    print("busy items: at most 2 at once {worked >= 60_000_000 && capped >= 60_000_000}")
 
     mapped: values.para_map(fn(n: Int) { n * 3 }, limit: 16)
     print("order kept {mapped == values.map(fn(n: Int) { n * 3 })}")
