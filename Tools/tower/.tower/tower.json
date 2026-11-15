@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106502,
+    "rev": 106503,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74628,6 +74628,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "InspectBuild in-tree check, batch compilers p186 against p187 (positioned reads, a9b0055b90), two alternating runs each on cores 24-31, 2026-11-15: same work (5484 bodies loaded, 62.8 against 62.7 MB of records, 4874 Core checked); sema.finalize CPU 31.65 against 33.50 s and 5.80 against 6.17 s; load 0.71 against 0.94 s; peak 3137/3191 against 3083/3128 MB. Wall times were noise from a concurrent census. The one real p187 cost: 5484 opens of /proc/self/exe, one per record, removed by the c22 single-descriptor change in census c240c."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c22 probe on batch compiler p187 (dev 9860836a00), 2026-11-15: strace -f of jet run hello.jet outside the tree opens nothing under the toolchain tree (only hello.jet and /proc/self/exe; getdents64 only on the cwd), so the read/scan clause holds. Open: /proc/self/exe is opened 26 times (PrecompiledCore-4), the committed strace receipt, and the golden O0/O1/O2 run. Found beside it: the thread-admission load sampler opens /proc/<pid>/task/<tid>/stat 3,411 times across 599 processes on every run (Speed-3-2, #5479 c6 path)."
         },
         {
@@ -75436,7 +75441,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T18:06:50.766Z",
+      "updated": "2026-11-15T19:33:02.627Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -218215,6 +218220,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T19:33:02.627Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T19:30:25.554Z",
       "by": "Main",
