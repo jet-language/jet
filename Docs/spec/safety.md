@@ -237,15 +237,15 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1376,
+  "total": 1385,
   "counts": {
-    "Compiler": 630,
+    "Compiler": 638,
     "Core": 174,
     "Docs": 10,
     "Examples": 42,
     "Jetpack": 8,
     "Tools": 8,
-    "tests": 504
+    "tests": 505
   },
   "regions": [
     {
@@ -1056,217 +1056,273 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1643,
+      "line": 1648,
       "column": 1,
-      "reason": "reads one byte from a live readable mapped address supplied by the caller"
+      "reason": "the caller owns count writable bytes at target, and count is 1 through 3"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1650,
+      "line": 1664,
       "column": 1,
-      "reason": "writes one byte to a live writable mapped address supplied by the caller"
+      "reason": "the caller owns count writable bytes at target, and count is 4 through 7"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1660,
+      "line": 1676,
       "column": 1,
-      "reason": "writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return"
+      "reason": "the caller owns count writable bytes at target, and count is 8 through 16"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1681,
+      "line": 1687,
       "column": 1,
-      "reason": "bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced"
+      "reason": "the caller owns count writable bytes at target, and count is 16 through 32"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1718,
+      "line": 1700,
       "column": 1,
-      "reason": "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"
+      "reason": "the caller owns count writable bytes at target, and count is 32 through 64"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1765,
+      "line": 1717,
       "column": 1,
-      "reason": "the calling thread is attached and GS points at its live Jet TCB"
+      "reason": "the caller owns count writable bytes at target, and count is 64 through 128"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 1743,
+      "column": 1,
+      "reason": "the caller owns 64 writable bytes at target"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 1759,
+      "column": 1,
+      "reason": "the caller owns count writable bytes at target"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
       "line": 1774,
       "column": 1,
+      "reason": "reads one byte from a live readable mapped address supplied by the caller"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 1781,
+      "column": 1,
+      "reason": "writes one byte to a live writable mapped address supplied by the caller"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 1791,
+      "column": 1,
+      "reason": "writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 1812,
+      "column": 1,
+      "reason": "bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 1849,
+      "column": 1,
+      "reason": "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 1896,
+      "column": 1,
+      "reason": "the calling thread is attached and GS points at its live Jet TCB"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 1905,
+      "column": 1,
       "reason": "ARCH_GET_GS writes one initialized aligned stack word only during this syscall; no TLS or heap is read, and the push/pop is balanced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1794,
+      "line": 1925,
       "column": 1,
       "reason": "base is a live self-addressed Jet TCB the calling thread runs on until the next switch, and the kernel enabled FSGSBASE"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1808,
+      "line": 1939,
       "column": 1,
       "reason": "only a signal restorer's own frame calls this, on the stack its handler returned to"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1826,
+      "line": 1957,
       "column": 1,
       "reason": "save is a writable word the resumer reads; target is a stack this switch or a fresh fiber seed left, owned by no running thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1851,
+      "line": 1982,
       "column": 1,
       "reason": "atomically adds to one aligned live word and returns its previous value"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1864,
+      "line": 1995,
       "column": 1,
       "reason": "atomically exchanges one aligned live word; xchg has an implicit full barrier"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1877,
+      "line": 2008,
       "column": 1,
       "reason": "calls executable System V code with one raw word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1890,
+      "line": 2021,
       "column": 1,
       "reason": "calls a Jet closure's code with the live closure header and one raw word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1908,
+      "line": 2039,
       "column": 1,
       "reason": "calls C code; the caller vouches for the code and its word-argument System V signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1935,
+      "line": 2066,
       "column": 1,
       "reason": "raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1976,
+      "line": 2107,
       "column": 1,
       "reason": "calls checked System V Unit code; the caller lends one live raw machine-word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1988,
+      "line": 2119,
       "column": 1,
       "reason": "calls checked System V Unit code; the caller vouches for both raw machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2002,
+      "line": 2133,
       "column": 1,
       "reason": "calls checked System V Unit code; the caller vouches for all three raw machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2018,
+      "line": 2149,
       "column": 1,
       "reason": "calls a checked native runtime callback with one machine-word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2031,
+      "line": 2162,
       "column": 1,
       "reason": "calls a checked native runtime callback with two machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2046,
+      "line": 2177,
       "column": 1,
       "reason": "calls a checked native runtime callback with three machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2063,
+      "line": 2194,
       "column": 1,
       "reason": "calls a checked native runtime callback with four machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2082,
+      "line": 2213,
       "column": 1,
       "reason": "calls a checked native runtime callback with five machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2103,
+      "line": 2234,
       "column": 1,
       "reason": "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2126,
+      "line": 2257,
       "column": 1,
       "reason": "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2215,
+      "line": 2346,
       "column": 1,
       "reason": "the audited caller lends the stat scalar row and valid syscall object"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2217,
+      "line": 2348,
       "column": 5,
       "reason": "packed Linux 32-bit fields become independent portable machine words without any allocation"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2228,
+      "line": 2359,
       "column": 1,
       "reason": "calls a checked System V void(void) process entry that remains executable for the entire call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2238,
+      "line": 2369,
       "column": 1,
       "reason": "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2340,
+      "line": 2471,
       "column": 1,
       "reason": "calls machine code; the caller vouches for its three-word System V signature"
     },
@@ -3268,98 +3324,98 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 97,
+      "line": 98,
       "column": 5,
       "reason": "native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 155,
+      "line": 148,
       "column": 5,
-      "reason": "C's caller owns count writable bytes at target"
+      "reason": "native lowering owns count writable bytes at target; each leaf stores only inside its class's count"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 178,
+      "line": 207,
       "column": 5,
       "reason": "C's caller owns count readable bytes at left and at right"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 196,
+      "line": 225,
       "column": 5,
       "reason": "checked native value-returning callback; its raw argument stays valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 202,
+      "line": 231,
       "column": 5,
       "reason": "checked native value-returning callback; both raw arguments stay valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 208,
+      "line": 237,
       "column": 5,
       "reason": "checked unary closure adapter with borrowed environment, input and output slots"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 214,
+      "line": 243,
       "column": 5,
       "reason": "checked binary closure adapter with live environment, inputs and output slots"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 220,
+      "line": 249,
       "column": 5,
       "reason": "checked native Unit callback; its raw argument stays valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 226,
+      "line": 255,
       "column": 5,
       "reason": "checked Unit clone callback; source remains live and target lends writable output storage"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 232,
+      "line": 261,
       "column": 5,
       "reason": "checked native entry or runtime export whose System V signature takes five words, all live for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 238,
+      "line": 267,
       "column": 5,
       "reason": "checked executable System V void(void) address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 244,
+      "line": 273,
       "column": 5,
       "reason": "checked native Unit callback; its three raw arguments stay valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 252,
+      "line": 281,
       "column": 5,
       "reason": "checked code(box) address; the box stays live for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 258,
+      "line": 287,
       "column": 5,
       "reason": "checked code(box, argument) address; the box and argument stay live for the synchronous call"
     },
@@ -7089,6 +7145,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/a_raw_byte_fill_writes_exactly_its_range.fixture/main.jet",
+      "line": 14,
+      "column": 5,
+      "reason": "every fill and read stays inside the block's `room` bytes, and the block is freed once after them"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/unsafe_and_runtime/a_raw_byte_move_matches_a_buffered_move_at_every_size_and_overlap.fixture/main.jet",
       "line": 15,
       "column": 5,
@@ -9888,14 +9951,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 630 |
+| Compiler | 638 |
 | Core | 174 |
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 8 |
-| tests | 504 |
-| **total** | **1376** |
+| tests | 505 |
+| **total** | **1385** |
 
 ### Regions
 
@@ -10016,37 +10079,45 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1582:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 64 through 128" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1611:1 | "the caller owns 64 readable bytes at source and 64 writable bytes at target" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1628:1 | "the caller owns count writable words starting at target" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1643:1 | "reads one byte from a live readable mapped address supplied by the caller" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1650:1 | "writes one byte to a live writable mapped address supplied by the caller" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1660:1 | "writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1681:1 | "bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1718:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1765:1 | "the calling thread is attached and GS points at its live Jet TCB" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1774:1 | "ARCH_GET_GS writes one initialized aligned stack word only during this syscall; no TLS or heap is read, and the push/pop is balanced" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1794:1 | "base is a live self-addressed Jet TCB the calling thread runs on until the next switch, and the kernel enabled FSGSBASE" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1808:1 | "only a signal restorer's own frame calls this, on the stack its handler returned to" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1826:1 | "save is a writable word the resumer reads; target is a stack this switch or a fresh fiber seed left, owned by no running thread" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1851:1 | "atomically adds to one aligned live word and returns its previous value" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1864:1 | "atomically exchanges one aligned live word; xchg has an implicit full barrier" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1877:1 | "calls executable System V code with one raw word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1890:1 | "calls a Jet closure's code with the live closure header and one raw word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1908:1 | "calls C code; the caller vouches for the code and its word-argument System V signature" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1935:1 | "raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1976:1 | "calls checked System V Unit code; the caller lends one live raw machine-word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1988:1 | "calls checked System V Unit code; the caller vouches for both raw machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2002:1 | "calls checked System V Unit code; the caller vouches for all three raw machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2018:1 | "calls a checked native runtime callback with one machine-word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2031:1 | "calls a checked native runtime callback with two machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2046:1 | "calls a checked native runtime callback with three machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2063:1 | "calls a checked native runtime callback with four machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2082:1 | "calls a checked native runtime callback with five machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2103:1 | "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2126:1 | "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2215:1 | "the audited caller lends the stat scalar row and valid syscall object" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2217:5 | "packed Linux 32-bit fields become independent portable machine words without any allocation" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2228:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2238:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2340:1 | "calls machine code; the caller vouches for its three-word System V signature" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1648:1 | "the caller owns count writable bytes at target, and count is 1 through 3" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1664:1 | "the caller owns count writable bytes at target, and count is 4 through 7" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1676:1 | "the caller owns count writable bytes at target, and count is 8 through 16" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1687:1 | "the caller owns count writable bytes at target, and count is 16 through 32" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1700:1 | "the caller owns count writable bytes at target, and count is 32 through 64" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1717:1 | "the caller owns count writable bytes at target, and count is 64 through 128" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1743:1 | "the caller owns 64 writable bytes at target" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1759:1 | "the caller owns count writable bytes at target" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1774:1 | "reads one byte from a live readable mapped address supplied by the caller" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1781:1 | "writes one byte to a live writable mapped address supplied by the caller" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1791:1 | "writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1812:1 | "bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1849:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1896:1 | "the calling thread is attached and GS points at its live Jet TCB" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1905:1 | "ARCH_GET_GS writes one initialized aligned stack word only during this syscall; no TLS or heap is read, and the push/pop is balanced" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1925:1 | "base is a live self-addressed Jet TCB the calling thread runs on until the next switch, and the kernel enabled FSGSBASE" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1939:1 | "only a signal restorer's own frame calls this, on the stack its handler returned to" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1957:1 | "save is a writable word the resumer reads; target is a stack this switch or a fresh fiber seed left, owned by no running thread" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1982:1 | "atomically adds to one aligned live word and returns its previous value" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1995:1 | "atomically exchanges one aligned live word; xchg has an implicit full barrier" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2008:1 | "calls executable System V code with one raw word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2021:1 | "calls a Jet closure's code with the live closure header and one raw word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2039:1 | "calls C code; the caller vouches for the code and its word-argument System V signature" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2066:1 | "raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2107:1 | "calls checked System V Unit code; the caller lends one live raw machine-word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2119:1 | "calls checked System V Unit code; the caller vouches for both raw machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2133:1 | "calls checked System V Unit code; the caller vouches for all three raw machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2149:1 | "calls a checked native runtime callback with one machine-word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2162:1 | "calls a checked native runtime callback with two machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2177:1 | "calls a checked native runtime callback with three machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2194:1 | "calls a checked native runtime callback with four machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2213:1 | "calls a checked native runtime callback with five machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2234:1 | "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2257:1 | "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2346:1 | "the audited caller lends the stat scalar row and valid syscall object" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2348:5 | "packed Linux 32-bit fields become independent portable machine words without any allocation" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2359:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2369:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2471:1 | "calls machine code; the caller vouches for its three-word System V signature" |
 | Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2053:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 147:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 155:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
@@ -10332,20 +10403,20 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 21:5 | "address borrows an initialized byte inside the caller's live buffer" |
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 27:5 | "address is one exclusively owned writable byte and value is a byte" |
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 45:5 | "native lowering owns both live ranges of count bytes; each leaf loads all its bytes before it stores any, and the steps run in the order the overlap requires" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 97:5 | "native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 155:5 | "C's caller owns count writable bytes at target" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 178:5 | "C's caller owns count readable bytes at left and at right" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 196:5 | "checked native value-returning callback; its raw argument stays valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 202:5 | "checked native value-returning callback; both raw arguments stay valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 208:5 | "checked unary closure adapter with borrowed environment, input and output slots" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 214:5 | "checked binary closure adapter with live environment, inputs and output slots" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 220:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 226:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 232:5 | "checked native entry or runtime export whose System V signature takes five words, all live for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 238:5 | "checked executable System V void(void) address" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 244:5 | "checked native Unit callback; its three raw arguments stay valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 252:5 | "checked code(box) address; the box stays live for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 258:5 | "checked code(box, argument) address; the box and argument stay live for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 98:5 | "native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 148:5 | "native lowering owns count writable bytes at target; each leaf stores only inside its class's count" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 207:5 | "C's caller owns count readable bytes at left and at right" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 225:5 | "checked native value-returning callback; its raw argument stays valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 231:5 | "checked native value-returning callback; both raw arguments stay valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 237:5 | "checked unary closure adapter with borrowed environment, input and output slots" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 243:5 | "checked binary closure adapter with live environment, inputs and output slots" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 249:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 255:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 261:5 | "checked native entry or runtime export whose System V signature takes five words, all live for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 267:5 | "checked executable System V void(void) address" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 273:5 | "checked native Unit callback; its three raw arguments stay valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 281:5 | "checked code(box) address; the box stays live for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 287:5 | "checked code(box, argument) address; the box and argument stay live for the synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 34:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 74:5 | "the observer id is a label nothing reads back; a racing creator can only repeat a label" |
 | Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 235:5 | "the terminated path and the 128-byte stat fact row are live for the syscall" |
@@ -10878,6 +10949,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.fixture/main.jet | 5:5 | "every range stays inside the `values` tuple, which outlives each access" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.fixture/main.jet | 16:5 | "both Strings stay inside `names`; the static texts they replace need no drop" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.fixture/past.jet | 5:5 | "the fill runs one Int past the tuple, so the sentry stops it before any write" |
+| tests | tests/cases/unsafe_and_runtime/a_raw_byte_fill_writes_exactly_its_range.fixture/main.jet | 14:5 | "every fill and read stays inside the block's `room` bytes, and the block is freed once after them" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_byte_move_matches_a_buffered_move_at_every_size_and_overlap.fixture/main.jet | 15:5 | "every move and every byte written or read stays inside the block, which is freed once after the moves" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_pointer_cast_reads_the_same_address.fixture/main.jet | 6:5 | "each cast names the live local cell, at an alignment its type allows" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_pointer_cast_reads_the_same_address.fixture/misaligned.jet | 6:5 | "the cast Int starts one byte into the cell, so the sentry stops the read" |
