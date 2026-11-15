@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6923,
-    "rev": 104591,
+    "nextNum": 6925,
+    "rev": 104600,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25897,6 +25897,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T01:54:03.692Z"
+        },
+        {
+          "n": 11,
+          "text": "Inside a proven-pure call (`-[]>`), values that existed before the call skip generation checks, alias checks and count updates, while values created inside keep them. `jet inspect choices` lists every skipped check, removing the purity restores them, and a paired cell with and without `-[]>` is recorded. Proof: `jet test Compiler --profile cases --filter jetir_facts/purity_skips_checks`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:06.094Z"
         }
       ],
       "refs": [
@@ -25925,13 +25934,13 @@
       "parentId": "c0i42tsl",
       "needsAcceptance": false,
       "created": "2026-09-10T23:23:09.423Z",
-      "updated": "2026-11-13T02:20:18.333Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:30:06.094Z",
+      "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-11T12:44:52.246Z",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 11
     },
     {
       "id": "c08fc2sx",
@@ -64655,11 +64664,12 @@
         {
           "n": 3,
           "text": "(was #4567) Destructuring a returned tuple or struct copies its fields instead of moving them: emitted code for the repro has no clone of the fields; paired cell under #4566.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:00:35.175Z"
+          "evidence": "Moved to #6923 c2: destructure moves; frozen #4567 holds the original report",
+          "at": "2026-11-15T04:30:10.940Z",
+          "closure": "obsolete"
         },
         {
           "n": 4,
@@ -64672,12 +64682,12 @@
         },
         {
           "n": 5,
-          "text": "Field drop order follows D-FIELD-DROP-ORDER1=A in the IR drop glue: a golden with nested structs holding cleanup values passes on O0, O1 and O2, plus a UI test for the order.",
+          "text": "Fields drop in the order D-FIELD-DROP-ORDER1=A sets, in the JetIR drop glue. Proof: `jet test Compiler --profile golden --filter memory/destructure_drop_order` (nested structs holding cleanup values) on O0, O1 and O2, and `jet test Compiler --profile ui --filter field_drop_order`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:06:38.183Z"
+          "at": "2026-11-15T04:30:07.037Z"
         },
         {
           "n": 6,
@@ -64691,11 +64701,12 @@
         {
           "n": 7,
           "text": "(was #4916) Moves out of fields and params lower to copies; s.f.move() taken moves in Pipeline.jet",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:14:59.842Z"
+          "evidence": "Moved to #6923 c1: field and parameter move lowering",
+          "at": "2026-11-15T04:30:09.825Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
@@ -64771,21 +64782,21 @@
         },
         {
           "n": 17,
-          "text": "A panic inside a Close while a panic is already unwinding is process-fatal under the spec (Docs/spec/core-library-native-contract.md): exit 70 with a Stop E3001 report, on run and --release. Today tests/run/Ownership/ReleaseDeferClosePanic.jet (the body panics, then the second close panics) prints 'body / close second', then stderr 'panic in a destructor during cleanup' and exit 1 on both tiers. The golden carries the spec'd streams and a known-failing row naming this card (CoreCliLead-2, 11-07). Met when the golden passes on O0, O1 and O2 and the KF row is gone.",
+          "text": "A panic inside a Close while a panic is already unwinding is process-fatal, as Docs/spec/core-library-native-contract.md says: exit 70 with a Stop E3001 report, on run and --release. On 2026-11-07, tests/run/Ownership/ReleaseDeferClosePanic.jet (the body panics, then the second close panics) printed 'body / close second', then 'panic in a destructor during cleanup', and exited 1 on both tiers. Proof: `jet test Compiler --profile golden --filter Ownership/ReleaseDeferClosePanic` passes on O0, O1 and O2, and its known-failing row is removed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T14:23:06.665Z"
+          "at": "2026-11-15T04:30:07.961Z"
         },
         {
           "n": 18,
-          "text": "A cancel that arrives while a Close runs is held until the close finishes and delivered at the next wait (Docs/spec/core-library-native-contract.md). tests/cases/task_control_tiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier.case: the close signals the parent on entry, the parent cancels the task, then the close waits on a channel. Expected 'close worker: finished', then 'worker: cancelled'. Today the cancel cuts the close's wait and 'finished' never prints, on run and --release (301567cec7, CoreCliLead-2, 11-07). Met when the case passes on every tier and its KF row is gone.",
+          "text": "A cancel that arrives while a Close runs is held until the close finishes and is delivered at the next wait, as Docs/spec/core-library-native-contract.md says. In the case, the close signals the parent on entry, the parent cancels the task, and the close then waits on a channel; the output is 'close worker: finished', then 'worker: cancelled'. On 301567cec7 the cancel cut the close's wait on run and --release. Proof: `jet test Compiler --profile cases --filter task_control_tiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier` passes on every tier, and its known-failing row is removed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T14:33:52.142Z"
+          "at": "2026-11-15T04:30:08.878Z"
         },
         {
           "n": 19,
@@ -64799,11 +64810,12 @@
         {
           "n": 20,
           "text": "(was #5031) Native: pattern payload bindings of owned locals/params deep-copy the payload (should move at last use or alias under a stable root) (moved from #6414 c26)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:09:34.047Z"
+          "evidence": "Moved to #6923 c3: pattern payload moves",
+          "at": "2026-11-15T04:30:12.260Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -64815,8 +64827,8 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-28T11:41:38.387Z",
-      "updated": "2026-11-13T06:23:34.287Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:30:12.260Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
@@ -108640,6 +108652,174 @@
       "needsAcceptance": false,
       "created": "2026-11-15T04:14:49.012Z",
       "updated": "2026-11-15T04:14:49.012Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0d4kf8m",
+      "num": 6923,
+      "title": "Moves never copy: field, parameter, pattern, destructure and task-capture moves lower to moves in JetIR",
+      "body": "Destination: every move the checker decides (a last use, a written `x.move()`, a destructure of an owned temporary, a pattern payload binding, a task argument or capture) lowers to a move in JetIR on O0, O1 and O2, and no copy appears without a sema decision.\n\nWhy: a hidden copy costs time and memory, and it breaks D-COPY-DEFAULT1=A (the compiler chooses moves when unmarked; `x.copy()` is the only way to ask for a copy). Returning several results must cost no more than output parameters (D-OUTPUT-RETURNS1=A). The copy ledger and the zero-unjustified-copy guard live on #3836; this card fixes the lowering that makes copies the checker never asked for.\n\nSource: map #5989 (board consolidation 2026-10-28), carrying folded cards #4562 (task moves, SP13), #4564 (stage-2 copy gaps), #4567 (frozen; destructure copies), #4569 (linear copy residues), #4916 (field moves), #5821 (task capture lifetime), #5031 (pattern payload copies) and #5041 (no implicit copies).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`s.f.move()` and moves out of struct fields and parameters lower to a move in JetIR, with no clone, and the clone-gate copies the old FieldMove lowering added are removed. Proof: `jet test Compiler --profile cases --filter moves/field_and_param_move_no_clone` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:04.307Z"
+        },
+        {
+          "n": 2,
+          "text": "Destructuring an owned temporary (`(program, values) := returned_tuple()`, or a returned struct) moves every field on every tier, with no clone of the fields (D-OUTPUT-RETURNS1=A; frozen #4567 holds the original report). Proof: `jet test Compiler --profile cases --filter moves/destructure_returned_tuple_moves_fields` and a paired cell against output parameters.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:04.307Z"
+        },
+        {
+          "n": 3,
+          "text": "Pattern payload bindings of owned locals and parameters move at the last use or alias under a stable root, never deep-copy the payload. Proof: `jet test Compiler --profile cases --filter moves/pattern_payload_binding_moves`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:04.307Z"
+        },
+        {
+          "n": 4,
+          "text": "Task arguments are moved or borrowed exactly as the sema decision says, and typed lists of tasks lower to the right types. Proof: `jet test Compiler --profile golden --filter tasks/` passes, and `jet test Compiler --profile cases --filter moves/task_args_follow_sema_decision` shows no clone without a decision.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:04.307Z"
+        },
+        {
+          "n": 5,
+          "text": "When a task body moves a captured value out or drops it, the closure environment no longer keeps it alive. Proof: `jet test Compiler --profile cases --filter moves/task_capture_moved_out_frees`, where a task moves out a large captured value and then allocates as much again, and peak RSS stays below twice the value's size.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:04.307Z"
+        },
+        {
+          "n": 6,
+          "text": "The three linear copy residues in Compiler/ (the L1 payload copy, element leftovers and the ref-binding move) use the sema copy decisions, so no copy appears without one. Proof: `jet test Compiler --profile cases --filter moves/linear_copy_residues` and a lower copy count from `jet inspect choices` over the self-hosted compiler.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:04.307Z"
+        },
+        {
+          "n": 7,
+          "text": "The about 64 remaining dead parameter copies at O1 are gone. Proof: the entry-clone count from `jet inspect choices` over the self-hosted compiler is 0 (receipt with command and count).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:04.307Z"
+        },
+        {
+          "n": 8,
+          "text": "A `#Static` fixed array is one shared addressable constant, so a hot loop over it (the SHA-256 K table) emits no array copy. Proof: `jet test Compiler --profile cases --filter moves/static_array_loop_no_copy` on O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:04.307Z"
+        },
+        {
+          "n": 9,
+          "text": "The stage-2 copy-work repros for E0204, E0320 and the false L0102 are each accepted or rejected as the Jet spec says, each with its own UI snapshot. Proof: `jet test Compiler --profile ui --filter stage2_copy_gaps_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:04.307Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "memory",
+        "moves",
+        "copies"
+      ],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:30:04.307Z",
+      "updated": "2026-11-15T04:30:04.307Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0rw1zt7",
+      "num": 6924,
+      "title": "Plain data is freed in one step: root regions and no exit teardown",
+      "body": "Destination: dropping plain data (no Close, consume or scrub duty) is O(1) at its last use. Trees and lists of plain data are allocated from a region owned by their root or phase, so releasing the root frees the region in one step. At process exit, plain memory is not torn down; only values with duties (files, locks, connections, flush and commit protocols) still close.\n\nWhy: in the stage-1 self-compile profile, about 25% of all CPU time was the allocator's free path, almost all of it drop glue walking trees node by node (owner direction 2026-10-02, #4320).\n\nSource: #5989 c16, carried from #4320 by way of #4318 and #5041.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Plain-data trees and lists (no Close, consume duty or #Scrub) are allocated from a region owned by their root or phase, and dropping the root frees the region in one step with no per-node walk. Proof: `jet test Compiler --profile cases --filter memory/plain_tree_region_release`, which counts one free for the whole tree, plus a paired cell against the node-by-node walk.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:05.200Z"
+        },
+        {
+          "n": 2,
+          "text": "At process exit, plain memory is not torn down, and every Close, consume and scrub duty still runs. Proof: `jet test Compiler --profile cases --filter memory/exit_skips_plain_teardown`, which prints each Close's output and counts no frees of plain memory after main returns.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:30:05.200Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "memory",
+        "speed"
+      ],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:30:05.200Z",
+      "updated": "2026-11-15T04:30:05.200Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -214059,6 +214239,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:30:12.260Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T04:30:10.940Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T04:30:09.825Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T04:30:08.879Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00e9u2p",
+      "note": "#18: proof; was: A cancel that arrives while a Close runs is held until the close finishes and delivered at the next wait (Docs/spec/core-library-native-contract.md). tests/cases/task_control_tiers/a_cancel_at_cleanup"
+    },
+    {
+      "at": "2026-11-15T04:30:07.962Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00e9u2p",
+      "note": "#17: proof; was: A panic inside a Close while a panic is already unwinding is process-fatal under the spec (Docs/spec/core-library-native-contract.md): exit 70 with a Stop E3001 report, on run and --release. Today tes"
+    },
+    {
+      "at": "2026-11-15T04:30:07.037Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00e9u2p",
+      "note": "#5: proof; was: Field drop order follows D-FIELD-DROP-ORDER1=A in the IR drop glue: a golden with nested structs holding cleanup values passes on O0, O1 and O2, plus a UI test for the order."
+    },
+    {
+      "at": "2026-11-15T04:30:06.094Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c01k5lts",
+      "note": "#11 Inside a proven-pure call (`-[]>`), values that existed befo"
+    },
+    {
+      "at": "2026-11-15T04:30:05.200Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0rw1zt7",
+      "note": "Plain data is freed in one step: root regions and no exit teardown"
+    },
+    {
+      "at": "2026-11-15T04:30:04.308Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0d4kf8m",
+      "note": "Moves never copy: field, parameter, pattern, destructure and task-capture moves lower to moves in JetIR"
+    },
     {
       "at": "2026-11-15T04:27:37.104Z",
       "by": "TowerKeeper-1",
