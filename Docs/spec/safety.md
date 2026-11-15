@@ -2911,35 +2911,35 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 495,
+      "line": 497,
       "column": 5,
       "reason": "the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 886,
+      "line": 888,
       "column": 9,
       "reason": "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 965,
+      "line": 967,
       "column": 21,
       "reason": "readlink borrows the NUL-terminated output path and writes at most p (or the one dummy) bytes of the owned stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 1004,
+      "line": 1006,
       "column": 5,
       "reason": "getcwd writes at most 4097 bytes of the owned stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 1061,
+      "line": 1063,
       "column": 5,
       "reason": "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row"
     },
@@ -10792,11 +10792,11 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 329:13 | "rt_sigaction borrows four initialized stack words; no allocator, mutex or TLS is touched after fork" |
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 432:13 | "rt_sigaction writes the four-word old action into this spawn's block; no allocator, mutex or TLS is touched in the child" |
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 442:5 | "rt_sigprocmask reads the parent's saved mask word in this spawn's block" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 495:5 | "the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 886:9 | "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 965:21 | "readlink borrows the NUL-terminated output path and writes at most p (or the one dummy) bytes of the owned stack" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 1004:5 | "getcwd writes at most 4097 bytes of the owned stack" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 1061:5 | "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 497:5 | "the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 888:9 | "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 967:21 | "readlink borrows the NUL-terminated output path and writes at most p (or the one dummy) bytes of the owned stack" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 1006:5 | "getcwd writes at most 4097 bytes of the owned stack" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 1063:5 | "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 38:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 101:5 | "host argument registration is single-threaded and precedes user code" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 112:5 | "host argument registration is single-threaded and precedes user code" |

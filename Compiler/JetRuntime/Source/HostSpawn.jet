@@ -459,8 +459,8 @@ spawn_flag_word: fn(flag: Bool) -> I64 { if flag -> I64{1} else -> I64{0} }
 // ioprio_set value, and a `scope` descriptor >= 0 the memory_scope
 // cgroup.procs it joins. The pid, or a negative errno.
 spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, err_write: I64, candidates: I64, argv: I64, envp: I64, fallback_argv: I64, cwd: I64, dirs: I64, session: Bool, terminal: Bool, cpu: Bool, memory: Bool, files: Bool, parent_death: Bool, affinity: I64, ioprio: I64, scope: I64) -> I64 {
-    stack: alloc_map_try(SPAWN_CHILD_STACK)
-    if (stack == I64{0}) -> return I64{-12}
+    stack: trap_map(I64{0}, SPAWN_CHILD_STACK, I64{34})
+    if (stack < I64{0}) -> return stack
     block: jet_rt_alloc(SPAWN_BLOCK_BYTES, I64{8})
     fd_put(block, I64{0}, I64{-1})
     fd_put(block, I64{8}, I64{0})
@@ -490,15 +490,17 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
     fd_put(entry, I64{0}, rt_process_spawn_child_address())
     fd_put(entry, I64{8}, block)
     pid := I64{-1}
-    // The lowest page of this spawn's fresh stack mapping is the guard.
+    // The lowest page of this spawn's fresh stack mapping is the guard, which
+    // is no storage to the memory sentry either.
     alloc_guard(stack, I64{4096})
+    jet_rt_sentry_unmap(stack, I64{4096})
     #Unsafe("the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes") {
         _ := os_syscall_i64(I64{14}, I64{2}, block, wrapping(block + I64{8}), I64{8}, I64{0}, I64{0})
         pid = os_clone_i64(I64{16657}, entry, I64{0}, I64{0})
         _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
     }
     jet_rt_free(block, SPAWN_BLOCK_BYTES, I64{8})
-    alloc_unmap(stack, SPAWN_CHILD_STACK)
+    trap_unmap(stack, SPAWN_CHILD_STACK)
     pid
 }
 
