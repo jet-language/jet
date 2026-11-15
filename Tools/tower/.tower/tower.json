@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6923,
-    "rev": 104525,
+    "rev": 104547,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49057,7 +49057,7 @@
     {
       "id": "c0eve9h3",
       "num": 4624,
-      "title": "Unused-name warnings reach inside types: fields never read and enum cases never built (ballot D-MEMBER-LIVE1)",
+      "title": "Unused fields and enum cases are tidy errors: fields never read and cases never built (D-MEMBER-LIVE1=A)",
       "body": "New card hosting owner ballot D-MEMBER-LIVE1. Extends D-STRUCT-LIVE1=A (four name-level liveness verdicts, card #2052/#2132) to members; reuses its `_name` repair (D-NAME-SIGIL1) and D-LINTPOLICY1 (warnings never block). Library `pub` stays exempt exactly as in D-STRUCT-LIVE1. No new spelling, suppression marker or tool.\n\nJob: an application grows; fields and cases from old experiments stay in types, mislead newcomers, and cost bytes and fetches.\n\nToday (exercised 2026-10-05 with release jet dev-05ea86f65, probe $JET_SCRATCH_ROOT/mine/legwork/languages-b/probes/F-member-liveness.*): `jet check` warns L0104 on a private `unused_helper`, but says nothing about `User.nickname` (written once, never read) or `Plan.Legacy` (matched, never built). D-STRUCT-LIVE1 covers imports, bindings, private functions and unreachable exports only (Docs/spec/syntax-decisions.md:7596-7601).\n\nSource witness: ReScript reanalyze (Gabriel Nordeborn, yKl2fSdnw7w 52:39-60:06): whole-program detection of never-read record fields and never-constructed variant cases; teams 'switch it on, get thousands of errors' and delete old experiments; ReScript-Relay uses the same facts to drop unused GraphQL selections in CI. Rule-9 research (legwork resources 11-15): reanalyze README (case dead if never constructed, matching does not count; field dead if never read, creating does not count; needs @live for FFI); Rust dead_code ('field is never read', 'variant is never constructed'; 1.57 PR 85200 stopped derived Clone/Debug from counting as reads, which broke deny(dead_code) builds); Periphery (external indexer: synthesized Codable/Equatable code invisible, false positives need retain flags); staticcheck U1000 (field accesses use fields; anonymous structs assumed fully used).\n\nThe ballot decides whether these become compiler warnings. Implementation after ratification: member facts in the existing liveness pass (closed package/application graph), use rules from the ballot technical text, machine fix (delete or `_` rename), UI goldens, `jet explain` rows.\n\nNoise evidence for the loss mitigation: Jon Blow (youtube DaJWWePhRsM) disables unused-variable warnings globally because macro-only uses make them noisy, and calls Go's unused-is-error annoying; Jet keeps every liveness warning advisory (D-LINTPOLICY1) and counts encode/decode, derive, reflection and FFI as uses.\n\nDistilled 2026-10-05 by DistillLang from the six mining batches; Tower snapshot rev 74843 (jet-state digest INCONSISTENT during collection: rerun before posting).",
       "kind": "feature",
       "track": "sidequest",
@@ -49150,7 +49150,7 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.924Z",
-      "updated": "2026-11-15T04:24:27.595Z",
+      "updated": "2026-11-15T04:25:14.657Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -49782,11 +49782,12 @@
         {
           "n": 1,
           "text": "D-LAYOUT-SHOW1 is ratified and the record implements its outcome.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-05T21:07:54.070Z"
+          "evidence": "D-LAYOUT-SHOW1=B ratified 2026-10-05: every size is a language value, and $layout.size returns this target's number for every type. c2, c4 and c5 carry the implementation.",
+          "at": "2026-11-15T04:25:12.261Z",
+          "closure": "decision"
         },
         {
           "n": 2,
@@ -49853,7 +49854,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:54.070Z",
-      "updated": "2026-11-15T04:24:30.448Z",
+      "updated": "2026-11-15T04:25:12.261Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -65790,6 +65791,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: D-TEST-SCHEDULES1=A is spelled out across c2, c3, c4 and c8, and c1 merged into c8."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Moved from G1 to G15 (testing toolkit) by owner order 2026-11-06: G1 keeps only hand-off and durability."
@@ -65804,11 +65810,12 @@
         {
           "n": 1,
           "text": "A concurrent `#Test` can ask for schedule exploration with a run count (spelling recorded in Docs/spec); `jet test` runs it under that many seeded task orders and reports the result per seed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T11:57:19.302Z"
+          "evidence": "Merged into #6012 c8: the run-count spelling and its recording in the spec are the D-TEST-SCHEDULES1=A spelling criterion",
+          "at": "2026-11-15T04:25:11.016Z",
+          "closure": "obsolete"
         },
         {
           "n": 2,
@@ -65864,7 +65871,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:19.302Z",
-      "updated": "2026-11-15T04:24:40.405Z",
+      "updated": "2026-11-15T04:25:18.168Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -84870,7 +84877,7 @@
       "id": "c0gelll3",
       "num": 6566,
       "title": "Comments: the comment sigil ballot and the comment defects found by its study",
-      "body": "Owner question 2026-11-04: should comments move from // to ##? The study recommends keeping //, with a typed warning for Python 7 // 2 (ballot D-COMMENT-SIGIL1). Whatever the vote, the defects below are real today. Found by Research3, 2026-11-04 (comment-sigil study, probes c01-c14 under Docs/research/assets/2026-11-04-comment-sigil/, compiler 1f70b8d4bd).",
+      "body": "D-COMMENT-SIGIL1=A (ratified 2026-11-05): comments stay `//`, `///` and nested `/* */`, and a check catches the Python `7 // 2` habit with a `/%` fix (a tidy error under D-NO-WARNINGS1=A). The defects below are real today. Found by Research3, 2026-11-04 (comment-sigil study, probes c01-c14 under Docs/research/assets/2026-11-04-comment-sigil/, compiler 1f70b8d4bd).",
       "kind": "task",
       "track": "sidequest",
       "epoch": null,
@@ -85004,7 +85011,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T21:02:54.914Z",
-      "updated": "2026-11-15T04:24:46.861Z",
+      "updated": "2026-11-15T04:25:17.003Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 13
     },
@@ -86029,12 +86036,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A census lists every registered CLI flag with its setting (or none); after the ratified ballot, every flag has exactly one setting through one shared flag-to-setting mechanism, with a cases row per command family proving that flag and setting have the same effect",
+          "text": "A census lists every registered CLI flag with its setting (or none); after the ratified ballot, every flag has exactly one setting through one shared flag-to-setting mechanism, with a cases row per command family proving that flag and setting have the same effect Proof: `jet test Compiler --profile cases --filter cli_settings/flag_equals_setting_`, one row per command family.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T09:29:18.344Z"
+          "at": "2026-11-15T04:24:52.170Z"
         },
         {
           "n": 2,
@@ -86047,39 +86054,39 @@
         },
         {
           "n": 3,
-          "text": "Owner 2026-11-10 ~21:00: \"seems like we rely heavily on env vars ... other languages just use build settings and build flags, not a ton of hidden envvars ... yes we need to fix that\". Main's census on dev c2cecce162: code reads about 140 JET_/JETPACK_ variables (193 names in all), and Docs/spec/reference/environment.md, which calls itself the registry, lists 66 plus 3 wildcard families; 113 read names are on no list. One registry in code holds every environment variable that jet, jetpack, the runtime, Core or a repository tool reads. Each row gives the name, the owning module, its kind (user, automation, maintainer, transport between Jet processes, or test hook), its value type and default, and the flag or setting it overrides. A guard refuses a read of a name that has no row, across Compiler, Core, Jetpack and Tools. environment.md is generated from the registry, with a --check that the lane checks run. Zero unregistered reads.",
+          "text": "Owner 2026-11-10 ~21:00: \"seems like we rely heavily on env vars ... other languages just use build settings and build flags, not a ton of hidden envvars ... yes we need to fix that\". Main's census on dev c2cecce162: code reads about 140 JET_/JETPACK_ variables (193 names in all), and Docs/spec/reference/environment.md, which calls itself the registry, lists 66 plus 3 wildcard families; 113 read names are on no list. One registry in code holds every environment variable that jet, jetpack, the runtime, Core or a repository tool reads. Each row gives the name, the owning module, its kind (user, automation, maintainer, transport between Jet processes, or test hook), its value type and default, and the flag or setting it overrides. A guard refuses a read of a name that has no row, across Compiler, Core, Jetpack and Tools. environment.md is generated from the registry, with a --check that the lane checks run. Zero unregistered reads. Proof: `jet test tests/guards --filter env_registry_covers_every_read`, and the environment.md generator's `--check` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T01:54:30.801Z"
+          "at": "2026-11-15T04:24:53.067Z"
         },
         {
           "n": 4,
-          "text": "Every user, automation or maintainer behavior control is a CLI flag or a settings key first, and its environment variable only overrides that setting, through the shared flag-to-setting mechanism of c1. The controls include keep-going and its report and skip lists, trace file and trace detail, the optimizer dump, disable, verify and SSA-stress hooks, the GC trace, phase counters and the memory ledger. AGENTS.md, the skills and the repository tools use the flag, not the variable. A cases row per family proves the flag, the setting and the variable have the same effect. The flag and setting spellings are ratified on the D-ENV-SURFACE1 ballot first (owner gate).",
+          "text": "Every user, automation or maintainer behavior control is a CLI flag or a settings key first, and its environment variable only overrides that setting, through the shared flag-to-setting mechanism of c1. The controls include keep-going and its report and skip lists, trace file and trace detail, the optimizer dump, disable, verify and SSA-stress hooks, the GC trace, phase counters and the memory ledger. AGENTS.md, the skills and the repository tools use the flag, not the variable. A cases row per family proves the flag, the setting and the variable have the same effect. D-ENV-SURFACE1=A (ratified 2026-11-11): concise descriptive flags and the existing command-qualified setting names. Proof: `jet test Compiler --profile cases --filter cli_settings/env_override_family_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T01:54:32.071Z"
+          "at": "2026-11-15T04:24:53.996Z"
         },
         {
           "n": 5,
-          "text": "Transport between Jet-owned processes goes through one channel: argv, or one handoff file or descriptor that the parent passes to the child. It does not go through a separate environment name per value. The JET_FRONT_*, JET_DEVELOPMENT_RECEIPT_*, JET_DEVTOOLS_RELAY_*, JET_PROVE_*, JET_EVIDENCE_*, JET_TEST_SUITE_ROOT, JET_TEST_PLAN, JET_TEST_SETTINGS and JET_READ_SCOPE families are cut over in one greenfield cutover, with no old names kept. A launched user program inherits no Jet transport variable it does not own (a run case proves its environment).",
+          "text": "Transport between Jet-owned processes goes through one channel: argv, or one handoff file or descriptor that the parent passes to the child. It does not go through a separate environment name per value. The JET_FRONT_*, JET_DEVELOPMENT_RECEIPT_*, JET_DEVTOOLS_RELAY_*, JET_PROVE_*, JET_EVIDENCE_*, JET_TEST_SUITE_ROOT, JET_TEST_PLAN, JET_TEST_SETTINGS and JET_READ_SCOPE families are cut over in one greenfield cutover, with no old names kept. A launched user program inherits no Jet transport variable it does not own (a run case proves its environment). Proof: `jet test Compiler --profile cases --filter run/launched_program_inherits_no_jet_transport_vars`, and git grep finds none of the listed families in Compiler, Core or Jetpack.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T01:54:33.923Z"
+          "at": "2026-11-15T04:24:54.956Z"
         },
         {
           "n": 6,
-          "text": "One command prints every registered variable that is set, with its effective value, where that value came from (environment, setting, flag or default) and secret values redacted, in text and --json, with UI snapshots. It works like `go env`. Its spelling, and whether it is a new verb or part of an existing one (jet doctor, jet env), is ratified on the D-ENV-SURFACE1 ballot first (owner gate).",
+          "text": "D-ENV-SURFACE1=A: the env command group gains a pure vars listing, not a new environment manager. It prints every registered variable that is set, with its effective value and where that value came from (environment, setting, flag or default), redacts secret values, and has text and --json forms with UI snapshots, like `go env`. Proof: `jet test Compiler --profile cases --filter cli_env/vars_listing_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T01:54:35.160Z"
+          "at": "2026-11-15T04:24:55.977Z"
         },
         {
           "n": 7,
@@ -86117,8 +86124,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T09:29:13.427Z",
-      "updated": "2026-11-13T03:04:23.291Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:24:55.977Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 9
     },
     {
@@ -86387,30 +86394,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every tool output and selector listed in the body writes and reads symbol paths with `.` (for example `inferred_effect_signature.announce`), with no `::` writer, reader or fallback left except real Rust paths in RustForeign.jet; a repo search for `::` in Compiler/ outside Rust-foreign code and dated docs finds none.",
+          "text": "Every tool output and selector listed in the body writes and reads symbol paths with `.` (for example `inferred_effect_signature.announce`), with no `::` writer, reader or fallback left except real Rust paths in RustForeign.jet; a repo search for `::` in Compiler/ outside Rust-foreign code and dated docs finds none. Proof: git grep for `::` in Compiler, outside RustForeign.jet and dated docs, finds nothing that writes or reads a symbol path.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T19:42:47.718Z"
+          "at": "2026-11-15T04:24:57.014Z"
         },
         {
           "n": 2,
-          "text": "Readers split a dotted path at the longest prefix that names a module in the program's module graph; a case proves `jet inspect impact <file> core.process.spawn`-style selectors and an ambiguous or unknown prefix gives a registered diagnostic with a UI snapshot.",
+          "text": "Readers split a dotted path at the longest prefix that names a module in the program's module graph; a case proves `jet inspect impact <file> core.process.spawn`-style selectors and an ambiguous or unknown prefix gives a registered diagnostic with a UI snapshot. Proof: `jet test Compiler --profile cases --filter inspect/impact_dotted_selector` and `jet test Compiler --profile ui --filter dotted_path_unknown_prefix`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T19:42:47.719Z"
+          "at": "2026-11-15T04:24:58.024Z"
         },
         {
           "n": 3,
-          "text": "The affected cases, snapshots and goldens (semindex_projects_omitted_inferred_effects and every inspect, find, docs, codemod and try row that names a symbol) are updated in the same commit and pass on the default tier; the spec text that documents these outputs shows the `.` form.",
+          "text": "The affected cases, snapshots and goldens (semindex_projects_omitted_inferred_effects and every inspect, find, docs, codemod and try row that names a symbol) are updated in the same commit and pass on the default tier; the spec text that documents these outputs shows the `.` form. Proof: `jet test Compiler --profile cases --filter semindex/semindex_projects_omitted_inferred_effects`, and the inspect, find, docs, codemod and try rows pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T19:42:47.719Z"
+          "at": "2026-11-15T04:24:59.337Z"
         },
         {
           "n": 4,
@@ -86434,7 +86441,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:42:47.719Z",
-      "updated": "2026-11-15T02:33:55.354Z",
+      "updated": "2026-11-15T04:24:59.337Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 4
     },
@@ -94200,30 +94207,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A committed guard (a closed-list check beside tests/guards/closed_lists) fails on any tracked path whose PascalCase file or folder word spells a lexicon acronym in any other case, and the guard's census over dev is empty (receipt).",
+          "text": "A committed guard (a closed-list check beside tests/guards/closed_lists) fails on any tracked path whose PascalCase file or folder word spells a lexicon acronym in any other case, and the guard's census over dev is empty (receipt). Proof: `jet test tests/guards --filter acronym_path_case`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T15:56:50.283Z"
+          "at": "2026-11-15T04:25:00.499Z"
         },
         {
           "n": 2,
-          "text": "Every in-repository import, module mapping, test, example, golden, generated table and doc reference follows the rename in the same stack; the case, ui and golden suites pass on O0/O1/O2 and the self-host chain reaches its fixed point.",
+          "text": "Every in-repository import, module mapping, test, example, golden, generated table and doc reference follows the rename in the same stack; the case, ui and golden suites pass on O0/O1/O2 and the self-host chain reaches its fixed point. Proof: `jet test Compiler --profile cases`, `--profile ui` and `--profile golden` pass on O0, O1 and O2, and the self-host chain reaches its fixed point.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T15:56:51.507Z"
+          "at": "2026-11-15T04:25:01.978Z"
         },
         {
           "n": 3,
-          "text": "OWNER 2026-11-09: every folder in the repository is TitleCase with acronyms in capitals, top level included: tests/ becomes Tests/ and every lowercase folder under it (cases, guards, fixtures, ui, ...) and elsewhere follows. The only exceptions are names a tool requires (.git, .agents, .jet, src/ where ratified), each listed with the code that requires it. The AGENTS.md line 'tests/ keeps its lowercase name' is replaced in the same cutover, and the guard from c1 also refuses lowercase folders.",
+          "text": "OWNER 2026-11-09: every folder in the repository is TitleCase with acronyms in capitals, top level included: tests/ becomes Tests/ and every lowercase folder under it (cases, guards, fixtures, ui, ...) and elsewhere follows. The only exceptions are names a tool requires (.git, .agents, .jet, src/ where ratified), each listed with the code that requires it. The AGENTS.md line 'tests/ keeps its lowercase name' is replaced in the same cutover, and the guard from c1 also refuses lowercase folders. Proof: the c1 guard also refuses lowercase folders, and `git ls-files` lists no lowercase folder outside the named exceptions.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T17:04:18.661Z"
+          "at": "2026-11-15T04:25:03.051Z"
         }
       ],
       "refs": [],
@@ -94234,8 +94241,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:40.028Z",
-      "updated": "2026-11-13T02:06:16.035Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:25:03.051Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
     {
@@ -94259,21 +94266,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A committed spelling guard (a British-to-American word list with exceptions for quoted external names) fails on British spellings in tracked text, source comments, diagnostics and docs; its census over dev is empty (receipt).",
+          "text": "A committed spelling guard (a British-to-American word list with exceptions for quoted external names) fails on British spellings in tracked text, source comments, diagnostics and docs; its census over dev is empty (receipt). Proof: `jet test tests/guards --filter american_spelling`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T15:57:01.529Z"
+          "at": "2026-11-15T04:25:04.247Z"
         },
         {
           "n": 2,
-          "text": "Every CLI readout, diagnostic heading, report, help text and UI label starts with a capital (Title Case for labels and headings, sentence case for prose), acronyms in caps; a guard over the CLI, diagnostic registry and Core.Ui label sources holds it, and the UI snapshots and goldens are regenerated in the same stack.",
+          "text": "Every CLI readout, diagnostic heading, report, help text and UI label starts with a capital (Title Case for labels and headings, sentence case for prose), acronyms in caps; a guard over the CLI, diagnostic registry and Core.Ui label sources holds it, and the UI snapshots and goldens are regenerated in the same stack. Proof: `jet test tests/guards --filter user_text_capitalized`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T15:57:02.971Z"
+          "at": "2026-11-15T04:25:05.363Z"
         },
         {
           "n": 3,
@@ -94302,7 +94309,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:53.397Z",
-      "updated": "2026-11-15T04:06:33.873Z",
+      "updated": "2026-11-15T04:25:05.363Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 4
     },
@@ -94804,21 +94811,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Classify each of the 397 uncovered codes as emitted (a compiler, runtime or tool path reports it) or dead (no path does). The classification is checked in as a generated report from a Jet tool, never by hand, and it lists each emitting site as file:line.",
+          "text": "Classify each of the 397 uncovered codes as emitted (a compiler, runtime or tool path reports it) or dead (no path does). The classification is checked in as a generated report from a Jet tool, never by hand, and it lists each emitting site as file:line. Proof: the generated report is committed, and its tool's `--check` reproduces it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T01:02:08.407Z"
+          "at": "2026-11-15T04:25:06.414Z"
         },
         {
           "n": 2,
-          "text": "Every dead code is removed from Compiler/Prelude/Diagnostics.jet and from every in-repository reference, in one cutover.",
+          "text": "Every dead code is removed from Compiler/Prelude/Diagnostics.jet and from every in-repository reference, in one cutover. Proof: `jet test tests/guards --filter diagnostics_coverage` passes with no dead code registered.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T01:02:09.424Z"
+          "at": "2026-11-15T04:25:07.550Z"
         },
         {
           "n": 3,
@@ -94831,12 +94838,12 @@
         },
         {
           "n": 4,
-          "text": "A checked gate makes the rule permanent: a Jet tool run by LaneCheck fails when a registered code has no snapshot or case carrying it, and names the code.",
+          "text": "A checked gate makes the rule permanent: a Jet tool run by LaneCheck fails when a registered code has no snapshot or case carrying it, and names the code. Proof: `jet test tests/guards --filter every_code_has_snapshot`, run by LaneCheck.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T01:02:11.642Z"
+          "at": "2026-11-15T04:25:08.519Z"
         },
         {
           "n": 5,
@@ -94877,7 +94884,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T01:02:07.487Z",
-      "updated": "2026-11-15T03:52:58.168Z",
+      "updated": "2026-11-15T04:25:08.519Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 7
     },
@@ -96305,12 +96312,12 @@
         },
         {
           "n": 3,
-          "text": "Load sweep: the corpus rows that were TIMEOUT, ERROR, or passed only on retry in the a0.0.45 admit are run again while a load generator holds every core busy (for example stress-ng at 2x the core count). Every row passes, and each failure found on the way is fixed at its root: either the harness limit, or a product deadline. A product deadline in Jet's runtime or Core (a BiDi handshake, a service delivery wait, a readiness wait) waits on its event or uses the user's own deadline, never a fixed wall time that load can exhaust. The rows, the generator and the result are recorded.",
+          "text": "Load sweep: the corpus rows that were TIMEOUT, ERROR, or passed only on retry in the a0.0.45 admit are run again while a load generator holds every core busy (for example stress-ng at 2x the core count). Every row passes, and each failure found on the way is fixed at its root: either the harness limit, or a product deadline. A product deadline in Jet's runtime or Core (a BiDi handshake, a service delivery wait, a readiness wait) waits on its event or uses the user's own deadline, never a fixed wall time that load can exhaust. The rows, the generator and the result are recorded. Proof: the recorded load-sweep result under Docs/audits lists every row as PASS under the named load generator.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T10:41:40.693Z"
+          "at": "2026-11-15T04:25:09.826Z"
         },
         {
           "n": 4,
@@ -96339,8 +96346,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-14T20:01:19.685Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:25:09.826Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 5
     },
     {
@@ -213997,6 +214004,160 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T04:25:18.168Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c09f1iks",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:25:17.004Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0gelll3",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T04:25:14.658Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0eve9h3",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T04:25:12.261Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08idy63",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T04:25:11.016Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c09f1iks",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T04:25:09.826Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0gy2j07",
+      "note": "#3: proof; was: Load sweep: the corpus rows that were TIMEOUT, ERROR, or passed only on retry in the a0.0.45 admit are run again while a load generator holds every core busy (for example stress-ng at 2x the core coun"
+    },
+    {
+      "at": "2026-11-15T04:25:08.519Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0pmy5fy",
+      "note": "#4: proof; was: A checked gate makes the rule permanent: a Jet tool run by LaneCheck fails when a registered code has no snapshot or case carrying it, and names the code."
+    },
+    {
+      "at": "2026-11-15T04:25:07.550Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0pmy5fy",
+      "note": "#2: proof; was: Every dead code is removed from Compiler/Prelude/Diagnostics.jet and from every in-repository reference, in one cutover."
+    },
+    {
+      "at": "2026-11-15T04:25:06.414Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0pmy5fy",
+      "note": "#1: proof; was: Classify each of the 397 uncovered codes as emitted (a compiler, runtime or tool path reports it) or dead (no path does). The classification is checked in as a generated report from a Jet tool, never "
+    },
+    {
+      "at": "2026-11-15T04:25:05.363Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0cnf5w8",
+      "note": "#2: proof; was: Every CLI readout, diagnostic heading, report, help text and UI label starts with a capital (Title Case for labels and headings, sentence case for prose), acronyms in caps; a guard over the CLI, diagn"
+    },
+    {
+      "at": "2026-11-15T04:25:04.247Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0cnf5w8",
+      "note": "#1: proof; was: A committed spelling guard (a British-to-American word list with exceptions for quoted external names) fails on British spellings in tracked text, source comments, diagnostics and docs; its census ove"
+    },
+    {
+      "at": "2026-11-15T04:25:03.051Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c07k91t6",
+      "note": "#3: proof; was: OWNER 2026-11-09: every folder in the repository is TitleCase with acronyms in capitals, top level included: tests/ becomes Tests/ and every lowercase folder under it (cases, guards, fixtures, ui, ..."
+    },
+    {
+      "at": "2026-11-15T04:25:01.978Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c07k91t6",
+      "note": "#2: proof; was: Every in-repository import, module mapping, test, example, golden, generated table and doc reference follows the rename in the same stack; the case, ui and golden suites pass on O0/O1/O2 and the self-"
+    },
+    {
+      "at": "2026-11-15T04:25:00.499Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c07k91t6",
+      "note": "#1: proof; was: A committed guard (a closed-list check beside tests/guards/closed_lists) fails on any tracked path whose PascalCase file or folder word spells a lexicon acronym in any other case, and the guard's cens"
+    },
+    {
+      "at": "2026-11-15T04:24:59.337Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0a8z3u0",
+      "note": "#3: proof; was: The affected cases, snapshots and goldens (semindex_projects_omitted_inferred_effects and every inspect, find, docs, codemod and try row that names a symbol) are updated in the same commit and pass on"
+    },
+    {
+      "at": "2026-11-15T04:24:58.024Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0a8z3u0",
+      "note": "#2: proof; was: Readers split a dotted path at the longest prefix that names a module in the program's module graph; a case proves `jet inspect impact <file> core.process.spawn`-style selectors and an ambiguous or un"
+    },
+    {
+      "at": "2026-11-15T04:24:57.014Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0a8z3u0",
+      "note": "#1: proof; was: Every tool output and selector listed in the body writes and reads symbol paths with `.` (for example `inferred_effect_signature.announce`), with no `::` writer, reader or fallback left except real Ru"
+    },
+    {
+      "at": "2026-11-15T04:24:55.977Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c015yc5v",
+      "note": "#6: the D-ENV-SURFACE1 gate is ratified; proof; was: One command prints every registered variable that is set, with its effective value, where that value came from (environment, setting, flag or default) and secret values redacted, in text and --json, w"
+    },
+    {
+      "at": "2026-11-15T04:24:54.956Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c015yc5v",
+      "note": "#5: proof; was: Transport between Jet-owned processes goes through one channel: argv, or one handoff file or descriptor that the parent passes to the child. It does not go through a separate environment name per valu"
+    },
+    {
+      "at": "2026-11-15T04:24:53.996Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c015yc5v",
+      "note": "#4: the D-ENV-SURFACE1 gate is ratified; proof; was: Every user, automation or maintainer behavior control is a CLI flag or a settings key first, and its environment variable only overrides that setting, through the shared flag-to-setting mechanism of c"
+    },
+    {
+      "at": "2026-11-15T04:24:53.067Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c015yc5v",
+      "note": "#3: proof; was: Owner 2026-11-10 ~21:00: \"seems like we rely heavily on env vars ... other languages just use build settings and build flags, not a ton of hidden envvars ... yes we need to fix that\". Main's census on"
+    },
+    {
+      "at": "2026-11-15T04:24:52.170Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c015yc5v",
+      "note": "#1: proof; was: A census lists every registered CLI flag with its setting (or none); after the ratified ballot, every flag has exactly one setting through one shared flag-to-setting mechanism, with a cases row per co"
+    },
+    {
       "at": "2026-11-15T04:24:51.011Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-edit",
@@ -217432,713 +217593,6 @@
       "action": "card.update",
       "ref": "c0h4r83r",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:53:31.609Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0kob6cb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:53:30.609Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0h4r83r",
-      "note": "#50"
-    },
-    {
-      "at": "2026-11-15T03:53:29.578Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0h4r83r",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-15T03:53:28.634Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0h4r83r",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-15T03:53:27.684Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0h4r83r",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-15T03:53:26.322Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0h4r83r",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T03:53:25.372Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0h4r83r",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T03:53:24.365Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0h4r83r",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T03:53:23.309Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0h4r83r",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T03:53:22.026Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0h4r83r",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T03:53:20.620Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0h4r83r",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T03:53:19.326Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0h4r83r",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T03:53:18.114Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-15T03:53:17.089Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-15T03:53:15.851Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-15T03:53:14.511Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-15T03:53:13.252Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-15T03:53:11.955Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T03:53:10.490Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T03:53:09.277Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T03:53:07.987Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-15T03:53:06.756Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:53:05.550Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:53:03.994Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T03:53:02.410Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T03:53:01.365Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T03:53:00.312Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T03:52:59.157Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kob6cb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T03:52:58.168Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0pmy5fy",
-      "note": "#7 E3501-E3505, E3512 and E3530 are each registered in diagnost"
-    },
-    {
-      "at": "2026-11-15T03:52:57.181Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0gokkbf",
-      "note": "#5 tests/cases/fmt has one AST-equality and second-pass stabili"
-    },
-    {
-      "at": "2026-11-15T03:52:56.157Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0rl2anf",
-      "note": "Guides: a design guide, architecture rows for every Core namespace, embedded systems, and API maturity"
-    },
-    {
-      "at": "2026-11-15T03:52:55.122Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0aha21c",
-      "note": "Docs are runnable and true: every doc code block and public Core function example runs in CI, and the spec claims only what builds"
-    },
-    {
-      "at": "2026-11-15T03:52:54.075Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0t5gnhs",
-      "note": "jet fmt is safe: lossless, meaning- and template-preserving, its own fmt cases pass, and the repository is formatted once"
-    },
-    {
-      "at": "2026-11-15T03:51:25.044Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c018gdah",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T03:51:23.118Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0x9nq8j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:51:22.183Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c018gdah",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:51:21.265Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0x9nq8j",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T03:51:20.181Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0x9nq8j",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:51:19.049Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0x9nq8j",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:51:18.041Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#32"
-    },
-    {
-      "at": "2026-11-15T03:51:17.019Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#31"
-    },
-    {
-      "at": "2026-11-15T03:51:15.994Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-15T03:51:14.971Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-15T03:51:13.952Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-15T03:51:12.987Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-15T03:51:11.785Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-15T03:51:10.627Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T03:51:09.482Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-15T03:51:08.401Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-15T03:51:07.363Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T03:51:06.395Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:51:05.443Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:51:04.513Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T03:51:03.575Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T03:51:02.650Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T03:51:01.713Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T03:51:00.776Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T03:50:59.845Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T03:50:58.880Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c018gdah",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T03:50:57.768Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0wa0sjv",
-      "note": "#10 The rerun task set predeclares paired tasks for early guard "
-    },
-    {
-      "at": "2026-11-15T03:50:56.848Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0gokkbf",
-      "note": "#4 `jet fmt` rewrites the old arm-table shapes (adds an explici"
-    },
-    {
-      "at": "2026-11-15T03:50:55.862Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0i4ehbt",
-      "note": "Hidden costs are visible: one fact per hidden-cost site, a tidy error for hidden copies in loops, and the per-line cost view (D-COSTLAW1=A)"
-    },
-    {
-      "at": "2026-11-15T03:50:54.793Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c00gioxt",
-      "note": "No name silently wins: every shadowing and prelude-alias case is a tidy error with a rename fix"
-    },
-    {
-      "at": "2026-11-15T03:50:53.787Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0jt78qz",
-      "note": "Likely bugs are tidy errors: dead constant ranges, unconditional recursion, discarded pure results, N+1 queries and misleading loop and type shapes"
-    },
-    {
-      "at": "2026-11-15T03:48:43.196Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0fi6uj5",
-      "note": "plan"
-    },
-    {
-      "at": "2026-11-15T03:48:34.113Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0fi6uj5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:48:33.100Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0fi6uj5",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:48:20.175Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0qus24o",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T03:48:17.495Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:48:16.594Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0q31aks",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:48:15.707Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0qus24o",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:48:14.762Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0l7lwif",
-      "note": "title"
-    },
-    {
-      "at": "2026-11-15T03:48:13.085Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0q31aks",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:48:11.347Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0qus24o",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-15T03:48:10.463Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l39twq",
-      "note": "#9: proof; was: A dated adversarial review in Docs/audits compares Jet native windows with SDL3, GLFW, winit and GTK4 on the same program (open a 2560x1440 window, draw a frame, answer keys, resize, close), each buil"
-    },
-    {
-      "at": "2026-11-15T03:48:09.578Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l39twq",
-      "note": "#7: proof; was: One app experience across targets (owner 2026-11-08): the same Jet app runs as a native window and as a web app with identical behavior, look and functionality. Layout, style, the drawing model, text "
-    },
-    {
-      "at": "2026-11-15T03:48:08.655Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l39twq",
-      "note": "#5: proof; was: Ownership makes misuse unwritable: Fd and SharedMemory are owned resources closed on drop (no double close, no use after close, no fd-reuse race across threads); offsets and lengths are range-typed (I"
-    },
-    {
-      "at": "2026-11-15T03:48:07.718Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l39twq",
-      "note": "#3: split: the Wayland feature set and X11 to their own criteria; was: One implementation (owner 2026-11-08: \"keep one implementation and just have it adapt to underlying linux\"): one window, frame, buffer, input, keymap (XKB), renderer and event-loop model; each display"
-    },
-    {
-      "at": "2026-11-15T03:48:06.845Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l39twq",
-      "note": "#2: proof; was: Safe Jet: programs using ui need no #Unsafe, and Core/Ui (the Wayland client included) contains no #Unsafe; the OS primitives it needs (AF_UNIX connect, fd passing over SCM_RIGHTS as owned typed fds, "
-    },
-    {
-      "at": "2026-11-15T03:48:05.975Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0qnrbr0",
-      "note": "#1: proof; was: core.net.dtls exposes DTLS 1.2 client and server over UDP on the ported engine, idiomatic Jet in the core.net.tls shape (typed config, Result errors, Close), with interop cases against the vendored mb"
-    },
-    {
-      "at": "2026-11-15T03:48:05.102Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0cs6xlg",
-      "note": "#2: proof; was: Every gap is either filled with idiomatic Jet surface in the shape of existing Core modules, or carries an owner ruling that Jet does not need it."
-    },
-    {
-      "at": "2026-11-15T03:48:04.233Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l7lwif",
-      "note": "#5: proof; was: D-TEXT-FIXED1=A is built: a := String or &String parameter is edited in place with plain calls (D-CALLSITE-MARK2=A): s.insert(at, text), s.remove(from, to), s.truncate(n), s.reserve(n) and s.try_push("
-    },
-    {
-      "at": "2026-11-15T03:48:03.352Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0q31aks",
-      "note": "#1: the ballot is answered by D-CORE-TARGET1=A (ratified 2026-11-14); was: The ballot is answered and Sema/Scopes.jet:492-498 no longer tests for Core."
-    },
-    {
-      "at": "2026-11-15T03:48:02.436Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c00ys8fj",
-      "note": "#2: proof; was: After the ratified items land, each of the 15 ScriptBench programs in idiomatic Jet is within 15% of the shortest peer in o200k tokens and has fewer hidden behaviours (implicit conversions, unchecked "
-    },
-    {
-      "at": "2026-11-15T03:48:01.362Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0l39twq",
-      "note": "#11 An X11 wire adapter runs the same window, input and frame im"
-    },
-    {
-      "at": "2026-11-15T03:48:00.382Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0l39twq",
-      "note": "#10 Wayland is full-featured: multiple windows, resize, HiDPI sc"
-    },
-    {
-      "at": "2026-11-15T03:47:59.470Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0gxq09x",
-      "note": "The Jet SQLite engine in the `sql` package is complete: the sqllogictest corpus, WAL and crash recovery interoperate with C SQLite, and every SQLite 3.45 feature is ported"
-    },
-    {
-      "at": "2026-11-15T03:46:42.613Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c028lxdd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:46:41.705Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0p6h37r",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:46:40.816Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0jd9jl3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:46:39.761Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0l0ygs4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:46:38.734Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0jd9jl3",
-      "note": "title"
-    },
-    {
-      "at": "2026-11-15T03:46:37.094Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0jd9jl3",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T03:46:36.104Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0jd9jl3",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T03:46:35.157Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0jd9jl3",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T03:46:34.228Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0jd9jl3",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T03:46:33.353Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0l0ygs4",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T03:46:32.435Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0l0ygs4",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:46:31.490Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c028lxdd",
-      "note": "#5: split: name census and musl list to their own criteria; was: Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma, rsqrt, exp10m1, exp2m1, log2p1, log10p1, the pi-trig family, pown, powr, r"
-    },
-    {
-      "at": "2026-11-15T03:46:30.441Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0x9xmde",
-      "note": "#4: proof; was: D-ENDIAN-TYPES1=A: byte-order number types U16be/U16le, U32be/U32le, U64be/U64le, the matching I types, and F32be/F32le/F64be/F64le store a fixed byte order and read and compute as ordinary numbers. A"
-    },
-    {
-      "at": "2026-11-15T03:46:29.500Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0x9xmde",
-      "note": "#3: split: decimal-with-complex to its own criterion; was: F16{1.5} constructs and prints 1.5; 2.0 + 3.0i prints a Complex"
     }
   ],
   "nextNum": 368,
