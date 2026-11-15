@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6845,
-    "rev": 102755,
+    "nextNum": 6851,
+    "rev": 102775,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27199,39 +27199,39 @@
         },
         {
           "n": 9,
-          "text": "[#3140]  • Snapshots for missing cases, wrong payload arity/labels, ambiguous relative names, invalid raw codes and illegal payload keys, with stable codes and spans. • Each structured (JSON) repair applies cleanly to a valid program with no value change. No re-pin for prose only.",
+          "text": "Enum mistakes report stable codes and spans with UI snapshots: a missing case, wrong payload arity or labels, an ambiguous relative case name, an invalid raw code and an illegal payload key; each carries a structured (JSON) repair that applies cleanly and gives a program that checks with unchanged values. Proof: `jet test Compiler --profile ui --filter enum_repair_`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:28:46.533Z"
+          "at": "2026-11-15T02:10:50.517Z"
         },
         {
           "n": 10,
-          "text": "[#3146]  • A generated destination-owned `Enum.from_int` for unique coded payload-free enums. Representability is distinct from membership; sparse and negative codes work; payload enums are rejected. No implicit conversion. • Migrate the manual parsers. • JP: `types/enum_from_int`; `enum_from_int_payload`.",
+          "text": "An explicitly numbered payload-free enum gets a generated `from_int` (D-ENUM-INGRESS1=A): sparse and negative case numbers work, a number that is not a case returns the registered refusal (\"7 is not a case number of `Mode`\"), a payload enum is refused with a UI snapshot, and the hand-written number-to-case parsers in Core, Compiler and Examples call it instead. Proof: `jet test Compiler --profile golden --filter Types/EnumFromInt`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:28:47.211Z"
+          "at": "2026-11-15T02:10:51.575Z"
         },
         {
           "n": 11,
-          "text": "[#3159] JP `generics/typed_ast`; `typed_ast_ill_typed`. Pinned peer comparison.",
+          "text": "An ill-typed node in the typed expression tree of Examples/Metaprogramming/Generics/TypedAST.jet (an Int node where a Bool is required) is refused at compile time with a registered code and UI snapshot; the peer comparison is Docs/research/evidence-2026-09-29/3159-typed-ast.md. Proof: `jet test Compiler --profile ui --filter typed_ast_ill_typed`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:28:48.524Z"
+          "at": "2026-11-15T02:10:52.558Z"
         },
         {
           "n": 12,
-          "text": "[#3161]  • A qualified payload constructor passes where its lambda would. Labels and effects are kept; unrepresentable signatures are refused. Unit cases stay values. • JP: `types/constructor_values`; `constructor_value_*`.",
+          "text": "A qualified payload case such as `Message.Text` passes as a callable value wherever the equivalent lambda would (D-ENUM-CONSTRUCTORCALL1=A): labels and effects are kept, an unrepresentable signature is refused with a UI snapshot, and unit cases stay values. Proof: `jet test Compiler --profile golden --filter Types/ConstructorValues`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:28:50.021Z"
+          "at": "2026-11-15T02:10:53.536Z"
         },
         {
           "n": 13,
@@ -27244,12 +27244,12 @@
         },
         {
           "n": 14,
-          "text": "[#3389] JP `patterns/typed_selection`; `typed_selection_payload_escape`. Foreign downcast is explicitly classified.",
+          "text": "Selecting one case from a list of enum values uses a case pattern or `filter_map` and keeps the payload's ownership; letting a borrowed payload escape the selection is refused with a UI snapshot, and the spec states that a checked downcast of a foreign value is not Jet syntax. Proof: `jet test Compiler --profile golden --filter Patterns/TypedSelection`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:28:52.282Z"
+          "at": "2026-11-15T02:10:54.635Z"
         },
         {
           "n": 15,
@@ -27285,8 +27285,8 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:35.846Z",
-      "updated": "2026-11-15T01:40:57.432Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:10:54.635Z",
+      "updatedBy": "TowerKeeper-1",
       "workOrder": 128,
       "goals": [
         "G6"
@@ -27576,48 +27576,48 @@
         },
         {
           "n": 10,
-          "text": "[retarget] Descriptors carry identity, source/canonical wire names, payload fields/types and markers without constructing payload values; canonical identity and display spelling stay distinct and ordered.",
+          "text": "A case descriptor carries its identity, source and canonical wire names, payload fields and types, and markers without constructing a payload value; canonical identity and display spelling stay distinct and ordered. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/EnumCases`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:35:06.385Z"
+          "at": "2026-11-15T02:10:55.709Z"
         },
         {
           "n": 11,
-          "text": "[retarget] It uses #3520's single closed metadata path; non-enums, generics, ordering and visibility have explicit behavior or registered refusals, and no empty trait or case catalog is fabricated.",
+          "text": "Enum case metadata reads through the same typed reflection path as every other type (TypeInfo); a non-enum, a generic enum, case ordering and private cases each have explicit behavior or a registered refusal, and no empty trait or case catalog is made up. Proof: `jet test Compiler --profile ui --filter enum_cases_refuse_`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:35:06.955Z"
+          "at": "2026-11-15T02:10:56.624Z"
         },
         {
           "n": 12,
-          "text": "[retarget] value.case() exposes only the active case and typed payload; a program that doesn't reflect emits no reflection table or allocation (checked in the generated IR).",
+          "text": "`value.case()` exposes only the active case and its typed payload; a program that does not reflect emits no reflection table or allocation, checked in the generated IR. Proof: `jet test Compiler --profile cases --filter enum_case_no_unused_table`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:20:20.849Z"
+          "at": "2026-11-15T02:10:57.572Z"
         },
         {
           "n": 14,
-          "text": "[#1804]  • `T.reflect().path` and runtime `value.path` read the MirNameFacts ledger; `.name` stays the leaf. Remove the concatenation at Reflection.jet:1430,1492. • Diagnostics use the leaf when it is unique and the path when ambiguous; hover, project parts and JSON use the same spelling. • JP: `comptime/reflect_paths`.",
+          "text": "`T.reflect().path` and a run-time `value.path` read the canonical path from the name ledger (D-NAME-REFLECT1=A) instead of concatenating module path and name (Reflection.jet today); `.name` stays the leaf; diagnostics use the leaf when it is unique and the path when ambiguous, and hover, project output and JSON use the same spelling. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/ReflectPaths`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:28:55.125Z"
+          "at": "2026-11-15T02:10:58.507Z"
         },
         {
           "n": 15,
-          "text": "[#3155]  • No handwritten builtin enum case list in Compiler/ (`rg core_enum_variants Compiler` is empty). Completion, construction and missing-case lists come from the Core/*.jet declarations (UI `core_enum_missing_case`). • Emit shape mapping derives from checked facts. Rename, skip, computed/default, field order and unknown fields round-trip. • Historical snapshots are unchanged. No new public API is inferred.",
+          "text": "No handwritten built-in enum case list remains in Compiler/ (today CoreEnumRows.jet and CoreModules.jet hold `core_enum_variants`); completion, construction and missing-case lists come from the Core declarations (D-ONE-SHAPE1=A), and rename, skip, computed and default values, field order and unknown fields round-trip through the derived shape. Proof: `git grep -n core_enum_variants Compiler` prints nothing and `jet test Compiler --profile ui --filter core_enum_missing_case` passes",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:28:56.167Z"
+          "at": "2026-11-15T02:10:59.483Z"
         },
         {
           "n": 16,
@@ -27700,8 +27700,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-14T01:45:11.381Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:10:59.484Z",
+      "updatedBy": "TowerKeeper-1",
       "workOrder": 171,
       "goals": [
         "G6"
@@ -52680,6 +52680,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-17T23:30:30.185Z"
+        },
+        {
+          "n": 5,
+          "text": "A run-time typed hook point costs nothing when no hook is attached (no call, no table, checked in the generated IR) and a web hook decision is scoped by path prefix; one mechanism serves both (D-HOOK-ONE1=A). Proof: `jet test Compiler --profile cases --filter hook_runtime_zero_cost`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:46.571Z"
+        },
+        {
+          "n": 6,
+          "text": "Every typed compiler, build and tool hook stage (D-HOOK-STAGES1=A) runs inside the Jet sandbox with its declared authority only; a hook that reaches outside it is refused with a registered code. Proof: `jet test Compiler --profile cases --filter hook_stages_sandboxed`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:47.537Z"
         }
       ],
       "refs": [
@@ -52698,11 +52716,12 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:38.986Z",
-      "updated": "2026-11-13T01:54:25.393Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:10:47.537Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
-      ]
+      ],
+      "criteriaLastN": 6
     },
     {
       "id": "c0dvyqnu",
@@ -78950,6 +78969,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:28:43.464Z"
+        },
+        {
+          "n": 3,
+          "text": "At O1 and O2 an immutable binding of a literal used once is inlined into its use: the IR dump of `x: 3; f(x)` has no slot for x. Proof: `jet test Compiler --profile cases --filter ir_inline_single_use_literal`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:48.490Z"
         }
       ],
       "refs": [],
@@ -78960,9 +78988,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T21:31:05.067Z",
-      "updated": "2026-11-11T12:45:24.676Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2
+      "updated": "2026-11-15T02:10:48.490Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 3
     },
     {
       "id": "c0wssehw",
@@ -81918,6 +81946,15 @@
           "verifiedBy": null,
           "evidence": "dev 840067a056, gate-p64 jet, b53proofs 2026-11-14 (dev 99aa698189): jet test Compiler --profile golden --filter BrowserLockedProvision -> PASS 3/FAIL 0 (O0, O1, O2), plus cases --filter browser_lock/locked_provision_example_matches_its_golden_on_web -> PASS 1 (web); no rebless.",
           "at": "2026-11-14T13:36:38.323Z"
+        },
+        {
+          "n": 34,
+          "text": "Route markers on struct methods, added to the app with one call (D-HTTP-ROUTE-EXPOSE1=A, D-ROUTE-ONE1=A): a jokes API with GET and POST routes serves identically on O0, O1 and O2, `web.openapi` renders both routes, and a bad path parameter is a compile error with a UI snapshot. Proof: `jet test Compiler --profile golden --filter Web/JokesApi`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:49.467Z"
         }
       ],
       "refs": [],
@@ -81932,9 +81969,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T00:55:19.476Z",
-      "updated": "2026-11-14T13:36:39.822Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 33
+      "updated": "2026-11-15T02:10:49.467Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 34
     },
     {
       "id": "c00ii3d5",
@@ -98433,6 +98470,656 @@
       "updated": "2026-11-15T01:47:22.503Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
+    },
+    {
+      "id": "c0apk7x9",
+      "num": 6845,
+      "title": "Reflection reads typed facts: callables, declarations, fields, markers and run-time views",
+      "body": "Destination: every reflection read in Jet returns a typed record from one checked fact path, so a library can read a function's parameters, a type's fields, a marker's arguments or a run-time value without parsing strings. This is the reading half of the metaprogramming ladder (D-META-LADDER1=A) and what markers, derives and fn build all stand on.\n\nGoverning decisions: D-META-REFLECT2=A (the TypeInfo, FieldInfo, FunctionInfo records; TypeId identity; PreparedValue), D-PREP-SURFACE2=A, D-MARKER-REFLECT1=A (a marker reads as the typed record its declaration describes), D-REFLECT-FIELDTYPE1=A (field.type is a TypeId). Spec: Docs/spec/reference/metaprogramming.md.\n\nDecisions already taken for this work (Main, 2026-11-11): PreparedValue is a public enum mirroring the compiler's compile-time value cases (Int, Float, Bool, Char, String, Enum, List, Struct, Unit); TypeId is the TypeInfo identity; SourceSpan gains its file; SettingOrigin adds Build beside Declaration, Profile and CommandLine because fn build writes settings. A guard refuses a String-typed reflection field wherever a typed value exists. Fact reads are compile-time only since 4328d5ff94, so run-time examples read them through #run.\n\nCarried from #3520 (closed 2026-11-14) and #6039 (closed 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "FunctionInfo, MethodInfo and function types read one typed callable fact: parameters with labels and defaults (never run), declared and inferred effects, captures with ownership, access and type, and specialization identity. The callable example reads every field with no string parsing, and changing a callee's signature re-checks code that reads it. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/CallableCatalog`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:40.963Z"
+        },
+        {
+          "n": 2,
+          "text": "Every declaration kind has a typed reflection record with a stable identity and scope; comments, docs and marker arguments stay distinct; package settings show their value, type and origin (Declaration, Profile, CommandLine or Build) as typed values, not text; a whole-program query reports whether it is complete and at which revision. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/DeclarationFacts`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:40.963Z"
+        },
+        {
+          "n": 3,
+          "text": "`reflect.of(value)` keeps typed values and identity with no reading of display strings; capturing a value is complete or refused with a registered diagnostic; retention is explicit and inspectable; O0, O1 and O2 print the same output. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/ReflectValue`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:40.963Z"
+        },
+        {
+          "n": 4,
+          "text": "A field's type (a TypeId), default and offset read the same in a marker expand body, a derive expand body, ordinary code through `T.reflect()` and fn build, for a struct with a defaulted field (today the default read is E0956 and `Rock.reflect()` outside a template is E0311). Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/FieldFacts`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:40.963Z"
+        },
+        {
+          "n": 5,
+          "text": "TypeInfo lists associated constants with their values and the generic bindings of a specialized type, and a numeric type reports its signedness and bit width. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/TypeFacts`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:40.963Z"
+        },
+        {
+          "n": 6,
+          "text": "A type's implemented traits read as the typed `traits` list; no string `implements(\"X\")` read remains in Compiler/, Core or Examples (one cutover). Proof: `jet test Compiler --profile cases --filter reflect_traits_are_typed`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:40.963Z"
+        },
+        {
+          "n": 7,
+          "text": "TypeInfo.identity is a TypeId (D-META-REFLECT2=A), not a String, and every reader moves to it in one cutover. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:40.963Z"
+        },
+        {
+          "n": 8,
+          "text": "An engine-style library marks entity types with its own marker and derives the count, the sorted names, per-type `Rows<T>` storage and default constructors from `Entity.reflect().uses`, with no hand-kept list; adding one marked struct, including a generated one, is the only edit needed for it to appear. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/EntityBuckets`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:40.963Z"
+        },
+        {
+          "n": 9,
+          "text": "`target.marker(T)` returns the typed marker record (`T?`, or `[T]` for a repeatable marker) on every site kind, fields included, and `Rock.reflect().marker(T)` works on named types; a non-marker argument is a registered refusal with a UI snapshot. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Attributes/MarkerRead`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:40.963Z"
+        },
+        {
+          "n": 10,
+          "text": "No string `has_marker(\"X\")` read remains in the compiler (today Sema/Calls/Reflection.jet and Registration/Derives.jet); a one-time in-repo script converts them to typed marker reads (D-MARKER-REFLECT1=A), and no jet fix rule ships. Proof: `git grep -n 'has_marker(\"' Compiler` prints nothing and `jet test Compiler --profile cases --filter marker_read` passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:40.963Z"
+        },
+        {
+          "n": 11,
+          "text": "One executable manifest covers the 40 Jai metaprogramming peer families and every reflection registry row, each with a passing witness on its tiers; a missing or inconclusive row fails the check, and historical Jai behavior is marked apart from observed Jai behavior. Proof: `jet test Compiler --profile cases --filter meta_suite`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:40.964Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "meta",
+        "reflection",
+        "metaprogramming"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:10:40.964Z",
+      "updated": "2026-11-15T02:10:40.964Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0r6d7ja",
+      "num": 6846,
+      "title": "Generated code: the Compiler value, Meta effects, generation rounds and rollback",
+      "body": "Destination: a program that generates or rewrites code does it through one passed, root-created `Compiler` value whose actions are Meta effects checked like any effect, and generation is deterministic, provenanced and all-or-nothing. Why: generated code must be as trustworthy and debuggable as hand-written code, and nothing above marker expansion may happen by import alone.\n\nGoverning decisions: D-META-LADDER1=A (Meta effects follow the rule of every effect; compiler control is one passed value; macros stay out), D-META-OPTIN2=A (a checked package opt-in suffices for above-level-five operations), D-HOOK-STAGES1=A, D-ADDSTRUCT-TYPE1=A (meta.add_struct names a field's type with a TypeId). Spec: Docs/spec/reference/metaprogramming.md.\n\nCarried decisions: the org policy file accepts the same `authority: { deny: [...] }` record as package.jet (D-EFFBUDGET1), applied as an outer rung that only narrows (Main 2026-11-11). `#build`, `#program`, `#package` and `#phase` are spelled with `#` and cannot be shadowed (D-META-HASH2=A, landed 00a2b37a42..53805444ba). Sizing (owner 2026-11-11): each Compiler-value slice is at most one hour of code and one hour of tests. Background: the Compiler value needs a build session alive through application checking and closures called on each checked-function event; see the G6Decl notes in $JET_SCRATCH_ROOT/lanes/G6Decl/BLOCKED.md.\n\nCarried from #3526, #3520 and #4276 (closed 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A metaprogram action above marker expansion (adding declarations outside a marker, rewriting a body, making a type from text) needs a `Compiler` value, and each action checks its Meta cases (`Generate`, `Include`, `Rewrite`, `Types`, `Raw`) like any effect: denied by written code, otherwise allowed; without a `Compiler` value it is refused with a registered diagnostic and UI snapshot. Proof: `jet test Compiler --profile ui --filter meta_ladder_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:41.959Z"
+        },
+        {
+          "n": 2,
+          "text": "Standard mode allows complete read-only reflection and explicit checked generation and refuses operations above level 5 unless the package opts in (D-META-OPTIN2=A); `#run` runs at every tier, fn build runs only for artifacts, and a built artifact never re-runs `#run`; a pure cache hit keeps every observable effect (print count and order). Proof: `jet test Compiler --profile cases --filter meta_ladder_levels`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:41.959Z"
+        },
+        {
+          "n": 3,
+          "text": "`meta.add_struct` takes each field's type as a TypeId (D-ADDSTRUCT-TYPE1=A, ratified 2026-11-13); the String form of CompilerField.type is gone in one cutover, and a computed name is still refused with its registered code. Proof: `jet test Compiler --profile cases --filter meta_ladder_add_struct`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:41.959Z"
+        },
+        {
+          "n": 4,
+          "text": "Each generated declaration and rewrite carries a stable identity and its full producer and Compiler-handoff chain in `jet inspect`, `jet explain`, the editor and the CLI; diagnostics name the caller, handler, output or missing producer separately. Proof: `jet test Compiler --profile cases --filter inspect_generated_identity`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:41.959Z"
+        },
+        {
+          "n": 5,
+          "text": "Each generation round, source identity, collision check, dependency edge, lock fact and rollback result is deterministic and source-provenanced: two runs, and runs with permuted, cold, warm and parallel schedules, give byte-identical output and provenance. Proof: `jet test Compiler --profile cases --filter generate_rounds_deterministic`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:41.959Z"
+        },
+        {
+          "n": 6,
+          "text": "Shadowing, duplicate output, self and multi-node cycles, round exhaustion, outside-root paths and materialization failure each leave no partial module and report their registered code with what/why/fix text and a UI snapshot; each test fails if the code, span, message or cleanup path is bypassed. Proof: `jet test Compiler --profile ui --filter generate_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:41.959Z"
+        },
+        {
+          "n": 7,
+          "text": "`generate {}` helper values and inline `b.generate` are one mechanism with byte-identical output and source maps; handwritten code uses the generated items; a collision reports at the helper's line; opt-in in-tree materialization fails on drift; raw source strings are refused. Proof: `jet test Compiler --profile cases --filter generate_helper_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:41.959Z"
+        },
+        {
+          "n": 8,
+          "text": "Generation follows a dependency-aware schedule (declared inputs, rounds, typed barriers, promised outputs); cycles and duplicate outputs are detected with registered codes. Proof: `jet test Compiler --profile cases --filter generate_schedule_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:41.959Z"
+        },
+        {
+          "n": 9,
+          "text": "When a promised generated output is missing, the error names its producer and its consumer, and an unrelated unknown name is not reported as a generation promise. Proof: `jet test Compiler --profile ui --filter generate_promise_missing`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:41.959Z"
+        },
+        {
+          "n": 10,
+          "text": "Cancelling generation midway, or exhausting memory or steps during it, leaves no partly published declaration and no stale checked fact; the next run starts clean. Proof: `jet test Compiler --profile cases --filter generate_cancel_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:41.959Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "meta",
+        "generation",
+        "metaprogramming"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:10:41.959Z",
+      "updated": "2026-11-15T02:10:41.959Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c07ywjvi",
+      "num": 6847,
+      "title": "Compile-time evaluation: #run values match run time, fall back cleanly and run once",
+      "body": "Destination: compile-time evaluation (`#run`, `#if`, `#loop`, `NAME: #run value`, and automatic folding of immutable bindings) means exactly what the same code means at run time, reports every failure at its source with a registered code, and never runs twice. Why: compile-time code is ordinary Jet; any drift between the two meanings is a silent wrong answer.\n\nGoverning decisions: D-META-SPELL1=A (`#run`, `#if`, `#loop` replace `comptime`; shipped, cases ratified_p12/d_meta_spell1_forms), D-COMPTIME-WORD1=A, D-PREP-BRANCH1=A, D-PREP-FN1=A, D-MODULE-BUILD1=A (a module-level value that fails or has effects is a build error, E0643), D-EXEC2=A (tiers are O0, O1 and O2; no interpreter). Spec: Docs/spec/reference/metaprogramming.md; the 2026-10-29 and 2026-11-10 entries of Docs/spec/syntax-decisions.md.\n\nCarried from #4276 (closed 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Run-time-only reflection, unsupported holes, unsafe raw use, an unknown DSL owner or type and mutable observations each fail at compile time with their registered diagnostic, and compile-time and run-time results agree: every comptime_diff case passes with none marked known-failing. Proof: `jet test Compiler --profile cases --filter comptime_diff`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:42.975Z"
+        },
+        {
+          "n": 2,
+          "text": "Self-cycles, longer cycles, missing or impure dependencies, invalid values and consumer disagreement among compile-time values each report the registered diagnostic at the owning source span, with UI snapshots. Proof: `jet test Compiler --profile ui --filter comptime_dependency_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:42.975Z"
+        },
+        {
+          "n": 3,
+          "text": "An immutable `name: value` inside a block is computed while compiling whenever it can be and quietly falls back to run time for run-time inputs, outside effects, values that cannot be stored, or a step-limit stop; hover and `jet inspect` show the reason it fell back. Proof: `jet test Compiler --profile cases --filter comptime_fallback_reason`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:42.975Z"
+        },
+        {
+          "n": 4,
+          "text": "A compile-time fragment can call Core source functions through their loaded signatures (no E0956 'no loaded signature'), and a plain-literal constant registers without re-walking its unit, so registration time stays linear in unit size. Proof: `jet test Compiler --profile cases --filter comptime_core_call`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:42.975Z"
+        },
+        {
+          "n": 5,
+          "text": "Every tier (O0, O1, O2) observes the same compile-time values and result, and a built binary never repeats compile-time work at startup. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Comptime/FoldConstants`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:42.975Z"
+        },
+        {
+          "n": 6,
+          "text": "The NoEager policy turns off automatic compile-time evaluation but allows explicit `#run`; Only refuses compile-time execution of marked code; neither blocks ordinary optimizer folding. Proof: `jet test Compiler --profile cases --filter comptime_policy_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:42.975Z"
+        },
+        {
+          "n": 7,
+          "text": "`#run`, `#if`, `#loop` and `#run fn` never fall back silently to run time, never claim false purity and never execute a generated body before it is checked. Proof: `jet test Compiler --profile cases --filter comptime_no_silent_fallback`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:42.975Z"
+        },
+        {
+          "n": 8,
+          "text": "`#run` executes ordinary code with no fallback stubs; persistent, session and effect lifetimes stay separate; native and process execution do not inherit host authority; a host/target mismatch is diagnosed before any effect runs. Proof: `jet test Compiler --profile cases --filter comptime_diff_host_target`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:42.975Z"
+        },
+        {
+          "n": 9,
+          "text": "The compile-time totality pass always returns a value, a dependency wait set or a registered diagnostic: a top-level `#loop x in NAMED_CONSTANT` whose source waits on another top-level value no longer stops with ICE 101 (seen in the JetCli package on seed-t20), and the ScriptAPI-11r literal-list workaround in JetCli returns to the named constant. Proof: `jet test Compiler --profile cases --filter comptime_loop_waits_on_named_constant`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:42.975Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "meta",
+        "comptime",
+        "metaprogramming"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:10:42.975Z",
+      "updated": "2026-11-15T02:10:42.975Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0n7zpy3",
+      "num": 6848,
+      "title": "One fact registry: typed rows, one query, uniform flow joins and one gate ledger",
+      "body": "Destination: every compiler fact a user can see (marker rules, knowledge planes, rights, build facts, gates, send-safety, failure attribution) lives in one registry of typed rows, read through one public query, so tools and libraries see the same facts the compiler uses. Why: today facts live in several tables with several readers, so tools drift from the compiler.\n\nGoverning decisions: D-META-REG1=A (one registry substrate, told apart by attachment), D-META-REG2=A (one public `compiler.query`, ratified 2026-11-11), D-LEDGER1=D (three lifetime-separated stores behind one typed query), D-FACT-FLOW1=A, D-FACT-GATE1=A, D-FACT-HOME1=A, D-FACT-OWN1=A. How a fact is declared is D-DECL-TYPES1=A (field-less structs implementing Fact), built on the declarations card. Spec: Docs/spec/reference/metaprogramming.md.\n\nCarried from #4276 (closed 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`core.compiler` has one public typed query, `compiler.query(store, kind: FactKind) -> [FactRow] MetadataError!`, over the schema, package and plugin fact stores (D-META-REG2=A); `jet inspect facts --store=… --kind=… [--json]` renders the same call with the same rows, identities and errors, and no second registry reader remains; a golden counts marker rows both ways and gets equal counts on O0, O1 and O2, and a missing store reports its MetadataError with a UI snapshot. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/FactQuery`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:43.897Z"
+        },
+        {
+          "n": 2,
+          "text": "Marker rules, knowledge planes, rights and build facts register in one registry substrate, told apart by attachment (D-META-REG1=A); no second registration table remains in Compiler/. Proof: `jet test Compiler --profile cases --filter fact_registry_one_table`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:43.897Z"
+        },
+        {
+          "n": 3,
+          "text": "One flow-fact store on the checker holds every per-binding fact; each plane supplies only its join rule, and the walker applies joins the same way at every if, loop and arm table for ownership, effects, state and taint (D-FACT-FLOW1=A). Proof: `jet test Compiler --profile cases --filter fact_flow_join_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:43.897Z"
+        },
+        {
+          "n": 4,
+          "text": "Every gate lands in one ledger: unsafe regions, impure marks, grants, trust and .Force, taint scrubs, duty drops and precision demotions; `jet inspect gates` prints counts per kind with security kinds first and a filter selects one kind (D-FACT-GATE1=A). Proof: `jet test Compiler --profile cases --filter inspect_gates`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:43.897Z"
+        },
+        {
+          "n": 5,
+          "text": "Facts with user-visible meaning are typed registry rows readable through the fact query: send-safety, failure attribution, #Track, view and unit-scale provenance, and maturity; prover internals such as uninitialized tracking and exhaustiveness stay inside the engine (D-FACT-HOME1=A). Proof: `jet test Compiler --profile cases --filter fact_registry_user_rows`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:43.897Z"
+        },
+        {
+          "n": 6,
+          "text": "The borrow checker stays a prover, never a fact plane: the registry has no ownership plane row, and the ownership sigil surface stays as ratified (D-FACT-OWN1=A). Proof: `jet test Compiler --profile cases --filter fact_registry_no_ownership_plane`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:43.897Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "meta",
+        "facts",
+        "metaprogramming"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:10:43.897Z",
+      "updated": "2026-11-15T02:10:43.897Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0255wk0",
+      "num": 6849,
+      "title": "Markers, effects, facts, derives and tags are ordinary declared types (D-DECL-TYPES1)",
+      "body": "Destination: Jet has no special declaration words for markers, effects, facts, derives or tags. Each is an ordinary struct, enum or impl of a Core trait (Marker, Effect, Fact, Trait.Derive), so one mechanism, one reader and one set of tools serves all of them, and libraries declare their own on equal terms with Core.\n\nGoverning decisions: D-DECL-TYPES1=A (2026-10-30), D-TAG-MARKER1=A, D-FACT-MARKER1=A, D-DERIVE-PROVIDER1=A, D-MARKER-INBODY1=A (built by #6562), D-MARKER-MODULE1=A, D-MARKER-NAME-HYGIENE1=A, D-MARKER-LAW1=A, D-EFFTYPE-MODEL1=A, D-DECL-COLON1=A. Owner orders: retired declarations get no teaching diagnostic, UI snapshot or jet fix rule (2026-11-06); Jet's own diagnostic types live under the `jet.` prefix (2026-10-30).\n\nDecided without ballot (Main 2026-11-11): wrap is typed with the existing Code value and lowered through root-authorized Compiler events and Meta.Rewrite; library combine is as already ratified (no package marker sets resolution). Package settings take ordinary markers on the package settings record (a header in package.jet, the same marker on an inline package record); no inner-marker sigil. Marker struct form: `struct X { fields; impl Marker { settings; fn expand(self, target: Target) { template } } }`; a trailing list field without a default is variadic.\n\nCarried from #6039, #4276, #4284 and #3662 (closed 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Markers are structs implementing Core Marker (sites, repeatable, inherits, resolution, scopes, companion and group as trait constants; an `expand(self, target)` template; wrap); the Prelude's 81 markers are converted and the `marker` declaration word is gone; package markers cannot set resolution (D-MARKER-LAW1=A) and the Prelude's .Merge and .Tighten markers keep their built-in rules. Proof: `jet test Compiler --profile cases --filter decl_types_marker_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:44.799Z"
+        },
+        {
+          "n": 2,
+          "text": "Effects are types implementing Core Effect: #FX above the effect type, `impl X.Effect` in the same file, enum cases as closed families, `irreversible(self) -> Bool`, and value rows like `-[Bucket{name: \"photos\"}]>` that cover only that value; the Prelude's 46 effects are converted and the `effect` declaration word is gone. Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Effects/EffectDeclarations`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:44.799Z"
+        },
+        {
+          "n": 3,
+          "text": "Derives are `impl Trait.Derive { fn expand(target: Target) }` with no `derive` or `derives` word; compiler facts are field-less structs implementing Fact, with their attachment and gate laws as trait constants and gates as Prelude Gate values, one form for value, scope and build facts (this replaces D-FACTDECL1's `fact Name(...)` form); the `fact` word is gone. Proof: `jet test Compiler --profile cases --filter decl_types_derive_and_fact_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:44.799Z"
+        },
+        {
+          "n": 4,
+          "text": "A derive with no trait is a field-less marker struct with `impl Marker { sites: [.Type] }` and an `expand(self, target: Target)` template that writes `impl $target { ... }` (D-DERIVE-PROVIDER1=A); writing #DebugText on a type is unchanged; every `derive T.X` provider in Examples, tests and Tools/perf is converted by a one-time script, with no jet fix rule. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Derives/UserDerive` on O0, O1 and O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:44.799Z"
+        },
+        {
+          "n": 5,
+          "text": "A value tag is a field-less struct whose Marker impl has `sites: [.TypeUse]`; its denials are its own `#FX(!…)` row (D-EFFTYPE-MODEL1), with no tag-only deny setting; `from` is a Marker constant used only by tags; enum-based states and effect trees stay compile-time facts read by markers, not a new dispatch mechanism (D-FACTMODEL1=A). A tag with no denial or with a ceiling entry is refused with a registered code and UI snapshot. Proof: `jet test Compiler --profile ui --filter tag_marker_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:44.799Z"
+        },
+        {
+          "n": 6,
+          "text": "The four built-in tags are Prelude structs; the copies in EffectsSurface.jet, Taint.jet and the TaintKind enum are removed; the 36 tag declarations are converted; E0733 and E0734 texts describe the struct form. Proof: `git grep -n TaintKind Compiler` prints nothing and `jet test Compiler --profile cases --filter tag_marker_` passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:44.799Z"
+        },
+        {
+          "n": 7,
+          "text": "One in-repo migration rewrites every marker, effect, fact and derive declaration and reject call in one cutover; no old spelling, alias, reader, teaching diagnostic or jet fix rule remains, and the golden, UI and cases compares lose 0 rows. Proof: `jet test Compiler --profile cases --filter decl_types_no_old_words`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:44.799Z"
+        },
+        {
+          "n": 8,
+          "text": "Every converted Prelude marker accepts both placements, above the declaration and as a `#X :: value` line inside its body (D-MARKER-INBODY1=A); no marker opts in or out, and the cutovers move no existing marker between the two places. Proof: `jet test Compiler --profile cases --filter marker_inbody`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:44.799Z"
+        },
+        {
+          "n": 9,
+          "text": "No marker shares a name with a trait (a registry check fails on a collision); #Job is the scheduled-job marker; #Discriminant is not Jet syntax, replaced by `#Codable(tag:)` (D-MARKER-NAME-HYGIENE1=A, D-CODABLE-OPTIONS1=A). Proof: `jet test Compiler --profile cases --filter marker_name_hygiene`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:44.799Z"
+        },
+        {
+          "n": 10,
+          "text": "A package-declared marker is named through its module, `#web.Get` (D-MARKER-MODULE1=A); unknown, private and ambiguous marker names each report a registered code with a UI snapshot. Proof: `jet test Compiler --profile golden --filter Modules/QualifiedMarker` and `jet test Compiler --profile ui --filter qualified_marker_`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:44.799Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "markers",
+        "metaprogramming",
+        "decl-types"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:10:44.799Z",
+      "updated": "2026-11-15T02:10:44.799Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0gokkbf",
+      "num": 6850,
+      "title": "jet fmt --simplify: guard clauses, single-use temporaries and one corpus migration",
+      "body": "Destination: `jet fmt --simplify` rewrites code to the ratified simplest forms, the repository is migrated once with it, and style points are rewritten, never reported. Plain `jet fmt` keeps its one default style. Why: style should cost nobody attention; Jet has no warnings (owner, 2026-11-09 language review), so anything a tool can fix it fixes.\n\nGoverning decisions: D-FMT-SIMPLIFY1=A (plain jet fmt unchanged; the rewriter runs only with `--simplify`; teams canonicalize a repo in one deliberate run). Spec: Docs/spec/reference/cli.md (jet fmt), Docs/spec/spec.md (formatter).\n\nCarried from #4276 and #6637 (2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The in-repo corpus is migrated once with `jet fmt --simplify`, in one mechanical commit, and stays migrated: `jet fmt --simplify --check Compiler Core Jetpack Tools Examples tests` exits 0, and a plain `jet fmt` run leaves code it did not format unchanged. Proof: `jet fmt --simplify --check Compiler Core Jetpack Tools Examples tests`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:45.678Z"
+        },
+        {
+          "n": 2,
+          "text": "`jet fmt --simplify` rewrites a nested if/else into guard clauses (early return) without changing behavior and never reports it; it is applied across Compiler/, Core and Jetpack in one mechanical change, `jet fmt --check Compiler Core Jetpack` passes, and the self-host chain reaches its fixed point. Proof: `jet test Compiler --profile cases --filter fmt_simplify_guard_clause`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:45.678Z"
+        },
+        {
+          "n": 3,
+          "text": "`jet fmt --simplify` inlines a needless temporary (an immutable binding used once, on the next line) only when evaluation order is unchanged, and never reports it; a fmt case pins an order-sensitive negative that is left alone. Proof: `jet test Compiler --profile cases --filter fmt_simplify_inline_temporary`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:10:45.678Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "fmt",
+        "tooling"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:10:45.678Z",
+      "updated": "2026-11-15T02:10:45.678Z",
+      "updatedBy": "TowerKeeper-1"
     }
   ],
   "decisions": [
@@ -203362,6 +204049,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:10:59.484Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w7t4qu",
+      "note": "#15: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: [#3155]  • No handwritten builtin enum case list in Compiler/ (`rg core_enum_variants Compiler` is empty). Completion, construction and missing-case lists come from the Core/*.jet declarations (UI `co"
+    },
+    {
+      "at": "2026-11-15T02:10:58.507Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w7t4qu",
+      "note": "#14: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: [#1804]  • `T.reflect().path` and runtime `value.path` read the MirNameFacts ledger; `.name` stays the leaf. Remove the concatenation at Reflection.jet:1430,1492. • Diagnostics use the leaf when it is"
+    },
+    {
+      "at": "2026-11-15T02:10:57.572Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w7t4qu",
+      "note": "#12: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: [retarget] value.case() exposes only the active case and typed payload; a program that doesn't reflect emits no reflection table or allocation (checked in the generated IR)."
+    },
+    {
+      "at": "2026-11-15T02:10:56.624Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w7t4qu",
+      "note": "#11: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: [retarget] It uses #3520's single closed metadata path; non-enums, generics, ordering and visibility have explicit behavior or registered refusals, and no empty trait or case catalog is fabricated."
+    },
+    {
+      "at": "2026-11-15T02:10:55.709Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w7t4qu",
+      "note": "#10: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: [retarget] Descriptors carry identity, source/canonical wire names, payload fields/types and markers without constructing payload values; canonical identity and display spelling stay distinct and orde"
+    },
+    {
+      "at": "2026-11-15T02:10:54.635Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xb6zik",
+      "note": "#14: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: [#3389] JP `patterns/typed_selection`; `typed_selection_payload_escape`. Foreign downcast is explicitly classified."
+    },
+    {
+      "at": "2026-11-15T02:10:53.536Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xb6zik",
+      "note": "#12: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: [#3161]  • A qualified payload constructor passes where its lambda would. Labels and effects are kept; unrepresentable signatures are refused. Unit cases stay values. • JP: `types/constructor_values`;"
+    },
+    {
+      "at": "2026-11-15T02:10:52.558Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xb6zik",
+      "note": "#11: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: [#3159] JP `generics/typed_ast`; `typed_ast_ill_typed`. Pinned peer comparison."
+    },
+    {
+      "at": "2026-11-15T02:10:51.575Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xb6zik",
+      "note": "#10: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: [#3146]  • A generated destination-owned `Enum.from_int` for unique coded payload-free enums. Representability is distinct from membership; sparse and negative codes work; payload enums are rejected. "
+    },
+    {
+      "at": "2026-11-15T02:10:50.517Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xb6zik",
+      "note": "#9: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: [#3140]  • Snapshots for missing cases, wrong payload arity/labels, ambiguous relative names, invalid raw codes and illegal payload keys, with stable codes and spans. • Each structured (JSON) repair a"
+    },
+    {
+      "at": "2026-11-15T02:10:49.467Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0vxf4u0",
+      "note": "#34 Route markers on struct methods, added to the app with one c"
+    },
+    {
+      "at": "2026-11-15T02:10:48.490Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c02qdoro",
+      "note": "#3 At O1 and O2 an immutable binding of a literal used once is "
+    },
+    {
+      "at": "2026-11-15T02:10:47.537Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0gmf0y4",
+      "note": "#6 Every typed compiler, build and tool hook stage (D-HOOK-STAG"
+    },
+    {
+      "at": "2026-11-15T02:10:46.571Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0gmf0y4",
+      "note": "#5 A run-time typed hook point costs nothing when no hook is at"
+    },
+    {
+      "at": "2026-11-15T02:10:45.678Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0gokkbf",
+      "note": "jet fmt --simplify: guard clauses, single-use temporaries and one corpus migration"
+    },
+    {
+      "at": "2026-11-15T02:10:44.799Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0255wk0",
+      "note": "Markers, effects, facts, derives and tags are ordinary declared types (D-DECL-TYPES1)"
+    },
+    {
+      "at": "2026-11-15T02:10:43.897Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0n7zpy3",
+      "note": "One fact registry: typed rows, one query, uniform flow joins and one gate ledger"
+    },
+    {
+      "at": "2026-11-15T02:10:42.975Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c07ywjvi",
+      "note": "Compile-time evaluation: #run values match run time, fall back cleanly and run once"
+    },
+    {
+      "at": "2026-11-15T02:10:41.959Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0r6d7ja",
+      "note": "Generated code: the Compiler value, Meta effects, generation rounds and rollback"
+    },
+    {
+      "at": "2026-11-15T02:10:40.964Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0apk7x9",
+      "note": "Reflection reads typed facts: callables, declarations, fields, markers and run-time views"
+    },
     {
       "at": "2026-11-15T02:03:16.428Z",
       "by": "Main",
