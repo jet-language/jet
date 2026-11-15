@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6975,
-    "rev": 106102,
+    "rev": 106104,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75618,11 +75618,11 @@
         {
           "n": 32,
           "text": "Seed-seam step (b) for the image-part read: G12Docs-s4a-r3 (step (a)) ships only the runtime exports image_part and image_part_size, because seed-b14 refuses any guest import of an export it does not list (E1341). After the first admitted seed whose RUNTIME_C_EXPORTS carries them, s4b-r3 adds the jet.runtime.sys bindings `image_part -> [U8]?` and `image_part_size -> Int?` and their driver caller. Proof: the record is read with one bulk call in jetc-trace, and the s4b case passes on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T11:54:44.567Z"
+          "evidence": "dev 726c4aea9c. The jet.runtime.sys bindings image_part -> [U8]? and image_part_size -> Int? are in Compiler/JetRuntime/Source/Public/Sys.jet:131-132 (dbaeddc6a2), and their driver caller reads each part with one bulk call (JetCli Host.jet:750-761, jet_cli_runtime_part). tests/cases/cli_runtime/image_part_bindings_answer_none_for_a_part_the_executable_lacks_on_every_tier.case (726c4aea9c) PASSes on p171 at O0, O1, O2 and a build. Limits: the s4b case and jetc-trace record the criterion named were retired with the record, so this case replaces them. The one-call read is shown by the code, not observed by the case.",
+          "at": "2026-11-15T10:43:37.233Z"
         },
         {
           "n": 33,
@@ -75723,7 +75723,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T10:41:13.461Z",
+      "updated": "2026-11-15T10:43:37.233Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -101888,11 +101888,11 @@
         {
           "n": 14,
           "text": "Kernel mappings are sentry-tracked: os_map, Region.reserve and every kernel map path register the mapped (page-rounded) range with the sentry after mapping, and os_unmap and trim unmaps quarantine it first, inline and free in non-sentry builds. Every compiler and runtime mapping site (loader_c_string page, image reservation, loader_view, child start stack, comptime reply mapping) goes through them, with no direct mmap. Proof: a case where a checked mem.list_copy into a fresh mapping passes and the same copy after unmap stops with R0801, on every tier. (Root found by Speed-3 on 2026-11-14; it blocks #5479 S2.)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:36:47.215Z"
+          "evidence": "dev 726c4aea9c (1ef8f75731), p171, 2026-11-15. tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.case PASSes. A checked list_copy into a fresh mapping prints 3 4 5 at O0, O1, O2 and web; the same copy after the unmap stops with a located R0801 (after_close.jet:22, with the gate's audit text) at O0, O1, O2 and web (node exits 70). memory_kernel/ is 11/0 on p170. The raw-syscall grep: git grep -nE '(syscall\\w*|host_call)\\((I64\\{)?(9|11|25)\\}?,|loader_record\\(rows, OS_SYS_MUNMAP|^\\s*push (9|11|25)\\b' -- Compiler, excluding Image/Loader.jet and FaultReport/report.S, prints only Linux.jet's three kernel-primitive lines (167, 175, 185: map, unmap, remap). Those two path exclusions are the recorded boundary: the loader's executor rows run before the runtime and its sentry exist, and report.S is a dying-path blob with no relocations; each says so at the site (d682db1d23).",
+          "at": "2026-11-15T10:43:36.217Z"
         }
       ],
       "refs": [],
@@ -101903,7 +101903,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T10:24:14.593Z",
+      "updated": "2026-11-15T10:43:36.217Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -218124,6 +218124,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T10:43:37.233Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#32"
+    },
+    {
+      "at": "2026-11-15T10:43:36.217Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oo8eeq",
+      "note": "#14"
+    },
     {
       "at": "2026-11-15T10:41:13.461Z",
       "by": "Main",
