@@ -127,9 +127,13 @@ sema_call_histories_position_label: fn(index: Int) -> String Never! {
 
 sema_call_histories_frame: fn(value: String) -> String Never! { "{value.len()}:{value}" }
 
+// The source text under `span`. Spans count bytes, so the slice is taken on
+// the bytes: a character slice would shift past every multi-byte character
+// before the span.
 sema_call_histories_span_text: fn(source: String, span: Span) -> String Never! {
-    if span.start < 0 || span.end > source.len() || span.start >= span.end -> return ""
-    source.slice(span.start, span.end)
+    bytes: source.bytes()
+    if span.start < 0 || span.end > bytes.len() || span.start >= span.end -> return ""
+    String.from_bytes(bytes.slice(span.start, span.end)) ?? ""
 }
 
 // The digest of every module source of the package, in load order.
