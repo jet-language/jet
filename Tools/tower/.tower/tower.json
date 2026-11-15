@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6901,
-    "rev": 104037,
+    "nextNum": 6905,
+    "rev": 104050,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -50621,6 +50621,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T02:10:30.431Z"
+        },
+        {
+          "n": 13,
+          "text": "The REPL classifies input with the parser, not substrings: Input.jet has no substring classification, and a string literal containing `name: value` or `core.log` is accepted as an expression. Proof: `jet test Compiler --profile cases --filter repl/string_literal_input_is_expression`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:54.951Z"
         }
       ],
       "refs": [],
@@ -50631,12 +50640,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-07T09:50:33.240Z",
-      "updated": "2026-11-13T02:10:30.431Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:55:54.951Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 12
+      "criteriaLastN": 13
     },
     {
       "id": "c0h5ad4r",
@@ -52287,21 +52296,21 @@
         },
         {
           "n": 2,
-          "text": "Opening a file with a type error publishes the same diagnostics (code, range, message) as `jet check` on that file; an LSP fixture test compares them.",
+          "text": "Opening a file with a type error publishes the same diagnostics (code, range, message) as `jet check` on that file. Proof: `jet test Compiler --profile cases --filter lsp/lsp_checked_imported_diagnostics_and_repairs`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:02:49.311Z"
+          "at": "2026-11-15T03:55:56.993Z"
         },
         {
           "n": 3,
-          "text": "Hover on a local, a parameter and a Core call shows its type; go-to-definition reaches a declaration in the same file, in another module and in Core; one fixture test per case.",
+          "text": "Hover on a local, a parameter and a Core call shows its type; go-to-definition reaches a declaration in the same file, in another module and in Core. Proof: `jet test Compiler --profile cases --filter lsp/lsp_hover_returns_signature` and `--filter lsp/lsp_definition_` pass (lsp_definition_returns_location and lsp_hover_returns_signature PASS on dev 6f82527b17; the imported and generated definition cases are known-failing).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:02:50.647Z"
+          "at": "2026-11-15T03:55:57.955Z"
         },
         {
           "n": 4,
@@ -52342,20 +52351,22 @@
         {
           "n": 10,
           "text": "(was #6164) The listed scanners are gone; hover, references and completion use lexer tokens.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:15:43.264Z"
+          "evidence": "Moved to #6902 c1: token-based identifier lookup is an editor-assist outcome",
+          "at": "2026-11-15T03:56:00.953Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
           "text": "(was #6164) A Unicode identifier hovers and renames correctly (LSP test).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:15:44.151Z"
+          "evidence": "Merged into #6901 c7: Unicode hover and rename is the Unicode identity case",
+          "at": "2026-11-15T03:56:01.888Z",
+          "closure": "obsolete"
         },
         {
           "n": 13,
@@ -52440,12 +52451,12 @@
         },
         {
           "n": 30,
-          "text": "(was #1807 c3) Focused LSP/UI snapshots and O0, O1 and O2 checks show matching report meaning and recovery data [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "The LSP publishes the same report meaning and recovery data as `jet check` for the same program on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter lsp/lsp_checked_imported_diagnostics_and_repairs`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:50:50.875Z"
+          "at": "2026-11-15T03:55:55.859Z"
         },
         {
           "n": 31,
@@ -52710,21 +52721,21 @@
         },
         {
           "n": 62,
-          "text": "The real initialize response and registrations advertise only complete applicable handlers and respect negotiated client capabilities. (merged from #3410 c2)",
+          "text": "The initialize response and registrations advertise only complete handlers and respect negotiated client capabilities. Proof: `jet test Compiler --profile cases --filter lsp/lsp_initialize_capabilities_have_named_test_coverage`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:24.332Z"
+          "at": "2026-11-15T03:55:58.879Z"
         },
         {
           "n": 63,
-          "text": "Framing, positions, edits, progress, errors, cancellation, and shutdown satisfy the standard through the actual transport. (merged from #3410 c3)",
+          "text": "Framing, positions, edits, progress, errors, cancellation and shutdown meet the LSP standard through the real stdio transport. Proof: `jet test Compiler --profile cases --filter lsp/lsp_json_transcripts` and `--filter lsp/lsp_incremental_sync_rejects_stale_and_malformed_edits`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:25.830Z"
+          "at": "2026-11-15T03:55:59.905Z"
         },
         {
           "n": 66,
@@ -52791,7 +52802,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-09T18:06:22.233Z",
-      "updated": "2026-11-15T02:33:56.752Z",
+      "updated": "2026-11-15T03:56:01.888Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -105893,6 +105904,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:52:54.074Z"
+        },
+        {
+          "n": 13,
+          "text": "The formatter spells literals and reserved names from the lexer: it has no private escape or float-spelling table and no `__jet_` prefix test, and formatting every Examples file round-trips unchanged. Proof: `git grep -n '__jet_' -- Compiler/JetParser` shows no formatter prefix test and `jet test Compiler/JetCli/Tests/FmtLossless.jet` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:54.034Z"
         }
       ],
       "refs": [],
@@ -105906,8 +105926,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:52:54.075Z",
-      "updated": "2026-11-15T03:52:54.075Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:55:54.034Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 13
     },
     {
       "id": "c0aha21c",
@@ -106064,6 +106085,403 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:52:56.157Z",
       "updated": "2026-11-15T03:52:56.157Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0s1vode",
+      "num": 6901,
+      "title": "LSP references and rename follow checked identity across files, versions and Unicode",
+      "body": "Destination: definition, references, prepareRename, rename and document symbols in `jet self lsp` resolve by checked semantic identity, not by name text: they pick exactly the declaration meant across aliases, shadowing, same-name modules and qualified calls; return real absolute URIs and exact identifier spans; apply edits at the checked overlay positions of unsaved documents; refuse when the target or document version is not current; and handle UTF-8 and UTF-16 boundaries.\n\nWhy it matters: a rename that touches the wrong `letter` or edits stale positions breaks code silently.\n\nThe proofs are tests/cases/lsp/lsp_checked_identity_and_versioned_rename and lsp_document_symbol_returns_symbols_for_imported_package_module (known-failing on dev 6f82527b17, rows naming #6386).\n\nSource: #4917 c11, c37, c39-c46 (from #3183, #3184, #2370, #6164).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "References and rename on BIG-P02 select exactly scoring.letter's declaration and call, and leave the unrelated util.letter and its call untouched. Proof: `jet test Compiler --profile cases --filter lsp/lsp_checked_identity_and_versioned_rename`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:50.327Z"
+        },
+        {
+          "n": 2,
+          "text": "Returned document URIs name the actual absolute files and ranges cover the exact nonempty identifier spans, with no `file://run.jet` host-like URI or 0:0 insertion. Proof: `jet test Compiler --profile cases --filter lsp/lsp_checked_identity_and_versioned_rename`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:50.327Z"
+        },
+        {
+          "n": 3,
+          "text": "Definition, references, prepareRename, rename and semantic-op metadata agree on identity and location for aliases, shadowing, same-name modules and qualified calls. Proof: `jet test Compiler --profile cases --filter lsp/lsp_definition_imported_identity_collisions_are_exact` and `--filter lsp/lsp_checked_identity_and_versioned_rename`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:50.327Z"
+        },
+        {
+          "n": 4,
+          "text": "An unresolved or incomplete rename target gets an explicit refusal or a coverage-limited result, never a claimed-safe rename. Proof: `jet test Compiler --profile cases --filter lsp/lsp_checked_identity_and_versioned_rename` (refusal step).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:50.327Z"
+        },
+        {
+          "n": 5,
+          "text": "A sibling document with unsaved inserted lines receives edits at the checked overlay positions, not disk positions. Proof: `jet test Compiler --profile cases --filter lsp/lsp_checked_identity_and_versioned_rename` (overlay step).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:50.327Z"
+        },
+        {
+          "n": 6,
+          "text": "A document version change between check and apply blocks automatic application and asks for a new check, exercised through the real LSP response and version contract, not a range helper. Proof: `jet test Compiler --profile cases --filter lsp/lsp_checked_identity_and_versioned_rename` (version step).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:50.327Z"
+        },
+        {
+          "n": 7,
+          "text": "Saved, dirty and UTF-8/UTF-16 boundary cases keep the selected declaration and change no unrelated text, and a Unicode identifier hovers and renames correctly. Proof: `jet test Compiler --profile cases --filter lsp/lsp_checked_identity_and_versioned_rename` (Unicode steps).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:50.327Z"
+        },
+        {
+          "n": 8,
+          "text": "textDocument/documentSymbol returns the declarations of an opened imported package module with zero diagnostics. Proof: `jet test Compiler --profile cases --filter lsp/lsp_document_symbol_returns_symbols_for_imported_package_module`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:50.327Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "lsp",
+        "tooling"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:55:50.327Z",
+      "updated": "2026-11-15T03:55:50.327Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c06tzcrf",
+      "num": 6902,
+      "title": "Editor assists from checked facts: completion with foreign-word rows, semantic tokens and inlay hints",
+      "body": "Destination: completion, semantic tokens and inlay hints in `jet self lsp` read lexer tokens and checked facts. Completion maps foreign method words (append, length, size, push_back) to the Jet name through the same registered rows E0311 uses; semantic tokens follow current syntax; inlay hints show call marks (D-CALLSITE-MARK2=A), automatically passed-up failures and scattered-method breadcrumbs.\n\nWhy it matters: these are what an editor shows on every keystroke; a private scanner or a second table drifts from the compiler.\n\nSource: #4917 c10, c24-c27, c31, c49-c52 (from #6164, #4625, #662, #6014, #88).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Hover, references and completion find identifiers from lexer tokens, with no private text scanner in Compiler/JetLSP. Proof: `jet test Compiler --profile cases --filter lsp/lsp_hover_` and `--filter lsp/lsp_references_finds_all_uses` pass, and JetLSP has no character-class identifier scanner (`git grep -n -E 'is_ident_(start|char)' -- Compiler/JetLSP` prints nothing).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:51.221Z"
+        },
+        {
+          "n": 2,
+          "text": "Typing `nums.app` on `nums: [Int]` returns an item labelled `push` whose filter text is `append` and whose edit inserts `push`; the same for `.length` and `.size` to `len` and `push_back` to `push`. Proof: `jet test Compiler --profile cases --filter lsp/lsp_completion_foreign_words`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:51.221Z"
+        },
+        {
+          "n": 3,
+          "text": "Accepting a foreign-word completion never writes the foreign word, and the result compiles with no diagnostic. Proof: `jet test Compiler --profile cases --filter lsp/lsp_completion_foreign_words` (apply step).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:51.221Z"
+        },
+        {
+          "n": 4,
+          "text": "Completion reads the same registered rows as E0311, and a test fails if a row exists in one view and not the other. Proof: `jet test Compiler/JetLSP --filter completion_rows_match_e0311`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:51.221Z"
+        },
+        {
+          "n": 5,
+          "text": "Ordinary prefix completion is unchanged when no foreign row matches. Proof: `jet test Compiler --profile cases --filter lsp/lsp_completion_returns_items` and `--filter lsp/lsp_completion_returns_snippets_and_auto_imports` pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:51.221Z"
+        },
+        {
+          "n": 6,
+          "text": "Semantic tokens give retired local `view`/`.view` spellings no identifier or method token, while View<T> and ViewMut<T> stay type tokens. Proof: `jet test Compiler --profile cases --filter lsp/lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:51.221Z"
+        },
+        {
+          "n": 7,
+          "text": "The token classifier follows current syntax and handles comments, strings, incremental edits and qualified names without skip heuristics. Proof: `jet test Compiler --profile cases --filter lsp/lsp_semantic_tokens_` passes, delta fallback included.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:51.221Z"
+        },
+        {
+          "n": 8,
+          "text": "Inlay hints show breadcrumbs for scattered methods. Proof: `jet test Compiler --profile cases --filter lsp/lsp_inlay_hints_include_scattered_method_breadcrumbs`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:51.221Z"
+        },
+        {
+          "n": 9,
+          "text": "Inlay hints show `&` and `&&` at calls (D-CALLSITE-MARK2=A) and the server underlines a changed argument. Proof: `jet test Compiler --profile cases --filter lsp/lsp_inlay_hints_call_marks`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:51.221Z"
+        },
+        {
+          "n": 10,
+          "text": "The server sends an inlay hint at every call whose failure passes up automatically: a fixture with 4 such calls receives exactly 4 hints. Proof: `jet test Compiler --profile cases --filter lsp/lsp_inlay_hints_failure_passes_up`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:51.221Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "lsp",
+        "tooling"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:55:51.221Z",
+      "updated": "2026-11-15T03:55:51.221Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0mbiq9g",
+      "num": 6903,
+      "title": "The LSP stays current: cancellation, fresh verdicts, embedded Jet regions, workspaces and the VS Code, Zed and Neovim matrix",
+      "body": "Destination: `jet self lsp` never publishes a stale or cancelled result: cancelled work returns -32800, the latest edit gets the fresh verdict, Jet regions inside host documents map edits and diagnostics through incremental edits, workspaces with inline metadata and multiple roots behave honestly, and VS Code, Zed and Neovim run the real server with correct visible results.\n\nWhy it matters: an editor that shows yesterday's error, or applies an edit to the wrong version, is worse than no editor support.\n\nDecisions: D-LSP1=C (editor engine architecture). No new scheduling policy, worker count or public cancellation semantics is chosen silently.\n\nSource: #4917 c57-c60, c67-c70 (from #3196, #3410-#3413, #3003).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Cancelled work returns the -32800 response and never later publishes a result as current. Proof: `jet test Compiler --profile cases --filter lsp/lsp_cancelled_costly_request_returns_32800_and_never_publishes`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:52.157Z"
+        },
+        {
+          "n": 2,
+          "text": "The latest request receives the correct fresh verdict, diagnostics already published for unrelated modules stay correct, and nothing is reused across server restarts (no compile cache); no new scheduling policy, worker count or cancellation semantics is selected outside D-LSP1. Proof: `jet test Compiler --profile cases --filter lsp/lsp_overlapping_edits_latest_checked_revision_wins` and `--filter lsp/lsp_sibling_import_edit_never_publishes_stale_verdict` pass (both PASS on dev 6f82527b17 with gate-p141), plus a restart step.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:52.157Z"
+        },
+        {
+          "n": 3,
+          "text": "The edit-stream latency run prints p50 and p95 cancel-to-release and edit-to-current-verdict latencies, peak in-flight checks and the binary and input identity, attached to the card. Proof: `jet test Compiler --profile cases --filter lsp/lsp_repeated_edit_stream_latency` (opt-in).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:52.157Z"
+        },
+        {
+          "n": 4,
+          "text": "A host document with two Jet regions (including the UTF-8 25..46 / UTF-16 23..44 case) checks through the JetDriver SourceDocument query; diagnostics and edits map to host byte ranges after an incremental edit; cancellation, stale versions, Unicode and partial syntax never return a false current result. Proof: `jet test Compiler --profile cases --filter lsp/lsp_host_document_regions`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:52.157Z"
+        },
+        {
+          "n": 5,
+          "text": "Every applicable semantic feature and Jet construct cell has a witness test or a reasoned N/A: navigation, references, rename, completion and hierarchy follow checked identity across files, generics, shadowing and generated origins and stay version-correct during broken edits. Proof: `jet test Compiler --profile cases --filter lsp/lsp_feature_construct_matrix`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:52.157Z"
+        },
+        {
+          "n": 6,
+          "text": "Workspace and document operations work for inline single-file metadata and multi-root projects; formatting uses the canonical formatter; unsaved, read-only, generated, Unicode, symlink and dependency-change cases behave honestly. Proof: `jet test Compiler --profile cases --filter lsp/lsp_workspace_symbols_follow_all_roots_and_folder_changes` and `--filter lsp/lsp_workspace_honest_cases`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:52.157Z"
+        },
+        {
+          "n": 7,
+          "text": "VS Code, Zed and Neovim each run the real server against the client matrix with correct visible results, with limitations evidenced and bound to versions. Proof: a scripted client-matrix run per editor under Tools/editors, its report committed under Docs/audits.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:52.157Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "lsp",
+        "tooling"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:55:52.158Z",
+      "updated": "2026-11-15T03:55:52.158Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c01q17ls",
+      "num": 6904,
+      "title": "Editor refactors on checked facts: callable summary, signature-change preview, extract and inline, and marker moves",
+      "body": "Destination: the editor offers refactors that are proven safe from checked facts: an opt-in callable summary (D-READ-LOCAL1=A), a signature-change preview with explicit caller values (D-BIG-SIGNATURE1=A), extract and inline transforms that keep evaluation order, capture, control flow, ownership and effects, and the D-MARKER-MOVE1=A code actions.\n\nWhy it matters: refactors that cannot prove safety should refuse, not guess.\n\nSource: #4917 c29, c53-c55 (from #3191, #3168, #3187, #3198).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-MARKER-MOVE1=A, editor half (the CLI half landed in 37eae4f5d6): code actions on a struct and on a function offer 'Write the markers above the declaration' and 'Write the markers inside the declaration's body', and each edit gives the same text as `jet fix --markers above|inside`. Proof: `jet test Compiler/JetLSP --filter marker_move_code_actions`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:53.089Z"
+        },
+        {
+          "n": 2,
+          "text": "An opt-in callable summary anchored by semantic identity shows failure type and source, write-access parameters, the effect row and checked links, and labels missing facts unavailable (D-READ-LOCAL1=A); fixtures cover normal, typed-failure, write-access, impure, invalid and stale cases. Proof: `jet test Compiler --profile cases --filter lsp/lsp_callable_summary_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:53.089Z"
+        },
+        {
+          "n": 3,
+          "text": "The signature-change preview (D-BIG-SIGNATURE1=A) needs an explicit caller value, names the declaration, document versions and exact checked callers, blocks on unresolved uses, and re-checks after a document change. Proof: `jet test Compiler --profile cases --filter lsp/lsp_signature_change_preview`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:53.089Z"
+        },
+        {
+          "n": 4,
+          "text": "Every advertised extract and inline transform has a before/after or refusal receipt that keeps evaluation order, capture, control flow, ownership and effects, using the checked index. Proof: `jet test Compiler --profile cases --filter lsp/lsp_extract_inline_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:55:53.089Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "lsp",
+        "refactor"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:55:53.089Z",
+      "updated": "2026-11-15T03:55:53.089Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -211483,6 +211901,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:56:01.888Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03183d1",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T03:56:00.953Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03183d1",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T03:55:59.905Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03183d1",
+      "note": "#63: proof; was: Framing, positions, edits, progress, errors, cancellation, and shutdown satisfy the standard through the actual transport. (merged from #3410 c3)"
+    },
+    {
+      "at": "2026-11-15T03:55:58.879Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03183d1",
+      "note": "#62: proof; was: The real initialize response and registrations advertise only complete applicable handlers and respect negotiated client capabilities. (merged from #3410 c2)"
+    },
+    {
+      "at": "2026-11-15T03:55:57.955Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03183d1",
+      "note": "#3: proof; was: Hover on a local, a parameter and a Core call shows its type; go-to-definition reaches a declaration in the same file, in another module and in Core; one fixture test per case."
+    },
+    {
+      "at": "2026-11-15T03:55:56.993Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03183d1",
+      "note": "#2: proof; was: Opening a file with a type error publishes the same diagnostics (code, range, message) as `jet check` on that file; an LSP fixture test compares them."
+    },
+    {
+      "at": "2026-11-15T03:55:55.859Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03183d1",
+      "note": "#30: strip debris; proof; was: (was #1807 c3) Focused LSP/UI snapshots and O0, O1 and O2 checks show matching report meaning and recovery data [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-15T03:55:54.951Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0bk3yid",
+      "note": "#13 The REPL classifies input with the parser, not substrings: I"
+    },
+    {
+      "at": "2026-11-15T03:55:54.034Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0t5gnhs",
+      "note": "#13 The formatter spells literals and reserved names from the le"
+    },
+    {
+      "at": "2026-11-15T03:55:53.089Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c01q17ls",
+      "note": "Editor refactors on checked facts: callable summary, signature-change preview, extract and inline, and marker moves"
+    },
+    {
+      "at": "2026-11-15T03:55:52.158Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0mbiq9g",
+      "note": "The LSP stays current: cancellation, fresh verdicts, embedded Jet regions, workspaces and the VS Code, Zed and Neovim matrix"
+    },
+    {
+      "at": "2026-11-15T03:55:51.221Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c06tzcrf",
+      "note": "Editor assists from checked facts: completion with foreign-word rows, semantic tokens and inlay hints"
+    },
+    {
+      "at": "2026-11-15T03:55:50.328Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0s1vode",
+      "note": "LSP references and rename follow checked identity across files, versions and Unicode"
+    },
     {
       "at": "2026-11-15T03:53:36.157Z",
       "by": "TowerKeeper-1",
