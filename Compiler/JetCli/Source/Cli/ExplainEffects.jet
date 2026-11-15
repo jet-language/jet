@@ -598,7 +598,7 @@ jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, sp
     loop fact in doc_module.call_facts {
         if fact.caller_key != summary.raw_key -> next
         if fact.span.start < span.start || fact.span.end > span.end -> next
-        if fact.foreign_effect_root == .Val(root) {
+        if fact.detail == .Val(detail) && detail.foreign_effect_root == .Val(root) {
             direct.push(EffectRowEntry{name: root.copy(), span: fact.span})
         }
         storage: doc_module.name_ledger ?? next

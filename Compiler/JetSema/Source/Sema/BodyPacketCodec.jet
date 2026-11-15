@@ -1606,6 +1606,90 @@ body_codec_get_diagnosticerrorspan: fn(bytes: [U8], input: &BodyCodecIn) -> Diag
     DiagnosticErrorSpan{start: f0, end: f1}
 }
 
+body_codec_put_opt_semacallsitedetail: fn(out: &BodyCodecOut, value: SemaCallSiteDetail?) Never! {
+    if value == .Val(inner) {
+        body_codec_put_bool(out, true)
+        body_codec_put_semacallsitedetail(out, inner)
+        return
+    }
+    body_codec_put_bool(out, false)
+}
+
+body_codec_get_opt_semacallsitedetail: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallSiteDetail? Never! {
+    if body_codec_get_bool(bytes, input) {
+        return Val(body_codec_get_semacallsitedetail(bytes, input))
+    }
+    None
+}
+
+body_codec_put_semacallsitefact: fn(out: &BodyCodecOut, value: SemaCallSiteFact) Never! {
+    body_codec_put_span(out, value.span)
+    body_codec_put_string(out, value.caller_key)
+    body_codec_put_opt_symbolid(out, value.callee)
+    body_codec_put_semacallfacts(out, value.facts)
+    body_codec_put_bool(out, value.discarded)
+    body_codec_put_bool(out, value.discarded_if_infallible)
+    body_codec_put_bool(out, value.compile_time)
+    body_codec_put_opt_semacallsitedetail(out, value.detail)
+}
+
+body_codec_get_semacallsitefact: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallSiteFact Never! {
+    f0: body_codec_get_span(bytes, input)
+    f1: body_codec_get_string(bytes, input)
+    f2: body_codec_get_opt_symbolid(bytes, input)
+    f3: body_codec_get_semacallfacts(bytes, input)
+    f4: body_codec_get_bool(bytes, input)
+    f5: body_codec_get_bool(bytes, input)
+    f6: body_codec_get_bool(bytes, input)
+    f7: body_codec_get_opt_semacallsitedetail(bytes, input)
+    SemaCallSiteFact{span: f0, caller_key: f1, callee: f2, facts: f3, discarded: f4, discarded_if_infallible: f5, compile_time: f6, detail: f7}
+}
+
+body_codec_put_list_functiondefaultref: fn(out: &BodyCodecOut, values: [FunctionDefaultRef]) Never! {
+    body_codec_put_count(out, values.len())
+    loop value in values -> body_codec_put_functiondefaultref(out, value)
+}
+
+body_codec_get_list_functiondefaultref: fn(bytes: [U8], input: &BodyCodecIn) -> [FunctionDefaultRef] Never! {
+    count: body_codec_get_count(bytes, input, 1)
+    values := [FunctionDefaultRef]{}
+    loop _ in 0..<count -> values.push(body_codec_get_functiondefaultref(bytes, input))
+    values
+}
+
+body_codec_put_opt_teffectfacts: fn(out: &BodyCodecOut, value: TEffectFacts?) Never! {
+    if value == .Val(inner) {
+        body_codec_put_bool(out, true)
+        body_codec_put_teffectfacts(out, inner)
+        return
+    }
+    body_codec_put_bool(out, false)
+}
+
+body_codec_get_opt_teffectfacts: fn(bytes: [U8], input: &BodyCodecIn) -> TEffectFacts? Never! {
+    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_teffectfacts(bytes, input))
+    None
+}
+
+body_codec_put_semacallfacts: fn(out: &BodyCodecOut, value: SemaCallFacts) Never! {
+    body_codec_put_type(out, value.return_type)
+    body_codec_put_tfailurecarrier(out, value.failure_carrier)
+    body_codec_put_opt_list_effectrowentry(out, value.effect_bound)
+    body_codec_put_list_type(out, value.type_args)
+    body_codec_put_list_functiondefaultref(out, value.default_refs)
+    body_codec_put_opt_teffectfacts(out, value.local_lambda)
+}
+
+body_codec_get_semacallfacts: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallFacts Never! {
+    f0: body_codec_get_type(bytes, input)
+    f1: body_codec_get_tfailurecarrier(bytes, input)
+    f2: body_codec_get_opt_list_effectrowentry(bytes, input)
+    f3: body_codec_get_list_type(bytes, input)
+    f4: body_codec_get_list_functiondefaultref(bytes, input)
+    f5: body_codec_get_opt_teffectfacts(bytes, input)
+    SemaCallFacts{return_type: f0, failure_carrier: f1, effect_bound: f2, type_args: f3, default_refs: f4, local_lambda: f5}
+}
+
 body_codec_put_opt_semaforeigncapability: fn(out: &BodyCodecOut, value: SemaForeignCapability?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
@@ -1652,13 +1736,7 @@ body_codec_get_opt_semaoperatorsite: fn(bytes: [U8], input: &BodyCodecIn) -> Sem
     None
 }
 
-body_codec_put_semacallsitefact: fn(out: &BodyCodecOut, value: SemaCallSiteFact) Never! {
-    body_codec_put_span(out, value.span)
-    body_codec_put_string(out, value.caller_key)
-    body_codec_put_opt_symbolid(out, value.callee)
-    body_codec_put_semacallfacts(out, value.facts)
-    body_codec_put_bool(out, value.discarded)
-    body_codec_put_bool(out, value.discarded_if_infallible)
+body_codec_put_semacallsitedetail: fn(out: &BodyCodecOut, value: SemaCallSiteDetail) Never! {
     body_codec_put_opt_string(out, value.foreign_effect_root)
     body_codec_put_bool(out, value.foreign_opaque)
     body_codec_put_opt_string(out, value.unsafe_foreign_name)
@@ -1671,77 +1749,24 @@ body_codec_put_semacallsitefact: fn(out: &BodyCodecOut, value: SemaCallSiteFact)
     body_codec_put_string(out, value.shared_source)
     body_codec_put_opt_string(out, value.intrinsic_api)
     body_codec_put_opt_string(out, value.runtime_export)
-    body_codec_put_bool(out, value.compile_time)
     body_codec_put_opt_semaoperatorsite(out, value.operator)
 }
 
-body_codec_get_semacallsitefact: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallSiteFact Never! {
-    f0: body_codec_get_span(bytes, input)
-    f1: body_codec_get_string(bytes, input)
-    f2: body_codec_get_opt_symbolid(bytes, input)
-    f3: body_codec_get_semacallfacts(bytes, input)
-    f4: body_codec_get_bool(bytes, input)
-    f5: body_codec_get_bool(bytes, input)
-    f6: body_codec_get_opt_string(bytes, input)
-    f7: body_codec_get_bool(bytes, input)
-    f8: body_codec_get_opt_string(bytes, input)
-    f9: body_codec_get_bool(bytes, input)
-    f10: body_codec_get_opt_semaforeigncapability(bytes, input)
-    f11: body_codec_get_opt_coremarkerapplication(bytes, input)
-    f12: body_codec_get_bool(bytes, input)
-    f13: body_codec_get_opt_sharedlifetime(bytes, input)
-    f14: body_codec_get_string(bytes, input)
-    f15: body_codec_get_string(bytes, input)
-    f16: body_codec_get_opt_string(bytes, input)
-    f17: body_codec_get_opt_string(bytes, input)
-    f18: body_codec_get_bool(bytes, input)
-    f19: body_codec_get_opt_semaoperatorsite(bytes, input)
-    SemaCallSiteFact{span: f0, caller_key: f1, callee: f2, facts: f3, discarded: f4, discarded_if_infallible: f5, foreign_effect_root: f6, foreign_opaque: f7, unsafe_foreign_name: f8, audited_operation: f9, foreign_capability: f10, lifecycle: f11, replacement_hidden: f12, shared_lifetime: f13, shared_member: f14, shared_source: f15, intrinsic_api: f16, runtime_export: f17, compile_time: f18, operator: f19}
-}
-
-body_codec_put_list_functiondefaultref: fn(out: &BodyCodecOut, values: [FunctionDefaultRef]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_functiondefaultref(out, value)
-}
-
-body_codec_get_list_functiondefaultref: fn(bytes: [U8], input: &BodyCodecIn) -> [FunctionDefaultRef] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    values := [FunctionDefaultRef]{}
-    loop _ in 0..<count -> values.push(body_codec_get_functiondefaultref(bytes, input))
-    values
-}
-
-body_codec_put_opt_teffectfacts: fn(out: &BodyCodecOut, value: TEffectFacts?) Never! {
-    if value == .Val(inner) {
-        body_codec_put_bool(out, true)
-        body_codec_put_teffectfacts(out, inner)
-        return
-    }
-    body_codec_put_bool(out, false)
-}
-
-body_codec_get_opt_teffectfacts: fn(bytes: [U8], input: &BodyCodecIn) -> TEffectFacts? Never! {
-    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_teffectfacts(bytes, input))
-    None
-}
-
-body_codec_put_semacallfacts: fn(out: &BodyCodecOut, value: SemaCallFacts) Never! {
-    body_codec_put_type(out, value.return_type)
-    body_codec_put_tfailurecarrier(out, value.failure_carrier)
-    body_codec_put_opt_list_effectrowentry(out, value.effect_bound)
-    body_codec_put_list_type(out, value.type_args)
-    body_codec_put_list_functiondefaultref(out, value.default_refs)
-    body_codec_put_opt_teffectfacts(out, value.local_lambda)
-}
-
-body_codec_get_semacallfacts: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallFacts Never! {
-    f0: body_codec_get_type(bytes, input)
-    f1: body_codec_get_tfailurecarrier(bytes, input)
-    f2: body_codec_get_opt_list_effectrowentry(bytes, input)
-    f3: body_codec_get_list_type(bytes, input)
-    f4: body_codec_get_list_functiondefaultref(bytes, input)
-    f5: body_codec_get_opt_teffectfacts(bytes, input)
-    SemaCallFacts{return_type: f0, failure_carrier: f1, effect_bound: f2, type_args: f3, default_refs: f4, local_lambda: f5}
+body_codec_get_semacallsitedetail: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallSiteDetail Never! {
+    f0: body_codec_get_opt_string(bytes, input)
+    f1: body_codec_get_bool(bytes, input)
+    f2: body_codec_get_opt_string(bytes, input)
+    f3: body_codec_get_bool(bytes, input)
+    f4: body_codec_get_opt_semaforeigncapability(bytes, input)
+    f5: body_codec_get_opt_coremarkerapplication(bytes, input)
+    f6: body_codec_get_bool(bytes, input)
+    f7: body_codec_get_opt_sharedlifetime(bytes, input)
+    f8: body_codec_get_string(bytes, input)
+    f9: body_codec_get_string(bytes, input)
+    f10: body_codec_get_opt_string(bytes, input)
+    f11: body_codec_get_opt_string(bytes, input)
+    f12: body_codec_get_opt_semaoperatorsite(bytes, input)
+    SemaCallSiteDetail{foreign_effect_root: f0, foreign_opaque: f1, unsafe_foreign_name: f2, audited_operation: f3, foreign_capability: f4, lifecycle: f5, replacement_hidden: f6, shared_lifetime: f7, shared_member: f8, shared_source: f9, intrinsic_api: f10, runtime_export: f11, operator: f12}
 }
 
 body_codec_put_semaforeigncapability: fn(out: &BodyCodecOut, value: SemaForeignCapability) Never! {

@@ -9104,9 +9104,10 @@ sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, boun
 // running program, and a call computed while building would never reach them.
 sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact], runtime_runs: Bool) -> String? Never! {
     loop fact in call_facts {
-        name: if fact.callee == .Val(callee) && !symbol_is_local(callee) -> "`{sema_effect_comptime_callee_name(symbol_table_key(graph.symbols, callee))}`" else if fact.intrinsic_api == .Val(api) -> "`{api}`" else -> "a function value"
-        if fact.foreign_effect_root != None -> return Val("it calls foreign code ({name})")
-        if fact.runtime_export == .Val(symbol) {
+        detail: sema_call_site_detail(fact)
+        name: if fact.callee == .Val(callee) && !symbol_is_local(callee) -> "`{sema_effect_comptime_callee_name(symbol_table_key(graph.symbols, callee))}`" else if detail.intrinsic_api == .Val(api) -> "`{api}`" else -> "a function value"
+        if detail.foreign_effect_root != None -> return Val("it calls foreign code ({name})")
+        if detail.runtime_export == .Val(symbol) {
             if runtime_only_read(symbol) == .Val(reads) {
                 return Val("it calls {name}, which reads {reads}; only the running program has that")
             }

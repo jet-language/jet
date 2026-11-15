@@ -18,7 +18,7 @@ use {
         type_name,
     ]
     jet_foundation.[TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, module_is_core, module_text, record_key_digest, symbol_find, symbol_is_local, symbol_table_key]
-    jet_sema.[sema_compiler_identity, sema_comptime_reflection_type_info]
+    jet_sema.[sema_call_site_detail, sema_compiler_identity, sema_comptime_reflection_type_info]
     jet_lexer.[
         Lexed,
         TOKEN_AMP,
@@ -1006,7 +1006,7 @@ jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, g
             if checked.module_identity != module_row.module_identity -> next
             loop call in checked.call_facts {
                 if build_keys.contains(call.caller_key) -> next
-                callee := call.intrinsic_api.copy()  // copy: the checked graph keeps its call facts
+                callee := sema_call_site_detail(call).intrinsic_api.copy()  // copy: the checked graph keeps its call facts
                 if call.callee == .Val(id) {
                     if !symbol_is_local(id) {
                         callee = Val(symbol_table_key(registration.symbols, id))

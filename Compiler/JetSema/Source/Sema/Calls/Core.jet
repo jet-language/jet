@@ -1279,12 +1279,14 @@ sema_call_core_record_effects: fn(record: CoreCallRecord, span: Span, type_args:
     accepted: sema_effect_record_intrinsic_fact(environment, program, scopes, context, api, span, facts, diagnostics)
     if accepted && context.call_facts.len() > start {
         last: context.call_facts.len() - 1
-        if record.marker != None -> context.call_facts[last].lifecycle = record.marker
+        detail := sema_call_site_detail(context.call_facts[last])
+        detail.lifecycle = record.marker
         // A Math route computes from its arguments alone, so its export is
         // not one the runtime answers from the running program.
         if record.symbol == .Prelude(symbol) && record.pure_route != CoreCallPureRoute.Math {
-            context.call_facts[last].runtime_export = Val(symbol.copy())
+            detail.runtime_export = Val(symbol.copy())
         }
+        context.call_facts[last].detail = sema_call_site_detail_of(detail)
     }
     accepted
 }
@@ -1663,9 +1665,11 @@ sema_call_core_global_shared: fn(lifetime: SharedLifetime, member: String, type_
     if context.call_facts.len() != before + 1 {
         panic("checked Core publication call has no effect obligation")
     }
-    context.call_facts[before].shared_lifetime = Val(lifetime)
-    context.call_facts[before].shared_member = member
-    context.call_facts[before].shared_source = sema_scope_environment_module_text(environment, program)
+    detail := sema_call_site_detail(context.call_facts[before])
+    detail.shared_lifetime = Val(lifetime)
+    detail.shared_member = member
+    detail.shared_source = sema_scope_environment_module_text(environment, program)
+    context.call_facts[before].detail = sema_call_site_detail_of(detail)
     initializer: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
     value: sema_node(context, published, NodeKind.GlobalShared{initializer: initializer, lifetime: lifetime}, span)
     sema_expr_expected(value, expected, environment, program, diagnostics)

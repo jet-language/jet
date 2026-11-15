@@ -386,7 +386,8 @@ sema_call_rewrite_edits: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
 // The `==` or `!=` call `fact` as a call of `method` on its receiver:
 // `left.method(right)`, `!left.method(right)` for `!=`.
 sema_call_rewrite_edit: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, fact: SemaCallSiteFact, method: String) -> TextEdit? {
-    site: fact.operator ?? return None
+    detail: fact.detail ?? return None
+    site: detail.operator ?? return None
     row: sema_registration_module_index(graph, module_identity) ?? return None
     home: graph.modules[row]
     receiver: foundation_byte_text(home.source.bytes(), site.receiver.start, site.receiver.end)

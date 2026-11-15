@@ -567,14 +567,15 @@ sema_expression_lambda_add_effect_facts: fn(program: SemaProgramTables, source: 
     index := first_call
     loop index < source.call_facts.len() {
         fact := source.call_facts[index]
+        detail: sema_call_site_detail(fact)
         if {
             // A foreign body adds its one effect root; a C binding whose row
             // no descriptor owns is open-world as well.
-            fact.foreign_effect_root != None -> {
-                root: fact.foreign_effect_root ?? ""
+            detail.foreign_effect_root != None -> {
+                root: detail.foreign_effect_root ?? ""
                 sema_expression_lambda_append_name(direct, root)
                 spans.push(TEffectSpan{name: root, span: fact.span})
-                if fact.foreign_opaque -> maximal = true
+                if detail.foreign_opaque -> maximal = true
             }
             fact.callee != None -> {
                 callee: fact.callee ?? symbol_none()

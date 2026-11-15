@@ -183,6 +183,10 @@ SemaScopeDeclaration: struct {
     item: Item
 }
 
+// One checked call. A row holds what every call carries; the facts only a
+// foreign, audited, deprecated, lifecycle, shared, intrinsic or operator
+// call carries sit behind one optional `detail` word, so the run's many
+// plain calls hold none of them.
 SemaCallSiteFact: struct {
     span: Span
     caller_key: String
@@ -195,6 +199,17 @@ SemaCallSiteFact: struct {
     // carrier can still fail. The bundle failure solve sets `discarded` when
     // it projects the callee onto `T Never!` (#3708).
     discarded_if_infallible: Bool{false}
+    // The call runs while compiling (a comptime item, a `#run { }` site or
+    // a module value), not in the running program. A function only such calls
+    // name is prep code, not a runtime entry (sema_effect_runtime_input_paths).
+    compile_time: Bool{false}
+    // None for a call that carries no SemaCallSiteDetail fact
+    // (sema_call_site_detail_of).
+    detail: SemaCallSiteDetail?{None}
+}
+
+// What few calls carry (SemaCallSiteFact.detail).
+SemaCallSiteDetail: struct {
     // Rust `sig.foreign_effect_root`: the callee is an extern body (an
     // `#FFI(<lang>)` function or a foreign row) whose effect is this one root.
     foreign_effect_root: String?{None}
@@ -230,13 +245,27 @@ SemaCallSiteFact: struct {
     // while compiling. A run-time-only export (runtime_only_read) is never
     // computed while compiling at all.
     runtime_export: String?{None}
-    // The call runs while compiling (a comptime item, a `#run { }` site or
-    // a module value), not in the running program. A function only such calls
-    // name is prep code, not a runtime entry (sema_effect_runtime_input_paths).
-    compile_time: Bool{false}
     // The call is an `==` or `!=` the operator resolved to its callee
     // (sema_expr_check_operator), with where its operands were written.
     operator: SemaOperatorSite?{None}
+}
+
+// `detail`, or None when it holds no fact, so a plain call keeps no box.
+sema_call_site_detail_of: fn(detail: SemaCallSiteDetail) -> SemaCallSiteDetail? Never! {
+    if detail.foreign_effect_root != None || detail.foreign_opaque || detail.unsafe_foreign_name != None || detail.audited_operation || detail.foreign_capability != None || detail.lifecycle != None {
+        return Val(detail)
+    }
+    if detail.replacement_hidden || detail.shared_lifetime != None || detail.shared_member != "" || detail.shared_source != "" || detail.intrinsic_api != None || detail.runtime_export != None || detail.operator != None {
+        return Val(detail)
+    }
+    None
+}
+
+// A copy of `fact`'s detail, an empty one when it has none: what a cold
+// reader reads, or what a writer edits and stores back (`fact.detail =
+// sema_call_site_detail_of(edited)`). A hot reader matches `fact.detail`.
+sema_call_site_detail: fn(fact: SemaCallSiteFact) -> SemaCallSiteDetail Never! {
+    fact.detail ?? SemaCallSiteDetail{}
 }
 
 // An `==` or `!=` call site: `receiver` is the operand the method is called

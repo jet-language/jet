@@ -247,10 +247,11 @@ sema_lifecycle_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
                     rename = renames.get(callee.id)
                 }
             }
-            if call.lifecycle != None -> rename = None
-            payload: call.lifecycle ?? declared ?? next
+            detail: sema_call_site_detail(call)
+            if detail.lifecycle != None -> rename = None
+            payload: detail.lifecycle ?? declared ?? next
             if segments.len() > 0 && sema_source_location_at(segments, call.span) == None -> next
-            sema_lifecycle_record(payload, rename, call.replacement_hidden, graph_module.source_file, call.span, edition, result, seen)
+            sema_lifecycle_record(payload, rename, detail.replacement_hidden, graph_module.source_file, call.span, edition, result, seen)
         }
         sema_attach_diagnostic_source_locations(result.diagnostics, start, graph_module.source_segments)
     }

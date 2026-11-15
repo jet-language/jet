@@ -743,7 +743,10 @@ sema_expr_check_operator: fn(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs
         return None
     }
     if op == BinOp.Eq || op == BinOp.Ne {
-        context.call_facts[context.call_facts.len() - 1].operator = Val(site)
+        last: context.call_facts.len() - 1
+        detail := sema_call_site_detail(context.call_facts[last])
+        detail.operator = Val(site)
+        context.call_facts[last].detail = sema_call_site_detail_of(detail)
     }
     value := value_checked.value
     // A hook declared `-> T Never!` yields its success value: the uninhabited
@@ -3104,12 +3107,16 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
             callee: callee,
             facts: checked.facts,
             discarded: false,
-            foreign_effect_root: foreign_effect_root,
-            foreign_opaque: sema_expr_call_foreign_opaque(program, callee),
-            unsafe_foreign_name: sema_expr_call_unsafe_foreign_name(program, callee, foreign_effect_root),
-            foreign_capability: sema_expr_call_foreign_capability(program, callee),
-            replacement_hidden: sema_expr_call_replacement_hidden(program, scopes, callee, span),
             compile_time: scopes.comptime_execution_depth > 0,
+            detail: sema_call_site_detail_of(
+                SemaCallSiteDetail{
+                    foreign_effect_root: foreign_effect_root,
+                    foreign_opaque: sema_expr_call_foreign_opaque(program, callee),
+                    unsafe_foreign_name: sema_expr_call_unsafe_foreign_name(program, callee, foreign_effect_root),
+                    foreign_capability: sema_expr_call_foreign_capability(program, callee),
+                    replacement_hidden: sema_expr_call_replacement_hidden(program, scopes, callee, span),
+                },
+            ),
         },
     )
     // Demand: a codec call requires the generated codec it reaches, and a
@@ -4147,7 +4154,9 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
             if audited_operation {
                 loop index in first_fact..<context.call_facts.len() {
                     if context.call_facts[index].span == method_span {
-                        context.call_facts[index].audited_operation = true
+                        detail := sema_call_site_detail(context.call_facts[index])
+                        detail.audited_operation = true
+                        context.call_facts[index].detail = sema_call_site_detail_of(detail)
                     }
                 }
             }

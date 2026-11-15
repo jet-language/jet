@@ -665,7 +665,8 @@ sema_effect_in_assume_det: fn(node: SemaEffectNode, span: Span) -> Bool Never! {
 // records none of the site's effects. False when the site is not one.
 sema_effect_report_nondeterministic_intrinsic: fn(nodes: &[SemaEffectNode], node_index: Int, fact: SemaCallSiteFact, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
     if !nodes[node_index].is_pure || fact.callee != None -> return false
-    api: fact.intrinsic_api ?? return false
+    detail: fact.detail ?? return false
+    api: detail.intrinsic_api ?? return false
     if !api.starts_with("Clock.") && !api.starts_with("Clock ") && api != "ExpiringSecret.with" {
         return false
     }
@@ -690,7 +691,8 @@ sema_effect_report_nondeterministic_intrinsic: fn(nodes: &[SemaEffectNode], node
 // reaches the host clock or random source. An intrinsic (`time.now`) has no
 // declared callee and is named by its API.
 sema_effect_comptime_nondeterministic: fn(fact: SemaCallSiteFact, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
-    api: if fact.callee == .Val(callee) -> sema_effect_decl_label(sema_symbol_key(program, context, callee)) else -> fact.intrinsic_api ?? return
+    detail: sema_call_site_detail(fact)
+    api: if fact.callee == .Val(callee) -> sema_effect_decl_label(sema_symbol_key(program, context, callee)) else -> detail.intrinsic_api ?? return
     row: fact.facts.effect_bound ?? return
     loop entry in row {
         if entry.name.starts_with("!") -> next
@@ -2508,7 +2510,7 @@ sema_effect_record_intrinsic_fact: fn(environment: SemaScopeEnvironment, program
                 callee: None,
                 facts: facts,
                 discarded: false,
-                intrinsic_api: Val(api),
+                detail: Val(SemaCallSiteDetail{intrinsic_api: Val(api)}),
             },
         )
     }
@@ -2548,14 +2550,14 @@ sema_effect_record_fact: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex
     // A foreign body with a known effect root records that root and an open
     // memory dispatch; only an extern with no root, or a C binding whose row no
     // descriptor owns, is an unknown callee that forces the maximal set.
-    if fact.foreign_effect_root == .Val(root) {
+    if fact.detail == .Val(detail) && detail.foreign_effect_root == .Val(root) {
         effect_name: sema_effect_parse_name(root) ?? {
             diagnostics.push(sema_effect_unknown(root, fact.span))
             return
         }
         sema_effect_node_add_direct(nodes, node_index, effect_name, fact.span)
         sema_effect_record_memory_open(nodes, node_index, fact.span, "foreign function body")
-        if fact.foreign_opaque && !nodes[node_index].maximal {
+        if detail.foreign_opaque && !nodes[node_index].maximal {
             nodes[node_index].maximal = true
             nodes[node_index].maximal_span = Val(fact.span)
         }
@@ -2838,7 +2840,9 @@ sema_effect_clock_intrinsic_position: fn(index: SemaEffectCallIndex, caller: Sem
         at += 1
         fact: calls.facts[position]
         if fact.span.end != span.end || fact.callee != None -> next
-        if fact.intrinsic_api == .Val(api) && api.starts_with("Clock.") -> return Val(position)
+        if fact.detail == .Val(detail) && detail.intrinsic_api == .Val(api) && api.starts_with("Clock.") {
+            return Val(position)
+        }
     }
     None
 }
@@ -3832,15 +3836,17 @@ sema_effect_check_unsafe_enter: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
         if found == .Val(position) {
             // A `mem.<operation>(…)` call sema already reported as E3101
             // (`audited_operation`) is not reported again as E3103.
-            if facts.modules[caller.module_index].facts[position].callee == .Val(callee) && !facts.modules[caller.module_index].facts[position].audited_operation {
+            site: facts.modules[caller.module_index].facts[position]
+            detail: site.detail ?? SemaCallSiteDetail{}
+            if site.callee == .Val(callee) && !detail.audited_operation {
                 if facts.unsafe_names.get(symbol_key(facts.symbols, tree.symbols, callee)) == .Val(name) {
                     sema_effect_require_unsafe_call(name, true, audited, node.span, diagnostics)
                 }
             }
-            if facts.modules[caller.module_index].facts[position].unsafe_foreign_name == .Val(foreign) {
+            if detail.unsafe_foreign_name == .Val(foreign) {
                 _: sema_effect_require_unsafe_call(foreign, true, audited, node.span, diagnostics)
             }
-            if facts.modules[caller.module_index].facts[position].foreign_capability == .Val(capability) && !audited {
+            if detail.foreign_capability == .Val(capability) && !audited {
                 row: diagnostic_registry_row("E0702") ?? panic("E0702 has no registry row")
                 diagnostics.push(sema_error("E0702", node.span, row.what.replace("{{subject}}", "call `{capability.name}` uses capability `{capability.sigil}` outside `#Unsafe`"), "a foreign capability can write to or transfer ownership of Jet storage, so a raw call needs an audited boundary", "call `{capability.name}` inside `#Unsafe(\"…\") {{ … }}`, or expose it through a generated typed binding"))
             }
@@ -6156,9 +6162,10 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         site_diagnostics := [Diagnostic]{}
         facts := sema_effect_shared_facts(modules[inputs[module_index].module_index].call_facts)
         facts = loop fresh_item in facts -> fresh_item
-        facts.sort_by(fn(left: SemaCallSiteFact, right: SemaCallSiteFact) { (left.shared_source <=> right.shared_source).then(left.span.start <=> right.span.start).then(left.span.end <=> right.span.end).then(left.shared_member <=> right.shared_member) })
+        facts.sort_by(fn(left: SemaCallSiteFact, right: SemaCallSiteFact) { (sema_call_site_detail(left).shared_source <=> sema_call_site_detail(right).shared_source).then(left.span.start <=> right.span.start).then(left.span.end <=> right.span.end).then(sema_call_site_detail(left).shared_member <=> sema_call_site_detail(right).shared_member) })
         loop fact in facts {
-            lifetime: fact.shared_lifetime ?? next
+            detail: fact.detail ?? next
+            lifetime: detail.shared_lifetime ?? next
             initializer: fact.callee ?? panic("Core publication obligation has no initializer")
             target: sema_effect_node_index(calls.node_by_key, symbol_table_key(calls.symbols, initializer)) ?? panic("Core publication initializer has no solved effect row")
             // `Panic` is the deny-only stop row, not an effect
@@ -6173,7 +6180,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             conflicting := false
             if sites.get(initializer.id) == .Val(previous) -> conflicting = previous != lifetime
             if impure || conflicting {
-                site_diagnostics.push(sema_call_core_shared_diagnostic(fact.shared_member, fact.span))
+                site_diagnostics.push(sema_call_core_shared_diagnostic(detail.shared_member, fact.span))
             }
             if sites.get(initializer.id) == None -> sites[initializer.id] = lifetime
         }
@@ -6586,7 +6593,9 @@ sema_effect_collect_one: fn(nodes: &[SemaEffectNode], node_index: Int, function:
 sema_effect_calls_any_unsafe_foreign: fn(modules: [SemaEffectModuleCalls]) -> Bool Never! {
     loop module_calls in modules {
         loop fact in module_calls.facts {
-            if fact.unsafe_foreign_name != None || fact.foreign_capability != None -> return true
+            if fact.detail == .Val(detail) && (detail.unsafe_foreign_name != None || detail.foreign_capability != None) {
+                return true
+            }
         }
     }
     false
@@ -6805,7 +6814,7 @@ sema_effect_shared_facts: fn(call_facts: [SemaCallSiteFact]) -> [SemaCallSiteFac
     facts := [SemaCallSiteFact]{}
     loop fact in call_facts {
         // copy: the obligations are sorted on their own; the module keeps its facts.
-        if fact.shared_lifetime != None -> facts.push(fact.copy())
+        if fact.detail == .Val(detail) && detail.shared_lifetime != None -> facts.push(fact.copy())
     }
     facts
 }
