@@ -365,7 +365,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1136 | MarkerUsesOutsidePackage | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:1334 | the marker's own package reads its uses |
 | E1201 | PackageVersionConflict | Jetpack/PackageModel/Source/Lock/Verify.jet:340 | the dependencies agree on one version |
 | E1203 | MissingGit | Jetpack/PackageModel/Source/Lock/Verify.jet:376 | install `git` |
-| E1204 | StoreEntryTampered | Compiler/JetCli/Source/Cli/InspectProvenance.jet:510 | the entry is fetched again from its source |
+| E1204 | StoreEntryTampered | Compiler/JetCli/Source/Cli/InspectProvenance.jet:512 | the entry is fetched again from its source |
 | E1205 | CorruptLockFile | Jetpack/PackageModel/Source/Lock/Verify.jet:355 | the lock file is regenerated |
 | E1206 | LintSelectorIsCode | Jetpack/PackageModel/Source/Manifest/Manifest.jet:425 | `policy.lints.deny` takes lint names |
 | E1207 | UnresolvedRegistryDependency | Jetpack/Provider/Source/PackageFetch/Fetch.jet:85 | the dependency resolves to a verified artifact |
@@ -381,7 +381,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1220 | DependencyAuthorityExceeded | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:548 | the effect is added to the dependency's grant line |
 | E1221 | InvalidAuthorityBlock | Compiler/JetDriver/Source/Driver/Loader.jet:265 | `authority:` is written in its one block form |
 | E1222 | InvalidProgramAllocator | Compiler/JetDriver/Source/Driver/Loader.jet:680 | `mem.Heap` or a counting allocator over it with a valid cap |
-| E1224 | PackageFileOperationFailed | Compiler/JetCli/Source/Cli/Host.jet:3008 | the file is readable and writable |
+| E1224 | PackageFileOperationFailed | Compiler/JetCli/Source/Cli/Host.jet:3009 | the file is readable and writable |
 | E1227 | EngineProtocolMismatch | Compiler/JetCli/Source/Cli/InspectB.jet:662 | `jet` and its engines come from one toolchain |
 | E1228 | MissingEngine | Compiler/JetCli/Source/Cli/InspectB.jet:643 | install the engine with the toolchain |
 | E1230 | AmbiguousWorkspaceMember | Jetpack/CLI/Source/Output/RefErrorReport.jet:15 | a longer path or an `@source` names one member |
@@ -500,7 +500,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2120 | DeepCheckScopeUnknown | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:364 | the scope names a declaration of this program |
 | E2121 | DeepCheckScopeHoldsNone | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:365 | the scope names declarations that hold deep checks |
 | E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:38 | a working LLDB is installed |
-| E2204 | DebugSessionQuit | Compiler/JetCli/Source/Cli/Debug.jet:116 | let the program run to its end |
+| E2204 | DebugSessionQuit | Compiler/JetCli/Source/Cli/Debug.jet:118 | let the program run to its end |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:306 | the view's owner lives as long as the view |
 | E2307 | StringViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:306 | the string's owner lives as long as the view, or the string is copied |
 | E2389 | UnprovenEntryResolution | Compiler/JetCli/Source/Cli/Inspect.jet:1759 | the entry resolves |
@@ -588,7 +588,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:924 | the `#Todo` is written |
 | E3012 | StackOverflow | Compiler/JetCli/Source/Cli/Crash.jet:119 | the recursion is bounded |
 | E3015 | UnhandledEntryFailure | Jetpack/Store/Source/Build/Cache.jet:866 | the entry handles the failure |
-| E3016 | OutputCheckNotRun | Compiler/JetCli/Source/Cli/Host.jet:2507 | the fatal trap is fixed |
+| E3016 | OutputCheckNotRun | Compiler/JetCli/Source/Cli/Host.jet:2508 | the fatal trap is fixed |
 | E3105 | UnsafeForbiddenByPolicy | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:850 | the policy owner changes the outer policy |
 | E3106 | InvalidUnsafeObligationMode | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:838 | a permitted obligation mode |
 | E3107 | MissingUnsafeObligation | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:961 | the obligations are stated |
@@ -648,14 +648,14 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3540 | DuplicateCommandOverride | Compiler/JetCli/Source/Cli/Entry.jet:844 | one override per command |
 | E3611 | CorruptProofArtifact | Compiler/JetCli/Source/Cli/ProveReport.jet:1674 | produce the artifact again |
 | E3614 | UnsafeProofArtifactPath | Compiler/JetCli/Source/Cli/ProveReport.jet:1670 | a plain path |
-| E3620 | ReplaySchemaMismatch | Compiler/JetCli/Source/Cli/ProveReplay.jet:1311 | capture with a matching `jet prove` |
-| E3621 | ReplayIdentityMismatch | Compiler/JetCli/Source/Cli/ProveReplay.jet:1228 | capture again for this target |
-| E3622 | CorruptReplay | Compiler/JetCli/Source/Cli/ProveReplay.jet:1219 | capture again |
-| E3623 | ReplayDiverged | Compiler/JetCli/Source/Cli/ProveReplay.jet:1098 | capture again |
+| E3620 | ReplaySchemaMismatch | Compiler/JetCli/Source/Cli/ProveReplay.jet:1312 | capture with a matching `jet prove` |
+| E3621 | ReplayIdentityMismatch | Compiler/JetCli/Source/Cli/ProveReplay.jet:1229 | capture again for this target |
+| E3622 | CorruptReplay | Compiler/JetCli/Source/Cli/ProveReplay.jet:1220 | capture again |
+| E3623 | ReplayDiverged | Compiler/JetCli/Source/Cli/ProveReplay.jet:1099 | capture again |
 | E3624 | ReplayTargetNotUnique | Compiler/JetCli/Source/Cli/Prove.jet:71 | select one runnable target |
-| E3625 | UnmodeledReplayOperation | Compiler/JetCli/Source/Cli/ProveReplay.jet:1206 | keep the operation off the captured path |
-| E3628 | ReplayTooLarge | Compiler/JetCli/Source/Cli/ProveReplay.jet:991 | capture a smaller run |
-| E3629 | ReplayFinalizeFailed | Compiler/JetCli/Source/Cli/ProveReplay.jet:884 | the destination is fixed |
+| E3625 | UnmodeledReplayOperation | Compiler/JetCli/Source/Cli/ProveReplay.jet:1207 | keep the operation off the captured path |
+| E3628 | ReplayTooLarge | Compiler/JetCli/Source/Cli/ProveReplay.jet:992 | capture a smaller run |
+| E3629 | ReplayFinalizeFailed | Compiler/JetCli/Source/Cli/ProveReplay.jet:885 | the destination is fixed |
 | E4201 | TlsHandshakeFailed | Jetpack/Foundation/Source/Net/FetchError.jet:18 | an HTTPS server at the URL |
 | E4202 | UntrustedCertificate | Jetpack/Foundation/Source/Net/FetchError.jet:19 | a certificate valid for the host |
 | E4203 | MissingCertificateRoots | Jetpack/Foundation/Source/Net/FetchError.jet:20 | install the system certificate bundle |
