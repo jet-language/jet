@@ -689,8 +689,7 @@ sema_serde_items_default_expr: fn(field: Field) -> Expr? Never! {
 }
 
 // A leading-dot case default (`maturity: Maturity{.Tested}`) names its enum
-// from the field type: the generated `default.encode()` receiver has no
-// expected type to infer the case's enum from.
+// from the field type, so the generated default names it wherever it lands.
 sema_serde_items_named_default: fn(ty: Type, value: Expr) -> Expr {
     if value == .EnumLit(type_name, variant, variant_span, args, leading_dot, span, node) {
         if leading_dot && type_name == "" && ty == .Named(name) {
@@ -844,19 +843,31 @@ sema_serde_items_struct_decode_body: fn(definition: StructDef, items: [Item], sp
             field_default: sema_serde_items_default_expr(field)
             missing := String?{None}
             if !optional && field_default == None -> missing = Val("jet_serde_missing_required_{field.name}")
-            fallback := sema_serde_items_dyn_variant("Null", [Expr]{}, span)
-            if !optional && field_default == .Val(default_value) -> fallback = sema_serde_items_method_call(default_value, "encode", [Expr]{}, span)
-            subtree: Expr.OrFallback{value: sema_serde_items_method_call(sema_serde_items_ident("tree", span), "field", [Expr]{sema_serde_items_string(key, span)}, span), fallback: OrFallback.Value{value: fallback}, is_option: false, span: span, id: AST_NODE_GENERATED}
             index: field_values.len()
             result: "jet_serde_decode_{field.name}"
             slot: "jet_serde_field_value_{index}"
             value_name: "jet_serde_decoded_value_{index}"
             ok_value: "jet_serde_ok_value_{index}"
             error_name: "jet_serde_field_errors_{index}"
+            read: sema_serde_items_method_call(sema_serde_items_ident("tree", span), "field", [Expr]{sema_serde_items_string(key, span)}, span)
             body.push(sema_serde_items_binding(slot, Val(sema_serde_items_slot_type(field.ty)), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span))
-            body.push(sema_serde_items_binding(result, None, sema_serde_items_under(key, sema_serde_items_decode_call(subtree, field.ty, span), span), false, span))
             stored: if optional -> sema_serde_items_take(ok_value, span) else -> Expr.Present{value: sema_serde_items_take(ok_value, span), span: span, id: AST_NODE_GENERATED}
-            body.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, [Stmt]{sema_serde_items_assign_local(slot, stored, span)}, error_name, sema_serde_items_decode_error_body(error_name, missing, Val(key), span), span))
+            kept: sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, [Stmt]{sema_serde_items_assign_local(slot, stored, span)}, error_name, sema_serde_items_decode_error_body(error_name, missing, Val(key), span), span)
+            // A present key decodes; an absent one takes the default as it is,
+            // so a decode-only type needs no `Encode` for it.
+            if {
+                !optional && field_default == .Val(default_value) -> {
+                    present: "jet_serde_present_{index}"
+                    decoded: sema_serde_items_binding(result, None, sema_serde_items_under(key, sema_serde_items_decode_call(sema_serde_items_ident(present, span), field.ty, span), span), false, span)
+                    defaulted: sema_serde_items_assign_local(slot, Expr.Present{value: default_value, span: span, id: AST_NODE_GENERATED}, span)
+                    body.push(sema_serde_items_pattern_switch(read, "Ok", [String]{present}, [Stmt]{decoded, kept}, Val([Stmt]{defaulted}), span))
+                }
+                else -> {
+                    subtree: Expr.OrFallback{value: read, fallback: OrFallback.Value{value: sema_serde_items_dyn_variant("Null", [Expr]{}, span)}, is_option: false, span: span, id: AST_NODE_GENERATED}
+                    body.push(sema_serde_items_binding(result, None, sema_serde_items_under(key, sema_serde_items_decode_call(subtree, field.ty, span), span), false, span))
+                    body.push(kept)
+                }
+            }
             if optional {
                 value = sema_serde_items_ident(slot, span)
             } else {
@@ -963,18 +974,18 @@ sema_serde_items_struct_read_body: fn(definition: StructDef, span: Span) -> [Stm
                 after.push(sema_serde_items_if(sema_serde_items_ident(seen, span), forward, span))
                 value = sema_serde_items_ident(slot, span)
             } else {
-                missing := String?{None}
-                fallback := sema_serde_items_dyn_variant("Null", [Expr]{}, span)
                 absent := [Stmt]{}
                 if field_default == .Val(default_value) {
-                    fallback = sema_serde_items_method_call(default_value, "encode", [Expr]{}, span)
+                    // An absent key takes the default as it is.
+                    stored: if plain -> default_value else -> Expr.Present{value: default_value, span: span, id: AST_NODE_GENERATED}
+                    absent.push(sema_serde_items_assign_local(slot, stored, span))
+                    if plain -> absent.push(sema_serde_items_assign_local(set, Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, span))
                 } else {
                     missing_name: "jet_serde_missing_required_{field.name}"
-                    missing = Val(missing_name)
                     absent.push(sema_serde_items_binding(missing_name, Val(Type.Bool), Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, false, span))
+                    absent.push(sema_serde_items_binding(result, None, sema_serde_items_under(key, sema_serde_items_decode_call(sema_serde_items_dyn_variant("Null", [Expr]{}, span), field.ty, span), span), false, span))
+                    absent.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, sema_serde_items_keep(slot, ok_value, plain, set, span), error_name, sema_serde_items_decode_error_body(error_name, Val(missing_name), Val(key), span), span))
                 }
-                absent.push(sema_serde_items_binding(result, None, sema_serde_items_under(key, sema_serde_items_decode_call(fallback, field.ty, span), span), false, span))
-                absent.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, sema_serde_items_keep(slot, ok_value, plain, set, span), error_name, sema_serde_items_decode_error_body(error_name, missing, Val(key), span), span))
                 after.push(sema_serde_items_if_else(sema_serde_items_ident(seen, span), forward, absent, span))
                 if plain {
                     decoded_flags.push(set)
