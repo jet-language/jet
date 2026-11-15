@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106010,
+    "rev": 106016,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41686,6 +41686,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c1 second adversarial review (2026-11-15 01:10, of GoalsB-5-17r2; Docs/audits/2026-11-15-sync-partial-bootstrap-review-2.md, landing with the next batch): S2, S10 and S13 now hold within stated limits; S5, S8 and S14 still fail; of the new claims, N1 (Postgres watermark), N3 (endpoint epoch in key) and N5 (UUIDv5 seed IDs) fail; G36-G64 added. c1 stays open; -17r3 next."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Correction to the previous log: the review's verdict table counts 6 failed claims (S2, S5, S8, S10, S13, S14) and 8 that hold only within stated limits, not 5 and 9."
         },
         {
@@ -41993,7 +41998,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-15T05:34:49.048Z",
+      "updated": "2026-11-15T06:06:57.257Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -60501,6 +60506,16 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "p153 (dev 84df7e8189, built by p152, so the first compiler whose own Expr/Type/Stmt/NodeKind boxes are variant-sized), 2026-11-15 01:07: gate self-build peak 7364 -> 6721 MiB (-8.7%), cpu 146.7 -> 130.3 s, instructions -0.4%. jet check Compiler/JetCli/Source/Cli/InspectBuild.jet, median of 3 alternating runs (#5910 c62 program): p152 4745 MiB / 11.6 s -> p153 4086 MiB / 10.41 s (-13.9% RSS, -10% wall). #5910 c62's target is under 1 GB; the gap is still 4x."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Variant-sized enum boxes (679894f5a9, Speed-3; feature: enum box allocation), second program enum-churn (40 depth-16 trees of Leaf/Num/Pair/Call, built, rewritten through windows, dropped), jet build --release, 3 runs each, 2026-11-15 01:03: p151 (before) 0.39 s / 23.3 MiB max RSS; p152 (after) 0.25 s / 14.8 MiB. -36% wall, -37% RSS, output 1453733516 identical. VariantSizedBoxes (narrow to widest through 5 write paths) prints 877 5 436 on O0, O1 and O2 under p152. The compiler's own boxes show from p153 (built by p152). List growth (177567cc35): p151 vs p152 jet check InspectBuild.jet median of 3: 4886 -> 4781 MiB max RSS (-2.1%), 11.37 -> 10.92 s."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Batch self-build wall p143-p146 (38.7, 40.1, 42.4, 46.4 s) is machine load, not code (Speed-3, 2026-11-14). perf stat instructions:u for jet check Compiler/JetCli on a fixed tree with compilers p142-p146: 550.6-553.5 G (+0.5%); a cold jet build of CompilerData.jet: 18.57-18.68 G. The same binary on the same tree varies 9% in cycles at load average 13-18. One real shift: from p145 the small comptime.build batches bill about 35 ms to the calling thread (c23), with wall unchanged. Next: the batch gate judges instructions:u plus interleaved A/B cycles, not wall under load."
         },
         {
@@ -60907,8 +60922,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T05:37:57.727Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T06:07:34.802Z",
+      "updatedBy": "Main",
       "goals": [
         "G11"
       ],
@@ -61153,11 +61168,11 @@
         {
           "n": 43,
           "text": "Retire item-level reuse: the sema body-memo cache is deleted with no replacement reuse unit. Proof: `git grep -nE 'SemaIncremental|SemaBodyMemo|SemaModuleMemo|SemaCachedBody|sema_incremental_' -- Compiler` is empty (today SemaIncrementalCache is in Compiler/JetSema/Source/Sema/CheckProgram.jet:543 and JetDriver/Source/Driver/CompilerQueries.jet).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:20:22.821Z"
+          "evidence": "Speed-3-5910-c43-delete-sema-body-memo landed fbfc7a69d7 (census176 clean on p153). On dev 8fb675da5c, git grep -nE 'SemaIncremental|SemaBodyMemo|SemaModuleMemo|SemaCachedBody|sema_incremental_' -- Compiler prints 0 lines.",
+          "at": "2026-11-15T06:11:01.367Z"
         },
         {
           "n": 44,
@@ -61273,8 +61288,8 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-15T05:30:03.559Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T06:11:01.367Z",
+      "updatedBy": "Main",
       "goals": [
         "G11"
       ],
@@ -101998,6 +102013,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "p152 kernel rows (batch compiler from dev 9ae575e506, the first with mapping-window aa4b73320c in its runtime; 2026-11-15 00:57, asm-parity --gate, perf pinned). Cycles vs the ceiling, code bytes vs the reference: mapping 5.88x (12.5x on p146) / 2554 B vs 91 (28.07x); compare 11.13x / 423 B vs 730 (0.58x, ok); allocfree 8.12x / 7030 B vs 261; resize 2.14x / 5851 B vs 477; atomics 1.00x ok / 99 B vs 16; rawword 1.38x / 8 B vs 10, ok. Every output is the same as the reference. 6 Jet rows miss a gate. Next in flight: atomic-bytes (code bytes), compare's equality lowering, the allocator slab (allocfree, resize)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "p149 after-rows (batch compiler from dev 413cddeab5; 2026-11-15 00:20, perf 7.2.9, pinned). Atomics cell (4bf7c65a48), asm-parity --gate: ref 16 B / 1432.5M cycles; jet-release 99 B code (6.19x, over) / 1417.5M cycles (0.99x, ok), output same. On p144: 642 B (40.13x) / 1.37x. The atomics second program (ticket dispenser on two Atomic<U64> words): 750 B / 2.56G cycles on p144, 124 B / 1.32G on p149, output served 81920000 unchanged. Rawword re-measured on p149: 8 B (0.80x, ok) / 1.40x cycles (1.28x on p146; load noise; still over)."
         },
         {
@@ -102182,7 +102202,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T05:24:49.915Z",
+      "updated": "2026-11-15T05:58:33.203Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -104665,7 +104685,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c8 is not met yet, though db_scope_live_marks_writes_stale_only_after_commit passes on p152: the second sync review (2026-11-15) reads App.jet state (L404-416) then live_store (L566-584), which clears dirty unconditionally, so a re-run that read before a commit and stores after its invalidation keeps the old value as current. GoalsB-5 adds a per-binding generation counter and a case forcing that interleaving."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -104761,7 +104787,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-15T05:41:42.103Z",
+      "updated": "2026-11-15T06:06:58.461Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -218274,6 +218300,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T06:11:01.367Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-15T06:07:34.802Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T06:06:58.461Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00cqn1l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T06:06:57.257Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ttcd0k",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T06:04:06.892Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T05:58:33.203Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T05:47:03.746Z",
       "by": "TowerKeeper-1",
