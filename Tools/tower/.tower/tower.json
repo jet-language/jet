@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6905,
-    "rev": 104075,
+    "rev": 104092,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52216,8 +52216,8 @@
     {
       "id": "c03183d1",
       "num": 4917,
-      "title": "Jet LSP: `jet self lsp` serves diagnostics, hover and go-to-definition from the checker",
-      "body": "CARDBURN-LEDGER.md:115: the canonical Jet LSP diagnostic publisher is not ported. port-tools/Compiler/JetLSP/Source/LSP has only Position.jet and URI.jet. Port the publisher to Jet.\n\nSource: 2026-10-09 scratch mining ($JET_STATE_ROOT/mine/; notes archived in $JET_STATE_ROOT/backup/notes-2026-10-09.tar.gz).",
+      "title": "Jet LSP core: `jet self lsp` publishes check diagnostics, hover, definition and fix code actions, and the editor extension starts it",
+      "body": "Destination: `jet self lsp` (Compiler/JetLSP) serves the checker's own facts: the diagnostics `jet check` prints, hover types and effect rows, go-to-definition into other modules and Core, every fix_edits entry as a code action, and visibility from Sema facts; its initialize response and transport meet LSP 3.18, checked by a conformance inventory; and the Tools/editors extension starts it with no settings.\n\nState on dev 6f82527b17 with gate-p141: `jet test Compiler --profile cases --filter lsp/` gives 23 PASS, 32 KNOWN-FAILING, 1 OPT-IN.\n\nRelated cards: identity and rename #6901, completion, tokens and hints #6902, freshness and clients #6903, refactors #6904.\n\nDecisions: D-LSP1=C, D-EDITOR-DEV-PORT1=B (port the editor server now).",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e14",
@@ -52233,6 +52233,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Split 2026-11-15: identity and rename to #6901, completion, tokens and hints to #6902, freshness, host documents, workspaces and clients to #6903, refactors to #6904; formatter lexer to #6898, REPL parsing to #4720. This card keeps the core server criteria."
+        },
         {
           "at": "2026-11-09",
           "by": "Main",
@@ -52693,11 +52698,12 @@
         {
           "n": 55,
           "text": "(was #3191) [#3198] Every advertised extract/inline transform has a before/after or refusal receipt that preserves evaluation order, capture, control flow, ownership and effects, using the checked index (after the #3186 cutover). (was #4275 c65)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:33:57.024Z"
+          "evidence": "Moved to #6904 c4: refactors have their own card",
+          "at": "2026-11-15T03:56:26.967Z",
+          "closure": "obsolete"
         },
         {
           "n": 56,
@@ -52711,38 +52717,42 @@
         {
           "n": 57,
           "text": "(was #3196) Cancelled work returns the applicable -32800 response and does not later publish a purported current result. (was #4275 c67)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:34:05.155Z"
+          "evidence": "Moved to #6903 c1: freshness and cancellation have their own card",
+          "at": "2026-11-15T03:56:27.896Z",
+          "closure": "obsolete"
         },
         {
           "n": 58,
           "text": "The latest request eventually receives the correct fresh verdict, and the diagnostics already published for unrelated modules stay correct. Nothing is reused across server restarts (no compile cache).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:00.399Z"
+          "evidence": "Moved to #6903 c2: freshness and cancellation have their own card",
+          "at": "2026-11-15T03:56:28.803Z",
+          "closure": "obsolete"
         },
         {
           "n": 59,
           "text": "(was #3196) No new scheduling policy, worker count or public cancellation semantics is silently selected; observed violations are repaired under D-LSP1. (was #4275 c70)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:34:12.111Z"
+          "evidence": "Merged into #6903 c2: the no-silent-policy constraint is part of the freshness criterion",
+          "at": "2026-11-15T03:56:29.760Z",
+          "closure": "obsolete"
         },
         {
           "n": 60,
           "text": "(was #3196) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`) or a Jet-hosted tool: `jet test Compiler --profile cases lsp/lsp_overlapping_edits_latest_checked_revision_wins`, `lsp/lsp_sibling_import_edit_never_publishes_stale_verdict` and `lsp/lsp_cancelled_costly_request_returns_32800_and_never_publishes` pass, and `lsp/lsp_repeated_edit_stream_latency` prints the p50/p95 cancel-to-release and edit-to-current-verdict latencies, the peak in-flight checks and the binary/input identity, which are attached to the card. (was #4275 c71)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:34:15.032Z"
+          "evidence": "Moved to #6903 c3: its passing cases now prove LSPLIVE c2; the latency report stays",
+          "at": "2026-11-15T03:56:30.678Z",
+          "closure": "obsolete"
         },
         {
           "n": 62,
@@ -52774,38 +52784,42 @@
         {
           "n": 67,
           "text": "[#3003] A host document with two Jet regions (including the UTF-8 25..46 / UTF-16 23..44 case) checks through the JetDriver SourceDocument query. Diagnostics and edits map to host byte ranges after an incremental edit. Cancellation, stale versions, Unicode and partial syntax never return a false current result. (merged from #3410 c7)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:30.854Z"
+          "evidence": "Moved to #6903 c4: host-document regions have their own card",
+          "at": "2026-11-15T03:56:31.593Z",
+          "closure": "obsolete"
         },
         {
           "n": 68,
           "text": "[#3411] Every applicable semantic feature x Jet construct cell has a witness or a reasoned N/A. Navigation, references, rename, completion and hierarchy follow checked identity across files, generics, shadowing and generated origins. Results stay version-correct during broken edits. #3158/#3191 work is integrated. (merged from #3410 c8)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:32.099Z"
+          "evidence": "Moved to #6903 c5: feature matrix moves with freshness and clients",
+          "at": "2026-11-15T03:56:32.540Z",
+          "closure": "obsolete"
         },
         {
           "n": 69,
           "text": "[#3412] Workspace and document operations work for inline single-file metadata and multi-root projects. Edits preserve identity, versions and client rejection. Formatting uses the canonical formatter. Unsaved, read-only, generated, Unicode, symlink and dependency-change cases behave honestly. (merged from #3410 c9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:33.360Z"
+          "evidence": "Moved to #6903 c6: workspaces move with freshness and clients",
+          "at": "2026-11-15T03:56:33.449Z",
+          "closure": "obsolete"
         },
         {
           "n": 70,
           "text": "[#3413] VS Code, Zed and Neovim each run the real server against the full client matrix with correct visible results. Limitations are evidenced. Lint presentation is quiet but discoverable. Evidence is bound to versions. (merged from #3410 c10)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:34.591Z"
+          "evidence": "Moved to #6903 c7: the client matrix moves with freshness and clients",
+          "at": "2026-11-15T03:56:34.353Z",
+          "closure": "obsolete"
         },
         {
           "n": 71,
@@ -52827,7 +52841,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-09T18:06:22.233Z",
-      "updated": "2026-11-15T03:56:25.858Z",
+      "updated": "2026-11-15T03:56:43.901Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -59764,6 +59778,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "sema.codecs follow-up (GoalsB-5, 2026-11-14 23:00): no regression. The p143 gate trace (p142 binary, cutover sema) gives sema.codecs 2.84 s cpu, against 3.33 on p141 and 4.13 on p142. A controlled A/B on the same 964-codec input with --threads=1, interleaved, gives medians p141 4.75 s, p142 4.74 s, p143 4.64 s. The p142 rise was gate noise; 04e397982f only removes per-field and per-type marker scans."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "p142 gate (dev 0487a6552b, p141 binary), 2026-11-14 22:45, Speed-3 analysis: the jet-bare phase FAILs (ir.build 0.93 to 8.06 s, release, prelower) are an attribution artifact. Per-phase proc_cpu bills the whole process, and the runtime compile's late phases now overlap the Core object compile's 16-thread ir.opt window. Own-thread cpu: ir.build 0.26 to 0.34 s at 6778 to 6787 functions. Real change: jet-bare wall 9.41 to 10.06 s, process cpu +2.5%, critical path +2.16 s. The only per-phase cpu rise at equal items is sema.codecs, proc 3.68 to 4.53 s at 696 items (likely 04e397982f's codec cutover, sent to GoalsB-5). Gate fix for c11: judge each compile on per-thread or whole-process cpu, not per-phase proc."
         },
         {
@@ -60160,7 +60179,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T03:44:31.313Z",
+      "updated": "2026-11-15T03:57:05.744Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -98838,20 +98857,20 @@
         {
           "n": 1,
           "text": "`#App.Webhook(path:, signature:)` on a service method makes it a webhook; the framework checks the HMAC signature in constant time before decoding and answers 401 otherwise; a webhook with no signature rule is a compile error, proven by cases. (#6792 r2 gap K7)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T15:43:32.422Z"
+          "evidence": "dev 6f82527b17 (GoalsB-5-9, app.Signature export). p143 batch compiler (built from dev 6f82527b17), 2026-11-14 22:50: jet test Compiler --profile cases --filter web_app/webhook_without_a_key_answers_401 -> PASS 1. The case answers 401 before decoding a delivery signed with another key or with no key, answers 422 for an undecodable signed body, and refuses a webhook with no signature: rule at its marker (probes/no_signature.jet:8:6). Core/App/App.jet:125,139 compare each MAC with crypto.constant_time_equal_bytes.",
+          "at": "2026-11-15T03:57:24.448Z"
         },
         {
           "n": 2,
           "text": "key: in #App.Webhook names the #App.SigningKey method; a name that is not one is a compile error. Proof: `jet test Compiler --profile cases --filter web_app/webhook_key_names_a_signing_key_method`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T17:08:52.299Z"
+          "evidence": "dev 6f82527b17. p143 batch compiler (built from dev 6f82527b17), 2026-11-14 22:50: jet test Compiler --profile cases --filter web_app/webhook_key_names_a_signing_key_method -> PASS 1 (unmarked and unknown key: methods refused at the key: argument).",
+          "at": "2026-11-15T03:57:25.339Z"
         },
         {
           "n": 3,
@@ -98865,11 +98884,11 @@
         {
           "n": 4,
           "text": "A signing-key method that returns None makes the delivery answer 401; it never skips the check. The key: string must name an #App.SigningKey method of the same service, or the build fails with a registered diagnostic. Proof: `jet test Compiler --profile cases --filter web_app/webhook_without_a_key_answers_401`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T18:17:35.428Z"
+          "evidence": "dev 6f82527b17. p143 batch compiler (built from dev 6f82527b17), 2026-11-14 22:50: jet test Compiler --profile cases --filter web_app/webhook_without_a_key_answers_401 -> PASS 1 (a signing-key method returning None answers 401); key: naming a non-SigningKey method is refused (webhook_key_names_a_signing_key_method PASS 1).",
+          "at": "2026-11-15T03:57:26.254Z"
         }
       ],
       "refs": [],
@@ -98880,7 +98899,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:31.447Z",
-      "updated": "2026-11-14T03:25:30.668Z",
+      "updated": "2026-11-15T03:57:26.254Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -99531,11 +99550,11 @@
         {
           "n": 1,
           "text": "An #App.SignedIn or #App.Public method may carry limit: (calls per window per account, or per network for Public); a call past it gets 429 with Retry-After, and the client maps it to app.CallError.Unreachable with a retry time. Proof: `jet test Compiler --profile cases --filter web_app/method_rate_limit_answers_429`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T17:08:30.445Z"
+          "evidence": "dev 6f82527b17. p143 batch compiler (built from dev 6f82527b17), 2026-11-14 22:50: jet test Compiler --profile cases --filter web_app/method_rate_limit_answers_429 -> PASS 1.",
+          "at": "2026-11-15T03:57:27.157Z"
         },
         {
           "n": 2,
@@ -99555,7 +99574,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:29.121Z",
-      "updated": "2026-11-15T03:42:42.530Z",
+      "updated": "2026-11-15T03:57:27.157Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -211926,6 +211945,125 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:57:27.157Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pwde2g",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T03:57:26.254Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0voqhky",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T03:57:25.339Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0voqhky",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T03:57:24.448Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0voqhky",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T03:57:05.744Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:56:43.902Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c03183d1",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T03:56:37.094Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c03183d1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:56:35.974Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c03183d1",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:56:34.353Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03183d1",
+      "note": "#70"
+    },
+    {
+      "at": "2026-11-15T03:56:33.450Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03183d1",
+      "note": "#69"
+    },
+    {
+      "at": "2026-11-15T03:56:32.540Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03183d1",
+      "note": "#68"
+    },
+    {
+      "at": "2026-11-15T03:56:31.593Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03183d1",
+      "note": "#67"
+    },
+    {
+      "at": "2026-11-15T03:56:30.678Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03183d1",
+      "note": "#60"
+    },
+    {
+      "at": "2026-11-15T03:56:29.760Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03183d1",
+      "note": "#59"
+    },
+    {
+      "at": "2026-11-15T03:56:28.803Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03183d1",
+      "note": "#58"
+    },
+    {
+      "at": "2026-11-15T03:56:27.896Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03183d1",
+      "note": "#57"
+    },
+    {
+      "at": "2026-11-15T03:56:26.967Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03183d1",
+      "note": "#55"
+    },
     {
       "at": "2026-11-15T03:56:25.858Z",
       "by": "TowerKeeper-1",
