@@ -440,9 +440,9 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                     // whatever markers it carries.
                     loop marker in method.markers {
                         access: sema_app_endpoint_access(marker, graph, method_module) ?? next
-                        endpoint: sema_app_mount_endpoint(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, method, method_module, access, marker, prefix, environment, program, scopes, state, tail_store, context, diagnostics)
+                        endpoint: sema_app_mount_endpoint(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, method, method_module, access, marker, prefix, span, environment, program, scopes, state, tail_store, context, diagnostics)
                         if endpoint == .Val(value) {
-                            body.push(TStmt.ExprStmt{value: value, span: marker.span})
+                            body.push(TStmt.ExprStmt{value: value, span: span})
                         }
                         break
                     }
@@ -517,9 +517,10 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
 // `__remote_public` with a handler that decodes each argument from the
 // posted JSON array and encodes the method's reply; an `#App.SignedIn` one
 // through `__remote_signed_in`. Both take the endpoint `marker`'s rate limit
-// (`sema_app_endpoint_limit`).
-sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method_module: ModuleID, access: String, marker: Marker, prefix: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    span: marker.span
+// (`sema_app_endpoint_limit`). The generated code is the mount call's, at
+// `span`: the marker may sit in another file, or outside the function that
+// mounts, and a generated handler is a lambda of that function.
+sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method_module: ModuleID, access: String, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     graph: program.registration_graph ?? return None
     concrete: method.params.len() > 0 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Read && method.type_params.len() == 0
     read_only: loop index in 1..<method.params.len() {
@@ -528,7 +529,7 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
         }
     } ?? true
     if !concrete || !read_only {
-        diagnostics.push(sema_error("E2805", span, "endpoint method `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted endpoint decodes its arguments from the request and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
+        diagnostics.push(sema_error("E2805", marker.span, "endpoint method `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted endpoint decodes its arguments from the request and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
         return None
     }
     address: "{prefix}/{method.name}"

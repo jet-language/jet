@@ -1277,7 +1277,7 @@ __app_remote_limited: fn(limit: __AppRemoteLimit, request: HTTPRequest) -> Int? 
 // A call past its endpoint's limit: 429 with `Retry-After`, in whole seconds,
 // which a Remote reads as `CallError.Unreachable` with the retry time.
 __app_limited: fn(wait_ns: Int) -> HTTPResponse Never! {
-    seconds: (wait_ns + 999999999) / 1000000000
+    seconds: (wait_ns + 999999999) /% 1000000000
     refused: __app_json(429, __app_error_json("too many calls: retry after {seconds} s"))
     refused.__with_header("retry-after", "{seconds}")
 }
