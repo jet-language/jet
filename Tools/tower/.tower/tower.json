@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6894,
-    "rev": 103947,
+    "nextNum": 6895,
+    "rev": 103950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -91862,6 +91862,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T22:50:22.473Z"
+        },
+        {
+          "n": 10,
+          "text": "Wayland is full-featured: multiple windows, resize, HiDPI scale, pointer, keyboard with layouts and repeat, text input, clipboard, cursor shapes, decorations and fullscreen. Proof: `jet test Compiler --profile cases --filter ui/wayland_` against the headless compositor fixture.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:48:00.382Z"
+        },
+        {
+          "n": 11,
+          "text": "An X11 wire adapter runs the same window, input and frame implementation as Wayland, with the same golden output. Proof: `jet test Compiler --profile cases --filter ui/x11_` against an Xvfb fixture.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:48:01.362Z"
         }
       ],
       "refs": [],
@@ -91876,9 +91894,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-10T21:29:20.626Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 9
+      "updated": "2026-11-15T03:48:01.362Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 11
     },
     {
       "id": "c0wz8yaf",
@@ -105298,6 +105316,68 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:40:23.429Z",
       "updated": "2026-11-15T03:40:23.429Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0gxq09x",
+      "num": 6894,
+      "title": "The Jet SQLite engine in the `sql` package is complete: the sqllogictest corpus, WAL and crash recovery interoperate with C SQLite, and every SQLite 3.45 feature is ported",
+      "body": "Destination: the in-Jet SQL engine, which leaves Core for the first-party `sql` package (D-DB-AUTH-HOME1=A, move card #6448), is a complete SQLite: the public sqllogictest corpus passes, WAL mode and crash recovery round-trip with C SQLite databases, and every SQL feature of SQLite 3.45 that Core/Db does not use yet is ported.\n\nWhy it matters: owner order 2026-11-09 moved full library completion to G3 (from #6695 c2 and c3); a Jet SQLite that reads and writes real SQLite files lets Jet programs drop the C library.\n\nSource: #3550 c13.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The public sqllogictest corpus passes on the Jet SQL engine, with any skipped file listed with its reason. Proof: `jet test Compiler --profile packages --filter sql/sqllogictest`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:47:59.470Z"
+        },
+        {
+          "n": 2,
+          "text": "WAL mode and crash recovery round-trip with C SQLite: a database written by each engine, including one crashed mid-transaction, opens in the other with the same contents. Proof: `jet test Compiler --profile cases --filter sql/sqlite_c_interop_wal_crash`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:47:59.470Z"
+        },
+        {
+          "n": 3,
+          "text": "Every SQL feature of SQLite 3.45 (statements, functions, pragmas and virtual tables) exists in the Jet engine, checked by a census #Test that lists the 3.45 feature set and fails on any missing one. Proof: `jet test Compiler --profile packages --filter sql/sqlite345_census`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:47:59.470Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "sql",
+        "sqlite",
+        "db"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:47:59.470Z",
+      "updated": "2026-11-15T03:47:59.470Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -210717,6 +210797,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:48:01.362Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0l39twq",
+      "note": "#11 An X11 wire adapter runs the same window, input and frame im"
+    },
+    {
+      "at": "2026-11-15T03:48:00.382Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0l39twq",
+      "note": "#10 Wayland is full-featured: multiple windows, resize, HiDPI sc"
+    },
+    {
+      "at": "2026-11-15T03:47:59.470Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0gxq09x",
+      "note": "The Jet SQLite engine in the `sql` package is complete: the sqllogictest corpus, WAL and crash recovery interoperate with C SQLite, and every SQLite 3.45 feature is ported"
+    },
     {
       "at": "2026-11-15T03:46:42.613Z",
       "by": "TowerKeeper-1",
