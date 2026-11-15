@@ -1268,10 +1268,7 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
     // parse fills, and its blanked source.
     loaded_at := [Int]{}
     positions_at := [[Int]]{}
-    sources := [[U8]]{}
-    weights := [Int]{}
-    total := 0
-    largest := 0
+    sources := [JetDriverReachSource]{}
     loop row in held {
         unit: source_units[modules[row.loaded].source_unit_index]
         text: jet_driver_source_unit_text(request, unit) ?? next
@@ -1288,38 +1285,9 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
         jet_driver_blank_bytes(source, cursor, source.len())
         loaded_at.push(row.loaded)
         positions_at.push(positions)
-        weights.push(source.len())
-        total += source.len()
-        if source.len() > largest -> largest = source.len()
-        sources.push(source)
+        sources.push(JetDriverReachSource{bytes: source, hold: None})
     }
-    // The parses, last first, so each pops in `held` order.
-    parses := [ParseResult]{}
-    workers: compiler_threads_admit(request.compiler_threads, sources.len(), total, JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD, largest * JET_DRIVER_PARSE_SCRATCH_PER_BYTE, 0)
-    if workers <= 1 {
-        // One thread: each module's parse may split across the compiler threads.
-        loop source in sources -> parses.push(jet_driver_reach_parse_source(source, request.compiler_threads))
-    } else {
-        // Consecutive parts of the sources, even by bytes, each moved out
-        // of `sources` and held last-first.
-        bounds: compiler_threads_partition(weights, workers)
-        parts := [[[U8]]]{}
-        loop part in 0..<workers {
-            from: bounds[workers - 1 - part]
-            rows := [[U8]]{}
-            loop sources.len() > from {
-                source := sources.pop() ?? break
-                rows.push(source)
-            }
-            rows.reverse()
-            parts.push(rows.move())
-        }
-        parsed := jet_driver_reach_parse_parts(parts)
-        loop part in parsed.move() {
-            loop done in part.move() -> parses.push(done)
-        }
-    }
-    parses.reverse()
+    parses := jet_driver_reach_parse_sources(request.compiler_threads, sources)
     count := 0
     failed := false
     loop (at, loaded) in loaded_at {
@@ -1343,17 +1311,84 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
     count
 }
 
-// One held module's parse: its blanked source lexed and parsed on `threads`.
-jet_driver_reach_parse_source: fn(source: [U8], threads: CompilerThreads) -> ParseResult {
-    lexed: lex_generated_threads(source, threads)
-    parse_lexed_with_source_threads(lexed.lexed.move(), source, lexed.line_starts, lexed.runs, threads)
+// A module source the load parses again: its blanked bytes, and the Core
+// row whose hold the parse takes again (jet_driver_reach_hold), when its
+// held declarations should parse to their stubs as in the module's own
+// parse.
+JetDriverReachSource: struct {
+    bytes: [U8]
+    hold: JetDriverReachHoldRow?
 }
 
-// The parses of the held sources `parts` (consecutive parts, held
-// last-first), in part order: each part's on its own compiler thread, the
-// last part's on this one. Each parse runs on its thread alone, so no
-// spawned thread spawns.
-jet_driver_reach_parse_parts: fn(parts: &[[[U8]]]) -> [[ParseResult]] {
+// What a Core unit's hold reads of its row (jet_driver_parse_core_source).
+JetDriverReachHoldRow: struct {
+    module_name: String
+    owned_members: [String]
+    runtime: Bool
+}
+
+// The parses of the module sources `sources` (on several threads, moved
+// out of it), last first, so each pops in `sources` order: on the admitted
+// threads, each part of the sources (consecutive, even by bytes) on its own
+// thread. A parse reads nothing but its own source, so the parses are those
+// of parsing each in turn.
+jet_driver_reach_parse_sources: fn(threads: CompilerThreads, sources: &[JetDriverReachSource]) -> [ParseResult] {
+    weights := [Int]{}
+    total := 0
+    largest := 0
+    loop source in sources {
+        weights.push(source.bytes.len())
+        total += source.bytes.len()
+        if source.bytes.len() > largest -> largest = source.bytes.len()
+    }
+    parses := [ParseResult]{}
+    workers: compiler_threads_admit(threads, sources.len(), total, JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD, largest * JET_DRIVER_PARSE_SCRATCH_PER_BYTE, 0)
+    if workers <= 1 {
+        // One thread: each module's parse may split across the compiler threads.
+        loop source in sources -> parses.push(jet_driver_reach_parse_source(source.bytes, source.hold, threads))
+    } else {
+        // Consecutive parts of the sources, each moved out of `sources` and
+        // held last-first.
+        bounds: compiler_threads_partition(weights, workers)
+        parts := [[JetDriverReachSource]]{}
+        loop part in 0..<workers {
+            from: bounds[workers - 1 - part]
+            rows := [JetDriverReachSource]{}
+            loop sources.len() > from {
+                source := sources.pop() ?? break
+                rows.push(source)
+            }
+            rows.reverse()
+            parts.push(rows.move())
+        }
+        parsed := jet_driver_reach_parse_parts(parts)
+        loop part in parsed.move() {
+            loop done in part.move() -> parses.push(done)
+        }
+    }
+    parses.reverse()
+    parses
+}
+
+// One module's parse: its blanked source lexed, held as its `hold` row's
+// own parse holds it (when it has one), and parsed on `threads`.
+jet_driver_reach_parse_source: fn(source: [U8], hold: JetDriverReachHoldRow?, threads: CompilerThreads) -> ParseResult {
+    lexed := lex_generated_threads(source, threads)
+    runs := lexed.runs
+    if hold == .Val(row) {
+        part_members: if row.module_name.starts_with("__") -> row.owned_members else -> [String]{}
+        held: jet_driver_reach_hold(lexed.lexed, if row.runtime -> "" else -> row.module_name, row.owned_members, part_members, jet_driver_core_routes(row.module_name))
+        // The lexer's runs index the tokens before the hold took any out.
+        if held.declarations.len() > 0 || held.dropped.len() > 0 -> runs = [Int]{0, lexed.lexed.tokens.len()}
+    }
+    parse_lexed_with_source_threads(lexed.lexed.move(), source, lexed.line_starts, runs, threads)
+}
+
+// The parses of the sources `parts` (consecutive parts, held last-first),
+// in part order: each part's on its own compiler thread, the last part's
+// on this one. Each parse runs on its thread alone, so no spawned thread
+// spawns.
+jet_driver_reach_parse_parts: fn(parts: &[[JetDriverReachSource]]) -> [[ParseResult]] {
     parsed := [[ParseResult]]{}
     part := parts.pop() ?? return parsed
     if parts.len() == 0 {
@@ -1369,10 +1404,10 @@ jet_driver_reach_parse_parts: fn(parts: &[[[U8]]]) -> [[ParseResult]] {
     parsed
 }
 
-// One thread: the parses of the held sources `sources`, in order.
-jet_driver_reach_parse_part: fn(sources: [[U8]]) -> [ParseResult] {
+// One thread: the parses of the sources `sources`, in order.
+jet_driver_reach_parse_part: fn(sources: [JetDriverReachSource]) -> [ParseResult] {
     parsed := [ParseResult]{}
-    loop source in sources -> parsed.push(jet_driver_reach_parse_source(source, compiler_threads_single()))
+    loop source in sources -> parsed.push(jet_driver_reach_parse_source(source.bytes, source.hold, compiler_threads_single()))
     parsed
 }
 

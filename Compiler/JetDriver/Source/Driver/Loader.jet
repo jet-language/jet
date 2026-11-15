@@ -2685,7 +2685,8 @@ jet_driver_build_entry_members: fn(request: JetDriverCompileRequest, source_unit
     waiting_names := [[String]]{}
     waiting_words := [[String]]{}
     // The wave's results come back last-first: each pop is the next member.
-    wave: jet_driver_parse_wave(request, source_units, members, 0, -1, -1, name_table()) ?? return None
+    interface := jet_driver_core_interface_index(false)
+    wave: jet_driver_parse_wave(request, source_units, members, 0, -1, -1, interface, name_table()) ?? return None
     parsed := wave.units.move()
     loop index in members {
         member: parsed.pop() ?? return None
@@ -3653,6 +3654,9 @@ JetDriverCoreIdentifierDemand: struct {
 // parse wave reports (SPEED-500K work counters). `line_starts` is the
 // lexer's newline table, which becomes the unit's source segment line table.
 // `words` is what the source spells, for use-driven Core loading (CoreReach.jet).
+// `lazy` holds the body spans whose interiors the parse blanked, taking the
+// unit's words from its interface (CoreInterface.jet); the load parses back
+// the bodies it keeps (jet_driver_core_restore_bodies).
 JetDriverParsedUnit: struct {
     parsed: ParseResult
     demand: JetDriverCoreIdentifierDemand
@@ -3660,6 +3664,7 @@ JetDriverParsedUnit: struct {
     tokens: Int{0}
     line_starts: [Int]{[Int]{}}
     words: JetDriverUnitWords?{None}
+    lazy: [Span]{[Span]{}}
 }
 
 jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand Never! {
@@ -4135,6 +4140,9 @@ JetDriverParseJob: enum {
     // `tested` unit is the Core source a `jet test` of that file runs
     // (JetDriverCompileRequest.core_tests): it keeps its #Test controls.
     Core(text: String, module_name: String, owned_members: [String], runtime: Bool, tested: Bool)
+    // An embedded Core module of a load that reaches Core by use, with the
+    // block of the host's interface for its `path` (CoreInterface.jet).
+    CoreInterfaced(text: String, module_name: String, owned_members: [String], runtime: Bool, path: String, interface: [U8])
     // A Core unit whose row is out of range: an empty program.
     Missing
 }
@@ -4185,7 +4193,9 @@ jet_driver_withdraw_replaced: fn(request: JetDriverCompileRequest, path: String,
 jet_driver_is_build_manifest: fn(relative_path: String, source: String) -> Bool Never! {
     relative_path == "package.jet" && pkg_build_entry_source(source) != None
 }
-jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSourceUnit, runtime_entry: Bool, prelude_entry: Bool) -> JetDriverParseJob {
+// `interface` is what the load has read of the host's Core interface: a
+// Core unit of a load that reads it takes its block along.
+jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSourceUnit, runtime_entry: Bool, prelude_entry: Bool, interface: &JetDriverCoreInterfaceIndex) -> JetDriverParseJob {
     if !jet_driver_unit_is_core(unit) {
         text: jet_driver_source_unit_text(request, unit) ?? return JetDriverParseJob.Missing
         // A `package.jet` unit parses as its `build: fn` declarations alone, at
@@ -4197,7 +4207,12 @@ jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSource
     }
     if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
     row: request.core_sources[unit.file_index]
-    JetDriverParseJob.Core{text: row.source(), module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: request.core_tests != "" && row.path == request.core_tests}
+    tested: request.core_tests != "" && row.path == request.core_tests
+    if interface.on && !tested && request.core_interface == .Val(reader) {
+        block: jet_driver_core_interface_block(reader, interface, unit.file_index, row.path)
+        if block.len() > 0 -> return JetDriverParseJob.CoreInterfaced{text: row.source(), module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, path: row.path, interface: block}
+    }
+    JetDriverParseJob.Core{text: row.source(), module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: tested}
 }
 
 jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
@@ -4206,6 +4221,7 @@ jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
         .RuntimeEntry(text) -> text.len()
         .Prelude(text) -> text.len()
         .Core(text, _, _, _, _) -> text.len()
+        .CoreInterfaced(text, _, _, _, _, _) -> text.len()
         .Missing -> 0
     }
 }
@@ -4224,9 +4240,10 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
 jet_driver_parse_unit: fn(job: JetDriverParseJob, threads: CompilerThreads, shared: NameTable, own: &NameTable) -> JetDriverParsedUnit {
     if job == {
         .Source(text) -> jet_driver_parse_user_unit_threads(text, true, threads, shared, own)
-        .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, threads, shared, own)
+        .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, None, threads, shared, own)
         .Prelude(text) -> jet_driver_parse_prelude_source(text, threads, shared, own)
-        .Core(text, module_name, owned_members, runtime, tested) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, tested, threads, shared, own)
+        .Core(text, module_name, owned_members, runtime, tested) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, tested, None, threads, shared, own)
+        .CoreInterfaced(text, module_name, owned_members, runtime, path, interface) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, false, jet_driver_core_interface_unit(interface, JetDriverCoreInterfaceEntry{path: path, at: 0, size: interface.len()}), threads, shared, own)
         .Missing -> JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
     }
 }
@@ -4238,18 +4255,30 @@ jet_driver_parse_unit: fn(job: JetDriverParseJob, threads: CompilerThreads, shar
 // is the unit a `jet test` runs (an exact runtime entry, or the tested Core
 // source): it keeps its `#Test` controls and is reached whole. Any other
 // unit holds back the declarations the load parses only once it reaches
-// them (jet_driver_reach_hold).
-jet_driver_parse_core_source: fn(text: String, module_name: String, owned_members: [String], runtime: Bool, entry: Bool, threads: CompilerThreads, shared: NameTable, own: &NameTable) -> JetDriverParsedUnit {
+// them (jet_driver_reach_hold). A unit whose `interface` rows are its
+// text's (jet_driver_core_interface_matches) takes its words, demand and
+// counts from them and parses only its declaration heads: each body's
+// interior is blanked, and the load parses back the bodies it keeps
+// (jet_driver_core_restore_bodies). Should its heads hold other
+// declarations than its rows do, it parses whole.
+jet_driver_parse_core_source: fn(text: String, module_name: String, owned_members: [String], runtime: Bool, entry: Bool, interface: JetDriverCoreInterfaceUnit?, threads: CompilerThreads, shared: NameTable, own: &NameTable) -> JetDriverParsedUnit {
     source := text.bytes()
+    rows := interface ?? jet_driver_core_interface_none()
+    lazy: !entry && jet_driver_core_interface_matches(rows, module_name, source)
     carrier: jet_driver_inline_package_threads(text, source, threads)
     if carrier.found -> jet_driver_blank_bytes(source, carrier.start, carrier.end)
+    if lazy {
+        loop body in rows.bodies -> jet_driver_blank_bytes(source, body.start + 1, body.end - 1)
+    }
     lexed := lex_generated_threads(source, threads)
     name_pool_adopt(lexed.lexed.tables.names, shared, own)
-    tokens: lexed.lexed.tokens.len()
-    lines: lexed.line_starts.len() - 1
-    spellings := jet_driver_unit_spellings(source, lexed.lexed.tokens, lexed.lexed.tables)
-    scanned := jet_driver_collect_core_identifier_demand_threads(lexed.lexed.move(), lexed.runs, true, entry, threads)
+    tokens: if lazy -> rows.tokens else -> lexed.lexed.tokens.len()
+    lines: if lazy -> rows.lines else -> lexed.line_starts.len() - 1
+    spellings := JetDriverSpellings{table: name_table(), starts: [Int]{}, keys: [Int]{}}
+    if !lazy -> spellings = jet_driver_unit_spellings(source, lexed.lexed.tokens, lexed.lexed.tables)
+    scanned := jet_driver_collect_core_identifier_demand_threads(lexed.lexed.move(), lexed.runs, !lazy, entry, threads)
     demand := scanned.demand.move()
+    if lazy -> demand = rows.demand.move()
     part_members: if module_name.starts_with("__") -> owned_members else -> [String]{}
     routes: jet_driver_core_routes(module_name)
     held := JetDriverReachHeld{declarations: [JetDriverReachDeclaration]{}, dropped: [Span]{}}
@@ -4297,13 +4326,20 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
     // A lazy declaration of a Core module (public module, private part or
     // runtime unit) counts once the program reaches it; an entry is reached
     // whole (CoreReach.jet).
-    words: jet_driver_unit_words(spellings.move(), kept, held.declarations, quiet, !entry, part_members, routes)
+    words := rows.words.move()
+    if !lazy {
+        words = jet_driver_unit_words(spellings.move(), kept, held.declarations, quiet, !entry, part_members, routes)
+    } else if !jet_driver_core_interface_same_held(words.held, held.declarations) {
+        return jet_driver_parse_core_source(text, module_name, owned_members, runtime, entry, None, threads, shared, own)
+    }
     parsed.program.items = kept
     diagnostics := [Diagnostic]{}
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity != DIAGNOSTIC_LINT -> diagnostics.push(diagnostic)
     }
-    JetDriverParsedUnit{parsed: ParseResult{program: parsed.program.move(), diagnostics: diagnostics.move()}, demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move())}
+    bodies := [Span]{}
+    if lazy -> bodies = rows.bodies.move()
+    JetDriverParsedUnit{parsed: ParseResult{program: parsed.program.move(), diagnostics: diagnostics.move()}, demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move()), lazy: bodies.move()}
 }
 
 // `jet check --prelude`: a Compiler/Prelude source parsed as the compiler
@@ -4325,7 +4361,7 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
 //   injects the routine for a family member (FailureLaw.jet
 //   sema_prelude_error_conversion), so X must be one and the target `Err`.
 jet_driver_parse_prelude_source: fn(text: String, threads: CompilerThreads, shared: NameTable, own: &NameTable) -> JetDriverParsedUnit {
-    unit := jet_driver_parse_core_source(text, "", [String]{}, true, true, threads, shared, own)
+    unit := jet_driver_parse_core_source(text, "", [String]{}, true, true, None, threads, shared, own)
     unit.parsed.program.items = jet_driver_prelude_checked_items(unit.parsed.program.items, "", text, unit.parsed.diagnostics)
     unit
 }
@@ -4710,9 +4746,10 @@ JetDriverParseWave: struct {
 // parsing each unit when the loop reaches it.
 // `runtime_entry` is the source-unit index of an exact runtime entry, or -1;
 // `prelude_entry` is the index of a `jet check --prelude` entry, or -1.
-// `spellings` holds the load's spellings so far: the wave's units take
-// their Strings from it.
-jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], pending: [Int], first: Int, runtime_entry: Int, prelude_entry: Int, spellings: &&NameTable) -> JetDriverParseWave {
+// `interface` is what the load has read of the host's Core interface
+// (jet_driver_parse_job). `spellings` holds the load's spellings so far:
+// the wave's units take their Strings from it.
+jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], pending: [Int], first: Int, runtime_entry: Int, prelude_entry: Int, interface: &JetDriverCoreInterfaceIndex, spellings: &&NameTable) -> JetDriverParseWave {
     jobs := [JetDriverParseJob]{}
     weights := [Int]{}
     total := 0
@@ -4724,7 +4761,7 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
     // Whether each job, in `pending` order, is a user source (tracing only).
     user_jobs := [Bool]{}
     loop position in first..<pending.len() {
-        job: jet_driver_parse_job(request, source_units[pending[position]], pending[position] == runtime_entry, pending[position] == prelude_entry)
+        job: jet_driver_parse_job(request, source_units[pending[position]], pending[position] == runtime_entry, pending[position] == prelude_entry, interface)
         bytes: jet_driver_parse_job_bytes(job)
         weights.push(bytes)
         total += bytes
@@ -4752,6 +4789,10 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
                     user_job = true
                 }
                 .Core(text, _, _, _, _) -> {
+                    core_input_bytes += text.count_bytes()
+                    core_source_units += 1
+                }
+                .CoreInterfaced(text, _, _, _, _, _) -> {
                     core_input_bytes += text.count_bytes()
                     core_source_units += 1
                 }
@@ -5249,6 +5290,11 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     // The Core modules whose parse held declarations back, for
     // jet_driver_reach_parse_held once the load has reached them.
     held_modules := [JetDriverReachHeldModule]{}
+    // The Core modules parsed from their declaration heads, for
+    // jet_driver_core_restore_bodies once reach has stripped them; the host's
+    // Core interface, read once a Core unit asks, only when reach is on.
+    lazy_modules := [JetDriverCoreLazyModule]{}
+    interface := jet_driver_core_interface_index(reach.enabled)
     pending_index := 0
     meta_decided := false
     spells_program := false
@@ -5326,7 +5372,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         if parsed.len() == 0 {
             wave_size: pending.len() - pending_index
             if request.trace_sink == .Val(sink) -> sink.begin("parse", if wave_size == 1 -> source_units[pending[pending_index]].relative_path else -> "{wave_size} files", pending_index, pending.len())
-            wave: jet_driver_parse_wave(request, source_units, pending, pending_index, if entry_module != "" -> entry_index ?? 0 else -> -1, if request.prelude_entry -> entry_index ?? 0 else -> -1, spellings.move())
+            wave: jet_driver_parse_wave(request, source_units, pending, pending_index, if entry_module != "" -> entry_index ?? 0 else -> -1, if request.prelude_entry -> entry_index ?? 0 else -> -1, interface, spellings.move())
             parsed = wave.units.move()
             spellings = wave.spellings.move()
             if request.trace_sink == .Val(sink) {
@@ -5349,6 +5395,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         jet_driver_take_line_starts(source_units[source_unit_index].source_segments, parsed_unit.line_starts.move())
         demand := parsed_unit.demand.move()
         words := parsed_unit.words.move()
+        lazy_bodies := parsed_unit.lazy.move()
         // A package is one namespace. Loading any file of a
         // package loads every other file of it (and, through their imports,
         // the packages they use), so each member sees the whole namespace.
@@ -5887,6 +5934,15 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         unit_words: words ?? jet_driver_unit_no_words()
         // copy: reach admits the same rows from unit_words below.
         if unit_words.held.len() > 0 -> held_modules.push(JetDriverReachHeldModule{loaded: modules.len(), declarations: unit_words.held.copy()})
+        if lazy_bodies.len() > 0 {
+            lazy_modules.push(JetDriverCoreLazyModule{
+                loaded: modules.len(),
+                bodies: lazy_bodies.move(),
+                block_spans: program.block_spans.len(),
+                else_arms: program.else_arms.len(),
+                debug_sites: program.debug_sites.len(),
+            })
+        }
 
         if reach.enabled {
             reach_unit: jet_driver_reach_admit(reach, modules.len(), unit.module_name, unit_words, program.imports, !is_core || is_runtime_entry)
@@ -5904,20 +5960,27 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
     }
     // The held declarations the load reached take their stubs' places, then
-    // the unreached rest of each Core module leaves it (CoreReach.jet).
+    // the unreached rest of each Core module leaves it (CoreReach.jet), and
+    // the bodies a lazy module keeps parse back (CoreInterface.jet).
     reached: jet_driver_reach_reached_items(reach, modules.len())
     held_parsed: jet_driver_reach_parse_held(request, reach, reached, held_modules, modules, source_units, diagnostics)
     if held_parsed < 0 -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
+    bodies_parsed := 0
     if request.trace_sink == .Val(sink) {
         held_total := 0
         loop held in held_modules -> held_total += held.declarations.len()
         sink.progress("counters.load.core_held", held_total, -1)
         sink.progress("counters.load.core_held_parsed", held_parsed, -1)
-        sink.progress("counters.load.core_bodies_parsed", jet_driver_reach_core_bodies(modules, source_units), -1)
+        bodies_parsed = jet_driver_reach_core_bodies(modules, source_units)
     }
     if reach.enabled {
         jet_driver_reach_strip(reach, modules)
+        restored: jet_driver_core_restore_bodies(request, lazy_modules, modules, source_units, diagnostics)
+        if restored < 0 -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
         if request.trace_sink == .Val(sink) {
+            if restored > 0 -> bodies_parsed += restored
+            sink.progress("counters.load.core_lazy_modules", lazy_modules.len(), -1)
+            sink.progress("counters.load.core_bodies_restored", restored, -1)
             waiting := 0
             loop row in reach.demands {
                 if !row.followed -> waiting += 1
@@ -5935,6 +5998,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             sink.progress("counters.load.core_bodies", jet_driver_reach_core_bodies(modules, source_units), -1)
         }
     }
+    if request.trace_sink == .Val(sink) -> sink.progress("counters.load.core_bodies_parsed", bodies_parsed, -1)
     // Each package's denied edges (E0619) and unused rules (L0619).
     jet_driver_check_import_boundaries(catalog.packages, source_units, modules, resolved_imports, diagnostics)
     if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(modules, source_units, catalog.packages, request, diagnostics) {

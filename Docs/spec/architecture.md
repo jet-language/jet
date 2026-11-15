@@ -258,7 +258,14 @@ lexing and parsing its whole text (its spellings and held declarations,
 its identifier demand, its line and token counts), the text's length and
 64-bit FNV-1a hash, and the `{`..`}` span of each function body; the
 runtime step writes it beside the Core library from jet's built-in Core
-sources. A `jet run` whose Core is jet's built-in Core sources (a
+sources. A load that reaches Core by use reads the part's header the first
+time it parses a Core unit, then that unit's block alone: a unit whose
+length and hash are the block's takes its words, demand and counts from it
+and parses only its declaration heads, each body's interior blanked; once
+reach has stripped the module, the bodies it kept parse again on the
+compiler threads and take their functions' places
+(`jet_driver_core_restore_bodies`). Any other unit, or any unit of a load
+without reach or of jet-bare, which carries no part, parses whole. A `jet run` whose Core is jet's built-in Core sources (a
 compile outside a toolchain tree) binds its Core calls to that Core code
 (`JetCli/Cli/Host.jet` `jet_cli_native_executable`, `IRChecks.core`): a
 call of a non-generic Core function whose bounds checks are the stock ones

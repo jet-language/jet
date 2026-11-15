@@ -751,6 +751,16 @@ jet_cli_runtime_part: fn(name: String) -[Env]> [U8] Never! {
     cli_runtime.image_part(part, 0, size) ?? panic("the runtime part `{part}` has a size but no bytes")
 }
 
+// `size` bytes from byte `at` of this jet's runtime part `name`, lent from
+// its mapped image; None when it carries no such part (jet-bare) or the
+// range runs past the part's end.
+jet_cli_runtime_part_range: fn(name: String, at: Int, size: Int) -[Env]> [U8]? Never! {
+    part: "{JET_CLI_RUNTIME_PART_PREFIX}{name}"
+    total: cli_runtime.image_part_size(part) ?? return None
+    if at < 0 || size < 0 || at + size > total -> return None
+    cli_runtime.image_part(part, at, size)
+}
+
 // The sealed keys of the Core facts list `facts` (JET_CLI_CORE_FACTS_FILE:
 // `key<TAB>reason` rows) and, apart, each other row's key and reason.
 JetCLICoreFacts: struct { sealed: [String], excluded: [String], reasons: [String] }

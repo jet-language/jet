@@ -12,17 +12,21 @@
 // 64-bit FNV-1a hash of its bytes (jet_driver_core_interface_text_hash), and
 // the `{`..`}` span of each function body (jet_driver_core_body_spans). A
 // load whose unit text hashes the same can then take the rows as the unit's
-// own, and needs only the declaration heads of the text, not its bodies.
+// own, and needs only the declaration heads of the text, not its bodies: a
+// load that reaches Core by use parses the unit with each body's interior
+// blanked (jet_driver_parse_core_source), then parses back the bodies of
+// the functions it keeps (jet_driver_core_restore_bodies).
 //
 // Encoding: little-endian u32 words. The header is the magic, the version,
-// the unit count and one directory entry per unit (its path, the byte
-// offset of its block and the block's size). A unit decodes from its block
-// alone, so a load reads only the units it parses. A string is its byte
-// length then its UTF-8 bytes. A list is its length then its elements. An
-// Int is an i32 in two's complement (an owner row may be -1). A flag is
-// 0 or 1.
+// the unit count, the header's size in bytes, and one directory entry per
+// unit (its path, the byte offset of its block and the block's size). A
+// unit decodes from its block alone, so a load reads the header, then only
+// the blocks of the units it parses (jet_driver_core_interface_block). A
+// string is its byte length then its UTF-8 bytes. A list is its length then
+// its elements. An Int is an i32 in two's complement (an owner row may be
+// -1). A flag is 0 or 1.
 use {
-    jet_foundation.[CompilerThreads, Span]
+    jet_foundation.[CompilerThreads, DIAGNOSTIC_LINT, DebugTraceSite, Diagnostic, ElseArmSpan, Func, Item, Span, TraitImplBlock, TraitMethodSig, diagnostic_with_source_path]
     jet_lexer.[TOKEN_LBRACE, TOKEN_RBRACE, lex_generated_threads]
     jet_parser.[parse_lexed_with_source_threads]
 }
@@ -56,11 +60,15 @@ JetDriverCoreInterfaceEntry: struct {
 
 // FNV-1a over the bytes of `text`, 64 bits.
 jet_driver_core_interface_text_hash: fn(text: String) -> U64 Never! {
+    jet_driver_core_interface_bytes_hash(text.bytes())
+}
+
+jet_driver_core_interface_bytes_hash: fn(bytes: [U8]) -> U64 Never! {
     prime: U64{0x100000001b3}
     // The offset basis 0xcbf29ce484222325, built from two halves that each
     // fit an Int literal (JetFoundation Hash/StableID.jet).
     hash := (wrapping(U64{0xcbf29ce4} * U64{0x100000000})).bit_xor(U64{0x84222325})
-    loop byte in text.bytes() -> hash = wrapping((hash.bit_xor(U64{byte})) * prime)
+    loop byte in bytes -> hash = wrapping((hash.bit_xor(U64{byte})) * prime)
     hash
 }
 
@@ -266,7 +274,7 @@ jet_driver_core_interface_unit_bytes: fn(unit: JetDriverCoreInterfaceUnit) -> [U
 // each unit's block.
 jet_driver_core_interface_bytes: fn(units: [JetDriverCoreInterfaceUnit]) -> [U8] Never! {
     blocks := [[U8]]{}
-    header := 12
+    header := 16
     loop unit in units {
         blocks.push(jet_driver_core_interface_unit_bytes(unit))
         header += 12 + unit.path.bytes().len()
@@ -275,6 +283,7 @@ jet_driver_core_interface_bytes: fn(units: [JetDriverCoreInterfaceUnit]) -> [U8]
     jet_driver_core_interface_put(out, JET_DRIVER_CORE_INTERFACE_MAGIC)
     jet_driver_core_interface_put(out, JET_DRIVER_CORE_INTERFACE_VERSION)
     jet_driver_core_interface_put(out, units.len())
+    jet_driver_core_interface_put(out, header)
     at := header
     loop (index, unit) in units {
         jet_driver_core_interface_put_string(out, unit.path)
@@ -356,23 +365,88 @@ jet_driver_core_interface_ints: fn(bytes: [U8], cursor: &JetDriverCoreInterfaceC
     values
 }
 
-// The directory of the interface file `bytes`; None when it is not one this
-// compiler reads.
+// The directory of an interface file whose first bytes, through its header
+// at least, are `bytes`; None when it is not one this compiler reads.
 jet_driver_core_interface_entries: fn(bytes: [U8]) -> [JetDriverCoreInterfaceEntry]? Never! {
     cursor := JetDriverCoreInterfaceCursor{at: 0, end: bytes.len(), failed: false}
     if jet_driver_core_interface_u32(bytes, cursor) != JET_DRIVER_CORE_INTERFACE_MAGIC -> return None
     if jet_driver_core_interface_u32(bytes, cursor) != JET_DRIVER_CORE_INTERFACE_VERSION -> return None
     count: jet_driver_core_interface_count(bytes, cursor, 12)
+    header: jet_driver_core_interface_u32(bytes, cursor)
+    if cursor.failed || header > bytes.len() -> return None
+    cursor.end = header
     entries := [JetDriverCoreInterfaceEntry]{}
     loop _ in 0..<count {
         path: jet_driver_core_interface_string(bytes, cursor)
         at: jet_driver_core_interface_u32(bytes, cursor)
         size: jet_driver_core_interface_u32(bytes, cursor)
-        if at + size > bytes.len() -> cursor.failed = true
+        if at < header -> cursor.failed = true
         entries.push(JetDriverCoreInterfaceEntry{path: path, at: at, size: size})
     }
-    if cursor.failed -> return None
+    if cursor.failed || cursor.at != header -> return None
     Val(entries)
+}
+
+// What a load has read of its host's `core.interface`
+// (JetDriverCompileRequest.core_interface): nothing until its first Core
+// unit asks, then the header's entries, in the order the host's Core rows
+// were written (JetCli CoreLibrary.jet jet_cli_core_interface_made, the
+// order of its request's core_sources). `on` is whether the load reads it
+// at all: only a load that reaches Core by use drops the bodies the
+// interface lets it skip parsing. A host with no interface, or one this
+// compiler can't read, leaves `entries` empty, and each Core unit parses
+// whole.
+JetDriverCoreInterfaceIndex: struct {
+    on: Bool
+    read: Bool
+    entries: [JetDriverCoreInterfaceEntry]
+}
+
+jet_driver_core_interface_index: fn(on: Bool) -> JetDriverCoreInterfaceIndex Never! {
+    JetDriverCoreInterfaceIndex{on: on, read: false, entries: [JetDriverCoreInterfaceEntry]{}}
+}
+
+// The block of the Core unit at `path`, the request's core_sources row
+// `at`, in the interface `reader` reads, reading the header first when
+// `index` hasn't; empty when the entry at `at` is not that unit's.
+jet_driver_core_interface_block: fn(reader: JetDriverCoreInterfaceReader, index: &JetDriverCoreInterfaceIndex, at: Int, path: String) -> [U8] {
+    if !index.read {
+        index.read = true
+        head: reader.read(0, 16) ?? return [U8]{}
+        cursor := JetDriverCoreInterfaceCursor{at: 12, end: 16, failed: false}
+        header: jet_driver_core_interface_u32(head, cursor)
+        if header < 16 -> return [U8]{}
+        directory: reader.read(0, header) ?? return [U8]{}
+        index.entries = jet_driver_core_interface_entries(directory) ?? return [U8]{}
+    }
+    if at < 0 || at >= index.entries.len() || index.entries[at].path != path -> return [U8]{}
+    reader.read(index.entries[at].at, index.entries[at].size) ?? [U8]{}
+}
+
+// The rows a unit with no interface takes: they match no text.
+jet_driver_core_interface_none: fn() -> JetDriverCoreInterfaceUnit Never! {
+    JetDriverCoreInterfaceUnit{path: "", module_name: "", text_bytes: -1, text_hash: U64{0}, lines: 0, tokens: 0, demand: jet_driver_empty_core_identifier_demand(), words: jet_driver_unit_no_words(), bodies: [Span]{}}
+}
+
+// Whether `rows` are the interface of `source`, the text of the Core unit
+// `module_name`: the same length and hash, and each body span inside it.
+jet_driver_core_interface_matches: fn(rows: JetDriverCoreInterfaceUnit, module_name: String, source: [U8]) -> Bool Never! {
+    if rows.module_name != module_name || rows.text_bytes != source.len() -> return false
+    loop body in rows.bodies {
+        if body.start < 0 || body.start + 1 >= body.end || body.end > source.len() -> return false
+    }
+    jet_driver_core_interface_bytes_hash(source) == rows.text_hash
+}
+
+// Whether a heads-only parse held the declarations `rows` hold, at the
+// same places. A fence inside a body, blanked, could change what the hold
+// sees (jet_driver_reach_hold holds nothing in a unit with one).
+jet_driver_core_interface_same_held: fn(rows: [JetDriverReachDeclaration], held: [JetDriverReachDeclaration]) -> Bool Never! {
+    if rows.len() != held.len() -> return false
+    loop (index, row) in rows {
+        if row.position != held[index].position || row.name_start != held[index].name_start || row.span.start != held[index].span.start || row.span.end != held[index].span.end -> return false
+    }
+    true
 }
 
 jet_driver_core_interface_read_demand: fn(bytes: [U8], cursor: &JetDriverCoreInterfaceCursor) -> JetDriverCoreIdentifierDemand Never! {
@@ -466,4 +540,245 @@ jet_driver_core_interface_unit: fn(bytes: [U8], entry: JetDriverCoreInterfaceEnt
         words: words,
         bodies: bodies,
     })
+}
+
+// A Core module the load parsed from its declaration heads
+// (jet_driver_parse_core_source with matching interface rows): its place
+// in the load's modules, its blanked `bodies`, and how many block spans,
+// else arms and debug sites its own parse gave it (its held declarations'
+// parse appends more).
+JetDriverCoreLazyModule: struct {
+    loaded: Int
+    bodies: [Span]
+    block_spans: Int
+    else_arms: Int
+    debug_sites: Int
+}
+
+// The load is done: the blanked bodies of the functions each lazy module
+// kept parse back. The module's text parses again as its heads did, held
+// as they were (jet_driver_reach_hold), with the interior of every body it
+// doesn't keep blanked. Each kept function and trait method whose body was
+// blanked takes its place from the new parse, and the module's side tables
+// become the new parse's, then its held declarations': those of a whole
+// parse, but for the bodies reach stripped. The modules parse on the
+// admitted threads (jet_driver_reach_parse_sources). Returns how many
+// bodies came back, or -1 when a parse failed (its diagnostics are in
+// `diagnostics`).
+jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetDriverCoreLazyModule], modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic]) -> Int {
+    lazy_at := [Int]{}
+    sources := [JetDriverReachSource]{}
+    loop (at, row) in lazy {
+        kept := [Int:Bool]{}
+        loop item in modules[row.loaded].program.items -> jet_driver_core_blanked_ends(item, kept)
+        unit: source_units[modules[row.loaded].source_unit_index]
+        text: jet_driver_source_unit_text(request, unit) ?? next
+        source := text.bytes()
+        carrier: jet_driver_inline_package_threads(text, source, request.compiler_threads)
+        if carrier.found -> jet_driver_blank_bytes(source, carrier.start, carrier.end)
+        wanted := false
+        loop body in row.bodies {
+            if kept.get(body.end) != None {
+                wanted = true
+                next
+            }
+            jet_driver_blank_bytes(source, body.start + 1, body.end - 1)
+        }
+        if !wanted -> next
+        core: request.core_sources[unit.file_index]
+        lazy_at.push(at)
+        sources.push(JetDriverReachSource{bytes: source, hold: Val(JetDriverReachHoldRow{module_name: core.module_name, owned_members: core.owned_members, runtime: core.runtime})})
+    }
+    parses := jet_driver_reach_parse_sources(request.compiler_threads, sources)
+    restored := 0
+    failed := false
+    loop at in lazy_at {
+        parsed := parses.pop() ?? panic("a lazy Core module lost its parse")
+        loaded: lazy[at].loaded
+        loop diagnostic in parsed.diagnostics {
+            if diagnostic.severity != DIAGNOSTIC_LINT -> diagnostics.push(diagnostic_with_source_path(diagnostic, source_units[modules[loaded].source_unit_index].path, 0))
+        }
+        if jet_driver_has_errors(parsed.diagnostics) {
+            failed = true
+            next
+        }
+        funcs := [Int:Func]{}
+        sigs := [Int:TraitMethodSig]{}
+        loop item in parsed.program.items.move() -> jet_driver_core_restore_index(item, funcs, sigs)
+        restored += jet_driver_core_restore_items(modules[loaded].program.items, funcs, sigs)
+        // The side tables: the new parse's, then those the held
+        // declarations' parse appended after the module's own parse's.
+        held_spans := [Span]{}
+        loop modules[loaded].program.block_spans.len() > lazy[at].block_spans {
+            span := modules[loaded].program.block_spans.pop() ?? break
+            held_spans.push(span)
+        }
+        held_spans.reverse()
+        loop span in held_spans.move() -> parsed.program.block_spans.push(span)
+        modules[loaded].program.block_spans = parsed.program.block_spans.move()
+        held_arms := [ElseArmSpan]{}
+        loop modules[loaded].program.else_arms.len() > lazy[at].else_arms {
+            arm := modules[loaded].program.else_arms.pop() ?? break
+            held_arms.push(arm)
+        }
+        held_arms.reverse()
+        loop arm in held_arms.move() -> parsed.program.else_arms.push(arm)
+        modules[loaded].program.else_arms = parsed.program.else_arms.move()
+        held_sites := [DebugTraceSite]{}
+        loop modules[loaded].program.debug_sites.len() > lazy[at].debug_sites {
+            site := modules[loaded].program.debug_sites.pop() ?? break
+            held_sites.push(site)
+        }
+        held_sites.reverse()
+        loop site in held_sites.move() -> parsed.program.debug_sites.push(site)
+        modules[loaded].program.debug_sites = parsed.program.debug_sites.move()
+        modules[loaded].program.fenced_statements = parsed.program.fenced_statements.move()
+        modules[loaded].program.applied_rules = parsed.program.applied_rules.move()
+        modules[loaded].program.rule_facts = parsed.program.rule_facts.move()
+        modules[loaded].program.policy_declarations = parsed.program.policy_declarations.move()
+        loop name in parsed.program.used_import_names.move() {
+            if !modules[loaded].program.used_import_names.contains(name) -> modules[loaded].program.used_import_names.push(name)
+        }
+    }
+    if failed -> return -1
+    restored
+}
+
+// Files the end of each function and trait method of `item` whose body is
+// empty: those a lazy parse blanked, among others.
+jet_driver_core_blanked_ends: fn(item: Item, ends: &[Int:Bool]) Never! {
+    if item == .Func(value) {
+        if value.body.len() == 0 -> ends[value.span.end] = true
+    } else if item == .Struct(value) {
+        jet_driver_core_blanked_method_ends(value.methods, value.trait_impls, ends)
+    } else if item == .Enum(value) {
+        jet_driver_core_blanked_method_ends(value.methods, value.trait_impls, ends)
+    } else if item == .Impl(value) {
+        jet_driver_core_blanked_method_ends(value.methods, [TraitImplBlock]{}, ends)
+    } else if item == .Trait(value) {
+        loop method in value.methods {
+            if method.default_body == .Val(body) && body.len() == 0 -> ends[method.span.end] = true
+        }
+    }
+}
+
+jet_driver_core_blanked_method_ends: fn(methods: [Func], blocks: [TraitImplBlock], ends: &[Int:Bool]) Never! {
+    loop method in methods {
+        if method.body.len() == 0 -> ends[method.span.end] = true
+    }
+    loop block in blocks {
+        loop method in block.methods {
+            if method.body.len() == 0 -> ends[method.span.end] = true
+        }
+    }
+}
+
+// Files each function and trait method of `item`, an item of a restoring
+// parse, that has a body, by the byte where it starts.
+jet_driver_core_restore_index: fn(&&item: Item, funcs: &[Int:Func], sigs: &[Int:TraitMethodSig]) Never! {
+    if item == .Func(value) {
+        if value.body.len() > 0 -> funcs[value.span.start] = value
+    } else if item == .Struct(value) {
+        jet_driver_core_restore_index_methods(value.methods, value.trait_impls, funcs)
+    } else if item == .Enum(value) {
+        jet_driver_core_restore_index_methods(value.methods, value.trait_impls, funcs)
+    } else if item == .Impl(value) {
+        jet_driver_core_restore_index_methods(value.methods, [TraitImplBlock]{}, funcs)
+    } else if item == .Trait(value) {
+        loop method in value.methods {
+            if method.default_body == .Val(body) && body.len() > 0 -> sigs[method.span.start] = method
+        }
+    }
+}
+
+jet_driver_core_restore_index_methods: fn(methods: [Func], blocks: [TraitImplBlock], funcs: &[Int:Func]) Never! {
+    loop method in methods {
+        if method.body.len() > 0 -> funcs[method.span.start] = method
+    }
+    loop block in blocks {
+        loop method in block.methods {
+            if method.body.len() > 0 -> funcs[method.span.start] = method
+        }
+    }
+}
+
+// Puts the parse in `funcs` or `sigs` (jet_driver_core_restore_index) of
+// each function and trait method of `items` with an empty body in its
+// place. Returns how many it put.
+jet_driver_core_restore_items: fn(items: &[Item], funcs: [Int:Func], sigs: [Int:TraitMethodSig]) -> Int Never! {
+    restored := 0
+    loop position in 0..<items.len() {
+        if items[position] == .Func(value) {
+            if value.body.len() > 0 -> next
+            found := funcs.get(value.span.start) ?? next
+            items[position] = Item.Func{value: found}
+            restored += 1
+        } else if items[position] == .Struct(value) {
+            if !jet_driver_core_restorable(value.methods, value.trait_impls, funcs) -> next
+            updated := value
+            restored += jet_driver_core_restore_methods(updated.methods, updated.trait_impls, funcs)
+            items[position] = Item.Struct{value: updated}
+        } else if items[position] == .Enum(value) {
+            if !jet_driver_core_restorable(value.methods, value.trait_impls, funcs) -> next
+            updated := value
+            restored += jet_driver_core_restore_methods(updated.methods, updated.trait_impls, funcs)
+            items[position] = Item.Enum{value: updated}
+        } else if items[position] == .Impl(value) {
+            if !jet_driver_core_restorable(value.methods, [TraitImplBlock]{}, funcs) -> next
+            updated := value
+            blocks := [TraitImplBlock]{}
+            restored += jet_driver_core_restore_methods(updated.methods, blocks, funcs)
+            items[position] = Item.Impl{value: updated}
+        } else if items[position] == .Trait(value) {
+            restorable := false
+            loop method in value.methods {
+                if method.default_body == .Val(body) && body.len() == 0 && sigs.get(method.span.start) != None -> restorable = true
+            }
+            if !restorable -> next
+            updated := value
+            loop index in 0..<updated.methods.len() {
+                if updated.methods[index].default_body == .Val(body) && body.len() > 0 -> next
+                found := sigs.get(updated.methods[index].span.start) ?? next
+                updated.methods[index] = found
+                restored += 1
+            }
+            items[position] = Item.Trait{value: updated}
+        }
+    }
+    restored
+}
+
+// Whether a method of `methods` or `blocks` with an empty body has a parse
+// in `funcs`.
+jet_driver_core_restorable: fn(methods: [Func], blocks: [TraitImplBlock], funcs: [Int:Func]) -> Bool Never! {
+    loop method in methods {
+        if method.body.len() == 0 && funcs.get(method.span.start) != None -> return true
+    }
+    loop block in blocks {
+        loop method in block.methods {
+            if method.body.len() == 0 && funcs.get(method.span.start) != None -> return true
+        }
+    }
+    false
+}
+
+// Puts the parse in `funcs` of each method of `methods` and `blocks` with
+// an empty body in its place. Returns how many it put.
+jet_driver_core_restore_methods: fn(methods: &[Func], blocks: &[TraitImplBlock], funcs: [Int:Func]) -> Int Never! {
+    restored := 0
+    loop index in 0..<methods.len() {
+        if methods[index].body.len() > 0 -> next
+        found := funcs.get(methods[index].span.start) ?? next
+        methods[index] = found
+        restored += 1
+    }
+    loop block in 0..<blocks.len() {
+        loop index in 0..<blocks[block].methods.len() {
+            if blocks[block].methods[index].body.len() > 0 -> next
+            found := funcs.get(blocks[block].methods[index].span.start) ?? next
+            blocks[block].methods[index] = found
+            restored += 1
+        }
+    }
+    restored
 }

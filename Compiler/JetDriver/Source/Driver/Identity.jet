@@ -234,6 +234,12 @@ JetDriverCoreSourceReader: trait {
     read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError!
 }
 
+// The host's `core.interface` (CoreInterface.jet): its `size` bytes from
+// byte `at`; `None` when the host has none or the range runs past its end.
+JetDriverCoreInterfaceReader: trait {
+    read: fn(self, at: Int, size: Int) -[Env]> [U8]?
+}
+
 jet_driver_core_text: fn(text: String) -> Shared<JetDriverCoreText> Never! {
     Shared{JetDriverCoreText{file: "", reader: None, text: Val(text)}}
 }
@@ -277,6 +283,10 @@ JetDriverCompileRequest: struct {
     host_facts: JetDriverHostFacts
     eval_config: JetEvalConfig
     record_store: JetDriverRecordStore?
+    // Where a load reads the interface of built-in Core units that the
+    // program reaches by use (CoreInterface.jet); `None` parses every Core
+    // unit whole.
+    core_interface: JetDriverCoreInterfaceReader?{None}
     // Captured snapshots override the canonical project schema cache; absence
     // reads that cache once through the same ordinary populated checker.
     schema_snapshots: [String:SchemaSnapshot]?{None}
