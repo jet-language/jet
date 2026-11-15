@@ -103,22 +103,13 @@ SemaTaintCatalog: struct {
     // The function paths a tag's `from` may name, gathered only when one
     // names any (sema_taint_collect_known_sources).
     known_sources: [String]
-    // Lookup slots kept beside the rows: the first row of each key wins, as
-    // the ordered scans over every callable and field did.
-    callable_slots: SemaTaintSlots
-    callable_name_slots: SemaTaintSlots
-    field_slots: SemaTaintSlots
-    field_name_slots: SemaTaintSlots
-    // The first field row of each struct, by "{module_identity}|{name}" and
-    // by bare name (the first struct of that name); its fields follow it.
-    struct_field_slots: SemaTaintSlots
+    // Lookups kept beside the rows (SemaTaintIndex): callables by
+    // "{owner}|{name}", fields by "{owner}|{field}", and each struct's first
+    // field row by the struct's name; its fields follow that row.
+    callable_index: SemaTaintIndex
+    field_index: SemaTaintIndex
+    struct_index: SemaTaintIndex
     known_source_slots: SemaTaintSlots
-    // The by-name slots of the Core modules' rows alone: a walk of a Core
-    // body resolves a name only to Core, which names no type of a program's
-    // (sema_taint_find_callable, sema_taint_find_field, sema_taint_struct_fixed).
-    core_callable_name_slots: SemaTaintSlots
-    core_field_name_slots: SemaTaintSlots
-    core_struct_field_slots: SemaTaintSlots
 }
 
 // The first row of each key: `keys` interns the key (an open-addressing
@@ -149,6 +140,80 @@ sema_taint_slot_add: fn(slots: &SemaTaintSlots, key: String, row: Int) -> Bool N
 sema_taint_slot: fn(slots: SemaTaintSlots, key: String) -> Int? Never! {
     name: name_find(slots.keys, key) ?? return None
     row: slots.rows[name_index(name)]
+    if row < 0 -> None else -> Val(row)
+}
+
+// Rows by a key text, the first row of each key winning in each module, as
+// the ordered scans over every callable and field did. `names` interns each
+// key once. Per key id, `heads` holds its first entry and `core_rows` its
+// first row of a Core module (-1: none); a walk of a Core body resolves a
+// name only to Core, which names no type of a program's. An entry is one
+// module's first row of a key (`entry_modules` holds the module's id);
+// `entry_next` links a key's entries in the order their rows arrived, so its
+// first entry holds its first row of any module.
+SemaTaintIndex: struct {
+    names: NameTable
+    heads: [Int]
+    core_rows: [Int]
+    entry_rows: [Int]
+    entry_modules: [U32]
+    entry_next: [Int]
+}
+
+sema_taint_index: fn() -> SemaTaintIndex Never! {
+    SemaTaintIndex{names: name_table(), heads: [Int]{}, core_rows: [Int]{}, entry_rows: [Int]{}, entry_modules: [U32]{}, entry_next: [Int]{}}
+}
+
+// Records `row` of module `module_identity` under `key` unless that module
+// has a row of it.
+sema_taint_index_add: fn(index: &SemaTaintIndex, key: String, module_identity: ModuleID, row: Int) Never! {
+    id: name_index(name_intern(index.names, key))
+    loop index.heads.len() <= id {
+        index.heads.push(-1)
+        index.core_rows.push(-1)
+    }
+    if sema_taint_core_fact(module_identity) && index.core_rows[id] < 0 -> index.core_rows[id] = row
+    entry: index.entry_rows.len()
+    at := index.heads[id]
+    if at < 0 -> index.heads[id] = entry
+    loop at >= 0 {
+        if index.entry_modules[at] == module_identity.id -> return
+        if index.entry_next[at] < 0 {
+            index.entry_next[at] = entry
+            break
+        }
+        at = index.entry_next[at]
+    }
+    index.entry_rows.push(row)
+    index.entry_modules.push(module_identity.id)
+    index.entry_next.push(-1)
+}
+
+// The id of `key` when a row was recorded under it (-1: none).
+sema_taint_index_id: fn(index: SemaTaintIndex, key: String) -> Int Never! {
+    name: name_find(index.names, key) ?? return -1
+    id: name_index(name)
+    if id < index.heads.len() && index.heads[id] >= 0 -> id else -> -1
+}
+
+// The first row of `key` of module `module_identity`.
+sema_taint_index_row: fn(index: SemaTaintIndex, module_identity: ModuleID, key: String) -> Int? Never! {
+    id: sema_taint_index_id(index, key)
+    if id < 0 -> return None
+    at := index.heads[id]
+    loop at >= 0 {
+        if index.entry_modules[at] == module_identity.id -> return Val(index.entry_rows[at])
+        at = index.entry_next[at]
+    }
+    None
+}
+
+// The first row of `key` of any module, or of a Core module's when
+// `module_identity` is Core's.
+sema_taint_index_first: fn(index: SemaTaintIndex, module_identity: ModuleID, key: String) -> Int? Never! {
+    id: sema_taint_index_id(index, key)
+    if id < 0 -> return None
+    row: if module_is_core(module_identity) -> index.core_rows[id] else -> index.entry_rows[index.heads[id]]
     if row < 0 -> None else -> Val(row)
 }
 
@@ -445,7 +510,7 @@ sema_taint_add_builtin_tags: fn(catalog: &SemaTaintCatalog) Never! {
 }
 
 sema_taint_catalog_init: fn() -> SemaTaintCatalog Never! {
-    catalog := SemaTaintCatalog{tags: [SemaTaintTagFact]{}, callables: [SemaTaintCallableFact]{}, fields: [SemaTaintFieldFact]{}, known_sources: [String]{}, callable_slots: sema_taint_slots(), callable_name_slots: sema_taint_slots(), field_slots: sema_taint_slots(), field_name_slots: sema_taint_slots(), struct_field_slots: sema_taint_slots(), known_source_slots: sema_taint_slots(), core_callable_name_slots: sema_taint_slots(), core_field_name_slots: sema_taint_slots(), core_struct_field_slots: sema_taint_slots()}
+    catalog := SemaTaintCatalog{tags: [SemaTaintTagFact]{}, callables: [SemaTaintCallableFact]{}, fields: [SemaTaintFieldFact]{}, known_sources: [String]{}, callable_index: sema_taint_index(), field_index: sema_taint_index(), struct_index: sema_taint_index(), known_source_slots: sema_taint_slots()}
     sema_taint_add_builtin_tags(catalog)
     catalog
 }
@@ -636,16 +701,9 @@ sema_taint_collect_known_sources: fn(catalog: &SemaTaintCatalog, graph: SemaRegi
     }
 }
 
-// The slots of the callable row just pushed.
+// Indexes the callable row just pushed.
 sema_taint_index_callable: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, owner: String, name: String) Never! {
-    slot: catalog.callables.len() - 1
-    exact: "{module_identity.id}|{owner}|{name}"
-    _: sema_taint_slot_add(catalog.callable_slots, exact, slot)
-    loose: "{owner}|{name}"
-    _: sema_taint_slot_add(catalog.callable_name_slots, loose, slot)
-    if sema_taint_core_fact(module_identity) {
-        _: sema_taint_slot_add(catalog.core_callable_name_slots, loose, slot)
-    }
+    sema_taint_index_add(catalog.callable_index, "{owner}|{name}", module_identity, catalog.callables.len() - 1)
 }
 
 // Whether a walk of a Core body may resolve a name to a row of
@@ -683,16 +741,8 @@ sema_taint_add_extern_callable: fn(catalog: &SemaTaintCatalog, module_identity: 
 sema_taint_add_field: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, owner: String, field: Field) Never! {
     catalog.fields.push(SemaTaintFieldFact{module_identity: module_identity, owner_type: owner, field: field.name, tags: sema_taint_type_tags(field.ty), type_name: sema_taint_type_name(field.ty), span: field.ty_span})
     slot: catalog.fields.len() - 1
-    exact: "{module_identity.id}|{owner}|{field.name}"
-    _: sema_taint_slot_add(catalog.field_slots, exact, slot)
-    loose: "{owner}|{field.name}"
-    _: sema_taint_slot_add(catalog.field_name_slots, loose, slot)
-    _: sema_taint_slot_add(catalog.struct_field_slots, "{module_identity.id}|{owner}", slot)
-    _: sema_taint_slot_add(catalog.struct_field_slots, owner, slot)
-    if sema_taint_core_fact(module_identity) {
-        _: sema_taint_slot_add(catalog.core_field_name_slots, loose, slot)
-        _: sema_taint_slot_add(catalog.core_struct_field_slots, owner, slot)
-    }
+    sema_taint_index_add(catalog.field_index, "{owner}|{field.name}", module_identity, slot)
+    sema_taint_index_add(catalog.struct_index, owner, module_identity, slot)
 }
 sema_taint_collect_items: fn(catalog: &SemaTaintCatalog, graph: SemaRegistrationGraph) Never! {
     loop module_row_index in 0..<graph.modules.len() {
@@ -759,20 +809,14 @@ sema_taint_find_tag: fn(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph,
 // function (owner "") resolves only exactly: sema_taint_bare_callable and
 // sema_taint_method_callable find its module.
 sema_taint_find_callable: fn(catalog: SemaTaintCatalog, module_identity: ModuleID, owner: String, name: String) -> SemaTaintCallableFact? {
-    exact: sema_taint_slot(catalog.callable_slots, "{module_identity.id}|{owner}|{name}")
+    key: "{owner}|{name}"
+    exact: sema_taint_index_row(catalog.callable_index, module_identity, key)
     if exact == .Val(slot) {
         callable := catalog.callables[slot]
         return Val(callable)
     }
     if owner == "" -> return None
-    key: "{owner}|{name}"
-    found := Int?{None}
-    if module_is_core(module_identity) {
-        found = sema_taint_slot(catalog.core_callable_name_slots, key)
-    } else {
-        found = sema_taint_slot(catalog.callable_name_slots, key)
-    }
-    loose: found ?? return None
+    loose: sema_taint_index_first(catalog.callable_index, module_identity, key) ?? return None
     callable := catalog.callables[loose]
     Val(callable)
 }
@@ -782,7 +826,7 @@ sema_taint_find_callable: fn(catalog: SemaTaintCatalog, module_identity: ModuleI
 // import or the module's package binds the name to.
 sema_taint_bare_callable: fn(state: SemaTaintFlowState, name: String) -> SemaTaintCallableFact? {
     if sema_taint_binding_index(state.bindings, name) != None -> return None
-    slot := sema_taint_slot(state.catalog.callable_slots, "{state.module_identity.id}||{name}")
+    slot := sema_taint_index_row(state.catalog.callable_index, state.module_identity, "|{name}")
     if slot == None && state.scope_at >= 0 -> slot = sema_taint_slot(state.scopes[state.scope_at].callable_scope, name)
     found: slot ?? return None
     callable := state.catalog.callables[found]
@@ -816,13 +860,13 @@ sema_taint_callable_scope: fn(graph: SemaRegistrationGraph, catalog: SemaTaintCa
     scope := SemaTaintSlots{keys: name_table_sized(2 * names + 2), rows: [Int]{-1}}
     loop import in graph.modules[module_index].imports {
         loop binding in import.bindings {
-            slot: sema_taint_slot(catalog.callable_slots, "{import.target_module_identity.id}||{binding.original}") ?? next
+            slot: sema_taint_index_row(catalog.callable_index, import.target_module_identity, "|{binding.original}") ?? next
             _: sema_taint_slot_add(scope, binding.local, slot)
         }
     }
     loop owner in graph.modules[module_index].namespace_bindings {
         name: graph.modules[owner.module_index].symbols[owner.row].name
-        slot: sema_taint_slot(catalog.callable_slots, "{graph.modules[owner.module_index].module_identity.id}||{name}") ?? next
+        slot: sema_taint_index_row(catalog.callable_index, graph.modules[owner.module_index].module_identity, "|{name}") ?? next
         _: sema_taint_slot_add(scope, name, slot)
     }
     scope
@@ -832,8 +876,9 @@ sema_taint_callable_scope: fn(graph: SemaRegistrationGraph, catalog: SemaTaintCa
 // module, id 0), else the first field of that name on any `owner` (a Core
 // module's when `module_identity` is Core's, as sema_taint_find_callable).
 sema_taint_find_field: fn(catalog: SemaTaintCatalog, module_identity: ModuleID, owner: String, field: String) -> SemaTaintFieldFact? {
-    local: sema_taint_slot(catalog.field_slots, "{module_identity.id}|{owner}|{field}")
-    unowned: sema_taint_slot(catalog.field_slots, "{module_none().id}|{owner}|{field}")
+    key: "{owner}|{field}"
+    local: sema_taint_index_row(catalog.field_index, module_identity, key)
+    unowned: sema_taint_index_row(catalog.field_index, module_none(), key)
     first := local
     if unowned == .Val(unowned_slot) {
         if local == .Val(local_slot) {
@@ -846,14 +891,7 @@ sema_taint_find_field: fn(catalog: SemaTaintCatalog, module_identity: ModuleID, 
         fact := catalog.fields[slot]
         return Val(fact)
     }
-    key: "{owner}|{field}"
-    found := Int?{None}
-    if module_is_core(module_identity) {
-        found = sema_taint_slot(catalog.core_field_name_slots, key)
-    } else {
-        found = sema_taint_slot(catalog.field_name_slots, key)
-    }
-    loose: found ?? return None
+    loose: sema_taint_index_first(catalog.field_index, module_identity, key) ?? return None
     fact := catalog.fields[loose]
     Val(fact)
 }
@@ -1913,14 +1951,8 @@ sema_taint_check_struct_compare: fn(state: &SemaTaintFlowState, op: BinOp, left:
 // sema_taint_find_callable).
 sema_taint_struct_fixed: fn(state: &SemaTaintFlowState, value: Expr) -> String? {
     owner: sema_taint_type_of_expr(state, value) ?? return None
-    found := sema_taint_slot(state.catalog.struct_field_slots, "{state.module_identity.id}|{owner}")
-    if found == None {
-        if module_is_core(state.module_identity) {
-            found = sema_taint_slot(state.catalog.core_struct_field_slots, owner)
-        } else {
-            found = sema_taint_slot(state.catalog.struct_field_slots, owner)
-        }
-    }
+    found := sema_taint_index_row(state.catalog.struct_index, state.module_identity, owner)
+    if found == None -> found = sema_taint_index_first(state.catalog.struct_index, state.module_identity, owner)
     first: found ?? return None
     at := first
     loop at < state.catalog.fields.len() && state.catalog.fields[at].owner_type == owner && state.catalog.fields[at].module_identity == state.catalog.fields[first].module_identity {
