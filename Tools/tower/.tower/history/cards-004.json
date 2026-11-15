@@ -99173,6 +99173,67 @@
       "completedAt": "2026-11-12T01:52:40.700Z",
       "questions": [],
       "retiredAt": "2026-11-15T02:00:02.614Z"
+    },
+    {
+      "id": "c0o2a99m",
+      "num": 6617,
+      "title": "Every --json command prints its machine envelope with the right exit status",
+      "body": "tests/cases/machine_output/every_json_report_door_uses_the_one_machine_envelope.case fails under a0_029 and every candidate since (vb8 on 690b182cb3, the e32b979063 release candidate) and has no known-failing line. TestSystemLead-2 ran each command by hand on s1 of dev 3e1b28f646 plus 976542d4b9: `jet build run.jet --json` (step build-effects) exits 0 with empty stdout and stderr where the case expects one {\"action\":\"build.effects\",...} status object; `jet budget check --json` exits 2 where the case expects 0; `jet inspect live 0 --json` exits 2 where it expects 1; hangar-generations exits 2 where it expects 0. Those three print a JSON report. perf-view and perf-export are unjudged. The other 31 commands are correct.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet build FILE --json prints exactly one build.effects status object in the machine envelope",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5a on dev c886c5e718 with seed-b9 (jet@a0.0.45), 2026-11-11 23:0x: jet test Compiler --profile cases tests/cases/machine_output/every_json_report_door_uses_the_one_machine_envelope.case: PASS 1, FAIL/KF/UP/SKIP-HOST/REFUSED/ERROR/TIMEOUT 0. Its build-effects step asserts exactly one status record, action build.effects, exit 0, empty stderr. A one-file jet build main.jet --json also printed exactly one line with action build.effects and ok true, rc 0.",
+          "at": "2026-11-12T04:04:37.895Z"
+        },
+        {
+          "n": 2,
+          "text": "jet budget check --json, jet inspect live N --json and hangar-generations --json exit with the status the case names, or the case is corrected with the reason the status is right",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5a on dev c886c5e718 with seed-b9 (jet@a0.0.45), 2026-11-11 23:0x: same case, PASS 1 and every other count 0. jet budget check --json exits 0; the inspect step is jet inspect structure --live 1 --json, exit 1, with the case comment naming the E2105 refusal envelope; hangar generations --json exits 2, with the comment that Hangar is Jetpack's, so it is the E2101 unknown-command envelope. Each status is the one the case names, with its reason.",
+          "at": "2026-11-12T04:04:38.792Z"
+        },
+        {
+          "n": 3,
+          "text": "cases tests/cases/machine_output/every_json_report_door_uses_the_one_machine_envelope.case PASS on a Main verify run",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "6c31e4f192 release candidate kit (chain s2 jet fa08aca4357522f7, a0_033): tests/cases/machine_output/every_json_report_door_uses_the_one_machine_envelope.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T11:07:24.229Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T22:42:08.389Z",
+      "updated": "2026-11-12T04:06:55.473Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-12T04:06:55.473Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T04:06:55.722Z"
     }
   ]
 }

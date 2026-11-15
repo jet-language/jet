@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6918,
-    "rev": 104225,
+    "rev": 104250,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41907,12 +41907,12 @@
         },
         {
           "n": 23,
-          "text": "A checked-in corpus of 50 Python and JavaScript habits and typos (`for x in xs:`, `and`, `**`, `//`, `elif`, `len(xs)`, `None`, `True`, `x++`, misspelled locals and fields) runs through `jet check --json`: at least 45 carry a non-empty `fix_edits` after which `jet check` passes; the mirrored Python 3.13 corpus gives a did-you-mean on fewer cases. Both counts are logged on this card.",
+          "text": "A checked-in corpus of 50 Python and JavaScript habits and typos (`for x in xs:`, `and`, `**`, `//`, `elif`, `len(xs)`, `None`, `True`, `x++`, misspelled locals and fields) runs through `jet check --json`. At least 45 carry a non-empty `fix_edits` after which `jet check` passes, and the mirrored Python 3.13 corpus gives a did-you-mean on fewer cases. Both counts are logged on this card. Proof: `jet test tests/guards --filter habit_corpus_fix_edits`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:58.695Z"
+          "at": "2026-11-15T04:06:40.399Z"
         },
         {
           "n": 24,
@@ -41943,21 +41943,21 @@
         },
         {
           "n": 28,
-          "text": "(was #6397) For t03_unclosed.jet, `jet check` reports E0083 naming the `if` opened on line 9, chosen from the indentation mismatch (a `}` at column 1 closing a block opened at column 5). Its suggested edit inserts `}` before line 12, the first line back at the `if`'s indentation. UI snapshot registered.",
+          "text": "For t03_unclosed.jet, `jet check` reports E0083 naming the `if` opened on line 9, found from the indentation mismatch (a `}` at column 1 closing a block opened at column 5). Its suggested edit inserts `}` before line 12, the first line back at the `if`'s indentation. Proof: `jet test Compiler --profile ui --filter t03_unclosed`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:14:51.253Z"
+          "at": "2026-11-15T04:06:41.336Z"
         },
         {
           "n": 29,
-          "text": "(was #6397) The follow-on E0003 (\"found the keyword `fn`\") caused by the same unclosed block is not reported, so t03 prints 1 problem. When several diagnostics print, the root cause prints first.",
+          "text": "The follow-on E0003 ('found the keyword `fn`') caused by the same unclosed block is not reported, so t03 prints 1 problem, and when several diagnostics print the root cause prints first. Proof: `jet test Compiler --profile ui --filter t03_unclosed`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:14:52.122Z"
+          "at": "2026-11-15T04:06:42.301Z"
         },
         {
           "n": 30,
@@ -41971,47 +41971,52 @@
         {
           "n": 31,
           "text": "(was #6398) t04_comptime_panic.jet gets one E3010 whose primary location is the `panic` call at line 4. A second label marks the `check_size(400)` call on line 10. UI snapshot registered.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:14:58.189Z"
+          "evidence": "Moved to #6915 c1: stop locations have their own card",
+          "at": "2026-11-15T04:06:48.971Z",
+          "closure": "obsolete"
         },
         {
           "n": 32,
           "text": "(was #6398) A compile-time stop three calls deep lists every compile-time call, innermost first, in the same Trail format that runtime failures print. UI snapshot registered.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:14:59.319Z"
+          "evidence": "Moved to #6915 c2: stop locations have their own card",
+          "at": "2026-11-15T04:06:50.035Z",
+          "closure": "obsolete"
         },
         {
           "n": 33,
           "text": "(was #6398) A compile-time stop inside a derive or marker body names the line inside that body and the use site that ran it. UI snapshot registered.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:15:01.325Z"
+          "evidence": "Moved to #6915 c3: stop locations have their own card",
+          "at": "2026-11-15T04:06:51.273Z",
+          "closure": "obsolete"
         },
         {
           "n": 34,
           "text": "(was #6399) t06_panic_trace.jet prints the panic, then `inner` (line 4), `middle` (line 9), `outer` (line 13) and `run` (line 17), each with file and line, innermost first. This holds under `jet run` and under `jet build` with the stock `backtrace: full`, on o0, o1 and o2. UI snapshot registered.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:15:06.522Z"
+          "evidence": "Moved to #6915 c4: stop locations have their own card",
+          "at": "2026-11-15T04:06:52.337Z",
+          "closure": "obsolete"
         },
         {
           "n": 35,
           "text": "(was #6399) `backtrace: brief` prints only the panicking frame, as today, and `backtrace: off` prints no frame. A failed `assert` and `assert_eq` follow the same rule. Snapshots registered.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:15:07.313Z"
+          "evidence": "Moved to #6915 c5: stop locations have their own card",
+          "at": "2026-11-15T04:06:53.310Z",
+          "closure": "obsolete"
         },
         {
           "n": 37,
@@ -42052,11 +42057,12 @@
         {
           "n": 41,
           "text": "(was #4627) `/`, `/%` and `%` with a zero divisor at run time all produce the same registered stop (E3010 family, 'divided by zero') with the division's file, line, column and caret on O0, O1 and O2; a UI snapshot per tier pins it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:57:15.277Z"
+          "evidence": "Moved to #6915 c6: stop locations have their own card",
+          "at": "2026-11-15T04:06:54.348Z",
+          "closure": "obsolete"
         },
         {
           "n": 42,
@@ -42079,11 +42085,12 @@
         {
           "n": 44,
           "text": "(was #4627) All list-position stop sites call one shared message owner; a grep for the old template string finds only that owner.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:15:25.631Z"
+          "evidence": "Moved to #6915 c7: stop locations have their own card",
+          "at": "2026-11-15T04:06:55.538Z",
+          "closure": "obsolete"
         },
         {
           "n": 45,
@@ -42106,11 +42113,12 @@
         {
           "n": 47,
           "text": "(was #3703) Inside a ?? handler, {err}, {err:Debug} and err.message all render a Core #Error value on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:57:16.960Z"
+          "evidence": "Moved to #6916 c2: error values in handlers have their own card",
+          "at": "2026-11-15T04:06:58.039Z",
+          "closure": "obsolete"
         },
         {
           "n": 48,
@@ -42124,29 +42132,30 @@
         {
           "n": 49,
           "text": "(was #3703) E0915 and E0112 fixes never suggest a spelling that itself fails for the same value.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:15:35.003Z"
+          "evidence": "Moved to #6916 c3: error values in handlers have their own card",
+          "at": "2026-11-15T04:06:59.009Z",
+          "closure": "obsolete"
         },
         {
           "n": 50,
-          "text": "A marker application counts as an import use: no false L0103, while a genuinely unused import is still reported as the registered tidy error (listed by jet check, never stopping jet run). An unknown or qualified marker gives one E0927 per site whose Why/Fix matches D-META-USER1 and names the declaring import. A parse error in an imported file renders with that file's path, line and text. Proof: UI snapshots for all three under `jet test Compiler --profile ui --filter marker_import`.",
+          "text": "A marker application counts as a use of its import, so it raises no false unused-import error, while a genuinely unused import is still reported as the registered tidy error (listed by jet check, never stopping jet run). An unknown or qualified marker gives one E0927 per site whose Why and Fix match D-META-USER1 and name the declaring import. A parse error in an imported file renders with that file's path, line and text. Proof: UI snapshots for all three under `jet test Compiler --profile ui --filter marker_import`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:22:47.716Z"
+          "at": "2026-11-15T04:06:43.207Z"
         },
         {
           "n": 51,
-          "text": "(was #3703) [#3571] A namespace required by a used dotted, grouped or forward-alias member import is never reported unused, and no safe fix removes it. A genuinely unused namespace still gets L0103. UI fixture tests/ui_lint/unused_import_* passes on the Jet compiler.",
+          "text": "A namespace needed by a used dotted, grouped or forward-alias member import is never reported unused, and no safe fix removes it, while a genuinely unused namespace still gets the unused-import tidy error. Proof: `jet test Compiler --profile ui --filter unused_import_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:15:37.076Z"
+          "at": "2026-11-15T04:06:44.216Z"
         },
         {
           "n": 52,
@@ -42204,12 +42213,12 @@
         },
         {
           "n": 60,
-          "text": "(was #2176 c4) Caret width, Unicode display columns, multiline behavior, source text, Why text, Fix text, and trailing newlines do not change Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
+          "text": "The diagnostic renderer keeps caret width equal to the Unicode display width for wide characters, multiline spans and empty spans, and NO_COLOR, piped and JSON output carry no ANSI bytes. Proof: `jet test Compiler --profile ui --filter caret_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:20:22.140Z"
+          "at": "2026-11-15T04:06:45.356Z"
         },
         {
           "n": 61,
@@ -42223,38 +42232,42 @@
         {
           "n": 62,
           "text": "(was #2206 c1) Status and progress lines obey the ratified law, including lines assembled from runtime fragments Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:20:26.542Z"
+          "evidence": "Merged into #6734 c2: status and progress line case is part of the user-visible text case rule",
+          "at": "2026-11-15T04:07:01.933Z",
+          "closure": "obsolete"
         },
         {
           "n": 63,
           "text": "(was #2206 c2) Prompts and confirmations obey it Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:20:28.833Z"
+          "evidence": "Merged into #6734 c2: prompt case is part of the user-visible text case rule",
+          "at": "2026-11-15T04:07:02.899Z",
+          "closure": "obsolete"
         },
         {
           "n": 64,
           "text": "(was #2206 c3) Table headers and column labels obey it Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:20:31.335Z"
+          "evidence": "Merged into #6734 c2: table header case is part of the user-visible text case rule",
+          "at": "2026-11-15T04:07:03.872Z",
+          "closure": "obsolete"
         },
         {
           "n": 65,
           "text": "(was #2206 c4) TUI, Canvas and Studio buttons, menus, tabs and panel titles obey it Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:20:34.208Z"
+          "evidence": "Merged into #6734 c2: TUI, Canvas and Studio label case is part of the user-visible text case rule",
+          "at": "2026-11-15T04:07:04.887Z",
+          "closure": "obsolete"
         },
         {
           "n": 66,
@@ -42268,29 +42281,32 @@
         {
           "n": 67,
           "text": "(was #2207 c1) A check reads every user-facing string from its source of truth and fails when one violates the ratified law Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:20:38.939Z"
+          "evidence": "Merged into #6734 c2: #6734 c2 requires the guard over every user-facing string source",
+          "at": "2026-11-15T04:07:05.878Z",
+          "closure": "obsolete"
         },
         {
           "n": 68,
           "text": "(was #2215 c1) Realization progress renders in a single bottom-anchored status region and diagnostics print atomically above it; no interleaved torn lines Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:20:41.843Z"
+          "evidence": "Moved to #6917 c1: progress output has its own card",
+          "at": "2026-11-15T04:06:59.984Z",
+          "closure": "obsolete"
         },
         {
           "n": 69,
           "text": "(was #2215 c2) Plain sequential fallback used for non-TTY, NO_COLOR, and CI, covered by a test asserting no ANSI cursor movement in that mode Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:20:44.210Z"
+          "evidence": "Moved to #6917 c2: progress output has its own card",
+          "at": "2026-11-15T04:07:00.973Z",
+          "closure": "obsolete"
         },
         {
           "n": 70,
@@ -42330,12 +42346,12 @@
         },
         {
           "n": 78,
-          "text": "Jet tools collect no telemetry and post nothing to external services without an explicit user command; a test checks the diagnostics and report paths make no network calls.",
+          "text": "Jet tools collect no telemetry and post nothing to external services without an explicit user command. Proof: `jet test Compiler --profile cases --filter diagnostics/report_paths_make_no_network_calls`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:50:58.893Z"
+          "at": "2026-11-15T04:06:46.876Z"
         },
         {
           "n": 79,
@@ -42357,12 +42373,12 @@
         },
         {
           "n": 81,
-          "text": "D-DIAG-HEADER1 A (ratified 2026-11-04): every diagnostic's header, More: link and closing hint show the type name (jet.ValueTypeMismatch), with the link at jet-lang.dev/e/<name>. The E-code stays the stable code: jet.report/v3 JSON carries both name and code, jet explain E0112 still works, and the site redirects old E-code pages. Runtime reports (TrapMessages.jet, ServicesMessages.jet, report.S) print the name too. D-DIAG-URL1 and D-DIAG-LIBLINK1 text is amended to match. Every UI snapshot is regenerated from real output, and goldens pass on o0, o1 and o2. (was #6039 c24)",
+          "text": "D-DIAG-HEADER1=A: every diagnostic's header, More: link and closing hint show the type name (jet.ValueTypeMismatch), with the link at jet-lang.dev/e/<name>. The E-code stays the stable code: jet.report/v3 JSON carries both name and code, `jet explain E0112` still works, and the site redirects old E-code pages. Runtime reports (TrapMessages.jet, ServicesMessages.jet, report.S) print the name too. Every UI snapshot is regenerated from real output. Proof: `jet test Compiler --profile ui` and goldens pass on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T18:53:44.465Z"
+          "at": "2026-11-15T04:06:47.985Z"
         },
         {
           "n": 82,
@@ -42385,11 +42401,12 @@
         {
           "n": 84,
           "text": "Int.parse`s error type (ParseError) has a declaration in Core, so a `??` handler can name it, print it with `{err}`, and read `err.message` on o0, o1 and o2; E0915`s suggested fixes for it compile. G5DevX-2 found on 2026-11-13 that today `{err}` gives E0915, `{err:Debug}` gives E0112 and `err.message` gives E0302. This blocks c47 and c49. Proof: a run case covering all three uses at o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T01:46:07.489Z"
+          "evidence": "Moved to #6916 c1: error values in handlers have their own card",
+          "at": "2026-11-15T04:06:57.047Z",
+          "closure": "obsolete"
         },
         {
           "n": 85,
@@ -42416,7 +42433,7 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-15T04:06:39.226Z",
+      "updated": "2026-11-15T04:07:05.878Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -86546,65 +86563,6 @@
       "created": "2026-11-06T21:54:09.666Z",
       "updated": "2026-11-13T01:53:29.088Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c0o2a99m",
-      "num": 6617,
-      "title": "Every --json command prints its machine envelope with the right exit status",
-      "body": "tests/cases/machine_output/every_json_report_door_uses_the_one_machine_envelope.case fails under a0_029 and every candidate since (vb8 on 690b182cb3, the e32b979063 release candidate) and has no known-failing line. TestSystemLead-2 ran each command by hand on s1 of dev 3e1b28f646 plus 976542d4b9: `jet build run.jet --json` (step build-effects) exits 0 with empty stdout and stderr where the case expects one {\"action\":\"build.effects\",...} status object; `jet budget check --json` exits 2 where the case expects 0; `jet inspect live 0 --json` exits 2 where it expects 1; hangar-generations exits 2 where it expects 0. Those three print a JSON report. perf-view and perf-export are unjudged. The other 31 commands are correct.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "jet build FILE --json prints exactly one build.effects status object in the machine envelope",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "meet-G5a on dev c886c5e718 with seed-b9 (jet@a0.0.45), 2026-11-11 23:0x: jet test Compiler --profile cases tests/cases/machine_output/every_json_report_door_uses_the_one_machine_envelope.case: PASS 1, FAIL/KF/UP/SKIP-HOST/REFUSED/ERROR/TIMEOUT 0. Its build-effects step asserts exactly one status record, action build.effects, exit 0, empty stderr. A one-file jet build main.jet --json also printed exactly one line with action build.effects and ok true, rc 0.",
-          "at": "2026-11-12T04:04:37.895Z"
-        },
-        {
-          "n": 2,
-          "text": "jet budget check --json, jet inspect live N --json and hangar-generations --json exit with the status the case names, or the case is corrected with the reason the status is right",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "meet-G5a on dev c886c5e718 with seed-b9 (jet@a0.0.45), 2026-11-11 23:0x: same case, PASS 1 and every other count 0. jet budget check --json exits 0; the inspect step is jet inspect structure --live 1 --json, exit 1, with the case comment naming the E2105 refusal envelope; hangar generations --json exits 2, with the comment that Hangar is Jetpack's, so it is the E2101 unknown-command envelope. Each status is the one the case names, with its reason.",
-          "at": "2026-11-12T04:04:38.792Z"
-        },
-        {
-          "n": 3,
-          "text": "cases tests/cases/machine_output/every_json_report_door_uses_the_one_machine_envelope.case PASS on a Main verify run",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "6c31e4f192 release candidate kit (chain s2 jet fa08aca4357522f7, a0_033): tests/cases/machine_output/every_json_report_door_uses_the_one_machine_envelope.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T11:07:24.229Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G5"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T22:42:08.389Z",
-      "updated": "2026-11-12T04:06:55.473Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-12T04:06:55.473Z"
     },
     {
       "id": "c02vsnvm",
@@ -213262,6 +213220,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T04:07:05.878Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#67"
+    },
+    {
+      "at": "2026-11-15T04:07:04.887Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#65"
+    },
+    {
+      "at": "2026-11-15T04:07:03.872Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#64"
+    },
+    {
+      "at": "2026-11-15T04:07:02.899Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#63"
+    },
+    {
+      "at": "2026-11-15T04:07:01.933Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#62"
+    },
+    {
+      "at": "2026-11-15T04:07:00.973Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#69"
+    },
+    {
+      "at": "2026-11-15T04:06:59.984Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#68"
+    },
+    {
+      "at": "2026-11-15T04:06:59.009Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#49"
+    },
+    {
+      "at": "2026-11-15T04:06:58.039Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#47"
+    },
+    {
+      "at": "2026-11-15T04:06:57.047Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#84"
+    },
+    {
+      "at": "2026-11-15T04:06:55.538Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-15T04:06:54.348Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#41"
+    },
+    {
+      "at": "2026-11-15T04:06:53.310Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-15T04:06:52.337Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-15T04:06:51.273Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-15T04:06:50.036Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#32"
+    },
+    {
+      "at": "2026-11-15T04:06:48.971Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#31"
+    },
+    {
+      "at": "2026-11-15T04:06:47.985Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#81: strip debris; was: D-DIAG-HEADER1 A (ratified 2026-11-04): every diagnostic's header, More: link and closing hint show the type name (jet.ValueTypeMismatch), with the link at jet-lang.dev/e/<name>. The E-code stays the "
+    },
+    {
+      "at": "2026-11-15T04:06:46.876Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#78: proof; was: Jet tools collect no telemetry and post nothing to external services without an explicit user command; a test checks the diagnostics and report paths make no network calls."
+    },
+    {
+      "at": "2026-11-15T04:06:45.356Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#60: strip debris; restated for the self-hosted renderer; was: (was #2176 c4) Caret width, Unicode display columns, multiline behavior, source text, Why text, Fix text, and trailing newlines do not change Proof: a tests/ui snapshot, a tests/cases row or the named"
+    },
+    {
+      "at": "2026-11-15T04:06:44.216Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#51: strip debris; proof; was: (was #3703) [#3571] A namespace required by a used dotted, grouped or forward-alias member import is never reported unused, and no safe fix removes it. A genuinely unused namespace still gets L0103. U"
+    },
+    {
+      "at": "2026-11-15T04:06:43.207Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#50: no warnings (D-NO-WARNINGS1=A); was: A marker application counts as an import use: no false L0103, while a genuinely unused import is still reported as the registered tidy error (listed by jet check, never stopping jet run). An unknown o"
+    },
+    {
+      "at": "2026-11-15T04:06:42.301Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#29: strip debris; proof; was: (was #6397) The follow-on E0003 (\"found the keyword `fn`\") caused by the same unclosed block is not reported, so t03 prints 1 problem. When several diagnostics print, the root cause prints first."
+    },
+    {
+      "at": "2026-11-15T04:06:41.336Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#28: strip debris; proof; was: (was #6397) For t03_unclosed.jet, `jet check` reports E0083 naming the `if` opened on line 9, chosen from the indentation mismatch (a `}` at column 1 closing a block opened at column 5). Its suggested"
+    },
+    {
+      "at": "2026-11-15T04:06:40.399Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#23: proof; was: A checked-in corpus of 50 Python and JavaScript habits and typos (`for x in xs:`, `and`, `**`, `//`, `elif`, `len(xs)`, `None`, `True`, `x++`, misspelled locals and fields) runs through `jet check --j"
+    },
+    {
       "at": "2026-11-15T04:06:39.226Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-edit",
@@ -216718,713 +216851,6 @@
       "action": "card.criteria-meet",
       "ref": "c9q0534j",
       "note": "#12"
-    },
-    {
-      "at": "2026-11-15T03:32:58.592Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c9q0534j",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:32:57.616Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c9q0534j",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:32:56.689Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c9q0534j",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T03:32:55.768Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0u913de",
-      "note": "#16: strip debris; proof; was: [#3388]  • Seeded Rng sampling replays. Splits are independent. Bounded reservoir sampling is separate from full permutation; endless input gets no full shuffle. • Golden `math/random_sampling`."
-    },
-    {
-      "at": "2026-11-15T03:32:54.847Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0u913de",
-      "note": "#15: strip debris; greenfield: no retirement snapshot; was: [#3392]  • Migrate every caller to `random.rng(seed)` + `rng.shuffle(items)` and delete the demo `List`/`Iter` shuffle (Collections.jet:415,426). • UI `list_shuffle_retired` registers the rejection."
-    },
-    {
-      "at": "2026-11-15T03:32:53.460Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0u913de",
-      "note": "#8: strip debris; decision; proof; was: [#3349]  • A,B,A distinguishes adjacent dedup, first-occurrence unique and later-duplicate reporting. • Order, representative and key-call count are explicit. Memory grows with distinct keys. Hashing "
-    },
-    {
-      "at": "2026-11-15T03:32:52.407Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0u913de",
-      "note": "#7: strip debris; decision; proof; was: [#3347]  • A,A,B,A gives three runs. Groups are consumed incrementally, with no full-run materialization. • Retaining a group needs an explicit collection. • Golden `collections/chunk_by`; UI `chunk_b"
-    },
-    {
-      "at": "2026-11-15T03:32:51.520Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0u913de",
-      "note": "#6: strip debris; decision; proof; was: [#3328]  • Key and binary Ordering forms both exist. • Ties keep the pinned LAST item. Callback count and error order are documented. Empty and partial orders follow the existing law. • Golden `collec"
-    },
-    {
-      "at": "2026-11-15T03:32:50.549Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0u913de",
-      "note": "#5: strip debris; decision; proof; was: [#3326]  • State and output types may differ, including a move-only output. • The step runs once per demanded item, with an explicit stop/error/remainder rule. • No whole-state clone; existing `scan` "
-    },
-    {
-      "at": "2026-11-15T03:32:49.534Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0u913de",
-      "note": "#4: decision and current path; was: The collections/filter_map and filter_map_absence goldens pass on O0, O1 and O2: Option absence skips, Result keeps success-only selection, failure propagates, map_while stops and find_map continues."
-    },
-    {
-      "at": "2026-11-15T03:32:48.407Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c9q0534j",
-      "note": "#16: strip debris; proof; was: (was #2488 c1) Implementation-only closure: declared asset roots are discovered and watched with typed coalesced dependency facts; imports produce validated runtime facts; hot reload atomically swaps "
-    },
-    {
-      "at": "2026-11-15T03:32:47.504Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c9q0534j",
-      "note": "#15: the ballot is ratified; restate as the build criterion; was: [#3287] **[OWNER]** The PCM container IO ballot (A/B/C) is ratified. If A: golden game/game_wav passes on every level, scoped to bounded common game-asset PCM, with no specialist audio expansion."
-    },
-    {
-      "at": "2026-11-15T03:32:46.551Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c9q0534j",
-      "note": "#9: one outcome with proof; was: Runnable proof: `jet test Compiler --profile golden game/game_assets` passes on O0, O1 and O2, and no asset policy remains outside Core/Game/*.jet (replaces the Rust-bypass wording of criterion 6)."
-    },
-    {
-      "at": "2026-11-15T03:32:45.551Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c9q0534j",
-      "note": "#3: absorbs c8; proof; was: Missing files, wrong asset kinds, stale scene identity, corrupt import facts, and failed hot reload report a safe error while preserving the last valid asset state and its provenance."
-    },
-    {
-      "at": "2026-11-15T03:32:44.638Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c9q0534j",
-      "note": "#2: proof; current path; was: Asset handles are typed and tied to their owning scene. Image and sound loading uses the checked importer fact, reports the declared path and kind, and successful reload publishes one deterministic ha"
-    },
-    {
-      "at": "2026-11-15T03:32:43.756Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0776o2m",
-      "note": "#24 Backends expose typed capability interfaces with headless an"
-    },
-    {
-      "at": "2026-11-15T03:32:42.877Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c087ot9q",
-      "note": "#16 A playable vertical slice degrades or fails visibly without "
-    },
-    {
-      "at": "2026-11-15T03:32:42.009Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c087ot9q",
-      "note": "#15 Editor transitions and typed perf roles and budgets live in "
-    },
-    {
-      "at": "2026-11-15T03:32:41.146Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c087ot9q",
-      "note": "#14 Input action mapping and a fixed-step clock give identical t"
-    },
-    {
-      "at": "2026-11-15T03:32:40.284Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c087ot9q",
-      "note": "#13 Typed ECS storage, entity identity, deterministic queries an"
-    },
-    {
-      "at": "2026-11-15T03:32:39.427Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0t3qh8f",
-      "note": "Lazy multi-source and combinatoric iterator adapters: sorted merge, join, combinations, interleave, Cartesian product and keyed set operations"
-    },
-    {
-      "at": "2026-11-15T03:31:18.096Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0du93i4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:31:17.152Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0du93i4",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:31:16.190Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0du93i4",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T03:31:15.175Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0du93i4",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T03:31:14.193Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0du93i4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T03:31:13.246Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0du93i4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T03:31:12.317Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0du93i4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T03:31:11.431Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0du93i4",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:31:10.536Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0du93i4",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T03:31:09.633Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0du93i4",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T03:31:08.547Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0du93i4",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T03:31:07.679Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0du93i4",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T03:31:06.788Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0du93i4",
-      "note": "#1: add proof; was: Core/Db/Sql.jet and Core/Auth/Auth.jet are gone from Core; their examples and tests import the `sql`/`auth` packages and goldens pass on O0/O1/O2; the old imports fail with the ordinary unknown-module"
-    },
-    {
-      "at": "2026-11-15T03:31:05.913Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0ujz0kr",
-      "note": "core.db tools: a bounded connection pool, `jet db` migrations with preview and receipts, the SQL console and EXPLAIN facts"
-    },
-    {
-      "at": "2026-11-15T03:30:33.414Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0ufrhm0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:30:32.420Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c025w7rd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:30:31.448Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c025w7rd",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:30:29.737Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c025w7rd",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T03:30:28.655Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c025w7rd",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T03:30:27.699Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c025w7rd",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-15T03:30:26.730Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c025w7rd",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-15T03:30:25.814Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c025w7rd",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T03:30:24.893Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c025w7rd",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:30:23.949Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c025w7rd",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:30:23.021Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c025w7rd",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T03:30:22.110Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c025w7rd",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T03:30:21.188Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c025w7rd",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T03:30:20.216Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c025w7rd",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T03:30:19.284Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ufrhm0",
-      "note": "#14: strip debris; proof; was: (was #3226) [#3373]  • Non-Unicode argv and env follow platform law. • Argv order, env snapshot/unset and command removal entries are exact. • Golden `io/os_sources` + `non_unicode_argv_and_env_follow"
-    },
-    {
-      "at": "2026-11-15T03:30:18.353Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ufrhm0",
-      "note": "#6: replace scratch-script proof with a case; was: Jetpack verified-lease commands run (found by CardClose-1, 2026-11-01): CacheLease.jet keep_open_for hands the lease's descriptors to the child at their pinned slots (STORE_LEASE_NEXT_SLOT 64+) throug"
-    },
-    {
-      "at": "2026-11-15T03:30:17.354Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ufrhm0",
-      "note": "#1: Examples moved to Examples/Systems/Process (2c3e68a70b); was: Binary pipes, replace_process, terminal handoff, keep_open, signals() and identity each have a focused proof. Goldens `Examples/features/io/process_{bytes,keep_open,signals,identity}.jet` pass `jet te"
-    },
-    {
-      "at": "2026-11-15T03:30:16.342Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c025w7rd",
-      "note": "#6: current path; absorbs c2; was: After each specialized module cutover, Compiler/Prelude/Core.jet has no dispatcher_row for a member its source_module owns, and `jet Tools/agent/CoreSurfaceLedger.jet --check` exits 0."
-    },
-    {
-      "at": "2026-11-15T03:30:15.258Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c025w7rd",
-      "note": "#3: exact proof; was: Specialized APIs pass failure/effect proof on O0, O1 and O2 through their Core/<module> Jet bodies (Core #Tests under `jet test Compiler --profile core`)."
-    },
-    {
-      "at": "2026-11-15T03:30:14.298Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c025w7rd",
-      "note": "#1: one outcome with proof; was: Every specialized declaration has a real Jet body or typed provider leaf."
-    },
-    {
-      "at": "2026-11-15T03:30:13.384Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0isxyo3",
-      "note": "#10 `ui.UiNodeId` is the public identity in the `tui` package's "
-    },
-    {
-      "at": "2026-11-15T03:30:12.265Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0isxyo3",
-      "note": "#9 The `tui` package publishes only the managed `tui.run`: it t"
-    },
-    {
-      "at": "2026-11-15T03:30:11.324Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0rqtmrp",
-      "note": "Core codecs: gzip and zstd live in core.compress and really compress, and image decode is bounded by one shared inflater"
-    },
-    {
-      "at": "2026-11-15T03:28:33.061Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0dhc7rh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:28:31.936Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0776o2m",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:28:30.734Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0776o2m",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:28:28.617Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0dhc7rh",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T03:28:27.361Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0dhc7rh",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T03:28:26.242Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0dhc7rh",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T03:28:25.114Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0dhc7rh",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:28:23.726Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0dhc7rh",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:28:22.191Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-15T03:28:21.287Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ue0hua",
-      "note": "#12 A `#Codable(only: .Decode)` struct whose field has a declare"
-    },
-    {
-      "at": "2026-11-15T03:28:20.377Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T03:28:19.326Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T03:28:18.366Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T03:28:17.437Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T03:28:16.457Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T03:28:15.455Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-15T03:28:14.427Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T03:28:13.391Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:28:12.478Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:28:11.556Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T03:28:10.634Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T03:28:09.664Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T03:28:08.714Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T03:28:07.603Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0776o2m",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T03:28:06.691Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0dhc7rh",
-      "note": "#8: drop the stale 2026-11-10 probe narrative; add proof; was: Main probe 2026-11-10 on the t17a compiler (dev c2cecce162): `#Context(allocator: …)` blocks run, but `context.allocator` and `context.scratch` give E0107 (no `context` name), `#Context(frame_index: 3"
-    },
-    {
-      "at": "2026-11-15T03:28:05.733Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0776o2m",
-      "note": "#22: add proof; owner naming order; was: D-GAME-PLATFORM1=A (the owner renamed ray to ui on 2026-11-08): two independent subsystems shared by games and apps: ui (windows, frames, present(pixels, palette)/present(rgba), immediate-mode drawing"
-    },
-    {
-      "at": "2026-11-15T03:28:04.808Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0776o2m",
-      "note": "#19: strip debris; proof; was: (was #2850 c1) The ui subsystem (D-GAME-PLATFORM1=A; the owner renamed ray to ui on 2026-11-08) uses one shared input, atlas decode, sprite draw and transcript model for keyboard/gamepad state and det"
-    },
-    {
-      "at": "2026-11-15T03:28:03.889Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c087ot9q",
-      "note": "core.game: parallel system scheduling, the frame schedule, and editor, overlay and packaging tools"
-    },
-    {
-      "at": "2026-11-15T03:26:15.891Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0uyfbge",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:26:14.956Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0uyfbge",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:26:13.427Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0uyfbge",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-15T03:26:12.517Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0uyfbge",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T03:26:11.638Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0uyfbge",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T03:26:10.718Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0uyfbge",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T03:26:09.737Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0uyfbge",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T03:26:08.772Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0uyfbge",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T03:26:07.823Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0uyfbge",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T03:26:06.888Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0uyfbge",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T03:26:05.960Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0uyfbge",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T03:26:05.019Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uyfbge",
-      "note": "#19: strip debris; proof; was: (was #5466) E0152 on a quoted regex that contains `{4}` names the brace as the cause and emits a `fix_edits` entry that rewrites the body to backtick raw text, which already works today: `Regex{`\\d{4}"
-    },
-    {
-      "at": "2026-11-15T03:26:04.062Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uyfbge",
-      "note": "#15: strip debris; proof; was: (was #4426) [#4466] Every module named on the card (files.jet:1112, args.jet:107, parse.jet:710, ...) builds text from whole UTF-8 runs, never byte-at-a-time from_bytes. One non-ASCII witness per modu"
-    },
-    {
-      "at": "2026-11-15T03:26:03.149Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uyfbge",
-      "note": "#14: strip debris; proof; was: (was #4426) [#4437] D-TEXT-CONTROL1=A: allocation-free text.has_control (any Cc) with the ratified empty and non-ASCII laws. The private grapheme helper is renamed."
-    },
-    {
-      "at": "2026-11-15T03:26:02.263Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uyfbge",
-      "note": "#13: strip debris; proof; was: (was #4426) [#4475] D-UNICODE-CASE1=A: generated Lowercase, Uppercase, Lt and UAX29 word facts drive istitle, is_lower and is_upper on every route."
     }
   ],
   "nextNum": 368,
