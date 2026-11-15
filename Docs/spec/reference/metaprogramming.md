@@ -358,7 +358,10 @@ print a field's type, default span and offset. An enum case's `FieldInfo`
 names its payload as a TypeId: `Unit` for none, the payload type for one,
 and the written record `{x: Float, y: Float}` for named fields. A template
 compares a field's type by its `name` (`field.type.name == "Float"`) or,
-across modules, by its `identity`.
+across modules, by its `identity`. A TypeInfo's own `identity` is the TypeId
+of the type it describes, the one a field of that type reads as its `type`,
+so `field.type.identity == Ore.reflect().identity.identity` holds for a field
+of type `Ore`.
 
 A `FunctionInfo` and a `MethodInfo` share one typed contract: `signature` is
 a `CallableSignature`. Its `params` is a `[ParamInfo]` in declaration order,
@@ -597,8 +600,9 @@ holds), `Struct`, `Enum`, `Distinct`, `Alias`, `Tag`, `UnitFamily`,
 `Trait`, `Impl`, `Constant`, `Field`, `Variant`, `Parameter`, `Local`,
 `Import`, `Foreign` or `Label`. The `path` is the declaration's dotted path
 (`run.Point.norm`), and the `scope` is the path of the declaration that holds
-it, or its module's name at module scope. The `path` of a type, function,
-method, trait or constant is the `identity` of its record. A type's record is
+it, or its module's name at module scope. The `path` of a function, method,
+trait or constant is the `identity` of its record, and a type's is the
+`identity` of its TypeInfo's TypeId. A type's record is
 in `b.program.types()` and a function's in `functions()`. A method's
 MethodInfo is in its type's or trait's `methods`. `traits()` lists a
 TraitInfo for each trait a module declares, and `constants()` a ConstantInfo

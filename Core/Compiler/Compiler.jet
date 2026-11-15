@@ -241,13 +241,13 @@ query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{
                     seen := [String]{}
                     scope: FactScope{package: package.name.copy(), module: info.module.copy(), item: info.name.copy()}
                     if kind == FactKind.Marker {
-                        loop marker in info.markers -> rows.push(program_fact(kind, marker.name, info.identity, scope, revision, seen))
+                        loop marker in info.markers -> rows.push(program_fact(kind, marker.name, info.identity.identity, scope, revision, seen))
                     } else if kind == FactKind.MarkerArg {
                         loop marker in info.markers {
-                            loop arg in marker.args -> rows.push(program_fact(kind, "{marker.name}.{arg.name}", info.identity, scope, revision, seen))
+                            loop arg in marker.args -> rows.push(program_fact(kind, "{marker.name}.{arg.name}", info.identity.identity, scope, revision, seen))
                         }
                     } else {
-                        loop fact in info.facts -> rows.push(program_fact(kind, fact.name, info.identity, scope, revision, seen))
+                        loop fact in info.facts -> rows.push(program_fact(kind, fact.name, info.identity.identity, scope, revision, seen))
                     }
                 }
             }

@@ -25,7 +25,7 @@ FromMarker: struct {
 
         expand: fn(self, target: Target) {
             label: target.marker(Label)?.text ?? "none"
-            seen: "{target.name} {target.kind} {target.identity} {target.module} fields={target.fields.len()} markers={target.markers.len()} label={label}"
+            seen: "{target.name} {target.kind} {target.identity.identity} {target.module} fields={target.fields.len()} markers={target.markers.len()} label={label}"
             impl Rungs {
                 from_marker: fn() -> String { #{seen} }
             }
@@ -60,7 +60,7 @@ Describe: struct {
         expand: fn(self, target: Target) {
             tname: target.name
             label: target.marker(Label)?.text ?? "none"
-            seen: "{target.name} {target.kind} {target.identity} {target.module} fields={target.fields.len()} markers={target.markers.len()} label={label}"
+            seen: "{target.name} {target.kind} {target.identity.identity} {target.module} fields={target.fields.len()} markers={target.markers.len()} label={label}"
             impl #{tname} {
                 described: fn(self) -> String { "{seen}" }
             }
@@ -82,7 +82,7 @@ Plain: struct {
 // The comptime and fn build rungs share one ordinary function.
 #Label("rung") describe: fn(info: TypeInfo) -> String {
     label: info.marker(Label)?.text ?? "none"
-    "{info.name} {info.kind} {info.identity} {info.module} fields={info.fields.len()} markers={info.markers.len()} label={label}"
+    "{info.name} {info.kind} {info.identity.identity} {info.module} fields={info.fields.len()} markers={info.markers.len()} label={label}"
 }
 
 POINT: #run describe(Point.reflect())

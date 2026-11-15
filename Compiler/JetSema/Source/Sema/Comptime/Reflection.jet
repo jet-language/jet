@@ -2015,6 +2015,17 @@ sema_comptime_reflection_specialized_identity: fn(identity: String, bindings: [S
     "{identity}<{(loop binding in bindings -> type_name(binding.ty)).join(", ")}>"
 }
 
+// The TypeId a TypeInfo's `identity` is: the type `type_name` module row
+// `caller` declares, applied to the specialization `bindings` when it has
+// any, named as every TypeId names a type (sema_comptime_reflection_type_id),
+// so a field whose type it is reads the same TypeId.
+sema_comptime_reflection_declared_type_id: fn(graph: SemaRegistrationGraph, caller: Int, type_name: String, bindings: [SemaInferenceBinding]) -> TComptimeValue {
+    if bindings.len() == 0 -> return sema_comptime_reflection_type_id(graph, caller, Type.Named{name: type_name})
+    identity: Type.Apply{name: sema_comptime_reflection_qualified_name(graph, caller, type_name), args: loop binding in bindings -> sema_comptime_reflection_qualified_type(graph, caller, binding.ty)}
+    written: Type.Apply{name: type_name, args: loop binding in bindings -> type_unqualified_nominals(binding.ty)}
+    sema_comptime_reflection_type_id_of(identity, written)
+}
+
 // The GenericBindingInfo records of a specialization, in parameter order;
 // each argument's TypeId is named from the module row `caller`.
 sema_comptime_reflection_binding_infos: fn(registration: SemaRegistrationGraph, caller: Int, bindings: [SemaInferenceBinding]) -> TComptimeValue {
@@ -2187,7 +2198,7 @@ sema_comptime_reflection_builtin_type_info: fn(graph: SemaRegistrationGraph, nam
         name,
         name,
         "",
-        name,
+        sema_comptime_reflection_type_id_record(name, name),
         "builtin",
         layout,
         Span{start: 0, end: 0},
@@ -2379,7 +2390,7 @@ sema_comptime_reflection_type_info_fields: fn(
     name: String,
     path: String,
     module_path: String,
-    identity: String,
+    identity: TComptimeValue,
     kind: String,
     layout: TComptimeValue,
     span: Span,
@@ -2425,7 +2436,7 @@ sema_comptime_reflection_type_info_fields: fn(
     if kind == "distinct" -> values.push(SemaComptimeReflectionField{name: "path", value: TComptimeValue.String{value: path}})
     values.extend([SemaComptimeReflectionField]{
         {name: "module", value: TComptimeValue.String{value: module_path}},
-        {name: "identity", value: TComptimeValue.String{value: identity}},
+        {name: "identity", value: identity},
         {name: "kind", value: TComptimeValue.String{value: kind}},
     })
     sema_comptime_reflection_struct("TypeInfo", values)
@@ -2478,7 +2489,7 @@ sema_comptime_reflection_struct_type_info: fn(
         definition.name,
         "{registered_module.module_path}.{definition.name}",
         registered_module.module_path,
-        identity,
+        sema_comptime_reflection_declared_type_id(registration, caller, definition.name, bindings),
         "struct",
         sema_comptime_reflection_struct_layout(registration, caller, definition, engine, layout_facts),
         definition.name_span,
@@ -2543,7 +2554,7 @@ sema_comptime_reflection_enum_type_info: fn(
         definition.name,
         "{registered_module.module_path}.{definition.name}",
         registered_module.module_path,
-        identity,
+        sema_comptime_reflection_declared_type_id(registration, caller, definition.name, bindings),
         "enum",
         sema_comptime_reflection_enum_layout(registration, caller, definition, engine, module_text(registration.module_table, registered_module.module_identity)),
         definition.name_span,
@@ -2580,7 +2591,7 @@ sema_comptime_reflection_distinct_type_info: fn(
         definition.name,
         "{registered_module.module_path}.{definition.name}",
         registered_module.module_path,
-        identity,
+        sema_comptime_reflection_declared_type_id(registration, caller, definition.name, [SemaInferenceBinding]{}),
         "distinct",
         sema_comptime_reflection_distinct_layout(engine),
         definition.name_span,
