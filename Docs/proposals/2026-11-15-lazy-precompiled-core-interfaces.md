@@ -784,6 +784,53 @@ text. So step B is required:
   they do today for a text-checked generic body. B1's proof compares
   them with today's results (section 10).
 
+### 4.1 Bodies that stay on text after A2
+
+A2's proof is that `parse.core_input_bytes`, summed over the load's
+waves, is 0 (section 10). Until its B step lands, each row of the table
+above still checks its bodies from text, and every row of B5 does so until
+B5. After A2, such a body is found in one way, and none of it parses a
+wave.
+
+- **The declaration comes from the interface.** Its name, signature,
+  owner and full byte span are an interface row (3.1). Registration,
+  reach and seal facts read that row, never text.
+- **The body comes from its own declaration's text, parsed alone.** For
+  each reached declaration whose body sema checks from text, the load copies
+  the unit's embedded text and blanks every byte outside that declaration's
+  span. Inside a type or impl block, it also blanks every other member's
+  body. Then it parses the copy. The parsed item supplies the body, and the
+  interface row stays the declaration. The bytes keep their offsets, so
+  spans, line tables and diagnostics are the unit's.
+- **The path is today's path, minus the head parse.** The two halves are
+  already code. A held top-level declaration is parsed alone, after reach,
+  by `jet_driver_reach_parse_held` (`CoreReach.jet`). A lazy module's kept
+  bodies parse back with every other body still blank, through
+  `jet_driver_core_restore_bodies` (`CoreInterface.jet`). A2 removes only
+  the head parse that comes before them. It also limits the parse-back to
+  the bodies sema checks from text. A body that the seal stands in for
+  binds to `jet_core.o` and is never parsed.
+- **It is counted where it can be seen.** Each such body counts once under
+  `core.bodies_from_text.<category>` when sema checks it. The bytes it parses
+  count under `core.text_bytes_read` (3.5), not under
+  `parse.core_input_bytes`. A2's 0 is therefore not a claim that no Core
+  text is read. It says that no declaration comes from text, and that the
+  only Core text read is the text of these counted bodies. Each B step
+  brings its categories to 0. After B5 a clean compile reads 0 bytes, which
+  is c22's claim (section 10).
+- **`jet build` at `-O1` and `-O2` takes this path for every reached body
+  until B5.** The census row `core-text-build` builds and runs a Core-using
+  program at both levels and requires `core.bodies_from_text` above 0. So a
+  B step that breaks the path fails that row at once.
+
+The case
+`tests/cases/core/a_core_body_kept_on_text_parses_back_alone_and_runs.case`
+pins the path. In it, a DateTime's display, a lowering root kept on text
+until B3, is checked from text and runs. `core.time` loads lazily, its held
+`from_timestamp` parses alone, and its kept bodies parse back. When A2
+lands, its proof adds that the same run's waves report 0 for
+`parse.core_input_bytes`.
+
 ## 5. Toolchain trees (G1, G20, G21, H18, H19, H20, H21)
 
 **Ruled (Main, on #6328): T1.** A compile uses a toolchain tree only when
@@ -1180,6 +1227,9 @@ value.
   corpus. It is 11,256 B for hello today (1.3).
 - The hello budget gate of A2 (6.1a): the 1.43 ms parse share is gone, and
   no other span grows.
+- Bodies that stay on text (4.1):
+  - the kept-body case runs with 0 `parse.core_input_bytes` in its waves;
+  - the census row `core-text-build` passes at `-O1` and `-O2`.
 - 6.1(e) and (f).
 - The c22 strace of hello, outside a checkout and inside one.
 - The request-builder proofs (3.7).
