@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106058,
+    "rev": 106061,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60544,6 +60544,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "p156 regression located (Main, 2026-11-15 02:09): jet check --trace InspectBuild.jet, p155 vs p156: comptime.closure SEMA_PRELUDE_MARKER_DECLS 0.00 -> 1.48 s; comptime.build and load of CORE_DECLARATIONS/CORE_BARE_SOURCE_KEYS/EFFECT... +0.34 s; comptime 1.83 -> 3.74 s. Cause: G5 a568b242df (the marker rows as a #run constant whose closure walks the parser). Fix owner PrecompiledCore-4."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "p156 gate (dev aa5f5f1bba, 2026-11-15 01:57): compiler build wall 37.82 s (p155 37.32), cpu 141.9 s (+15.5%), parallel 6.0, peak 5541 MiB (p155 5924, -6.5%), instructions -0.8%. Regression: the main package's comptime phase went 2.04 -> 4.31 s with no growth in its traced sub-phases. InspectBuild check, A/B median of 3: p155 9.82 s / 4069 MiB, p156 11.25 s / 4089 MiB (+14.6% wall). Suspect: G5 a568b242df (Prelude rows as #run constants built by the real parser); owner PrecompiledCore-4, top item."
         },
         {
@@ -60970,7 +60975,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T07:03:52.961Z",
+      "updated": "2026-11-15T07:09:55.917Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -102104,6 +102109,16 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c11 kernel cells on p156 (dev aa5f5f1bba, 2026-11-15 02:09), Jet release vs the asm reference, cycles ratio (code bytes ratio): compare 3.18x (1.04x), was 11.13x on p152 (list bytes-equal af277c2051); allocfree 3.32x (28.6x), was 8.12x (Core half of the raw-heap fast path 8375d732e6; the runtime half reaches programs from p157); resize 1.97x (13.3x), was 2.14x; mapping 6.03x (27.75x), was 5.88x (the window thread stacks landed 4b16946457 after this compiler); rawword 1.35x (0.80x); atomics 0.99x (1.56x). All but atomics still fail cycles."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Finding (CardCloser-3, 2026-11-15): tests/cases/runtime_fragments/*.case copy Compiler/JetRuntime/package.jet, so jet doc fails with E3113 over the repository; raw/package.jet works. Outside the kernel criteria; recorded here so it is not lost."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c11 mapping (CardCloser-3 profile on p152; 400 cycles and 1080 instructions per pass): ~35% is the boxed Result<Region> return (a 40-byte heap box plus a store-forward stall), ~17% the two lock cmpxchg on the window stack, ~10% the region record's heap alloc/free, and the rest page-map work plus madvise. Ruling (Main, under the AGENTS.md performance-gate rule that the reference includes the smallest hand-written implementation of each feature the Jet program delivers): the mapping asm reference registers the region in a minimal page map. Work order: window stack without locked cmpxchg; region record from a per-thread free list; reference update; then general Result lowering (a two-word payload returns in registers) split into items of an hour or less."
         },
         {
@@ -102303,7 +102318,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T06:54:35.794Z",
+      "updated": "2026-11-15T07:09:55.027Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -218424,6 +218439,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T07:09:55.917Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T07:09:55.027Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T07:04:50.809Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T07:04:19.081Z",
       "by": "Main",
