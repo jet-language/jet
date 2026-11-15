@@ -86,7 +86,9 @@ JetCLIDap: struct {
                 if self.launched -> return
                 self.launched = true
                 if self.start(session) == {
-                    .Ok(stop) -> self.report(session, stop, "entry")
+                    // Only `stopOnEntry` stops for the entry; otherwise the
+                    // first stop is a breakpoint's, or a pause.
+                    .Ok(stop) -> self.report(session, stop, if self.stop_on_entry -> "entry" else -> "pause")
                     .Err(failure) -> self.stopped_by(failure)
                 }
             }
@@ -284,7 +286,7 @@ JetCLIDap: struct {
         stop: settled.stop
         if stop.kind == {
             .Paused -> {
-                hit: if reason == "entry" -> Int?{None} else -> settled.hit
+                hit: settled.hit
                 why: if hit != None -> "breakpoint" else -> reason
                 ids: if hit == .Val(number) -> ",\"hitBreakpointIds\":[{number}]" else -> ""
                 self.event("stopped", "{{\"reason\":\"{why}\",\"threadId\":1,\"allThreadsStopped\":true{ids}}}")

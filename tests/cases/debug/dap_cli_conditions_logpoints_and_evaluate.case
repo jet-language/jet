@@ -19,6 +19,7 @@ recv dap until $.request_seq = 3 timeout 30s every 100ms
 json: stdout doc $.body.breakpoints[0].verified = true
 json: stdout doc $.body.breakpoints[1].verified = true
 json: stdout doc $.body.breakpoints[2].verified = false
+stdout: ~ "is not a Jet expression" # the malformed condition says why it was not placed
 send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
 recv dap until $.event = "stopped" timeout 30s every 100ms
 json: stdout doc $.body.reason = "breakpoint"
@@ -44,12 +45,11 @@ send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\
 recv dap until $.request_seq = 9 timeout 30s every 100ms
 json: stdout doc $.success = false
 send dap: "{\"seq\":10,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
-recv dap until $.event = "terminated" timeout 30s every 100ms
+recv dap collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
+stdout: ~ "\"category\":\"console\",\"output\":\"total is 10" # the logpoint logged with the local filled in
+stdout: ~ "\"output\":\"10" # and the program ran on to its end
+stdout: ~ "\"event\":\"exited\"" # and exited
 send dap: "{\"seq\":11,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
 recv dap until $.request_seq = 11 timeout 30s every 100ms
 close dap
 exit: 0
-stdout: ~ "\"category\":\"console\",\"output\":\"total is 10" # the logpoint logged with the local filled in
-stdout: ~ "\"output\":\"10" # and the program ran on to its end
-stdout: ~ "\"event\":\"exited\"" # and exited
-stdout: ~ "is not a Jet expression" # the malformed condition says why it was not placed

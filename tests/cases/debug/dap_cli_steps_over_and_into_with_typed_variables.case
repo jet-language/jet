@@ -33,6 +33,7 @@ recv dap until $.request_seq = 7 timeout 30s every 100ms
 json: stdout doc $.success = true
 json: stdout doc $.body.variables[?name="a"][0].value = "5"
 json: stdout doc $.body.variables[?name="a"][0].type = "Int"
+stdout: !~ "__jet_" # no compiler-internal local leaks into the frame's variables
 send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"stepIn\",\"arguments\":{\"threadId\":1}}"
 recv dap until $.request_seq = 8 timeout 30s every 100ms
 send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
@@ -52,12 +53,12 @@ send dap: "{\"seq\":13,\"type\":\"request\",\"command\":\"stackTrace\",\"argumen
 recv dap until $.request_seq = 13 timeout 30s every 100ms
 json: stdout doc $.body.stackFrames[0].name = "run"
 send dap: "{\"seq\":14,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
-recv dap until $.event = "terminated" timeout 30s every 100ms
+recv dap collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
+stdout: ~ "\"event\":\"exited\"" # the debuggee ran to its end
+stdout: ~ "\"output\":\"10" # the program's own print reaches the client as output
+stdout: !~ "__jet_" # nor into the run's output and its end
 send dap: "{\"seq\":15,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
 recv dap until $.request_seq = 15 timeout 30s every 100ms
 json: stdout doc $.success = true
 close dap
 exit: 0
-stdout: ~ "\"event\":\"exited\"" # the debuggee ran to its end
-stdout: ~ "\"output\":\"10" # the program's own print reaches the client as output
-stdout: !~ "__jet_" # no compiler-internal name leaks into the session
