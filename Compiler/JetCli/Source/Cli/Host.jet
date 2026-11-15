@@ -1417,8 +1417,11 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     // Each literal plugin artifact becomes this program's own code (JetPlugin).
     jet_plugin_link(built.program, root, jet_cli_plugin_needs(result))
     // A program whose stops need no process root owns its main (JetIR
-    // EntryOwned.jet): its stop points go before Lint and the optimizer.
-    if harness == None -> _ := ir_entry_own(built.program)
+    // EntryOwned.jet): its stop points go before Lint and the optimizer. A
+    // web build keeps them: its loader always runs the entry under the
+    // runtime partition's root (jet_rt_main), so a stop with no stop edge
+    // after it would reach the trap that follows it.
+    if harness == None && build_options_value(options, "os") != "web" -> _ := ir_entry_own(built.program)
     // A runtime call the runtime does not export would fail the whole link;
     // its function fails here instead, like any construct the builder rejects.
     if runtime.failure == .Val(failure) -> return JetCLINativeProgram{program: ir_module_new(), failure: Val(failure)}
