@@ -237,9 +237,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1413,
+  "total": 1414,
   "counts": {
-    "Compiler": 646,
+    "Compiler": 647,
     "Core": 178,
     "Docs": 10,
     "Examples": 42,
@@ -1728,252 +1728,259 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1809,
+      "line": 1807,
       "column": 5,
       "reason": "reads the stack pointer register only; nothing is dereferenced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2053,
+      "line": 2051,
       "column": 13,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2097,
+      "line": 2098,
+      "column": 13,
+      "reason": "as in jet_rt_alloc: GS:0 is the attached thread's TCB or the readable zero word; the aligned mode word is read atomically on x86; row is this thread's private cache row and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 2135,
       "column": 13,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2148,
+      "line": 2186,
       "column": 17,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2181,
+      "line": 2219,
       "column": 21,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2222,
+      "line": 2260,
       "column": 13,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2261,
+      "line": 2299,
       "column": 17,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2308,
+      "line": 2346,
       "column": 13,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose two cached words are read before the payload header overwrites them; an align-1 payload at block + 16 needs no alignment"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2336,
+      "line": 2374,
       "column": 13,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the caller frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2374,
+      "line": 2412,
       "column": 9,
       "reason": "row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2390,
+      "line": 2428,
       "column": 5,
       "reason": "the lowering returns this still-live direct allocation with exactly its original size and alignment"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2402,
+      "line": 2440,
       "column": 5,
       "reason": "the caller's live payload header names its slab, whose arena word is fixed when the slab is created"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2407,
+      "line": 2445,
       "column": 5,
       "reason": "the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under its arena's lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2462,
+      "line": 2500,
       "column": 5,
       "reason": "the fresh state page and stub page are private to initialization, which precedes every allocation; the stub page becomes read+execute before any call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2469,
+      "line": 2507,
       "column": 5,
       "reason": "checked-heap start runs during runtime-init, before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2483,
+      "line": 2521,
       "column": 5,
       "reason": "the checked-mode stub only copies rbp to rax and returns; a missing stub leaves no chain"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2491,
+      "line": 2529,
       "column": 13,
       "reason": "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2497,
+      "line": 2535,
       "column": 9,
       "reason": "out lends count writable words: a checked block's chain words or a trap's scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2511,
+      "line": 2549,
       "column": 5,
       "reason": "block is this caller's fresh heap block of prefix + size + 8 bytes; every word written lies in block .. pointer + size + 8"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2535,
+      "line": 2573,
       "column": 5,
       "reason": "a checked payload's canary word precedes it; the quarantine lock orders racing frees of one block"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2544,
+      "line": 2582,
       "column": 5,
       "reason": "the live canary proves pointer is a checked payload whose header and tail this free now owns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2557,
+      "line": 2595,
       "column": 5,
       "reason": "the quarantine lock owns the ring and its counters; every parked block is freed and owned by the quarantine"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2592,
+      "line": 2630,
       "column": 5,
       "reason": "aligned whole-word stores; each checked take or give loads its observer word once"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2601,
+      "line": 2639,
       "column": 5,
       "reason": "the freeing caller owns size payload bytes at pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2616,
+      "line": 2654,
       "column": 5,
       "reason": "pointer is a parked checked payload owned by the quarantine; its header, payload and tail stay mapped until retired"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2639,
+      "line": 2677,
       "column": 5,
       "reason": "the freed canary proved the checked header"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2648,
+      "line": 2686,
       "column": 5,
       "reason": "pointer is an inspected parked checked payload; its header still names the enclosing block and layout"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2675,
+      "line": 2713,
       "column": 5,
       "reason": "the quarantine lock owns the ring and its counters"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2691,
+      "line": 2729,
       "column": 5,
       "reason": "data lends length readable bytes; write retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2727,
+      "line": 2765,
       "column": 5,
       "reason": "path is a fresh private page; the image is mapped read-only and only read"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2751,
+      "line": 2789,
       "column": 5,
       "reason": "image is a read-only private mapping of this executable's ELF64 file; its program header table lies inside it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2780,
+      "line": 2818,
       "column": 9,
       "reason": "image is a read-only private mapping of this executable's ELF64 file; every offset read comes from its own section and symbol tables"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2823,
+      "line": 2861,
       "column": 9,
       "reason": "words lends count readable chain words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2867,
+      "line": 2905,
       "column": 9,
       "reason": "the live canary proved the checked header"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2913,
+      "line": 2951,
       "column": 5,
       "reason": "remaining is in 1..=8, so write borrows only the initialized stack word; a short write advances within it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2970,
+      "line": 3008,
       "column": 5,
       "reason": "the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed"
     },
@@ -10147,14 +10154,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 646 |
+| Compiler | 647 |
 | Core | 178 |
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 11 |
 | tests | 518 |
-| **total** | **1413** |
+| **total** | **1414** |
 
 ### Regions
 
@@ -10371,42 +10378,43 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1509:5 | "the private raw-heap node is fully initialized before linking under the policy/tracker lock" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1522:5 | "the process-lifetime tracker count is an aligned x86 word; a zero count avoids any lookup or lock" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1529:5 | "the policy/tracker lock exclusively owns all side-table links and count" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1809:5 | "reads the stack pointer register only; nothing is dereferenced" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2053:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align &lt;= 8 payload at block + header is aligned because blocks start 32-aligned" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2097:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2148:17 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2181:21 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2222:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align &lt;= 8 payload at block + header is aligned because blocks start 32-aligned" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2261:17 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2308:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose two cached words are read before the payload header overwrites them; an align-1 payload at block + 16 needs no alignment" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2336:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the caller frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2374:9 | "row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2390:5 | "the lowering returns this still-live direct allocation with exactly its original size and alignment" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2402:5 | "the caller's live payload header names its slab, whose arena word is fixed when the slab is created" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2407:5 | "the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under its arena's lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2462:5 | "the fresh state page and stub page are private to initialization, which precedes every allocation; the stub page becomes read+execute before any call" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2469:5 | "checked-heap start runs during runtime-init, before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2483:5 | "the checked-mode stub only copies rbp to rax and returns; a missing stub leaves no chain" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2491:13 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2497:9 | "out lends count writable words: a checked block's chain words or a trap's scratch page" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2511:5 | "block is this caller's fresh heap block of prefix + size + 8 bytes; every word written lies in block .. pointer + size + 8" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2535:5 | "a checked payload's canary word precedes it; the quarantine lock orders racing frees of one block" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2544:5 | "the live canary proves pointer is a checked payload whose header and tail this free now owns" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2557:5 | "the quarantine lock owns the ring and its counters; every parked block is freed and owned by the quarantine" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2592:5 | "aligned whole-word stores; each checked take or give loads its observer word once" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2601:5 | "the freeing caller owns size payload bytes at pointer" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2616:5 | "pointer is a parked checked payload owned by the quarantine; its header, payload and tail stay mapped until retired" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2639:5 | "the freed canary proved the checked header" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2648:5 | "pointer is an inspected parked checked payload; its header still names the enclosing block and layout" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2675:5 | "the quarantine lock owns the ring and its counters" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2691:5 | "data lends length readable bytes; write retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2727:5 | "path is a fresh private page; the image is mapped read-only and only read" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2751:5 | "image is a read-only private mapping of this executable's ELF64 file; its program header table lies inside it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2780:9 | "image is a read-only private mapping of this executable's ELF64 file; every offset read comes from its own section and symbol tables" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2823:9 | "words lends count readable chain words" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2867:9 | "the live canary proved the checked header" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2913:5 | "remaining is in 1..=8, so write borrows only the initialized stack word; a short write advances within it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2970:5 | "the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1807:5 | "reads the stack pointer register only; nothing is dereferenced" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2051:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align &lt;= 8 payload at block + header is aligned because blocks start 32-aligned" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2098:13 | "as in jet_rt_alloc: GS:0 is the attached thread's TCB or the readable zero word; the aligned mode word is read atomically on x86; row is this thread's private cache row and block its cached head, whose two cached words are read before the payload header overwrites them; an align &lt;= 8 payload at block + header is aligned because blocks start 32-aligned" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2135:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2186:17 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2219:21 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2260:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align &lt;= 8 payload at block + header is aligned because blocks start 32-aligned" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2299:17 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2346:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose two cached words are read before the payload header overwrites them; an align-1 payload at block + 16 needs no alignment" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2374:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the caller frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2412:9 | "row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2428:5 | "the lowering returns this still-live direct allocation with exactly its original size and alignment" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2440:5 | "the caller's live payload header names its slab, whose arena word is fixed when the slab is created" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2445:5 | "the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under its arena's lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2500:5 | "the fresh state page and stub page are private to initialization, which precedes every allocation; the stub page becomes read+execute before any call" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2507:5 | "checked-heap start runs during runtime-init, before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2521:5 | "the checked-mode stub only copies rbp to rax and returns; a missing stub leaves no chain" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2529:13 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2535:9 | "out lends count writable words: a checked block's chain words or a trap's scratch page" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2549:5 | "block is this caller's fresh heap block of prefix + size + 8 bytes; every word written lies in block .. pointer + size + 8" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2573:5 | "a checked payload's canary word precedes it; the quarantine lock orders racing frees of one block" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2582:5 | "the live canary proves pointer is a checked payload whose header and tail this free now owns" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2595:5 | "the quarantine lock owns the ring and its counters; every parked block is freed and owned by the quarantine" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2630:5 | "aligned whole-word stores; each checked take or give loads its observer word once" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2639:5 | "the freeing caller owns size payload bytes at pointer" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2654:5 | "pointer is a parked checked payload owned by the quarantine; its header, payload and tail stay mapped until retired" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2677:5 | "the freed canary proved the checked header" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2686:5 | "pointer is an inspected parked checked payload; its header still names the enclosing block and layout" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2713:5 | "the quarantine lock owns the ring and its counters" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2729:5 | "data lends length readable bytes; write retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2765:5 | "path is a fresh private page; the image is mapped read-only and only read" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2789:5 | "image is a read-only private mapping of this executable's ELF64 file; its program header table lies inside it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2818:9 | "image is a read-only private mapping of this executable's ELF64 file; every offset read comes from its own section and symbol tables" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2861:9 | "words lends count readable chain words" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2905:9 | "the live canary proved the checked header" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2951:5 | "remaining is in 1..=8, so write borrows only the initialized stack word; a short write advances within it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 3008:5 | "the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed" |
 | Compiler | Compiler/JetRuntime/Source/Authority.jet | 331:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CAbiSession.jet | 21:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CAbiSession.jet | 27:5 | "runtime-init runs before any other thread exists" |

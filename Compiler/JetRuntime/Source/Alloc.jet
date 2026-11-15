@@ -1570,8 +1570,6 @@ alloc_try: fn(size: I64, align: I64) -> I64 {
     alloc_try_reserved(size, align)
 }
 
-#Export(c) jet_rt_alloc_try: fn(size: I64, align: I64) -> I64 { alloc_try(size, align) }
-
 // User allocators: a `#Context(allocator: a)` block (Context.jet
 // jet_ctx_push_allocator) serves the values of align <= 8 its code makes,
 // in the functions it calls, from `a` until the block ends, outside checked
@@ -2015,14 +2013,14 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
     alloc_grow_try(old, place, size, I64{8})
 }
 
-// The allocation fast path (#5476): jet_rt_alloc and jet_rt_free serve a
-// small request of a plainly valid layout (size below alloc_class_limit,
-// align 1, 2, 4 or 8) on the calling thread's cache row, calling nothing
-// but an empty row's refill (the runtime is not inlined, and a call costs
-// more than the work): the block, header and count word alloc_try_validated
-// writes, and the push alloc_free_validated makes. The class row (0..7,
-// class 32 << row) is alloc_class's comparisons spelled out. The checks
-// that stay on it:
+// The allocation fast path (#5476): jet_rt_alloc, jet_rt_alloc_try and
+// jet_rt_free serve a small request of a plainly valid layout (size below
+// alloc_class_limit, align 1, 2, 4 or 8) on the calling thread's cache row,
+// calling nothing but an empty row's refill (the runtime is not inlined,
+// and a call costs more than the work): the block, header and count word
+// alloc_try_validated writes, and the push alloc_free_validated makes. The
+// class row (0..7, class 32 << row) is alloc_class's comparisons spelled
+// out. The checks that stay on it:
 // - the layout: a size and power-of-two align in the range, so the full
 //   path's alloc_layout_valid accepts it and its trap is never skipped;
 // - checked mode: alloc_class_limit 0 admits no size, so every request takes
@@ -2077,6 +2075,46 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
     pointer: alloc_try_reserved(size, align)
     if (pointer == I64{0}) { alloc_out_of_memory(if (size == I64{0}) -> I64{1} else -> size) }
     pointer
+}
+
+// The fallible entry (core.mem.alloc_raw, a list growth that may be
+// refused) takes jet_rt_alloc's fast path while no allocation fault is armed
+// (fault_check_code 0: an armed schedule sees every request); whatever the
+// path does not serve takes alloc_try, which answers 0 where jet_rt_alloc
+// aborts.
+#Export(c) jet_rt_alloc_try: fn(size: I64, align: I64) -> I64 {
+    if (fault_check_code == I64{0} && size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0}) {
+        header: if (align == I64{8}) -> I64{24} else -> I64{16}
+        needed: wrapping((if (size == I64{0}) -> I64{1} else -> size) + header + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})))
+        index: if {
+            needed <= (I64{64}) -> if (needed <= I64{32}) -> I64{0} else -> I64{1}
+            needed <= (I64{256}) -> if (needed <= I64{128}) -> I64{2} else -> I64{3}
+            needed <= (I64{1024}) -> if (needed <= I64{512}) -> I64{4} else -> I64{5}
+            needed <= (I64{2048}) -> I64{6}
+            needed <= (I64{4096}) -> I64{7}
+            else -> I64{-1}
+        }
+        if (index >= I64{0}) {
+            #Unsafe("as in jet_rt_alloc: GS:0 is the attached thread's TCB or the readable zero word; the aligned mode word is read atomically on x86; row is this thread's private cache row and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned") {
+                base: os_tls_base_i64()
+                if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{144})) == I64{0}) {
+                    row: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
+                    block := os_load_i64(row)
+                    if (block == I64{0} && alloc_cache_refill(row, I64{32} << index)) { block = os_load_i64(row) }
+                    if (block != I64{0}) {
+                        pointer: wrapping(block + header)
+                        os_store_i64(row, os_load_i64(block))
+                        os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - I64{1}))
+                        os_store_i64(wrapping(pointer - I64{16}), os_load_i64(wrapping(block + I64{8})))
+                        os_store_i64(wrapping(pointer - I64{8}), block)
+                        if (align == I64{8}) { os_store_i64(block, I64{1}) }
+                        return pointer
+                    }
+                }
+            }
+        }
+    }
+    alloc_try(size, align)
 }
 
 #Export(c) jet_rt_free: fn(pointer: I64, size: I64, align: I64) {
