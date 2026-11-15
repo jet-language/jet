@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6861,
-    "rev": 102993,
+    "rev": 103000,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -51849,6 +51849,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T01:51:34.591Z"
+        },
+        {
+          "n": 71,
+          "text": "JetLSP reads declaration visibility from Sema facts, never from source text: the import quick-fix fires for a public function in another module, and signature preview reports external callers for public functions and not for functions inside a priv module. Proof: JetLSP tests whose fixtures contain no `pub` keyword (`jet test Compiler/JetLSP`).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:33:56.752Z"
         }
       ],
       "refs": [],
@@ -51861,12 +51870,12 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-09T18:06:22.233Z",
-      "updated": "2026-11-14T01:51:24.342Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:33:56.752Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 70
+      "criteriaLastN": 71
     },
     {
       "id": "c01sunrb",
@@ -53425,6 +53434,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T20:44:53.639Z"
+        },
+        {
+          "n": 2,
+          "text": "Compile-time host access (windows, processes, network, foreign and DLL calls; audit rows A05, A06) is a Meta expert leaf: root-only, not held by default or by an ancestor, grantable per dependency through `authority.grants`; without it the call is refused with a registered error, and a family or one leaf can be denied as with Net (D-JAI-EXPERT1=A). Proof: `jet test Compiler --profile ui --filter meta_comptime_host_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:34:02.976Z"
         }
       ],
       "refs": [
@@ -53442,11 +53460,12 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:40.464Z",
-      "updated": "2026-11-09T20:48:19.060Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:34:02.976Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
-      ]
+      ],
+      "criteriaLastN": 2
     },
     {
       "id": "c0jlyc69",
@@ -73996,6 +74015,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-12T21:39:27.234Z"
+        },
+        {
+          "n": 39,
+          "text": "`ffi.Bool<U32>` in core.ffi holds a C API's sized true-or-false field (VkBool32, Win32 BOOL) with exact conversions to and from Bool (D-PRIM-BOOLSIZE1=A); misuse is a registered error. Proof: `jet test Compiler --profile golden --filter FFI/SizedBool` on o0, o1 and o2 and `jet test Compiler --profile ui --filter ffi_sized_bool_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:33:57.872Z"
+        },
+        {
+          "n": 40,
+          "text": "`ffi.USize` and `ffi.ISize` in core.ffi are sized to the target, so a C binding is right on 32-bit and 64-bit targets (D-PRIM-USIZE1=A); a lossy conversion is a registered error. Reconcile with #4524 c4 (core.mem.CSize, D-USIZE-TARGET1) first. Proof: `jet test Compiler --profile golden --filter FFI/PointerSizedInts` on o0, o1 and o2 and `jet test Compiler --profile ui --filter ffi_usize_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:33:59.062Z"
+        },
+        {
+          "n": 41,
+          "text": "C strings: once an owner ballot decides them, the chosen type has a registry row, an example with golden output on every tier and a misuse UI snapshot, or the spec lists the refusal with its reason and the Jet mechanism that covers the use. Proof: `jet test Compiler --profile golden --filter FFI/CStrings`, or the spec row and `jet test tests/guards --filter core_declarations`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:34:00.454Z"
         }
       ],
       "refs": [
@@ -74008,9 +74054,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:48.265Z",
-      "updated": "2026-11-13T02:22:26.310Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 38
+      "updated": "2026-11-15T02:34:00.454Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 41
     },
     {
       "id": "c0ov7lce",
@@ -84501,6 +84547,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-06T19:42:47.719Z"
+        },
+        {
+          "n": 4,
+          "text": "A guard case fails on any `::` in UI, golden or case expected output, and in a JetCli or JetSemIndex string literal; only foreign-language subjects such as C++ and Rust FFI snippets are exempt. Semindex definition identities, inspect's callable identity, live value ids and expand's static paths use dotted paths with one kind-prefix scheme. Proof: `jet test tests/guards --filter no_double_colon_output`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:33:55.354Z"
         }
       ],
       "refs": [],
@@ -84515,8 +84570,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:42:47.719Z",
-      "updated": "2026-11-14T01:52:43.025Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T02:33:55.354Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 4
     },
     {
       "id": "c0bbj6h3",
@@ -98976,6 +99032,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:10:40.964Z"
+        },
+        {
+          "n": 12,
+          "text": "A type name is a value of type Type wherever a Type is expected: `counts[Position] = 2` keys a map by type, `if t == { Position -> … }` switches on it, `Type{Rock}` builds one explicitly and `type_of(p)` gives a name's static type; Box<Int> and Box<String> are different keys (D-PRIM-TYPEKEY2=A, amending D-PRIM-TYPEKEY1=A). Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/TypeValues` on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:34:01.775Z"
         }
       ],
       "refs": [],
@@ -98990,8 +99055,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:40.964Z",
-      "updated": "2026-11-15T02:18:22.553Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T02:34:01.775Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 12
     },
     {
       "id": "c0r6d7ja",
@@ -205785,6 +205851,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:34:02.976Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c04pd50v",
+      "note": "#2 Compile-time host access (windows, processes, network, forei"
+    },
+    {
+      "at": "2026-11-15T02:34:01.775Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0apk7x9",
+      "note": "#12 A type name is a value of type Type wherever a Type is expec"
+    },
+    {
+      "at": "2026-11-15T02:34:00.454Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#41 C strings: once an owner ballot decides them, the chosen typ"
+    },
+    {
+      "at": "2026-11-15T02:33:59.062Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#40 `ffi.USize` and `ffi.ISize` in core.ffi are sized to the tar"
+    },
+    {
+      "at": "2026-11-15T02:33:57.872Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#39 `ffi.Bool<U32>` in core.ffi holds a C API's sized true-or-fa"
+    },
+    {
+      "at": "2026-11-15T02:33:56.752Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c03183d1",
+      "note": "#71 JetLSP reads declaration visibility from Sema facts, never f"
+    },
+    {
+      "at": "2026-11-15T02:33:55.354Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0a8z3u0",
+      "note": "#4 A guard case fails on any `::` in UI, golden or case expecte"
+    },
     {
       "at": "2026-11-15T02:31:22.822Z",
       "by": "TowerKeeper-1",
