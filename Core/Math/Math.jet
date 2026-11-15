@@ -87,7 +87,7 @@ acos: fn(n: Float) -> Float Never! {
             return NAN
         }
         t: Float{2.0} - Float{2.0} * fabs(n)
-        jd: __round_even(t * Float{32.0})
+        jd: round_ties_even(t * Float{32.0})
         z: copysign(sqrt(t), n)
         zl: fma(z, z, -t) * ((Float{-0.5} / t) * z)
         tj: Float{0.25} * t - jd * Float{0.0078125}
@@ -109,7 +109,7 @@ acos: fn(n: Float) -> Float Never! {
         return lb
     }
     // pi/2 - asin(x)
-    jd: __round_even(n * n * Float{128.0})
+    jd: round_ties_even(n * n * Float{128.0})
     t: fma(n, n, Float{-0.0078125} * jd)
     r: asin_core(jd, t, -n, Float{0.0}, f0h, f0l, (-n * t) * Float{3.3393426912553537e-16})
     if r.lb != r.ub -> return acos_refine(n, r.lb)
@@ -233,7 +233,7 @@ asin: fn(n: Float) -> Float Never! {
             return NAN
         }
         t: Float{2.0} - Float{2.0} * fabs(n)
-        jd: __round_even(t * Float{32.0})
+        jd: round_ties_even(t * Float{32.0})
         z: copysign(sqrt(t), -n)
         zl: fma(z, z, -t) * ((Float{-0.5} / t) * z)
         tj: Float{0.25} * t - jd * Float{0.0078125}
@@ -243,7 +243,7 @@ asin: fn(n: Float) -> Float Never! {
     }
     // |x| < 2.149119332890821e-8: x rounds as asin(x) does
     if ax < 0x7CAE_26E8_9224_7DEC -> return fma(Float{2.7755575615628914e-17}, n, n)
-    jd: __round_even(n * n * Float{128.0})
+    jd: round_ties_even(n * n * Float{128.0})
     t: fma(n, n, Float{-0.0078125} * jd)
     r: asin_core(jd, t, n, Float{0.0}, Float{0.0}, Float{0.0}, fabs(n * t) * Float{3.2526065174565133e-16})
     if r.lb != r.ub -> return asin_refine(n, r.lb)
@@ -1392,7 +1392,7 @@ exp: fn(n: Float) -> Float Never! {
         if bits >= 0 -> return INFINITY
         if ax >= 0x4087_4910_D52D_3052 -> return 0.0
     }
-    t: __round_even(n * Float{5909.278887481194})
+    t: round_ties_even(n * Float{5909.278887481194})
     jt: whole_i64(t)
     i0: Int{(jt >> 6).bit_and(0x3F)}
     i1: Int{jt.bit_and(0x3F)}
@@ -1441,7 +1441,7 @@ exp2: fn(n: Float) -> Float Never! {
     if ax <= 0x3C97_1547_652B_82FE -> return Float{1.0} + copysign(Float{5.551115123125783e-17}, n)
     whole: core.math.floor(n) == n
     sx: Float{4096.0} * n
-    fx: __round_even(sx)
+    fx: round_ties_even(sx)
     z: sx - fx
     z2: z * z
     k: whole_i64(fx)
@@ -1487,14 +1487,14 @@ exp10: fn(n: Float) -> Float Never! {
         if bits >= 0 -> return INFINITY
         if ax > 0x4074_39B7_46E3_6B52 -> return 0.0
     }
-    if (bits.bit_and(0xFFFF_FFFF_FFFF) == 0 && (ax >> 48) <= 0x4036 && bits >= 0 && __round_even(n) == n) {
+    if (bits.bit_and(0xFFFF_FFFF_FFFF) == 0 && (ax >> 48) <= 0x4036 && bits >= 0 && round_ties_even(n) == n) {
         r := Float{1.0}
         loop _ in 0..<(checked(Int{n}) ?? 0) { r = r * Float{10.0} }
         return r
     }
     // 10^x rounds to 1 for |x| <= 2^-55.2
     if ax <= 0x3C7B_CB7B_1526_E50E -> return Float{1.0} + n
-    t: __round_even(Float{13606.617476658635} * n)
+    t: round_ties_even(Float{13606.617476658635} * n)
     jt: whole_i64(t)
     i1: Int{jt.bit_and(0x3F)}
     i0: Int{(jt >> 6).bit_and(0x3F)}
@@ -1536,7 +1536,7 @@ exp_m1: fn(n: Float) -> Float Never! {
         }
         // |x| < 1/4: e^(i/128) - 1 from __EXPM1CR_TZ times e^(z/128)
         sx: Float{128.0} * n
-        fx: __round_even(sx)
+        fx: round_ties_even(sx)
         z: sx - fx
         z2: z * z
         i: Int{whole_i64(fx)} + 32
@@ -1567,7 +1567,7 @@ exp_m1: fn(n: Float) -> Float Never! {
         if ax >= 0x4042_B708_8723_20E2 -> return -1.0
         return ((Float{36.7368005696771} + n) + Float{6.739832990259606e-16}) * Float{8.008566259537294e-17} - Float{0.9999999999999999}
     }
-    t: __round_even(n * Float{5909.278887481194})
+    t: round_ties_even(n * Float{5909.278887481194})
     jt: whole_i64(t)
     i0: Int{(jt >> 6).bit_and(0x3F)}
     i1: Int{jt.bit_and(0x3F)}
@@ -1623,7 +1623,7 @@ exp2_m1: fn(n: Float) -> Float Never! {
     if tiny -> return exp2_m1_accurate_tiny(n)
     r: hard_case(__EXP2M1_HARD, n)
     if !is_nan(r) -> return r
-    k: __round_even(n * Float{4096.0})
+    k: round_ties_even(n * Float{4096.0})
     y: s_mul(fma(-k, Float{0.000244140625}, n), Float{0.6931471805599453}, Float{2.3190468138462996e-17})
     e: exp_dd_tail(k, exp_q2(y.hi, y.lo))
     d: dd_minus_one(n, e.hi, e.lo)
@@ -1661,7 +1661,7 @@ exp10_m1: fn(n: Float) -> Float Never! {
     if tiny -> return exp10_m1_accurate_tiny(n)
     r: hard_case(__EXP10M1_HARD, n)
     if !is_nan(r) -> return r
-    k0: __round_even(n * Float{13606.617476658635})
+    k0: round_ties_even(n * Float{13606.617476658635})
     // k = 2^22 would scale by 2^1024
     k: if (k0 == Float{4194304.0}) -> Float{4194303.0} else -> k0
     yh: fma(-k, Float{0.00007349365128515166}, n)
@@ -2279,7 +2279,7 @@ __ERFC_ACC_CUT: [Float]{
 // relatively, for -742 < xh: xh + xl = k log(2) + y, then a degree-19
 // polynomial of y.
 priv erfc_exp_accurate: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float, k: Int) Never! {
-    kf: __round_even(xh * Float{1.4426950408889634})
+    kf: round_ties_even(xh * Float{1.4426950408889634})
     // exact by Sterbenz
     yh: fma(-kf, Float{0.6931471805599453}, xh)
     t: two_sum(-kf * Float{2.31904681384628e-17}, xl)
@@ -2506,7 +2506,7 @@ gamma: fn(n: Float) -> Float Never! {
     }
     // -3 <= x <= 4: gamma(x) = gamma(x + j) / (x (x + 1) ... (x + j - 1)),
     // x + j within 1/2 of 3.5
-    i: __round_even(n - Float{3.5})
+    i: round_ties_even(n - Float{3.5})
     d: n - (i + Float{3.5})
     d2: d * d
     d4: d2 * d2
@@ -2734,7 +2734,7 @@ priv gamma_log: fn(x: Float) -> (hi: Float, lo: Float) Never! {
 // cos(pi (x - 1/2)) from t at the nearest multiple of 1/128.
 priv gamma_sin_pi: fn(x: Float, t: [Float]) -> (hi: Float, lo: Float) Never! {
     v: fabs(x - Float{0.5}) * Float{128.0}
-    iv: __round_even(v)
+    iv: round_ties_even(v)
     d: iv - v
     d2: d * d
     ky: checked(Int{iv}) ?? 0
@@ -2756,7 +2756,7 @@ priv gamma_sin_pi: fn(x: Float, t: [Float]) -> (hi: Float, lo: Float) Never! {
 // 2^(k/1024) from two tables and 2^(y/1024) - 1 by a polynomial.
 priv tgamma_exp: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float, e: Int) Never! {
     t: exp_cr_muldd(xh, xl, Float{1477.3197218702985}, Float{2.0843800310713378e-14})
-    kf: __round_even(t.hi)
+    kf: round_ties_even(t.hi)
     y: fast_two_sum(t.hi - kf, t.lo)
     k: checked(Int{kf}) ?? 0
     i0: (k >> 5).bit_and(31)
@@ -3407,7 +3407,7 @@ priv lgamma_piece_poly: fn(j: Int, z: Float) -> (hi: Float, lo: Float) Never! {
 // series in z = 1/2 - |x - 1/2| within 1/64 of 0 and 1.
 priv lgamma_sin_pi: fn(x: Float) -> (hi: Float, lo: Float) Never! {
     ax: fabs(x - Float{0.5})
-    if (__round_even(ax * Float{128.0}) <= Float{62.0}) -> return gamma_sin_pi(x, __LGAMMA_SIN_PI_T)
+    if (round_ties_even(ax * Float{128.0}) <= Float{62.0}) -> return gamma_sin_pi(x, __LGAMMA_SIN_PI_T)
     z: Float{0.5} - ax
     z2: z * z
     z2l: fma(z, z, -z2)
@@ -3606,7 +3606,7 @@ priv lgamma_log_accurate: fn(x: Float) -> (hi: Float, mid: Float, lo: Float) Nev
 // < 1, as gamma_sin_pi with double-double series.
 priv lgamma_sin_pi_accurate: fn(x: Float) -> (hi: Float, lo: Float) Never! {
     v: fabs(x - Float{0.5}) * Float{128.0}
-    iv: __round_even(v)
+    iv: round_ties_even(v)
     d: iv - v
     ky: checked(Int{iv}) ?? 0
     kx: 64 - ky
@@ -5283,7 +5283,7 @@ priv pow_exp_1: fn(rh: Float, rl: Float) -> (hi: Float, lo: Float) Never! {
         if (rh < Float{-745.1332670341407}) -> return (hi: 0.0, lo: 0.0)
         return (hi: NAN, lo: NAN)
     }
-    k: __round_even(rh * Float{5909.278887481194})
+    k: round_ties_even(rh * Float{5909.278887481194})
     zh: fma(Float{0.0001692253858788929}, -k, rh)
     zl: fma(Float{5.661735385366942e-21}, -k, rl)
     exp_dd_tail(k, pow_q_1(zh + zl))
@@ -6264,12 +6264,12 @@ asin_pi: fn(n: Float) -> Float Never! {
         smh: wrap_i64((sm << (6 + e)) - __ASINPI_SH[64 - indx])
         sc = 6 + ce
         cmh0: if sc >= 0 -> wrap_i64(cm << sc) else -> cm >> -sc
-        cmh: wrap_i64(wrap_i64(cmh0 - __ASINPI_SH[indx]) - (__mh(h, ixm) >> (34 - ixe)))
-        v := wrap_i64(__mh(smh, __ASINPI_S[indx]) - __mh(cmh, __ASINPI_S[64 - indx]))
-        v2: __mh(v, v)
-        v3: __mh(v2, v)
+        cmh: wrap_i64(wrap_i64(cmh0 - __ASINPI_SH[indx]) - (mul_high(h, ixm) >> (34 - ixe)))
+        v := wrap_i64(mul_high(smh, __ASINPI_S[indx]) - mul_high(cmh, __ASINPI_S[64 - indx]))
+        v2: mul_high(v, v)
+        v3: mul_high(v2, v)
         a: __ASINPI_A
-        v = wrap_i64(v + __mh(v3, a[0] + muuh(v2, a[1] + muuh(v2, a[2] + muuh(v2, a[3])))))
+        v = wrap_i64(v + mul_high(v3, a[0] + muuh(v2, a[1] + muuh(v2, a[2] + muuh(v2, a[3])))))
         // y_i as (64 - indx) (pi / 2 / 64) in 2^127 units, plus v
         f0: u128((0x0324_3F6A_8885_A308_D313_198A_2E03_7073 * (64 - indx)))
         vh: (v >> 5).bit_and(0xFFFF_FFFF_FFFF_FFFF)
@@ -6693,7 +6693,7 @@ priv pi_trig_special: fn(n: Float) -> Float Never! {
 // x/(2pi) in 128-bit fixed point and evaluates there.
 priv sin_moderate: fn(x: Float) -> Float Never! {
     ax: fabs(x)
-    k: __round_even(Float{5215.189175235227} * ax)
+    k: round_ties_even(Float{5215.189175235227} * ax)
     r: fma(k, Float{-0.00019174759848570515}, ax) + k * Float{-7.474650873702107e-21}
     r2: r * r
     j: whole_i64(k)
@@ -6719,7 +6719,7 @@ priv sin_large: fn(x: Float) -> Float Never! {
     sin_accurate(x)
 }
 priv cos_moderate: fn(x: Float) -> Float Never! {
-    k: __round_even(Float{5215.189175235227} * x)
+    k: round_ties_even(Float{5215.189175235227} * x)
     r: fma(k, Float{-0.00019174759848570515}, x) + k * Float{-7.474650873702107e-21}
     r2: r * r
     j: whole_i64(k)
@@ -8914,7 +8914,7 @@ priv asin_renorm: fn(ph: Float, pl: Float, ps: Float) -> (hi: Float, mid: Float,
 // asin to about 2^-149 for the inputs the fast path cannot round: phi
 // approximates asin(x), x = sin(j pi/64 + delta); the hardest are tabulated.
 priv asin_refine: fn(x: Float, phi: Float) -> Float Never! {
-    jf: __round_even(fabs(phi) * Float{20.371832715762604})
+    jf: round_ties_even(fabs(phi) * Float{20.371832715762604})
     r: asin_rotate(x, checked(Int{jf}) ?? 0)
     sg: copysign(Float{1.0}, x)
     f: asin_series(r.hi, r.lo, sg)
@@ -8938,7 +8938,7 @@ priv asin_refine: fn(x: Float, phi: Float) -> Float Never! {
 // approximates acos(x), x = cos(pi/2 -+ j pi/64 - delta). A tail on a
 // rounding boundary is nudged by the next term's sign; five inputs are listed.
 priv acos_refine: fn(x: Float, phi: Float) -> Float Never! {
-    jf: __round_even(fabs(phi - Float{1.5707963267948966}) * Float{20.371832715762604})
+    jf: round_ties_even(fabs(phi - Float{1.5707963267948966}) * Float{20.371832715762604})
     r: asin_rotate(x, checked(Int{jf}) ?? 0)
     sg: copysign(Float{1.0}, x)
     f: asin_series(r.hi, r.lo, -sg)
@@ -9338,7 +9338,7 @@ priv asin_pi_acc: fn(x: Float) -> Float Never! {
         iu: to_bits(ixx)
         ixm: iu.bit_and(0xF_FFFF_FFFF_FFFF).bit_or(0x10_0000_0000_0000)
         ixe: (iu >> 52) - 0x3FF
-        dc: __mh(wrap_i64(s >> 64), ixm)
+        dc: mul_high(wrap_i64(s >> 64), ixm)
         s = u128(s - u128((dc * (cm >> 1)) << 13))
         sc: 28 - 2 * ixe
         dsm3: if sc >= 0 -> (dc * dc) >> sc else -> u128((dc * dc) << -sc)
@@ -9347,7 +9347,7 @@ priv asin_pi_acc: fn(x: Float) -> Float Never! {
         ss: 24 + k
         // dc 2^ss; C builds it from two words, which only works for ss < 64
         cmv := u128((cm << 64) - (dc << ss))
-        dc2: __mh(wrap_i64(s >> 14), ixm)
+        dc2: mul_high(wrap_i64(s >> 14), ixm)
         ss2: 26 - k
         cmv = if ss2 >= 0 -> u128(cmv - (dc2 >> ss2)) else -> u128(cmv - (dc2 << -ss2))
         // y_i = (64 - indx) pi / 128 plus asin of the rotated remainder
@@ -9398,7 +9398,7 @@ priv asin_pi_acc_s: fn(i: Int) -> Int Never! { (__ASINPI_ACC_S[2 * i] << 64) + _
 // 64- and 128-bit unsigned words of the CORE-MATH ports as Ints: the high
 // word of a product, C's wraparound, and leading zeros.
 priv muuh: fn(a: Int, b: Int) -> Int Never! { (a * b) >> 64 }
-__mh: fn(a: Int, b: Int) -> Int Never! { (a * b) >> 64 }
+priv mul_high: fn(a: Int, b: Int) -> Int Never! { (a * b) >> 64 }
 priv u128: fn(v: Int) -> Int Never! { v.bit_and(0xFFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF) }
 priv wrap_i128: fn(v: Int) -> Int Never! {
     w: u128(v)
@@ -10676,7 +10676,7 @@ __ATAN2PI_ERR: [Float]{
 // e^(xh + xl) within 2^-74.139 relatively, for |xl/xh| < 2^-23.89 and |xl| <
 // 2^-14.3486: x = k log(2)/4096 + y, then 2^(k/4096) e^y.
 priv exp_dd_fast: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float) Never! {
-    k: __round_even(xh * Float{5909.278887481194})
+    k: round_ties_even(xh * Float{5909.278887481194})
     kp: s_mul(k, Float{0.0001692253858788929}, Float{5.661735385366942e-21})
     y: fast_two_sum(xh - kp.hi, xl)
     exp_dd_tail(k, exp_q1(y.hi, y.lo - kp.lo))
@@ -10767,7 +10767,7 @@ priv exp_cr_subnormal: fn(y: Float) -> Float Never! { __from_bits_i64(__to_bits_
 // exp's accurate path for |x| > 2^-54: a degree-7 double-double polynomial
 // after a three-part Cody-Waite reduction, then __EXPCR_HARD's exceptions.
 priv exp_cr_accurate: fn(n: Float) -> Float Never! {
-    t: __round_even(n * Float{5909.278887481194})
+    t: round_ties_even(n * Float{5909.278887481194})
     jt: whole_i64(t)
     i0: Int{(jt >> 6).bit_and(0x3F)}
     i1: Int{jt.bit_and(0x3F)}
@@ -10928,7 +10928,7 @@ priv exp2_cr_polydd: fn(xh: Float, c: [Float], n: Int) -> (hi: Float, lo: Float)
 // reduced 4096 x, then __EXP2CR_HARD's exceptions.
 priv exp2_cr_accurate: fn(n: Float) -> Float Never! {
     sx: Float{4096.0} * n
-    fx: __round_even(sx)
+    fx: round_ties_even(sx)
     z: sx - fx
     k: whole_i64(fx)
     i1: Int{k.bit_and(0x3F)}
@@ -10998,7 +10998,7 @@ __EXP10CR_C: [Float]{
 // exp10's accurate path: a three-part reduction x = t log10(2)/4096 + dx,
 // a degree-6 double-double polynomial, then __EXP10CR_HARD's exceptions.
 priv exp10_cr_accurate: fn(n: Float) -> Float Never! {
-    t: __round_even(Float{13606.617476658635} * n)
+    t: round_ties_even(Float{13606.617476658635} * n)
     jt: whole_i64(t)
     i1: Int{jt.bit_and(0x3F)}
     i0: Int{(jt >> 6).bit_and(0x3F)}
@@ -11198,7 +11198,7 @@ priv exp_m1_cr_accurate: fn(n: Float) -> Float Never! {
         }
         return c0.hi + v1
     }
-    t: __round_even(n * Float{5909.278887481194})
+    t: round_ties_even(n * Float{5909.278887481194})
     jt: checked(Int{t}) ?? 0
     i0: (jt >> 6).bit_and(0x3F)
     i1: jt.bit_and(0x3F)
@@ -12264,7 +12264,7 @@ priv ln_1p_cr_refine: fn(x: Float, a: Float) -> Float Never! {
         return log_cr_round3(x, m.hi, m.lo)
     }
     // 2^16 / log(2)
-    j: checked(Int{__round_even(a * Float{94548.4621996991})}) ?? 0
+    j: checked(Int{round_ties_even(a * Float{94548.4621996991})}) ?? 0
     i: j + 34952
     j1: (i >> 12).bit_and(15)
     j2: (i >> 8).bit_and(15)
@@ -14876,7 +14876,7 @@ Rounding: enum {
 round_even: fn<T: Roundable>(n: T) -> T Never! { n.rounded(.TiesToEven) }
 /// The integral Float nearest `n`, ties to the even one (C23 roundeven); an
 /// infinity, a NaN or a whole `n` is itself, and the sign of zero is kept.
-__round_even: fn(n: Float) -> Float Never! {
+priv round_ties_even: fn(n: Float) -> Float Never! {
     a: fabs(n)
     if !(a < Float{4503599627370496.0}) -> return n
     // a + 2^52 lands where the unit is 1, so its rounding (to nearest, ties
@@ -14891,13 +14891,13 @@ priv round_away: fn(n: Float) -> Float Never! {
     whole
 }
 // `n` rounded to an integral Float in `mode`.
-__rounded: fn(n: Float, mode: Rounding) -> Float Never! {
+priv round_in_mode: fn(n: Float, mode: Rounding) -> Float Never! {
     if mode == {
         .TowardNegative -> core.math.floor(n)
         .TowardPositive -> core.math.ceil(n)
         .TowardZero -> core.math.trunc(n)
         .TiesToAway -> round_away(n)
-        .TiesToEven -> __round_even(n)
+        .TiesToEven -> round_ties_even(n)
     }
 }
 
@@ -14911,7 +14911,7 @@ Roundable: trait {
     rounded: fn(self, mode: Rounding) -> Self
 }
 impl Float.Roundable {
-    rounded: fn(self, mode: Rounding) -> Float Never! { __rounded(self, mode) }
+    rounded: fn(self, mode: Rounding) -> Float Never! { round_in_mode(self, mode) }
 }
 // An F32 rounds through its exact Float widening. Below 2^23 in magnitude the
 // integral result is an F32 again; any other F32 (a NaN, an infinity, a value
@@ -14920,7 +14920,7 @@ impl F32.Roundable {
     rounded: fn(self, mode: Rounding) -> F32 Never! {
         wide: Float.from_f32(self)
         if !(fabs(wide) < Float{8388608.0}) -> return self
-        F32{__rounded(wide, mode)}
+        F32{round_in_mode(wide, mode)}
     }
 }
 impl Decimal.Roundable {
@@ -14958,7 +14958,7 @@ priv magnitude_rounds_up: fn(negative: Bool, quotient: Int, remainder: Int, deno
 round_to_signed: fn(n: Float, mode: Rounding, bits: Int) -> Int? Never! {
     if !is_finite(n) || bits < 1 -> return None
     width: min(bits, 64)
-    whole: __rounded(n, mode)
+    whole: round_in_mode(n, mode)
     limit: ldexp(Float{1.0}, width - 1)
     if whole < -limit || whole >= limit -> return None
     Val(checked(Int{whole}) ?? 0)
@@ -14969,7 +14969,7 @@ round_to_signed: fn(n: Float, mode: Rounding, bits: Int) -> Int? Never! {
 round_to_unsigned: fn(n: Float, mode: Rounding, bits: Int) -> Int? Never! {
     if !is_finite(n) || bits < 1 -> return None
     width: min(bits, 64)
-    whole: __rounded(n, mode)
+    whole: round_in_mode(n, mode)
     if (whole < Float{0.0} || whole >= ldexp(Float{1.0}, width)) -> return None
     // An Int conversion of a whole value above 2^63 halves exactly first.
     if (whole >= Float{9223372036854775808.0}) -> return Val((checked(Int{whole * Float{0.5}}) ?? 0) * 2)
@@ -15300,11 +15300,11 @@ priv payload_bits_f32: fn(payload: F32) -> Int? Never! {
 }
 
 #Test("math C23 exact operations follow IEEE 754-2019") {
-    assert_eq(__round_even(2.5), 2.0)
-    assert_eq(__round_even(3.5), 4.0)
-    assert_eq(__round_even(-2.5), -2.0)
-    assert(sign_bit(__round_even(-0.25)))
-    assert_eq(__round_even(4503599627370497.0), 4503599627370497.0)
+    assert_eq(round_ties_even(2.5), 2.0)
+    assert_eq(round_ties_even(3.5), 4.0)
+    assert_eq(round_ties_even(-2.5), -2.0)
+    assert(sign_bit(round_ties_even(-0.25)))
+    assert_eq(round_ties_even(4503599627370497.0), 4503599627370497.0)
     assert_eq(round_to_signed(2.5, Rounding.TiesToEven, 8), Val(2))
     assert_eq(round_to_signed(2.5, Rounding.TiesToAway, 8), Val(3))
     assert_eq(round_to_signed(-2.5, Rounding.TowardNegative, 8), Val(-3))

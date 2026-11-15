@@ -130,7 +130,7 @@ TLSStream: struct {
         end_ns: deadline_end(deadline, "tls read") ?? return Err(net_to_io(err))
         state: __state(self) ?? return Err(io_error(.Read, "TLS stream is closed"))
         guard := state.guard_edit()
-        __read_into(guard.value, buffer, limit, end_ns)
+        read_into_locked(guard.value, buffer, limit, end_ns)
     }
 
     write_bytes: fn(self, bytes: [U8], /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
@@ -171,7 +171,7 @@ TLSStream: struct {
         state: __state(self) ?? return Err(io_error(.Close, "TLS stream is closed"))
         guard := state.guard_edit()
         if guard.value.closed -> return Ok()
-        _: __close_write(guard.value, C_NO_DEADLINE, "tls close") ?? return Err(err)
+        _: send_close_notify(guard.value, C_NO_DEADLINE, "tls close") ?? return Err(err)
         guard.value.closed = true
         release(guard.value)
         Ok()
@@ -183,7 +183,7 @@ TLSStream: struct {
         state: __state(self) ?? return Err(io_error(.Close, "TLS stream is closed"))
         guard := state.guard_edit()
         if guard.value.closed -> return Err(io_error(.Close, "TLS stream is closed"))
-        __close_write(guard.value, end_ns, "tls close write")
+        send_close_notify(guard.value, end_ns, "tls close write")
     }
 
     // The verified server identity. Server-side and closed streams have none
@@ -309,10 +309,10 @@ __client_config_deadline_entry: fn(stream: &&TCPStream, server_name: String, con
 priv client_connect: fn(stream: &&TCPStream, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
     tcp := stream.move()
     end_ns: deadline_end(deadline, "tls handshake") ?? return Err(err)
-    context := __client_context(server_name, config) ?? return Err(net_error("tls handshake", err.message))
+    context := client_tls_context(server_name, config) ?? return Err(net_error("tls handshake", err.message))
     state := open(context, tcp, server_name) ?? return Err(net_error("tls handshake", "TLS handshake with `{server_name}` failed: {ssl_text(err)}"))
-    _: __handshake(state, server_name, end_ns) ?? return Err(err)
-    peer: __peer_identity(state.ssl, server_name) ?? return Err(NetError.TLS(__detail("tls peer identity", err.message)))
+    _: run_handshake(state, server_name, end_ns) ?? return Err(err)
+    peer: verified_peer_identity(state.ssl, server_name) ?? return Err(NetError.TLS(tls_error_detail("tls peer identity", err.message)))
     state.peer = Val(peer)
     Ok(TLSStream{state: Val(Shared{state})})
 }
@@ -326,7 +326,7 @@ __server: fn(stream: &&TCPStream, cert_pem: String, key_pem: String, alpn: [Stri
     _: add_alpn(context, alpn) ?? return Err(net_error("tls accept", err.message))
     context.conf.authmode = ssldefs.SSL_VERIFY_NONE
     state := open(context, tcp, "") ?? return Err(net_error("tls accept", "TLS handshake failed: {ssl_text(err)}"))
-    _: __handshake(state, "", end_ns) ?? return Err(err)
+    _: run_handshake(state, "", end_ns) ?? return Err(err)
     Ok(TLSStream{state: Val(Shared{state})})
 }
 
@@ -702,7 +702,7 @@ priv open: fn(context: &&__TLSContext, tcp: &&TCPStream, hostname: String) -> __
     Ok(__TLSState{ssl: ssl, rng: ctx.rng.move(), tcp: tcp.move(), buffer: ssldefs.ssl_zeros(C_RECORD_BYTES), peer: None, pending: [U8]{}, read_eof: false, write_closed: false, closed: false})
 }
 
-__client_context: fn(server_name: String, config: ClientConfig) -> __TLSContext __TLSFailure! {
+priv client_tls_context: fn(server_name: String, config: ClientConfig) -> __TLSContext __TLSFailure! {
     if !valid_server_name(server_name) -> return Err(fail("invalid TLS server name `{server_name}`"))
     context := context_new(ssldefs.SSL_IS_CLIENT) ?? return Err(err)
     _: load_trust(context, config.trust) ?? return Err(err)
@@ -820,7 +820,7 @@ priv ca_dir: fn(ca: &[x509crt.X509Crt], path: String) -> Int Never! {
     loop row in rows {
         // The first byte is 1 for a directory; the name follows.
         if row.len() < 2 || row[0] == (U8{1}) -> next
-        name: String.from_bytes(__slice(row, 1, row.len())) ?? {
+        name: String.from_bytes(byte_range(row, 1, row.len())) ?? {
             count += 1
             next
         }
@@ -880,11 +880,11 @@ priv split_colon: fn(text: String) -> [String] Never! {
     start := 0
     loop at in 0..<raw.len() {
         if raw[at] == (U8{58}) {
-            parts.push(String.from_bytes(__slice(raw, start, at)) ?? "")
+            parts.push(String.from_bytes(byte_range(raw, start, at)) ?? "")
             start = at + 1
         }
     }
-    parts.push(String.from_bytes(__slice(raw, start, raw.len())) ?? "")
+    parts.push(String.from_bytes(byte_range(raw, start, raw.len())) ?? "")
     parts
 }
 
@@ -1030,7 +1030,7 @@ priv find: fn(raw: [U8], needle: [U8], from: Int) -> Int Never! {
     -1
 }
 
-__slice: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
+priv byte_range: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     loop at in start..<end -> out.push(raw[at])
     out
@@ -1061,7 +1061,7 @@ priv valid_server_name: fn(name: String) -> Bool Never! {
 // ---- engine and socket --------------------------------------------------------
 
 // The status of an engine error as mbedtls returns it.
-__code: fn(e: ssldefs.SSLError) -> Int Never! { ssldefs.ssl_error_code(e) }
+priv engine_status: fn(e: ssldefs.SSLError) -> Int Never! { ssldefs.ssl_error_code(e) }
 
 priv ssl_text: fn(e: ssldefs.SSLError) -> String Never! { mbedtls_text(ssldefs.ssl_error_code(e)) }
 
@@ -1098,7 +1098,7 @@ priv send_queued: fn(&tls: __TLSState, end_ns: Int, operation: String) -[Net, Ti
                 next
             }
         } else {
-            sent = tls.tcp.write_some(__slice(tls.ssl.bio.tx, at, total), deadline: slice) ?? {
+            sent = tls.tcp.write_some(byte_range(tls.ssl.bio.tx, at, total), deadline: slice) ?? {
                 if !timed_out(err) -> return Ok(socket_status(err, C_NET_SEND_FAILED))
                 next
             }
@@ -1138,7 +1138,7 @@ priv socket_status: fn(err: NetError, fallback: Int) -> Int Never! {
 // Waits out a WANT_READ or WANT_WRITE status: 0 when the engine can be
 // called again, or the socket status that ended the wait.
 priv await: fn(&tls: __TLSState, status: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
-    ready: __wait(tls.tcp, __want(status), end_ns, operation) ?? return Err(err)
+    ready: __wait(tls.tcp, status_interest(status), end_ns, operation) ?? return Err(err)
     if status == C_WANT_READ && ready.readable -> return Ok(__take(tls, end_ns))
     Ok(0)
 }
@@ -1146,7 +1146,7 @@ priv await: fn(&tls: __TLSState, status: Int, end_ns: Int, operation: String) -[
 // One engine read of at most `limit` bytes (mbedtls_ssl_read).
 priv engine_read: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> __Got NetError! {
     status: engine_read_status(tls, limit, end_ns, operation) ?? return Err(err)
-    if status > 0 -> return Ok(__Got{status: status, bytes: __slice(tls.buffer, 0, status)})
+    if status > 0 -> return Ok(__Got{status: status, bytes: byte_range(tls.buffer, 0, status)})
     Ok(__Got{status: status, bytes: [U8]{}})
 }
 
@@ -1157,7 +1157,7 @@ priv engine_read_status: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation
     status := 0
     if sslmsg.ssl_read(tls.ssl, tls.buffer, size, tls.rng) == {
         .Ok(count) -> status = count
-        .Err(e) -> status = __code(e)
+        .Err(e) -> status = engine_status(e)
     }
     sent: flush(tls, end_ns, operation) ?? return Err(err)
     if status > 0 -> return Ok(status)
@@ -1168,7 +1168,7 @@ priv engine_read_status: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation
 
 // A failed handshake frees the engine and wipes the buffers before its error
 // goes back, as close does.
-__handshake: fn(&tls: __TLSState, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
+priv run_handshake: fn(&tls: __TLSState, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
     if handshake_steps(tls, server_name, end_ns) == .Err(error) {
         release(tls)
         return Err(error)
@@ -1180,7 +1180,7 @@ priv handshake_steps: fn(&tls: __TLSState, server_name: String, end_ns: Int) Net
     loop {
         status := 0
         if ssltls.ssl_handshake(tls.ssl, tls.rng) == .Err(e) {
-            status = __code(e)
+            status = engine_status(e)
         }
         sent: flush(tls, end_ns, "tls handshake") ?? return Err(err)
         status = settle(status, sent)
@@ -1219,7 +1219,7 @@ priv verify_reason: fn(flags: Int) -> String Never! {
     "Other"
 }
 
-__want: fn(status: Int) -> NetReadyInterest Never! {
+priv status_interest: fn(status: Int) -> NetReadyInterest Never! {
     if status == C_WANT_WRITE -> return NetReadyInterest.Write
     NetReadyInterest.Read
 }
@@ -1242,8 +1242,8 @@ __read: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8
     if tls.closed -> return Err(io_error(.Read, "TLS stream is closed"))
     if tls.pending.len() > 0 {
         count: if max_bytes < tls.pending.len() -> max_bytes else -> tls.pending.len()
-        head: __slice(tls.pending, 0, count)
-        tls.pending = __slice(tls.pending, count, tls.pending.len())
+        head: byte_range(tls.pending, 0, count)
+        tls.pending = byte_range(tls.pending, count, tls.pending.len())
         return Ok(head)
     }
     if tls.read_eof -> return Ok([U8]{})
@@ -1268,12 +1268,12 @@ __read: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8
 
 // read_into under the stream's lock: __read's steps, the bytes appended to
 // `buffer` rather than returned.
-__read_into: fn(&tls: __TLSState, &buffer: [U8], limit: Int, end_ns: Int) -[Net, Time.Wait]> Int IOError! {
+priv read_into_locked: fn(&tls: __TLSState, &buffer: [U8], limit: Int, end_ns: Int) -[Net, Time.Wait]> Int IOError! {
     if tls.closed -> return Err(io_error(.Read, "TLS stream is closed"))
     if tls.pending.len() > 0 {
         count: if limit < tls.pending.len() -> limit else -> tls.pending.len()
         loop index in 0..<count -> buffer.push(tls.pending[index])
-        tls.pending = __slice(tls.pending, count, tls.pending.len())
+        tls.pending = byte_range(tls.pending, count, tls.pending.len())
         return Ok(count)
     }
     if tls.read_eof -> return Ok(0)
@@ -1304,7 +1304,7 @@ __read_into: fn(&tls: __TLSState, &buffer: [U8], limit: Int, end_ns: Int) -[Net,
 // reads a response body this way, one read timeout per read.
 __read_into_each: fn(stream: TLSStream, &buffer: [U8], limit: Int, wait: Duration) -[Net]> Int IOError! {
     if limit <= 0 -> return Err(IOError.InvalidInput(io_context(.Read, "tls read_into limit must be positive")))
-    if wait.ns < 0 -> return Err(net_to_io(NetError.InvalidInput(__detail("tls read", "network timeout must be non-negative"))))
+    if wait.ns < 0 -> return Err(net_to_io(NetError.InvalidInput(tls_error_detail("tls read", "network timeout must be non-negative"))))
     state: __state(stream) ?? return Err(io_error(.Read, "TLS stream is closed"))
     guard := state.guard_edit()
     read_into_waiting(guard.value, buffer, limit, wait)
@@ -1316,7 +1316,7 @@ priv read_into_waiting: fn(&tls: __TLSState, &buffer: [U8], limit: Int, wait: Du
     if tls.pending.len() > 0 {
         count: if limit < tls.pending.len() -> limit else -> tls.pending.len()
         loop index in 0..<count -> buffer.push(tls.pending[index])
-        tls.pending = __slice(tls.pending, count, tls.pending.len())
+        tls.pending = byte_range(tls.pending, count, tls.pending.len())
         return Ok(count)
     }
     if tls.read_eof -> return Ok(0)
@@ -1325,7 +1325,7 @@ priv read_into_waiting: fn(&tls: __TLSState, &buffer: [U8], limit: Int, wait: Du
         status := 0
         if sslmsg.ssl_read(tls.ssl, tls.buffer, size, tls.rng) == {
             .Ok(count) -> status = count
-            .Err(e) -> status = __code(e)
+            .Err(e) -> status = engine_status(e)
         }
         sent: flush_each(tls, wait) ?? return Err(net_to_io(err))
         if status > 0 {
@@ -1354,7 +1354,7 @@ priv flush_each: fn(&tls: __TLSState, wait: Duration) -[Net]> Int NetError! {
     total: tls.ssl.bio.tx.len()
     at := 0
     loop at < total {
-        sent: tls.tcp.write_some(__slice(tls.ssl.bio.tx, at, total), deadline: wait) ?? {
+        sent: tls.tcp.write_some(byte_range(tls.ssl.bio.tx, at, total), deadline: wait) ?? {
             tls.ssl.bio.tx.clear()
             if timed_out(err) -> return Err(deadline_error("tls read"))
             if stopped(err) -> return Err(err)
@@ -1419,8 +1419,8 @@ __read_text: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]
         loop b in more -> bytes.push(b)
         valid: utf8_valid(bytes)
         if valid > 0 || valid == bytes.len() {
-            unread(tls, __slice(bytes, valid, bytes.len()))
-            return Ok(String.from_bytes(__slice(bytes, 0, valid)) ?? "")
+            unread(tls, byte_range(bytes, valid, bytes.len()))
+            return Ok(String.from_bytes(byte_range(bytes, 0, valid)) ?? "")
         }
         if !utf8_cut(bytes) {
             unread(tls, bytes)
@@ -1520,7 +1520,7 @@ priv test_pump: fn(&from: __TLSState, &to: __TLSState) Never! {
 // One engine handshake call: 0 when it is over, else the status it stopped at.
 priv test_step: fn(&tls: __TLSState) -> Int Never! {
     if tls.ssl.state == ssldefs.SSL_HANDSHAKE_OVER -> return 0
-    if ssltls.ssl_handshake(tls.ssl, tls.rng) == .Err(e) -> return __code(e)
+    if ssltls.ssl_handshake(tls.ssl, tls.rng) == .Err(e) -> return engine_status(e)
     0
 }
 
@@ -1624,12 +1624,12 @@ priv test_released: fn(tls: __TLSState) -> Bool Never! {
     test_pump(client, server)
     end_ns: rt.clock_mono_ns() + 10000000000
     server_refused := false
-    if __handshake(server, "", end_ns) == .Err(_) -> server_refused = true
+    if run_handshake(server, "", end_ns) == .Err(_) -> server_refused = true
     assert(server_refused)
     assert(test_handshake_freed(server.ssl))
     assert(test_released(server))
     client_refused := false
-    if __handshake(client, "", end_ns) == .Err(_) -> client_refused = true
+    if run_handshake(client, "", end_ns) == .Err(_) -> client_refused = true
     assert(client_refused)
     assert(test_handshake_freed(client.ssl))
     assert(test_released(client))
@@ -1668,7 +1668,7 @@ priv write_all: fn(&tls: __TLSState, bytes: [U8], end_ns: Int) IOError! -[Net, T
     offset := 0
     loop offset < bytes.len() {
         size: if bytes.len() - offset > C_RECORD_BYTES -> C_RECORD_BYTES else -> bytes.len() - offset
-        count: if offset == 0 && size == bytes.len() -> write_chunk(tls, bytes, end_ns) ?? return Err(err) else -> write_chunk(tls, __slice(bytes, offset, offset + size), end_ns) ?? return Err(err)
+        count: if offset == 0 && size == bytes.len() -> write_chunk(tls, bytes, end_ns) ?? return Err(err) else -> write_chunk(tls, byte_range(bytes, offset, offset + size), end_ns) ?? return Err(err)
         if count == 0 -> return Err(IOError.Other(io_context(.Write, "tls write all failed: zero bytes written")))
         offset += count
     }
@@ -1682,7 +1682,7 @@ priv write_chunk: fn(&tls: __TLSState, chunk: [U8], end_ns: Int) -[Net, Time.Wai
         status := 0
         if sslmsg.ssl_write(tls.ssl, chunk, chunk.len(), tls.rng) == {
             .Ok(count) -> status = count
-            .Err(e) -> status = __code(e)
+            .Err(e) -> status = engine_status(e)
         }
         sent: flush(tls, end_ns, "tls write") ?? return Err(net_to_io(err))
         status = settle(status, sent)
@@ -1696,12 +1696,12 @@ priv write_chunk: fn(&tls: __TLSState, chunk: [U8], end_ns: Int) -[Net, Time.Wai
     }
 }
 
-__close_write: fn(&tls: __TLSState, end_ns: Int, operation: String) IOError! -[Net, Time.Wait]> {
+priv send_close_notify: fn(&tls: __TLSState, end_ns: Int, operation: String) IOError! -[Net, Time.Wait]> {
     if tls.write_closed -> return Ok()
     loop {
         status := 0
         if sslmsg.ssl_close_notify(tls.ssl, tls.rng) == .Err(e) {
-            status = __code(e)
+            status = engine_status(e)
         }
         sent: flush(tls, end_ns, operation) ?? return Err(net_to_io(err))
         status = settle(status, sent)
@@ -1759,7 +1759,7 @@ priv timed_out: fn(err: NetError) -> Bool Never! {
 priv forever: fn() -> Duration Never! { Duration{ns: C_NO_DEADLINE} }
 
 priv deadline_end: fn(deadline: Duration, operation: String) -> Int NetError! {
-    if deadline.ns < 0 -> return Err(NetError.InvalidInput(__detail(operation, "network timeout must be non-negative")))
+    if deadline.ns < 0 -> return Err(NetError.InvalidInput(tls_error_detail(operation, "network timeout must be non-negative")))
     now: rt.clock_mono_ns()
     if deadline.ns > C_NO_DEADLINE - now -> return Ok(C_NO_DEADLINE)
     Ok(now + deadline.ns)
@@ -1772,19 +1772,19 @@ __state: fn(stream: TLSStream) -> Shared<__TLSState>? Never! {
 
 // ---- errors -------------------------------------------------------------------
 
-__detail: fn(operation: String, message: String) -> NetErrorDetail Never! {
+priv tls_error_detail: fn(operation: String, message: String) -> NetErrorDetail Never! {
     NetErrorDetail{operation: operation, address: None, name: None, message: message, os_code: None}
 }
 
 priv deadline_error: fn(operation: String) -> NetError Never! {
-    NetError.Timeout(__detail(operation, "deadline exceeded while waiting in {operation}"))
+    NetError.Timeout(tls_error_detail(operation, "deadline exceeded while waiting in {operation}"))
 }
 
 priv net_error: fn(operation: String, message: String) -> NetError Never! {
-    if message.starts_with("TLS protocol truncation:") -> return NetError.Protocol(__detail(operation, message))
-    if message.contains("closed") -> return NetError.Closed(__detail(operation, message))
-    if message.contains("timed out") || message.contains("deadline") -> return NetError.Timeout(__detail(operation, message))
-    NetError.TLS(__detail(operation, message))
+    if message.starts_with("TLS protocol truncation:") -> return NetError.Protocol(tls_error_detail(operation, message))
+    if message.contains("closed") -> return NetError.Closed(tls_error_detail(operation, message))
+    if message.contains("timed out") || message.contains("deadline") -> return NetError.Timeout(tls_error_detail(operation, message))
+    NetError.TLS(tls_error_detail(operation, message))
 }
 
 priv io_context: fn(operation: IOOperation, message: String) -> IOContext Never! {
@@ -1910,7 +1910,7 @@ priv empty_identity: fn() -> TLSPeerIdentity Never! {
 // engine's parsed X509Crt chain, leaf first (mbedtls_ssl_get_peer_cert), so
 // every certificate x509 accepted reports them and no second DER walk can
 // refuse one.
-__peer_identity: fn(ssl: ssldefs.SSLContext, server_name: String) -> TLSPeerIdentity __TLSFailure! {
+priv verified_peer_identity: fn(ssl: ssldefs.SSLContext, server_name: String) -> TLSPeerIdentity __TLSFailure! {
     chain := [TLSCertificate]{}
     if ssl.session >= 0 && ssl.session < ssl.spool.len() && ssl.spool[ssl.session].peer_cert == .Val(certs) {
         loop crt in certs -> chain.push(certificate(crt))
@@ -1935,7 +1935,7 @@ priv certificate: fn(crt: x509crt.X509Crt) -> TLSCertificate Never! {
     TLSCertificate{
         der: crt.raw.copy(),
         sha256: crypto.sha256(crt.raw).bytes,
-        spki_sha256: crypto.sha256(__slice(crt.raw, crt.pk_raw.p, crt.pk_raw.p + crt.pk_raw.len)).bytes,
+        spki_sha256: crypto.sha256(byte_range(crt.raw, crt.pk_raw.p, crt.pk_raw.p + crt.pk_raw.len)).bytes,
         dns_names: dns_names,
         valid_from_unix_ms: unix_ms(crt.valid_from),
         valid_until_unix_ms: unix_ms(crt.valid_to),

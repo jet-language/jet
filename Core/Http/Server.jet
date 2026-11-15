@@ -312,7 +312,7 @@ HTTPServer: struct {
     }
 
     // What a readiness probe reads now (HTTPReadiness). It does no I/O.
-    readiness: fn(self) -> HTTPReadiness Never! { __readiness(self.__state) }
+    readiness: fn(self) -> HTTPReadiness Never! { server_readiness(self.__state) }
 
     // Each admitted connection is served by its own task, so a held
     // connection does not hold up the next; one over the connection limits
@@ -468,7 +468,7 @@ priv server_mark_stopping: fn(server: HTTPServer) Never! {
     guard.value.stopping = true
 }
 
-__readiness: fn(state: Shared<__HTTPServerState>) -> HTTPReadiness Never! {
+priv server_readiness: fn(state: Shared<__HTTPServerState>) -> HTTPReadiness Never! {
     guard: state.guard_read()
     if {
         guard.value.phase == 2 -> HTTPReadiness.Closed
@@ -639,11 +639,6 @@ priv refuse: fn(stream: &&TCPStream, tls: HTTPServerTLS?) Never! -[Net, Time]> {
 __live: fn(state: Shared<__HTTPServerState>) -> Int Never! {
     guard: state.guard_read()
     guard.value.live
-}
-
-__completed: fn(state: Shared<__HTTPServerState>) -> Int Never! {
-    guard: state.guard_read()
-    guard.value.completed
 }
 
 priv accept_timed_out: fn(error: NetError) -> Bool Never! {
@@ -1058,7 +1053,7 @@ priv select: fn(mux: HTTPMux, request: HTTPRequest) -> HTTPResponse HTTPError! {
 priv allow_value: fn(methods: [String]) -> String Never! {
     names := methods.copy()
     if list_contains(names, "GET") && !list_contains(names, "HEAD") -> names.push("HEAD")
-    sorted: __sorted(names)
+    sorted: sorted_text(names)
     out := ""
     loop name in sorted {
         if name == "OPTIONS" -> next
@@ -1068,7 +1063,7 @@ priv allow_value: fn(methods: [String]) -> String Never! {
     "{out}, OPTIONS"
 }
 
-__sorted: fn(values: [String]) -> [String] Never! {
+priv sorted_text: fn(values: [String]) -> [String] Never! {
     out := [String]{}
     loop value in values {
         at := out.len()
@@ -1567,7 +1562,7 @@ priv serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?,
 priv server_answer: fn(server: Shared<__HTTPServerState>?, mux: HTTPMux, request: HTTPRequest, refusing: Bool) -> HTTPResponse? Never! {
     state: server ?? return None
     if request.method == "GET" && request.path == C_READY_PATH && __pick(mux, request).answer == .Val(_) {
-        readiness: __readiness(state)
+        readiness: server_readiness(state)
         status: if readiness == .Ready -> 200 else -> 503
         return Val(response(status, readiness_word(readiness)))
     }
