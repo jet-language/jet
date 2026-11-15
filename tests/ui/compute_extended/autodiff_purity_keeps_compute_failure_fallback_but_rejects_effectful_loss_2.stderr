@@ -1,7 +1,7 @@
 Error [jet.ValueTypeMismatch]: `to_list` wants `Tensor` for argument 1, but this is (value: Tensor)
   --> tests/ui/compute_extended/autodiff_purity_keeps_compute_failure_fallback_but_rejects_effectful_loss_2.jet:11:27
     |
- 12 |     print(compute.to_list(gradient))
+ 11 |     print(compute.to_list(gradient))
     |                           ^^^^^^^^
  Why: Every argument must match its parameter's type
  Fix: Use `Tensor` here
@@ -10,7 +10,7 @@ More: jet-lang.dev/e/E0112
 Error [jet.ValueTypeMismatch]: `compute.gradient` needs a pure Tensor function
   --> tests/ui/compute_extended/autodiff_purity_keeps_compute_failure_fallback_but_rejects_effectful_loss_2.jet:10:23
     |
- 11 |     gradient: compute.gradient(loss, value.copy())
+ 10 |     gradient: compute.gradient(loss, value.copy())
     |                       ^^^^^^^^
  Why: `autodiff_purity_keeps_compute_failure_fallback_but_rejects_effectful_loss_2.loss` reaches IO, Panic; autodiff records only pure Tensor operations
  Fix: Remove the effectful operation from `autodiff_purity_keeps_compute_failure_fallback_but_rejects_effectful_loss_2.loss`, or differentiate a pure Tensor function

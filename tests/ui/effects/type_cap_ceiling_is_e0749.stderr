@@ -1,7 +1,7 @@
 Error [jet.ProhibitedEffectReached]: `load` uses the effect `FS.Read("rates.txt")`, which type `Report`'s `#FX(…)` cap doesn't allow
   --> tests/ui/effects/type_cap_ceiling_is_e0749.jet:9:5
     |
-  8 |     load: fn(self) -> String { fs.read("rates.txt") ?? "" }
+  9 |     load: fn(self) -> String { fs.read("rates.txt") ?? "" }
     |     ^^^^
   --> tests/ui/effects/type_cap_ceiling_is_e0749.jet:3:1
     |
@@ -17,11 +17,11 @@ More: jet-lang.dev/e/E0749
 Error [jet.ProhibitedEffectReached]: `hush` reaches the `IO` effect, which type `Level` denies
   --> tests/ui/effects/type_cap_ceiling_is_e0749.jet:17:5
     |
- 16 |     hush: fn(self) { print("x") }
+ 17 |     hush: fn(self) { print("x") }
     |     ^^^^
   --> tests/ui/effects/type_cap_ceiling_is_e0749.jet:12:1
     |
- 11 | #FX(!IO)
+ 12 | #FX(!IO)
     | ^^^^^^^^ type `Level` is capped here
  Why: The type's `#FX(…)` cap denies `IO` to every method of the type and every callee it can reach
  Fix: Remove the call that introduces `IO`, move `hush` out of type `Level`, or drop `!IO` from the type's `#FX(…)` cap

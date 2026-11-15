@@ -1,7 +1,7 @@
 Error [jet.UseWhileWriteActive]: `xs` is being changed in this call, so it can't be used again here
   --> tests/ui/write_arg_then_held_use.jet:24:14
     |
- 34 |     grow(xs, xs)
+ 24 |     grow(xs, xs)
     |              ^^
  Why: While something is being changed through a write parameter, nobody else may be looking at it
  Fix: Pass `xs` only once, or copy first with `xs.copy()`
@@ -10,7 +10,7 @@ More: jet-lang.dev/e/E0204
 Error [jet.UseWhileWriteActive]: `xs` is being changed in this call, so it can't be used again here
   --> tests/ui/write_arg_then_held_use.jet:25:20
     |
- 35 |     grow_taken(xs, xs)
+ 25 |     grow_taken(xs, xs)
     |                    ^^
  Why: While something is being changed through a write parameter, nobody else may be looking at it
  Fix: Pass `xs` only once, or copy first with `xs.copy()`
@@ -19,7 +19,7 @@ More: jet-lang.dev/e/E0204
 Error [jet.UseWhileWriteActive]: `xs` is already lent to this call, so `grow_taken` can't take it here too
   --> tests/ui/write_arg_then_held_use.jet:25:20
     |
- 35 |     grow_taken(xs, xs)
+ 25 |     grow_taken(xs, xs)
     |                    ^^
  Why: An earlier argument lets `grow_taken` read `xs` for the whole call, so this argument can't hand the same value over
  Fix: Pass a copy to one of the two parameters with `xs.copy()`
@@ -28,7 +28,7 @@ More: jet-lang.dev/e/E0204
 Error [jet.UseWhileWriteActive]: `ys` is being changed in this call, so it can't be used again here
   --> tests/ui/write_arg_then_held_use.jet:27:19
     |
- 37 |     grow_both(ys, ys)
+ 27 |     grow_both(ys, ys)
     |                   ^^
  Why: While something is being changed through a write parameter, nobody else may be looking at it
  Fix: Pass `ys` only once, or copy first with `ys.copy()`
@@ -37,7 +37,7 @@ More: jet-lang.dev/e/E0204
 Error [jet.UseWhileWriteActive]: `zs` is being changed in this call, so it can't be used again here
   --> tests/ui/write_arg_then_held_use.jet:29:23
     |
- 39 |     grow_by(zs, count(zs))
+ 29 |     grow_by(zs, count(zs))
     |                       ^^
  Why: While something is being changed through a write parameter, nobody else may be looking at it
  Fix: Pass `zs` only once, or copy first with `zs.copy()`
@@ -46,7 +46,7 @@ More: jet-lang.dev/e/E0204
 Error [jet.UseWhileWriteActive]: `bag` is being changed in this call, so it can't be used again here
   --> tests/ui/write_arg_then_held_use.jet:31:19
     |
- 41 |     fill(bag, bag.drain())
+ 31 |     fill(bag, bag.drain())
     |                   ^^^^^
  Why: While something is being changed through a write parameter, nobody else may be looking at it
  Fix: Pass `bag` only once, or copy first with `bag.copy()`

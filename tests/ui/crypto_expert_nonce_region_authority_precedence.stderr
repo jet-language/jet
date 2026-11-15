@@ -1,7 +1,7 @@
 Error [jet.EffectWithoutAuthority]: This `#FX` region uses the effect `FS.Read("x")`, which it has no authority for
   --> tests/ui/crypto_expert_nonce_region_authority_precedence.jet:8:8
     |
-  8 |     #FX(Net) {
+  8 |     #FX(Net) { _: fs.read("x") }
     |        ^^^^^
  Why: `#FX(…)` allows only `Net`; an effect reached inside — even through a call — must be in that list
  Fix: Add `FS.Read("x")` to the `#FX(…)` list, or move that work outside the region

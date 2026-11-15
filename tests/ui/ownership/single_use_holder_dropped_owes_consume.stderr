@@ -1,7 +1,7 @@
 Error [jet.SingleUseDropped]: `holder` still owes `consume`
   --> tests/ui/ownership/single_use_holder_dropped_owes_consume.jet:39:5
     |
- 41 |     holder: BlockHolder{block: block}
+ 39 |     holder: BlockHolder{block: block}
     |     ^^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
  Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(holder) }` to discard it deliberately
@@ -10,7 +10,7 @@ More: jet-lang.dev/e/E0140
 Error [jet.SingleUseDropped]: `holder` still owes `consume`
   --> tests/ui/ownership/single_use_holder_dropped_owes_consume.jet:44:5
     |
- 46 |     holder: Holder{lease: acquire("record"), count: 1}
+ 44 |     holder: Holder{lease: acquire("record"), count: 1}
     |     ^^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
  Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(holder) }` to discard it deliberately
@@ -19,7 +19,7 @@ More: jet-lang.dev/e/E0140
 Error [jet.SingleUseDropped]: `nested` still owes `consume`
   --> tests/ui/ownership/single_use_holder_dropped_owes_consume.jet:45:5
     |
- 47 |     nested: Nested{inner: Holder{lease: acquire("nested"), count: 2}}
+ 45 |     nested: Nested{inner: Holder{lease: acquire("nested"), count: 2}}
     |     ^^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
  Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(nested) }` to discard it deliberately
@@ -28,7 +28,7 @@ More: jet-lang.dev/e/E0140
 Error [jet.SingleUseDropped]: `slot` still owes `consume`
   --> tests/ui/ownership/single_use_holder_dropped_owes_consume.jet:46:5
     |
- 48 |     slot: Slot.Held{lease: acquire("payload")}
+ 46 |     slot: Slot.Held{lease: acquire("payload")}
     |     ^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
  Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(slot) }` to discard it deliberately

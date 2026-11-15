@@ -5,7 +5,7 @@ Error [jet.ProhibitedEffectReached]: `load` uses the effect `FS.Read("rates.txt"
     |     ^^^^
   --> tests/ui/effects/module_cap_ceiling_is_e0749.jet:3:1
     |
-  3 | #FX(IO)
+  3 | #FX(IO) report: module {
     | ^^^^^^^ module `report` is capped here
  Why: The module's cap allows only `IO` in every function inside it, even through a call
  Fix: Add `FS.Read("rates.txt")` to the module's `#FX(…)` cap, or move that work out of module `report`
@@ -21,7 +21,7 @@ Error [jet.ProhibitedEffectReached]: `hush` reaches the `IO` effect, which modul
     |         ^^^^
   --> tests/ui/effects/module_cap_ceiling_is_e0749.jet:8:5
     |
-  7 |     #FX(!IO)
+  8 |     #FX(!IO) quiet: module {
     |     ^^^^^^^^ module `quiet` is capped here
  Why: The module's `#FX(…)` cap denies `IO` to every function inside it and every callee it can reach
  Fix: Remove the call that introduces `IO`, move `hush` out of module `quiet`, or drop `!IO` from the module's `#FX(…)` cap

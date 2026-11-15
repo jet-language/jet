@@ -1,8 +1,8 @@
 Error [jet.RawMemoryOutsideKernel]: `alloc_raw` is a raw memory operation outside the package's memory kernel
-  --> tests/ui/E3113_package_without_kernel_files/run.jet:7:9
+  --> tests/ui/E3113_package_without_kernel_files/run.jet:7:35
     |
-  7 |     mem.alloc_raw(16, 8)
-    |         ^^^^^^^^^
+  7 | _grab: fn() -> mem.Ptr<U8>? { mem.alloc_raw(16, 8) }
+    |                                   ^^^^^^^^^
  Why: Raw memory operations stand only in the kernel files `policy.memory` names, so the package's memory safety is audited in one place.
  Fix: Outside the kernel, hold the memory in a `[T]` list or an owner a kernel file hands out; to make `run.jet` a kernel file, name the package's kernel files in `package.jet`: `policy: { memory: .Kernel(["run.jet"]) }`.
 More: jet-lang.dev/e/E3113

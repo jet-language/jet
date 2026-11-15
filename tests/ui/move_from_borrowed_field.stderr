@@ -1,7 +1,7 @@
 Error [jet.MissingMoveMarker]: `r` cannot be moved from borrowed storage
   --> tests/ui/move_from_borrowed_field.jet:19:14
     |
- 21 |     taken := r.session.move()
+ 19 |     taken := r.session.move()
     |              ^^^^^^^^^^^^^^
  Why: Read and write parameters and named windows keep ownership with their source
  Fix: Copy the value with `r.copy()`, or declare the parameter `r: &&Root` to take ownership
@@ -10,7 +10,7 @@ More: jet-lang.dev/e/E0201
 Error [jet.MissingMoveMarker]: `r` cannot be moved from borrowed storage
   --> tests/ui/move_from_borrowed_field.jet:25:13
     |
- 27 |     taken = r.session.move()
+ 25 |     taken = r.session.move()
     |             ^^^^^^^^^^^^^^
  Why: Read and write parameters and named windows keep ownership with their source
  Fix: Copy the value with `r.copy()`, or declare the parameter `r: &&Root` to take ownership
@@ -19,8 +19,8 @@ More: jet-lang.dev/e/E0201
 Error [jet.MissingMoveMarker]: `r` cannot be moved from borrowed storage
   --> tests/ui/move_from_borrowed_field.jet:29:49
     |
- 32 |     Root{session: r.session.move()}
-    |                   ^^^^^^^^^^^^^^
+ 29 | wrap_field: fn(r: Root) -> Root { Root{session: r.session.move()} }
+    |                                                 ^^^^^^^^^^^^^^
  Why: Read and write parameters and named windows keep ownership with their source
  Fix: Copy the value with `r.copy()`, or declare the parameter `r: &&Root` to take ownership
 More: jet-lang.dev/e/E0201
@@ -28,8 +28,8 @@ More: jet-lang.dev/e/E0201
 Error [jet.MissingMoveMarker]: `r` cannot be moved from borrowed storage
   --> tests/ui/move_from_borrowed_field.jet:31:40
     |
- 36 |     r.session.move()
-    |     ^^^^^^^^^^^^^^
+ 31 | return_field: fn(r: Root) -> Session { r.session.move() }
+    |                                        ^^^^^^^^^^^^^^
  Why: Read and write parameters and named windows keep ownership with their source
  Fix: Copy the value with `r.copy()`, or declare the parameter `r: &&Root` to take ownership
 More: jet-lang.dev/e/E0201

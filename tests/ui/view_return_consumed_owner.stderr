@@ -1,8 +1,8 @@
 Error [jet.ViewOutlivesOwner]: This view points into `xs`, which this function consumes
   --> tests/ui/view_return_consumed_owner.jet:1:44
     |
-  2 |     xs[0..<1]
-    |       ^^^^^^^
+  1 | owned_head: fn(xs: &&[U8]) -> View<U8> { xs[0..<1] }
+    |                                            ^^^^^^^
  Why: The `&&` parameter `xs` moves the value into this function, which frees it when it returns, so a returned window into it would outlive its owner
  Fix: Take `xs` as a read or `&` parameter so the caller keeps owning it, or return an owned copy with `.copy()`
 More: jet-lang.dev/e/E2305

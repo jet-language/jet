@@ -1,8 +1,8 @@
 Error [jet.ErrorNotPropagatable]: `parse` fails with `ParseError`, which can't propagate into `Never` here
   --> tests/ui/failure_contract_ceiling_never_denies.jet:14:43
     |
- 15 |     parse(text)
-    |     ^^^^^
+ 14 | checked: fn(text: String) -> Int Never! { parse(text) }
+    |                                           ^^^^^
  Why: `parse` is defined at `failure_contract_ceiling_never_denies.jet:9:1` with effective failure contract `explicit ParseError!`; the caller's `explicit Never! (proven unreachable)` contract has no route from `ParseError` to `Never`
  Fix: The caller is declared `Never!`, so it can't fail: declare `ParseError!` in its return type, or handle `parse` locally with `??`
 More: jet-lang.dev/e/E2404
@@ -10,7 +10,7 @@ More: jet-lang.dev/e/E2404
 Error [jet.ErrorNotPropagatable]: This `Err` fails with `ParseError`, which can't propagate into `Never` here
   --> tests/ui/failure_contract_ceiling_never_denies.jet:17:29
     |
- 19 |     if text == "" -> return Err(ParseError.Empty)
+ 17 |     if text == "" -> return Err(ParseError.Empty)
     |                             ^^^
  Why: The function is declared `Never!`, a failure contract that denies every failure, so a returned `Err` is outside it
  Fix: Declare `ParseError!` in the return type, or handle the failure here instead of returning it

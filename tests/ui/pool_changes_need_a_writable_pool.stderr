@@ -10,8 +10,8 @@ More: jet-lang.dev/e/E0205
 Error [jet.FieldWriteWithoutMarker]: `.add()` changes `world`, which has read access only
   --> tests/ui/pool_changes_need_a_writable_pool.jet:12:50
     |
- 13 |     world.add(Player{name: "Ash"})
-    |     ^^^^^
+ 12 | recruit: fn(world: Pool<Player>) -> ID<Player> { world.add(Player{name: "Ash"}) }
+    |                                                  ^^^^^
  Why: `add: fn(&self, value: &&Player)` changes the value it's called on, but an unmarked parameter gives read access only
  Fix: Change the parameter to `world: &Pool<Player>`
 More: jet-lang.dev/e/E0205
@@ -19,8 +19,8 @@ More: jet-lang.dev/e/E0205
 Error [jet.FieldWriteWithoutMarker]: Cannot write to `world` — it has read access only
   --> tests/ui/pool_changes_need_a_writable_pool.jet:14:56
     |
- 17 |     world[id] = Player{name: "Rem"}
-    |          ^^^^
+ 14 | rename: fn(world: Pool<Player>, id: ID<Player>) { world[id] = Player{name: "Rem"} }
+    |                                                        ^^^^
  Why: An unmarked parameter gives read access only; assigning into it needs write access
  Fix: Change the parameter to `world: &Pool<Player>`
 More: jet-lang.dev/e/E0205

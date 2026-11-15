@@ -1,7 +1,7 @@
 Error [jet.MissingMoveMarker]: `env` cannot be moved from borrowed storage
   --> tests/ui/copy_out_carrier_owning_position.jet:17:20
     |
- 14 |     wrapped := Val(env)
+ 17 |     wrapped := Val(env)
     |                    ^^^
  Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into the binding `wrapped`
  Fix: Declare the parameter `env: &&Res` so the caller hands the value over
@@ -10,8 +10,8 @@ More: jet-lang.dev/e/E0201
 Error [jet.MissingMoveMarker]: `env` cannot be moved from borrowed storage
   --> tests/ui/copy_out_carrier_owning_position.jet:21:46
     |
- 19 |     Slot{held: Val(env)}
-    |                    ^^^
+ 21 | store: fn(env: Res) -> Slot { Slot{held: Val(env)} }
+    |                                              ^^^
  Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into the struct literal
  Fix: Declare the parameter `env: &&Res` so the caller hands the value over
 More: jet-lang.dev/e/E0201
@@ -19,8 +19,8 @@ More: jet-lang.dev/e/E0201
 Error [jet.MissingMoveMarker]: `env` cannot be moved from borrowed storage
   --> tests/ui/copy_out_carrier_owning_position.jet:23:34
     |
- 23 |     Val(env)
-    |         ^^^
+ 23 | give: fn(env: Res) -> Res? { Val(env) }
+    |                                  ^^^
  Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into the returned value
  Fix: Declare the parameter `env: &&Res` so the caller hands the value over
 More: jet-lang.dev/e/E0201
@@ -28,7 +28,7 @@ More: jet-lang.dev/e/E0201
 Error [jet.MissingMoveMarker]: `env` cannot be moved from borrowed storage
   --> tests/ui/copy_out_carrier_owning_position.jet:27:19
     |
- 28 |     kept.push(Val(env))
+ 27 |     kept.push(Val(env))
     |                   ^^^
  Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into `.push()`
  Fix: Declare the parameter `env: &&Res` so the caller hands the value over

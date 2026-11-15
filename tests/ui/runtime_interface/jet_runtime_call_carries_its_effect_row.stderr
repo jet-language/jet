@@ -1,7 +1,7 @@
 Error [jet.EffectBoundExceeded]: `stamp` uses the effect `Time`, which its signature doesn't allow
-  --> jet_runtime_call_carries_its_effect_row.jet:6:15
+  --> tests/ui/runtime_interface/jet_runtime_call_carries_its_effect_row.jet:6:15
     |
-  6 | stamp: fn() -[IO]> Int {
+  6 | stamp: fn() -[IO]> Int { rt.host_monotonic_ns() }
     |               ^^
  Why: The signature declares `-[IO]>`, so the body may only use those; `Time` is outside that set
  Fix: Add `Time` to the effect list, or stop using it in `stamp`
@@ -10,9 +10,9 @@ Error [jet.EffectBoundExceeded]: `stamp` uses the effect `Time`, which its signa
 More: jet-lang.dev/e/E0740
 
 Error [jet.EffectBoundExceeded]: `run` uses the effect `Time`, which its signature doesn't allow
-  --> jet_runtime_call_carries_its_effect_row.jet:8:13
+  --> tests/ui/runtime_interface/jet_runtime_call_carries_its_effect_row.jet:8:13
     |
- 10 | run: fn() -[IO]> {
+  8 | run: fn() -[IO]> { print(stamp()) }
     |             ^^
  Why: The signature declares `-[IO]>`, so the body may only use those; `Time` is outside that set
  Fix: Add `Time` to the effect list, or stop using it in `run`

@@ -1,7 +1,7 @@
 Warning [jet.InferredNeverReturn]: Public function `fail` always diverges but does not declare `Never`
   --> tests/ui_lint/inferred_never_return.jet:4:1
     |
-  4 | fail: fn(message: String) {
+  4 | fail: fn(message: String) { panic(message) }
     | ^^^^
  Why: Inferred divergence is useful to callers but is not part of the written API contract
  Fix: Write `-> Never` as the return type, for example `fail: fn() -> Never`
@@ -10,7 +10,7 @@ More: jet-lang.dev/e/L2421
 Warning [jet.InferredNeverReturn]: Public function `stop` always diverges but does not declare `Never`
   --> tests/ui_lint/inferred_never_return.jet:6:1
     |
-  8 | stop: fn(code: Int) -> Int {
+  6 | stop: fn(code: Int) -> Int {
     | ^^^^
  Why: Inferred divergence is useful to callers but is not part of the written API contract
  Fix: Write `-> Never` as the return type, for example `stop: fn() -> Never`
@@ -19,7 +19,7 @@ More: jet-lang.dev/e/L2421
 Warning [jet.PositionalBoolParameter]: Public function `maybe` has a positional `Bool` parameter `flag`
   --> tests/ui_lint/inferred_never_return.jet:13:11
     |
- 17 | maybe: fn(flag: Bool) {
+ 13 | maybe: fn(flag: Bool) {
     |           ^^^^
  Why: Positional booleans are easy to transpose at the call site
  Fix: Callers can write `flag: true` to make the intent clear (S61 labels)

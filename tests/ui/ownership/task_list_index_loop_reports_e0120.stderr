@@ -1,7 +1,7 @@
 Error [jet.ReadOnlyValueNotOwned]: This loop can't take handles out of a field or index
   --> tests/ui/ownership/task_list_index_loop_reports_e0120.jet:4:21
     |
-  5 |     loop h in groups[0] { total += h.join() ?? 0 }
+  4 |     loop h in groups[0] -> total += h.join() ?? 0
     |                     ^^^
  Why: Each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list
  Fix: Bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs { … }`
@@ -10,7 +10,7 @@ More: jet-lang.dev/e/E0120
 Error [jet.SingleUseDropped]: `groups` still owes `consume`
   --> tests/ui/ownership/task_list_index_loop_reports_e0120.jet:2:5
     |
-  3 |     groups: [[task 1]]
+  2 |     groups: [[task 1]]
     |     ^^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
  Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(groups) }` to discard it deliberately

@@ -28,7 +28,7 @@ More: jet-lang.dev/e/E0140
 Error [jet.SingleUseDropped]: `table` still owes `consume`
   --> tests/ui/ownership/single_use_duty_covers_every_container.jet:17:5
     |
- 17 |     table: [String: Lease]{"map": acquire("map")}
+ 17 |     table: [String:Lease]{"map": acquire("map")}
     |     ^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
  Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(table) }` to discard it deliberately

@@ -1,8 +1,8 @@
 Error [jet.ErrorNotPropagatable]: `sort_by` fails with `PriceError`, which can't propagate into `KeyError` here
   --> tests/ui/callback_error_generic_mismatch.jet:29:53
     |
- 30 |     sort_by(names, parse_price)
-    |     ^^^^^^^
+ 29 | sorted: fn(names: [String]) -> [String] KeyError! { sort_by(names, parse_price) }
+    |                                                     ^^^^^^^
  Why: `sort_by` is defined at `callback_error_generic_mismatch.jet:15:1` with effective failure contract `explicit E!`; the caller's `explicit KeyError!` contract has no route from `PriceError` to `KeyError`
  Fix: Declare the caller with `PriceError` as its failure domain, or add `impl KeyError.From(PriceError) { … }`; otherwise handle `sort_by` locally with `??`
 More: jet-lang.dev/e/E2404
