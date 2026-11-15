@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6932,
-    "rev": 104775,
+    "rev": 104800,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32914,48 +32914,48 @@
         },
         {
           "n": 11,
-          "text": "[#4165] One qualified-right grammar (`FS.Read:/dir`, `Net.Connect:host`) in #Caps and the manifest, enforced at run time. A program granted one host fails with a typed authority failure on another host, on a cross-host redirect, and on a path outside its directory, on every level.",
+          "text": "One qualified-right grammar (`FS.Read:/dir`, `Net.Connect:host`) is used in #Caps and the manifest and enforced at run time: a program granted one host fails with a typed authority failure on another host, on a cross-host redirect and on a path outside its directory, on every level. Proof: `jet test Compiler --profile cases --filter authority/qualified_right_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:58:56.020Z"
+          "at": "2026-11-15T04:41:23.885Z"
         },
         {
           "n": 12,
-          "text": "[#4180] A test replaces Net.HTTP.Get with a typed fake inside a scope, and the same program uses the real network outside it, on every level. Provider lookup is eliminated when release policy denies providers.",
+          "text": "A test replaces Net.HTTP.Get with a typed fake inside a scope while the same program uses the real network outside it, on every level, and provider lookup is eliminated when release policy denies providers. Proof: `jet test Compiler --profile cases --filter authority/scoped_provider_fake`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:58:57.144Z"
+          "at": "2026-11-15T04:41:24.893Z"
         },
         {
           "n": 16,
-          "text": "(was #2329 c1) One package policy block sets effect ceilings, unsafe allowance by path, expert-surface ceilings, dependency allow or deny rules, and diagnostics-as-errors classes [precut audit: failing on 9c7ddf1359: C:cli_parts_inspect/package_team_policy_rejects_unsafe_expert_and_dependency_violations FAIL exit 0; expected 1]",
+          "text": "One package policy block sets effect ceilings, unsafe allowance by path, expert-surface ceilings, dependency allow and deny rules, and errors-by-class. Proof: `jet test Compiler --profile cases --filter cli_parts_inspect/package_team_policy_rejects_unsafe_expert_and_dependency_violations` (exits 1).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:47:37.251Z"
+          "at": "2026-11-15T04:41:25.848Z"
         },
         {
           "n": 17,
-          "text": "(was #2329 c2) Sema and lint enforce the effective policy with registered diagnostics and snapshots. An absent policy block adds no beginner ceremony [precut audit: failing on 9c7ddf1359: C:cli_parts_inspect/package_team_policy_rejects_unsafe_expert_and_dependency_violations FAIL exit 0; expected 1]",
+          "text": "Sema and `jet lint` enforce the effective package policy with registered errors and snapshots, and an absent policy block adds no ceremony for a beginner. Proof: `jet test Compiler --profile ui --filter package_policy_` and `jet test Compiler --profile cases --filter cli_parts_inspect/no_policy_block_no_ceremony`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:47:38.184Z"
+          "at": "2026-11-15T04:41:26.891Z"
         },
         {
           "n": 18,
-          "text": "(was #2329 c3) `jet inspect guarantees` shows every effective policy rule and grant, including inherited package settings, with deterministic output [precut audit: failing on 9c7ddf1359: C:cli_parts_inspect/package_team_policy_rejects_unsafe_expert_and_dependency_violations FAIL exit 0; expected 1]",
+          "text": "`jet inspect guarantees` shows every effective policy rule and grant, including inherited package settings, with deterministic output. Proof: `jet test Compiler --profile cases --filter cli_parts_inspect/guarantees_lists_inherited_policy`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:47:38.816Z"
+          "at": "2026-11-15T04:41:27.870Z"
         }
       ],
       "refs": [
@@ -32988,7 +32988,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-09-15T00:27:21.584Z",
-      "updated": "2026-11-15T04:41:22.688Z",
+      "updated": "2026-11-15T04:41:27.870Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -44953,29 +44953,32 @@
         {
           "n": 3,
           "text": "{\"decisionId\": \"D-CRYPTOENV1\", \"text\": \"core.crypto uses misuse-resistant seal/open/sign/verify; expert raw/exposure operations require #Unsafe and secret values cannot be ordinarily printed, compared, reflected or serialized. Ruling source: `Docs/spec/syntax-decisions.md:4388`.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_cryptoenv1_contract\", \"suite\": \"tests/ratified/P04.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P04/d_cryptoenv1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"13 roots and all FFI language leaves; retired flat roots refused\", \"secret-safe seal/open/sign/verify and rejected raw nonce/algorithm without #Unsafe\", \"folder/host narrowing and derived Authority escape through loop headers/steps rejected\", \"guest declared import needs granted through narrowed host Authority; missing grant fails before side effect\", \"Panic deny is transitive and denial-only; unknown call edges cannot discharge prohibition\", \"all five policy scopes/modes; org refusal defeats family CLI override; retired --allow-impure teaches canonical flag\", \"parse #PII String, propagate facts through branches/containers/calls; denied sinks reject; only checked #Scrub removes tag\", \"devtools unavailable reason and projection use authority/effects/write-access rather than capability\"]}}",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-02T18:24:07.275Z"
+          "evidence": "Moved to #6925 c7: crypto envelopes belong with the Core crypto card #6925",
+          "at": "2026-11-15T04:41:42.166Z",
+          "closure": "obsolete"
         },
         {
           "n": 4,
           "text": "{\"decisionId\": \"D-FILES-SCOPE1\", \"text\": \"Trusted scripts keep direct fs calls. Restricted code derives one opaque scope from Authority and uses familiar methods on it.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_files_scope1_contract\", \"suite\": \"tests/ratified/P04.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P04/d_files_scope1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"13 roots and all FFI language leaves; retired flat roots refused\", \"secret-safe seal/open/sign/verify and rejected raw nonce/algorithm without #Unsafe\", \"folder/host narrowing and derived Authority escape through loop headers/steps rejected\", \"guest declared import needs granted through narrowed host Authority; missing grant fails before side effect\", \"Panic deny is transitive and denial-only; unknown call edges cannot discharge prohibition\", \"all five policy scopes/modes; org refusal defeats family CLI override; retired --allow-impure teaches canonical flag\", \"parse #PII String, propagate facts through branches/containers/calls; denied sinks reject; only checked #Scrub removes tag\", \"devtools unavailable reason and projection use authority/effects/write-access rather than capability\"]}}",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-02T18:24:07.885Z"
+          "evidence": "Moved to #6930 c1: restricted file scope",
+          "at": "2026-11-15T04:41:28.882Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
           "text": "{\"decisionId\": \"D-FOUND-SANDBOX1\", \"text\": \"The guest names the rights it needs. The host lends an Authority value tightened to a folder or host.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_found_sandbox1_contract\", \"suite\": \"tests/ratified/P04.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P04/d_found_sandbox1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"13 roots and all FFI language leaves; retired flat roots refused\", \"secret-safe seal/open/sign/verify and rejected raw nonce/algorithm without #Unsafe\", \"folder/host narrowing and derived Authority escape through loop headers/steps rejected\", \"guest declared import needs granted through narrowed host Authority; missing grant fails before side effect\", \"Panic deny is transitive and denial-only; unknown call edges cannot discharge prohibition\", \"all five policy scopes/modes; org refusal defeats family CLI override; retired --allow-impure teaches canonical flag\", \"parse #PII String, propagate facts through branches/containers/calls; denied sinks reject; only checked #Scrub removes tag\", \"devtools unavailable reason and projection use authority/effects/write-access rather than capability\"]}}",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-02T18:24:08.903Z"
+          "evidence": "Moved to #6930 c2: sandbox guest authority",
+          "at": "2026-11-15T04:41:29.831Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
@@ -44998,29 +45001,32 @@
         {
           "n": 8,
           "text": "{\"decisionId\": \"D-QUAL4\", \"text\": \"A value tag in type position is written directly before the type, for example `#PII String`.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_qual4_contract\", \"suite\": \"tests/ratified/P04.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P04/d_qual4.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"13 roots and all FFI language leaves; retired flat roots refused\", \"secret-safe seal/open/sign/verify and rejected raw nonce/algorithm without #Unsafe\", \"folder/host narrowing and derived Authority escape through loop headers/steps rejected\", \"guest declared import needs granted through narrowed host Authority; missing grant fails before side effect\", \"Panic deny is transitive and denial-only; unknown call edges cannot discharge prohibition\", \"all five policy scopes/modes; org refusal defeats family CLI override; retired --allow-impure teaches canonical flag\", \"parse #PII String, propagate facts through branches/containers/calls; denied sinks reject; only checked #Scrub removes tag\", \"devtools unavailable reason and projection use authority/effects/write-access rather than capability\"]}}",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-02T18:24:11.521Z"
+          "evidence": "Moved to #6931 c1: value tags",
+          "at": "2026-11-15T04:41:39.327Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
           "text": "{\"decisionId\": \"D-TAINT1\", \"text\": \"Direct tag facts propagate through dataflow and are rejected at the tag's denied destinations. D-TAG-SURFACE1 makes `#Scrub(Tag)` the sole checked removal door and retires Tainted/Sanitizer forms.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_taint1_contract\", \"suite\": \"tests/ratified/P04.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P04/d_taint1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"13 roots and all FFI language leaves; retired flat roots refused\", \"secret-safe seal/open/sign/verify and rejected raw nonce/algorithm without #Unsafe\", \"folder/host narrowing and derived Authority escape through loop headers/steps rejected\", \"guest declared import needs granted through narrowed host Authority; missing grant fails before side effect\", \"Panic deny is transitive and denial-only; unknown call edges cannot discharge prohibition\", \"all five policy scopes/modes; org refusal defeats family CLI override; retired --allow-impure teaches canonical flag\", \"parse #PII String, propagate facts through branches/containers/calls; denied sinks reject; only checked #Scrub removes tag\", \"devtools unavailable reason and projection use authority/effects/write-access rather than capability\"]}}",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-02T18:24:12.154Z"
+          "evidence": "Moved to #6931 c2: value tags",
+          "at": "2026-11-15T04:41:40.240Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
           "text": "[#4313] process spec .under(grant) narrows authority through the shared runtime (jet_std_process_spec_under is registered). The under/#FX boundary golden passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:43:28.011Z"
+          "evidence": "Moved to #6697 c5: process sandbox narrowing belongs with the Jet sandbox on #6697",
+          "at": "2026-11-15T04:41:43.295Z",
+          "closure": "obsolete"
         },
         {
           "n": 18,
@@ -45043,38 +45049,42 @@
         {
           "n": 20,
           "text": "(was #891 c2) Declared filesystem, process, network, environment, device, and resource policy is enforced and recorded by the actual platform backend Proof: a Linux tests/cases/authority row runs a child under the native sandbox (Jetpack/Foundation/Source/NativeSandbox.jet, SandboxPolicy.jet) with a declared policy and shows each denied access and the recorded policy. (The old precut case was Windows AppContainer only.)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:44:20.974Z"
+          "evidence": "Moved to #6697 c6: native sandbox enforcement belongs with #6697",
+          "at": "2026-11-15T04:41:44.428Z",
+          "closure": "obsolete"
         },
         {
           "n": 23,
           "text": "(was #1177 c2, #1178 c2, #1179 c2) Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority Proof: a Linux tests/cases/agent_executor row shows plan, launch, descendants, limits, outputs and receipt carrying one policy digest. (The old precut case was Windows AppContainer only.)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:44:23.101Z"
+          "evidence": "Moved to #6697 c7: native sandbox launch records belong with #6697",
+          "at": "2026-11-15T04:41:45.402Z",
+          "closure": "obsolete"
         },
         {
           "n": 24,
           "text": "(was #1177 c3, #1178 c3) Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes Proof: a Linux tests/cases/agent_executor row per failure (unsupported enforcement, denied access, escape, limit, cancellation, child abuse) shows a closed failure with no leaked handle, secret or process. (The old precut case was Windows AppContainer only.)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:44:25.228Z"
+          "evidence": "Moved to #6697 c8: native sandbox failures belong with #6697",
+          "at": "2026-11-15T04:41:46.365Z",
+          "closure": "obsolete"
         },
         {
           "n": 25,
           "text": "(was #1333) Crypto secret provenance diagnostics no longer fire (E0311 family) [precut audit: failing on 9c7ddf1359: U:crypto_secret_nested_provenance FAIL snapshot mismatch: tests/ui/crypto_secret_nested_provenance.stderr]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:38.417Z"
+          "evidence": "Moved to #6931 c3: secret provenance tags",
+          "at": "2026-11-15T04:41:41.152Z",
+          "closure": "obsolete"
         },
         {
           "n": 26,
@@ -45106,74 +45116,82 @@
         {
           "n": 33,
           "text": "(was #1731 c1) `target: sandbox` is the only manifest spelling; `target: plugin` is gone with no rewrite or alias.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:07:48.538Z"
+          "evidence": "Moved to #6930 c3: sandbox package kind",
+          "at": "2026-11-15T04:41:30.834Z",
+          "closure": "obsolete"
         },
         {
           "n": 34,
           "text": "(was #1731 c2) diagnostics, spec, and examples say sandbox; the wasm note survives as implementation detail Proof: a tests/guards check that diagnostics, spec pages and examples name the package kind sandbox, with wasm only where it names the browser ISA (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:44:28.175Z"
+          "evidence": "Moved to #6930 c4: sandbox package kind",
+          "at": "2026-11-15T04:41:31.905Z",
+          "closure": "obsolete"
         },
         {
           "n": 35,
           "text": "(was #1731 c3) adoption ratchet: zero plugin spellings in-repo Proof: a tests/guards ratchet that fails on plugin as a package-kind word in Compiler, Jetpack, Docs/spec and Examples (on dev 6a06b917cb PackageViews.jet:238 still maps .Plugin to \"plugin\", and architecture.md:1878 and syntax-decisions.md:3975 still say core.plugin; build-graph plugins are another word and stay) (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:44:31.053Z"
+          "evidence": "Moved to #6930 c5: sandbox package kind",
+          "at": "2026-11-15T04:41:32.898Z",
+          "closure": "obsolete"
         },
         {
           "n": 36,
           "text": "(was #1731 c5) Rows E1257, E1258 and E1259 in Compiler/Prelude/Diagnostics.jet and their UI and CLI snapshots say `sandbox`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:07:49.346Z"
+          "evidence": "Moved to #6930 c6: sandbox package kind",
+          "at": "2026-11-15T04:41:33.845Z",
+          "closure": "obsolete"
         },
         {
           "n": 41,
           "text": "(was #2786 c1) The sandbox guest and host enforce declared resource-scoped FS.Read for inside-root reads and real outside-root denial, with a guest build and golden.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:07:53.769Z"
+          "evidence": "Moved to #6930 c7: sandbox guest FS",
+          "at": "2026-11-15T04:41:34.772Z",
+          "closure": "obsolete"
         },
         {
           "n": 42,
           "text": "(was #2786 c2) The Component guest exports a typed Codable record-list function and the host consumes it without scalar-only substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:52.397Z"
+          "evidence": "Moved to #6930 c8: sandbox guest exports",
+          "at": "2026-11-15T04:41:35.718Z",
+          "closure": "obsolete"
         },
         {
           "n": 43,
           "text": "(was #2786 c3) The direct host FileScope API and every O0, O1, O2 and compile-time path call the canonical resource, no-follow and IOError policy, with denial cases on each tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:07:54.684Z"
+          "evidence": "Moved to #6930 c9: file scope policy",
+          "at": "2026-11-15T04:41:36.642Z",
+          "closure": "obsolete"
         },
         {
           "n": 44,
           "text": "(was #2805 c1) The sandbox foundation runs, with a generated guest snapshot, goldens on every applicable tier and a service execution case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:44:32.975Z"
+          "evidence": "Moved to #6930 c10: sandbox foundation",
+          "at": "2026-11-15T04:41:37.537Z",
+          "closure": "obsolete"
         },
         {
           "n": 45,
@@ -45232,20 +45250,22 @@
         {
           "n": 58,
           "text": "tests/run/Foundations/Capabilities passes as a run case: a sandbox build target produces guest/build/capability_guest.wasm, so the host loads it and the compiler reads its Component interface (moved from #6753 c2 on 2026-11-14; its known-failing row cited the missing card #4599). Proof: jet test Compiler --profile cases --filter Foundations/Capabilities -> PASS, with the row removed from tests/known-failing.tsv.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T14:05:15.783Z"
+          "evidence": "Moved to #6930 c11: Capabilities run case",
+          "at": "2026-11-15T04:41:38.428Z",
+          "closure": "obsolete"
         },
         {
           "n": 59,
           "text": "The netrc parser follows the exact netrc rules (default entry, macdef, quoting, malformed input) rather than treating netrc as INI. Proof: `jet test Compiler --profile cases --filter jetpack/netrc_parse_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:03:51.475Z"
+          "evidence": "Moved to #6632 c109: netrc parsing is Jetpack credential handling (G7, #6632)",
+          "at": "2026-11-15T04:41:47.320Z",
+          "closure": "obsolete"
         },
         {
           "n": 60,
@@ -45268,7 +45288,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:05.406Z",
-      "updated": "2026-11-15T04:41:12.249Z",
+      "updated": "2026-11-15T04:41:47.320Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -214977,6 +214997,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:41:47.320Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#59"
+    },
+    {
+      "at": "2026-11-15T04:41:46.365Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-15T04:41:45.402Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-15T04:41:44.428Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T04:41:43.295Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-15T04:41:42.166Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T04:41:41.152Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-15T04:41:40.240Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T04:41:39.327Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T04:41:38.428Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#58"
+    },
+    {
+      "at": "2026-11-15T04:41:37.537Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-15T04:41:36.642Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-15T04:41:35.718Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#42"
+    },
+    {
+      "at": "2026-11-15T04:41:34.772Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#41"
+    },
+    {
+      "at": "2026-11-15T04:41:33.845Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-15T04:41:32.898Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-15T04:41:31.905Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-15T04:41:30.834Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-15T04:41:29.831Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T04:41:28.882Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T04:41:27.870Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#18: strip debris; proof; was: (was #2329 c3) `jet inspect guarantees` shows every effective policy rule and grant, including inherited package settings, with deterministic output [precut audit: failing on 9c7ddf1359: C:cli_parts_i"
+    },
+    {
+      "at": "2026-11-15T04:41:26.891Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#17: strip debris; proof; was: (was #2329 c2) Sema and lint enforce the effective policy with registered diagnostics and snapshots. An absent policy block adds no beginner ceremony [precut audit: failing on 9c7ddf1359: C:cli_parts_"
+    },
+    {
+      "at": "2026-11-15T04:41:25.848Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#16: strip debris; proof; was: (was #2329 c1) One package policy block sets effect ceilings, unsafe allowance by path, expert-surface ceilings, dependency allow or deny rules, and diagnostics-as-errors classes [precut audit: failin"
+    },
+    {
+      "at": "2026-11-15T04:41:24.893Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#12: strip debris; proof; was: [#4180] A test replaces Net.HTTP.Get with a typed fake inside a scope, and the same program uses the real network outside it, on every level. Provider lookup is eliminated when release policy denies p"
+    },
+    {
+      "at": "2026-11-15T04:41:23.885Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#11: strip debris; proof; was: [#4165] One qualified-right grammar (`FS.Read:/dir`, `Net.Connect:host`) in #Caps and the manifest, enforced at run time. A program granted one host fails with a typed authority failure on another hos"
+    },
     {
       "at": "2026-11-15T04:41:22.688Z",
       "by": "TowerKeeper-1",
