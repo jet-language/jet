@@ -99900,6 +99900,203 @@
       "completedAt": "2026-11-12T08:28:48.879Z",
       "questions": [],
       "retiredAt": "2026-11-15T08:37:14.284Z"
+    },
+    {
+      "id": "c0qrom2s",
+      "num": 5028,
+      "title": "Build D-JAI-SMALL1: bit-stored enum sets, #Through, #As and #Specified",
+      "body": "## Outcome\n\nDecision D-JAI-SMALL1. Remaining Jai conveniences without a Jet counterpart: `enum_flags`, `#through` fall-through, `xx` autocast, `#as` member conversion, `#specified` enums, `..Any` heterogeneous parameters, bucket arrays, `#no_debug`, custom entry symbols. Audit rows: G01, G19, G21, G23, G28, G36, G39, G42, G43, C09.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c1 met (50a61e8454); c2, c3 and c5 were already met. All criteria met."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t19 landed G6Decl-3 (0efcf91a49..97462b6d92): #Specified makes every case of a numbered enum state its number (Prelude marker, a registered diagnostic, UI snapshot, golden O0/O1/O2). c5 stays open for its four-forms sentence, which closes with c1-c3."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-JAI-SMALL1=A part 1: a Set of a small enum is stored as bits and has bits() and from_bits(); a golden shows the round trip and the size on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G6Decl-7r landed as 50a61e8454. meet g6d on dev 831b178482 with seed-b12 jet@a0.0.45#b5c287db (built from 2844b04984), Lander5 meetrun 2026-11-12: jet test Compiler --profile cases tests/cases/collections_and_methods/set_bits_round_trip_on_every_tier.case PASS 1, 0 FAIL/KF/ERROR. The case's expected output pins the bits() and from_bits() round trip of a Set of a small enum and its 8-byte size on O0, O1 and O2. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6d/1.out.",
+          "at": "2026-11-12T09:26:46.344Z"
+        },
+        {
+          "n": 2,
+          "text": "D-JAI-SMALL1=A part 2: #Through ends a match arm and runs the next arm's body; misuse is a registered diagnostic with a UI snapshot, and a golden passes on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander meet-g6decl5028 on seed-b9 at dev 45e7ab43c4 (contains G6Decl-4d d3488f8f2e). `jet test Compiler --profile golden --filter=Through` gave PASS 33 (O0, O1 and O2 for every Through example) with FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR and TIMEOUT all 0. The UI lines tests/ui/through_refusals.jet and tests/ui/through_last_arm.jet each gave PASS 1, all else 0. `jet Tools/agent/DiagnosticRows.jet --check` passed (1078 copies match; the misuse codes are registered).",
+          "at": "2026-11-12T01:30:16.981Z"
+        },
+        {
+          "n": 3,
+          "text": "D-JAI-SMALL1=A part 3: #As on one field lets the struct pass as that field; misuse is a registered diagnostic with a UI snapshot, and a golden passes on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander meet-g6decl5028 on seed-b9 at dev 45e7ab43c4 (contains G6Decl-5d 2e7c55fc37). `jet test Compiler --profile golden --filter=AsField` gave PASS 3 (O0, O1, O2) with all failure counts 0. tests/ui/as_refusals.jet gave PASS 1, all else 0. `jet Tools/agent/DiagnosticRows.jet --check` passed (1078 copies match).",
+          "at": "2026-11-12T01:30:17.951Z"
+        },
+        {
+          "n": 5,
+          "text": "D-JAI-SMALL1=A part 4: #Specified on an enum makes every case state its value; a missing value is a registered diagnostic with a UI snapshot, and a golden passes on O0, O1 and O2. The syntax registry, Docs/spec/syntax-decisions.md and the jet devtools grammars show all four forms.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Already on dev (50ba4a149c; all four forms landed with G6Decl-4d 2e7c55fc37... 5d/7d 50a61e8454). On batch compiler seed-b3 at dev c188674ff0: jet test Compiler --profile golden --filter EnumSpecified passes o0/o1/o2 (3/0); jet test Compiler --profile ui tests/ui/enum_specified_refusals.jet passes 1/0. The syntax registry has Specified/Through, and the tmGrammar has As/Specified/Through.",
+          "at": "2026-11-11T19:48:30.123Z"
+        }
+      ],
+      "refs": [
+        "Docs/audits/jai-parity-2026-10-16.md",
+        "#5021"
+      ],
+      "tags": [
+        "mining-2026-10-16",
+        "jai-vs-jet",
+        "jai-parity",
+        "syntax",
+        "needs-owner",
+        "wayfinder:decision"
+      ],
+      "parentId": "c02y3vkg",
+      "needsAcceptance": false,
+      "created": "2026-10-16T10:54:46.152Z",
+      "updated": "2026-11-12T09:26:48.884Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G6"
+      ],
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-12T09:26:48.884Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T09:27:19.301Z"
+    },
+    {
+      "id": "c012p9p9",
+      "num": 6763,
+      "title": "Land.jet receipt is written by a failing census (jetpack-areas row not gated)",
+      "body": "Found 2026-11-12 02:18 by Lander5. The b10 admit census rerun exited rc=1 because jetpack-areas failed (CLI and JetOS exited 137 on OOM, see #6761 c2). The same run still wrote preflight receipt 8e82b8ae (mtime 02:15:45), whose rows are check, build, runtime-pack, selfcheck and selfcheck-core, with no jetpack-areas. Then Land.jet receipt and check-gate accepted it, and the admit reached the release gate before it was stopped by hand (no publish). AGENTS requires a clean collect-all census, every row clean or with a written disposition, before any expensive launch. The receipt must cover every census row.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c1 met (690bb98a80): a failing jetpack-areas row leaves no receipt and check-gate refuses; a clean census writes a receipt that admits. All criteria met."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Land.jet census writes its receipt only when every phase row of that run is clean, jetpack-areas included, and the receipt lists every row. Land.jet receipt and every --check-gate refuse a receipt that is missing a row or holds a failing row. Proof: a census whose jetpack-areas row fails (one area forced over its cap) leaves no new receipt, and check-gate rc!=0 for that tree and seed. A clean run still writes one that admits.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed as dev 690bb98a80 (Land.jet only; Lander5 landfix.sh with land6763-dev.patch, 2026-11-12). landproof on 50a2cbc7e6 plus that Land.jet, boot seed seed-b10 jet@a0.0.45#c089d4d3. Forced run, CENSUS_AREA_CAP=1G: census rc=1, 17 failing rows (the jetpack-areas row plus all 16 area lanes killed at 1024M), no receipt written; receipt commit rc=1; Tools/release/Main.jet admit --check-gate rc=2 'refused: no preflight receipt'. Clean run: census rc=0, 16 areas in 5 lanes, v2 receipt written with 24 rows and 0 failing; receipt commit rc=0; admit --check-gate rc=0. On dev 831b178482 with the patch and seed-b12 jet@a0.0.45#…b5c287db: jet check Tools/agent/Land.jet rc 0; jet test Tools/agent/Land.jet 25 passed, 0 failed.",
+          "at": "2026-11-12T09:21:53.233Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T07:18:38.825Z",
+      "updated": "2026-11-12T09:21:55.614Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-12T09:21:55.614Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T09:27:19.301Z"
+    },
+    {
+      "id": "c0qgaxcl",
+      "num": 6765,
+      "title": "Core Tasks: a task's identity is stable and differs from another running task's FAILS on b11 at none/basic/full (regression)",
+      "body": "The b11 deferred pass ran jet test Compiler --profile core on the b11 tree 19333b2bb3 with seed-b11 jet@a0.0.45#3667b9a1 and got 2292 rows, 2289 passed, 3 failed. All three failures are Core/Tasks/Tasks.jet, 'a task's identity is stable and differs from another running task's', at [none], [basic] and [full]. core.rows records the test as passed before (lost: was passed, now failed), so this is a regression in the b10..b11 range, I9-consistent across levels. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/deferred-b11/6.out. The other drift (75 lost doctests 'now missing', 111 new) is doctest line renumbering and is not this card.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c1 met: the Tasks identity row passes at none, basic and full on seed-b12 (G12Docs-50 fd03c6617f fixes root a1e1b740f6). All criteria met."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet test Core/Tasks/Tasks.jet --optimize=none, --optimize=basic and --optimize=full, on a compiler built from dev with the fix, pass every Tasks row with 0 FAIL, and the root (the b10..b11 commit that broke task identity) is named in the evidence.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Root: a1e1b740f6 (G6Meta-22, which folds locals while compiling) folded mine: current_task() to the compiler's own task. Fix: G12Docs-50 fd03c6617f, a sema rule under which a local value never folds a call that a runtime export or foreign body answers. b12 priority slice (Lander5 batch.sh b12 --deferred-only DEFERRED_SUBS, 2026-11-12 04:07-04:09, rc 0) on dev 2844b04984 with seed-b12, published from 2844b04984; out $JET_SCRATCH_ROOT/lanes/Lander/loop/out/deferred-b12/: jet test Core/Tasks/Tasks.jet --optimize=none, basic and full, each 5 passed, 0 failed, 0 skipped, including 'a task's identity is stable and differs from another running task's' (25.out, 26.out, 27.out); semindex cases locals_the_runtime_answers_run_at_run_time, locals_that_call_code_are_computed_while_compiling and immutable_locals_report_their_stage PASS (28-30.out).",
+          "at": "2026-11-12T09:15:24.722Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T08:08:20.375Z",
+      "updated": "2026-11-12T09:15:50.594Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-12T09:15:50.594Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T09:27:19.301Z"
     }
   ]
 }

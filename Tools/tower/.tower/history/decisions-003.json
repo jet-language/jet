@@ -22506,6 +22506,182 @@
       "outcome": "B",
       "ratifiedAt": "2026-11-09",
       "retiredAt": "2026-11-15T05:31:40.839Z"
+    },
+    {
+      "id": "D-JAI-SMALL1",
+      "cardId": "c0qrom2s",
+      "group": "syntax",
+      "title": "Small Jai conveniences: flag sets, fall-through, member conversion and fixed enum values",
+      "situation": "Jai has small conveniences Jet lacks: enums whose cases combine as bit flags, fall-through between switch cases, and structs that pass as one of their fields. It also has enums whose every value must be written. Other Jai conveniences, such as any-type arguments and stable arrays, already have Jet forms. The vote decides whether Jet adds the four missing ones; we recommend all four, each checked.",
+      "gist": "Should Jet add Jai's flag enums, fall-through, member conversion and fixed enum values in checked forms?",
+      "lesson": "Jai is a game language with many small shortcuts. A flag set stores several enum cases as bits in one number. Fall-through runs the next match arm's body too. Member conversion lets a struct pass where one of its fields' types is expected.",
+      "explainer": "",
+      "story": "Joe ports a Jai tool of ten thousand lines. Most of it maps cleanly, but permission flags, fall-through switches, embedded structs and enums with fixed on-disk values each need a different workaround.",
+      "inWild": "Perm :: enum_flags { READ; WRITE; EXEC; }\nEntity :: struct { #as using sprite: Sprite; }\nif x == { case 1; a(); #through; case 2; b(); }\nOp :: enum u8 #specified { ADD :: 1; SUB :: 2; }",
+      "detail": "Audit rows refer to Docs/audits/jai-parity-2026-10-16.md. Spellings use today's `prep` keyword and `$` fact mark (D-COMPILER-NS1=A, shipped 2026-09-30). The open ballots D-COMPTIME-WORD1 (prep to comptime) and D-META-HASH1 ($ reads to ##) would respell them mechanically. No choice here changes with those outcomes. Words used here. Jai is a systems programming language by Jonathan Blow, built for games, with no guardrails by default. `prep { }` runs Jet code while compiling.\n\nA `$` word such as `T.$fields` reads a fact the compiler knows. A `#Name` marker attaches a rule to the code below it. `package.jet` is a package's settings file. The main package is the one you build directly.\n\nTHE ITEMS UNDER A. (1) Flag sets (Jai enum_flags): `Set<E>` over a fieldless enum of up to 64 cases is stored as a bit mask. Case i is bit i in declaration order. For C flags, a `#Specified` enum whose values are single bits maps each case to its own value. Any other value is a compile error. This changes Set's storage for small enums only. Its methods and printing are unchanged (amends D-COLLBREADTH1's storage note).\n\n`.bits()` and fallible `Set<E>.from_bits(n)` cross C boundaries. No new enum kind is added. (2) `#Through` after a match arm (Jai #through) runs the next arm's body as well. That arm's bindings are not available, and the last arm cannot fall through. Or-patterns stay the tool for shared bodies. Fall-through is for 'do this, then also that'.\n\n(3) `#As` on a struct field (Jai #as): the struct converts to that field's type where that type is expected. One #As per type, and the conversion is a view of the field, never a copy. (4) `#Specified enum` (Jai #specified): every case states its value, and changing one on a public type is flagged as a breaking change. ALREADY COVERED, NOT RE-PROPOSED. Jai ..Any maps to trait-bounded variadics `...Debug` (D-ANY-JAI1. No top type).\n\nJai xx maps to `U8.from_int(n)?` (D-SHAPE-CONVERT1). Bucket arrays map to `Pool<T>`/`Id<T>`, which give stable identities. Stable raw addresses stay behind `#Unsafe`, a deliberate difference from Jai. A custom entry symbol is the freestanding target profile's entry fact (D-TARGET-SURFACE1). C++ methods and non-POD returns are handled by the `cpp.*` binder (D-FFI-CPP1). Jai `#type,isa` maps to distinct types with an explicit conversion.\n\nNOT PROPOSED. Identifier backslashes (public sources do not show their meaning) and textual #load (Jet modules use explicit names). Also #char (Jet has 'a'), #bytes (#FFI(asm) covers raw bytes), and #intrinsic and #runtime_support (compiler-internal in both languages).\n\nEVIDENCE. The Way to Jai Appendix C rows. Blow 8tMq3QZyz8s 00:02:52 (enum_flags), from the mining notes. C# [Flags], Rust enum-set crates and Odin `using` fields are the precedents.",
+      "options": [
+        {
+          "key": "A",
+          "name": "All four, checked",
+          "detail": "A Set of a small enum is stored as bits, with bits() and from_bits(). `#Through` ends an arm and runs the next arm's body. `#As` on one field lets the struct pass as that field. `#Specified` makes every enum case state its value.",
+          "technical": "Set<E> over a fieldless enum of up to 64 cases uses a bit mask, with `.bits() -> U64` and fallible `Set<E>.from_bits(n)`. Markers `#Through` (match arm), `#As` (one field per type) and `#Specified` (enum), registered with decision IDs (I7).",
+          "code": "perms: Set<Perm> = [.Read, .Write]   // stored as bits; perms.bits() == 3\nstruct Entity { #As sprite: Sprite }\ndraw(entity)                        // passes entity.sprite\n1 -> { a() } #Through\n2 -> { b() }\n#Specified enum Op: U8 { Add = 1, Sub = 2 }"
+        },
+        {
+          "key": "B",
+          "name": "All except member conversion",
+          "detail": "Flag sets, `#Through` and `#Specified` from A. `#As` is left out.",
+          "technical": "As A without `#As`.",
+          "code": "perms: Set<Perm> = [.Read, .Write]   // stored as bits\n1 -> { a() } #Through\n2 -> { b() }\ndraw(entity.sprite)                 // name the field\n#Specified enum Op: U8 { Add = 1, Sub = 2 }"
+        },
+        {
+          "key": "C",
+          "name": "Adopt none",
+          "detail": "No change.",
+          "technical": "No change.",
+          "code": "perms: Bits = Bits.new()          // integer set, combined by hand\ndraw(entity.sprite)\n// repeat shared arm code; review enum values by hand"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C#",
+          "note": "[Flags] enums combine with | and print as names.",
+          "code": "[Flags] enum Perm { Read = 1, Write = 2, Exec = 4 }"
+        },
+        {
+          "lang": "Rust",
+          "note": "EnumSet-style crates store enum sets as bits, the model for Set<E>.",
+          "code": "let perms = Perm::Read | Perm::Write;"
+        },
+        {
+          "lang": "Odin",
+          "note": "using on a struct field promotes its members, like Jai #as.",
+          "code": "Entity :: struct { using sprite: Sprite }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "These four forms remove the most common Jai porting rewrites, and each is checked by the compiler.",
+        "gains": [
+          "The four remaining small Jai conveniences get a home."
+        ],
+        "losses": [
+          {
+            "loss": "Member conversion is an implicit conversion.",
+            "mitigation": "Only one `#As` field per type, written on the struct, so each conversion has one visible source."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B avoids implicit member conversion but drops Jai's main composition tool."
+          },
+          {
+            "key": "C",
+            "reason": "C adds nothing and leaves every small porting gap open."
+          }
+        ],
+        "tradeoff": "Three markers and a set storage rule, for one-to-one Jai porting."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: BegSmall. Skill: rli5. The beginner pass tested the complete ballot. The reader could not hold nine items at once, so the ballot now carries four and maps the rest to existing forms.",
+        "adversarial": "Author model family: claude-opus. Adversarial model family: claude-haiku. Fresh agent: AdvSmall. The adversarial review attacked the recommendation. It found a source-owned conversion, a top type and a duplicate container; those five items now map to ratified forms, and flags reuse Set."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Jet add Jai's flag enums, fall-through, member conversion and fixed enum values in checked forms?",
+        "lesson": "Jai is a game language with many small shortcuts. A flag set stores several enum cases as bits in one number. Fall-through runs the next match arm's body too. Member conversion lets a struct pass where one of its fields' types is expected.",
+        "trio": {
+          "current": {
+            "note": "Today these need workarounds: an enum set has no bit value, arms cannot fall through, fields are passed by hand.",
+            "code": "perms: Set<Perm> = [.Read, .Write]     // general set, no bit value\ndraw(entity.sprite)                    // pass the field by hand\n// no fall-through; no rule that every case value is written"
+          },
+          "wild": {
+            "lang": "Jai",
+            "note": "enum_flags, #through, #as and #specified (The Way to Jai Appendix C).",
+            "code": "Perm :: enum_flags { READ; WRITE; EXEC; }\nEntity :: struct { #as using sprite: Sprite; }\nif x == { case 1; a(); #through; case 2; b(); }\nOp :: enum u8 #specified { ADD :: 1; SUB :: 2; }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "All four, checked",
+            "gist": "Bit-backed enum sets, fall-through, member conversion and fixed enum values.",
+            "gains": [
+              "Jai flags, fall-through and #as port directly.",
+              "Each form stays type-checked."
+            ],
+            "losses": [
+              "Member conversion is an implicit conversion."
+            ],
+            "proposed": {
+              "code": "perms: Set<Perm> = [.Read, .Write]   // stored as bits; perms.bits() == 3\nstruct Entity { #As sprite: Sprite }\ndraw(entity)                        // passes entity.sprite\n1 -> { a() } #Through\n2 -> { b() }\n#Specified enum Op: U8 { Add = 1, Sub = 2 }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "All except member conversion",
+            "gist": "Adopt flags, fall-through and fixed values; no implicit member conversion.",
+            "gains": [
+              "No implicit conversion at call sites."
+            ],
+            "losses": [
+              "Jai's #as composition needs explicit field access."
+            ],
+            "proposed": {
+              "code": "perms: Set<Perm> = [.Read, .Write]   // stored as bits\n1 -> { a() } #Through\n2 -> { b() }\ndraw(entity.sprite)                 // name the field\n#Specified enum Op: U8 { Add = 1, Sub = 2 }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Adopt none",
+            "gist": "Keep today's forms and write the workarounds.",
+            "gains": [
+              "No new forms."
+            ],
+            "losses": [
+              "Ported Jai code needs many small rewrites."
+            ],
+            "proposed": {
+              "code": "perms: Bits = Bits.new()          // integer set, combined by hand\ndraw(entity.sprite)\n// repeat shared arm code; review enum values by hand"
+            }
+          }
+        ],
+        "recommendation": {
+          "why": "These four forms remove the most common Jai porting rewrites, and each is checked by the compiler.",
+          "gains": [
+            "The four remaining small Jai conveniences get a home."
+          ],
+          "losses": [
+            {
+              "loss": "Member conversion is an implicit conversion.",
+              "mitigation": "Only one `#As` field per type, written on the struct, so each conversion has one visible source."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B avoids implicit member conversion but drops Jai's main composition tool."
+            },
+            {
+              "key": "C",
+              "reason": "C adds nothing and leaves every small porting gap open."
+            }
+          ],
+          "tradeoff": "Three markers and a set storage rule, for one-to-one Jai porting.",
+          "rec": "A"
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-16T11:40:02.085Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-17",
+      "retiredAt": "2026-11-15T09:27:19.301Z"
     }
   ]
 }
