@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6961,
-    "rev": 105475,
+    "rev": 105488,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22499,7 +22499,7 @@
       "track": "sidequest",
       "epoch": "e10",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nOwn four measurement runs and close only on fresh, unfiltered evidence: (1) the full gauntlet matrix, (2) the Core conformance census, (3) the compiler-speed dashboard, (4) the project-check corpus. No product source changes.\n\n## Owner direction (keep verbatim in spirit)\n- 2026-09-14: score AOT against Rust/C/Zig/Go, and `jet run` and `jet dev` independently against Python/JS. The split applies to execution, first-result and edit-to-result latency.\n- There is one JS language column and no Node language column; Node, Bun and Vite stay required web-development comparisons against `jet dev` (live_reload axis, nodemon disclosed). Hide expert columns from the main chart without deleting the evidence.\n- Outside-group comparisons are visible but non-blocking.\n- In-group comparator: Jet/peer <1.00 for every peer, Rust included (no parity band); then Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference. Missing, wrong, unavailable or inconclusive evidence fails. I9 correctness holds on O0, O1, O2 and web where applicable.\n- D-BUILDBENCH1, source/ergonomics thresholds and #1414 are unchanged. Historical receipts are immutable.\n\n## Current state\n- Paths moved: `gauntlet/` → `Tools/gauntlet/`, `tools/perf` → `Tools/perf/`, `scripts/agent` → `Tools/agent/`, `plugins/tower` → `Tools/tower/`. `Tools/agent/disk-report.sh` no longer exists.\n- `Tools/gauntlet/harness/run.mjs:212-223` (`--entry`, `--axis live_reload|memory_safety_fuzz`); `:3837` blocks publication of any partial run.\n- The census gate is `tests/dev_parts/corpus_gate.rs:160` `core_conformance_corpus_uses_strict_three_tier_gate` (`JET_CORE_CONFORMANCE_CENSUS=1`, `JET_CORE_CONFORMANCE_FILTER`). Census defects #2816, #2818 and #2846 are done; #2845 is building.\n- `Tools/perf/baseline.json` is still schema version 2, while run 3 needs the v4 peer contract.\n- The last full run (2026-09-03) gave 0 win / 11 loss / 14 unmeasured. Losses were carded as #2860-#2874, of which #2862, #2863, #2865-#2868 and #2870-#2873 are still open. The log from 2026-09-24 says eight perf entries still omit Go.\n\n## Runs (order: run 2 → run 1; runs 3 and 4 are independent)\nPreconditions: a fresh release build, `CARGO_INCREMENTAL=0`, a `JET_STORE_DIR` scratch store per run under `~/.cache/jet-test-scratch`, `Tools/agent/require-clean-tree.sh`, and `free -b; df -B1 ~/.cache` before and after.\n- **Run 2** (criteria 24-25): `JET_CORE_CONFORMANCE_CENSUS=1 JET_STORE_DIR=$HOME/.cache/jet-test-scratch/conf-store Tools/agent/jet-env cargo test --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --test-threads=2`. Use the filter while repairing; one unfiltered run closes the criteria.\n- **Run 1** (criteria 1-23, 31), after #3404: `Tools/agent/jet-env node Tools/gauntlet/harness/run.mjs`, then the same with `--axis live_reload` and `--axis memory_safety_fuzz`, then `node Tools/gauntlet/harness/status.mjs --merge`. Evidence is the `Tools/gauntlet/status.json` row per entry × metric, quoted with the run id.\n- **Run 3** (criteria 26-28): `JET_CI_CANDIDATE_COMMIT=$(git rev-parse HEAD) Tools/perf/ci-perf-check.sh` against a v4 `Tools/perf/baseline.json` from the production generator (#2530 producer). Measure the self-hosted front end, as #2859 does.\n- **Run 4** (criteria 29-30): `Tools/agent/jet-env cargo test --test cli_compile_latency --test cli_compiler_speed`, then run check → run → build over the witness projects. Warm incremental cost is measured against the cone law in a versioned schema.\n- Meet criteria with `node Tools/tower/tower.mjs card criteria '#2858' --meet <n> --evidence ...`, only from the integrated tree. A harness defect goes to #2869; a compiler defect gets a bug card.\n\n## Proof\nAll four commands above, run unfiltered, with every required cell passing the per-cell comparator.\n\n## Batch\nbatch-measure.\n\n## Dependencies\n#3404 (peer split), #2869 (harness), #2845 (census), and the open loss cards (#2862, #2863, #2865-#2868, #2870-#2874).",
       "checkSteps": null,
@@ -22507,8 +22507,13 @@
         "c0pr2dsz",
         "c0j1k587"
       ],
-      "assignee": "Main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Split and closed 2026-11-15 by TowerKeeper-1: all 87 open criteria placed. New cards: #6953 comparison law and groups, #6954 named workloads, #6955 conformance and routing canaries, #6956 thirty puzzles, #6957 Core cost cells, #6958 runtime and safety-check cost cells, #6959 web cost cells, #6960 tool latency. Moved to existing cards: run and dev speed to #6639, ScriptBench compile-included to #5949, source metrics and ecosystem cells to #6641, repair exercises to #6640; merged into #6756 c3 (losses by root) and #6834 c5 (full rerun). c116 is obsolete (owner ruling 2026-08-25: no shim). The owner hold of 2026-11-11 on small optimizations carries to every new card."
+        },
         {
           "at": "2026-11-12",
           "by": "Main",
@@ -22729,20 +22734,22 @@
         {
           "n": 13,
           "text": "From #2265 c10: Fresh full-corpus source measurements independently show Jet/Python <1.00 for LOC and tokens in every required comparable cell; missing or uncovered cells fail and no median hides a losing entry.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-03T10:47:46.080Z"
+          "evidence": "Merged into #6641 c3: the Python-only subset of the same metric",
+          "at": "2026-11-15T05:21:26.711Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
           "text": "From #2265 c11: For every declared comparable source/ergonomics metric and peer in every required cell, Jet/peer is < 1.00 for every peer, Rust included (no parity band); no median, Python-only subset, aggregate, missing, or unmeasured row passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-03T10:47:46.080Z"
+          "evidence": "Moved to #6641 c3: source metrics are the concision card",
+          "at": "2026-11-15T05:21:24.960Z",
+          "closure": "obsolete"
         },
         {
           "n": 15,
@@ -22757,11 +22764,12 @@
         {
           "n": 16,
           "text": "From #2268 c3: Every remaining loss has a deduplicated Tower card, and no correctness or I9 defect is hidden as a performance exclusion.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-03T10:47:46.080Z"
+          "evidence": "Merged into #6756 c3: every loss on a card by root; the no-hidden-correctness half is GPOLICY c6",
+          "at": "2026-11-15T05:21:32.783Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
@@ -22796,11 +22804,12 @@
         {
           "n": 20,
           "text": "From #2270 c2: Every corpus program runs native code with no fallback path; typed scalars and direct calls stay unboxed where sema facts permit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-03T10:47:46.080Z"
+          "evidence": "Moved to #6639 c10: scripting speed",
+          "at": "2026-11-15T05:21:21.331Z",
+          "closure": "obsolete"
         },
         {
           "n": 21,
@@ -22865,11 +22874,12 @@
         {
           "n": 33,
           "text": "(was #5954) Re-baseline the gauntlet on the self-hosted compiler: all 27 cells, one fresh receipt: Tools/gauntlet/status.json is regenerated by one full run with the current self-hosted `jet`, whose identity is",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T21:04:21.414Z"
+          "evidence": "Merged into #6834 c5: the same full rerun on the current self-hosted jet",
+          "at": "2026-11-15T05:21:34.340Z",
+          "closure": "obsolete"
         },
         {
           "n": 49,
@@ -23024,29 +23034,32 @@
         {
           "n": 79,
           "text": "(was #3404) (was #3195) Every one of the36 selected ecosystem/capability cells has a versioned evidence disposition and a specific executable contrast or a justified non-applicable boundary.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:43:39.140Z"
+          "evidence": "Moved to #6641 c4: ecosystem cells",
+          "at": "2026-11-15T05:21:28.377Z",
+          "closure": "obsolete"
         },
         {
           "n": 87,
           "text": "(was #3404) (was #3195) [#3117] A seeded repair exercise (typed CLI error, invalid external record, guest failure) records the rejection stage, side effects, edit/check/repair steps and the five quantities against pinned peers.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:43:46.505Z"
+          "evidence": "Moved to #6640 c4: reasoning and repair measurement",
+          "at": "2026-11-15T05:21:29.997Z",
+          "closure": "obsolete"
         },
         {
           "n": 88,
           "text": "(was #3404) (was #3195) [#3249] Core workflow tasks (imports, errors, lifecycle) are added to the existing runner and measure the five quantities. There is no second registry or runner.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:43:47.417Z"
+          "evidence": "Moved to #6640 c5: reasoning and repair measurement",
+          "at": "2026-11-15T05:21:31.519Z",
+          "closure": "obsolete"
         },
         {
           "n": 89,
@@ -23121,11 +23134,12 @@
         {
           "n": 101,
           "text": "Running and compiling together beat every peer: on every ScriptBench cell (Tools/perf/scriptbench), jet run of the script, compile included, has a lower wall time than every measured peer's run (Python, Bash, Node, Perl, awk and the rest), on the first run with nothing kept and on the warm run, measured with the manifest method on one quiet machine (owner ruling 2026-11-09, C-G4-1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:29:34.708Z"
+          "evidence": "Moved to #5949 c25: ScriptBench gate",
+          "at": "2026-11-15T05:21:23.226Z",
+          "closure": "obsolete"
         },
         {
           "n": 102,
@@ -23531,15 +23545,15 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T10:47:46.080Z",
-      "updated": "2026-11-15T05:21:19.264Z",
+      "updated": "2026-11-15T05:21:38.678Z",
       "updatedBy": "TowerKeeper-1",
       "probe": null,
-      "claimedAt": "2026-11-12T23:33:57.169Z",
       "visualMedia": [],
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 142
+      "criteriaLastN": 142,
+      "completedAt": "2026-11-15T05:21:38.678Z"
     },
     {
       "id": "c0pr2dsz",
@@ -112437,7 +112451,7 @@
       "id": "c02tlmeh",
       "num": 6954,
       "title": "The named gauntlet workloads beat every in-group peer: binparse, sieve, wordfreq, http-service, regex-logscan, nbody, concurrency, http-client and dispatch loops",
-      "body": "Destination: each named gauntlet workload passes the peer law on the self-hosted compiler: AOT at O2 against Rust, C, Zig and Go, and run and dev against Python and JS, on wall time, peak memory and every other declared metric, with byte-identical output.\n\nWhy: these are the workloads people compare languages on; each one is a public promise.\n\nDecisions: the peer law and groups live on {GPOLICY}; owner order 2026-11-11 holds small optimizations until the language is mostly stable, so a losing cell names its root on #6756 rather than getting a cell-only fix.\n\nSource: split from #2858 (measurement gate) on 2026-11-15; the per-entry rows came from #2250, #2254, #2255, #2256, #2261, #2263, #2869 and #4209.",
+      "body": "Destination: each named gauntlet workload passes the peer law on the self-hosted compiler: AOT at O2 against Rust, C, Zig and Go, and run and dev against Python and JS, on wall time, peak memory and every other declared metric, with byte-identical output.\n\nWhy: these are the workloads people compare languages on; each one is a public promise.\n\nDecisions: the peer law and groups live on #6953; owner order 2026-11-11 holds small optimizations until the language is mostly stable, so a losing cell names its root on #6756 rather than getting a cell-only fix.\n\nSource: split from #2858 (measurement gate) on 2026-11-15; the per-entry rows came from #2250, #2254, #2255, #2256, #2261, #2263, #2869 and #4209.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -112563,7 +112577,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:39.346Z",
-      "updated": "2026-11-15T05:19:39.346Z",
+      "updated": "2026-11-15T05:21:50.356Z",
       "updatedBy": "TowerKeeper-1"
     },
     {
@@ -112649,7 +112663,7 @@
       "id": "c0ylzrny",
       "num": 6956,
       "title": "Thirty frozen puzzles, both parts, measured against every peer on every tier",
-      "body": "Destination: thirty puzzle IDs, both parts, are frozen with a stated selection rationale before any Jet measurement; each comparison language has a complete, natural solution; an independent oracle and owned fixtures establish both answers; and all sixty part cells are measured against every applicable peer under the peer law.\n\nWhy: a broad set of small, varied programs catches losses that a few showcase workloads hide.\n\nDecisions: the peer law and groups live on {GPOLICY}. Neither official puzzle prose nor personal inputs are redistributed.\n\nSource: split from #2858 (measurement gate) on 2026-11-15; rows came from #3407 and #3408.",
+      "body": "Destination: thirty puzzle IDs, both parts, are frozen with a stated selection rationale before any Jet measurement; each comparison language has a complete, natural solution; an independent oracle and owned fixtures establish both answers; and all sixty part cells are measured against every applicable peer under the peer law.\n\nWhy: a broad set of small, varied programs catches losses that a few showcase workloads hide.\n\nDecisions: the peer law and groups live on #6953. Neither official puzzle prose nor personal inputs are redistributed.\n\nSource: split from #2858 (measurement gate) on 2026-11-15; rows came from #3407 and #3408.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -112730,7 +112744,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:41.268Z",
-      "updated": "2026-11-15T05:19:41.268Z",
+      "updated": "2026-11-15T05:21:52.098Z",
       "updatedBy": "TowerKeeper-1"
     },
     {
@@ -217208,6 +217222,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:21:52.098Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ylzrny",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T05:21:50.357Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02tlmeh",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T05:21:38.678Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0hs3czc",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T05:21:36.157Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0hs3czc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T05:21:34.340Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0hs3czc",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-15T05:21:32.784Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0hs3czc",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T05:21:31.519Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0hs3czc",
+      "note": "#88"
+    },
+    {
+      "at": "2026-11-15T05:21:29.997Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0hs3czc",
+      "note": "#87"
+    },
+    {
+      "at": "2026-11-15T05:21:28.377Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0hs3czc",
+      "note": "#79"
+    },
+    {
+      "at": "2026-11-15T05:21:26.711Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0hs3czc",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T05:21:24.961Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0hs3czc",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T05:21:23.226Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0hs3czc",
+      "note": "#101"
+    },
+    {
+      "at": "2026-11-15T05:21:21.331Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0hs3czc",
+      "note": "#20"
+    },
     {
       "at": "2026-11-15T05:21:19.264Z",
       "by": "TowerKeeper-1",
