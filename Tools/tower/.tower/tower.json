@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106045,
+    "rev": 106049,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -68146,11 +68146,11 @@
         {
           "n": 11,
           "text": "Probes are under $JET_SCRATCH_ROOT/lanes/Main/prep/ until they become repo cases. D-TASK-WINDOW1 A: a task in a `task.group` may capture a read view or a write window into storage whose owner outlives the group. The capture is a loan held until the group's join. Two live tasks holding overlapping windows, where either writes, are refused with the group-loan diagnostic E1101 (ConcurrentCaptureNotOwned), the one code the existing group-loan rule uses. So is any use of the owner inside the group. The element type must be sendable, and IR holds the window by address (BuildExpr.jet:6297-6300). Proof: prep/c6066/bal/task_a.jet prints 6 on O0, O1 and O2; today it is E0631 at 9:17 and 9:27 (Lambdas.jet:2171-2184). prep/c6066/bal2/task_overlap.jet (both tasks write window `a`) and task_owner.jet (`print(v[0])` inside the group) are refused, each with a UI snapshot. All three become tests/cases cases.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T07:31:26.901Z"
+          "evidence": "Built in e9bb4a3dbe (a group task may capture a window into an outer owner as a loan held to the join). on batch compiler p155 (dev 49836bd978), 2026-11-15 01:48: jet test Compiler --profile cases --filter concurrency_boundaries/a_group_task_can_write_through_a_window_into_an_outer_owner PASS 1 (split O0/O1/O2 and ranges O0/O2 print 6, read O0/O2 prints 10 and 1; overlap refused with E1101 ConcurrentCaptureNotOwned at overlap.jet:6:21; an owner read in the group refused at owner.jet:6:16); --profile ui --filter taskgroup_window_ PASS 2 (taskgroup_window_lent_to_two_writing_tasks, taskgroup_window_owner_read_inside_group). The prep probes became these cases.",
+          "at": "2026-11-15T06:49:35.860Z"
         },
         {
           "n": 12,
@@ -68209,8 +68209,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-15T04:32:23.219Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T06:49:35.860Z",
+      "updatedBy": "Main",
       "goals": [
         "G10"
       ],
@@ -96570,6 +96570,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c12 is NOT met (Main, on batch compiler p155 (dev 49836bd978), 2026-11-15 01:48): JET_RECHECK_VERIFY=1 on comptime_diff/a_local_value_over gives PASS 2 ERROR 4. The two cases c12 names (a_local_value_over_derived_equality_and_a_codec_lands_in_its_owners, a_local_value_over_a_generated_codec_lands_in_its_owners) and their keeps_the_codec_body/is_computed_while_compiling siblings stop with ICE 101: the landed local values differ from the full recheck, with core.encoding.json bodies (syntax_error, truncated_error, utf8_bytes, Parser.__ws_scan, skip_ws, parse_hex4) checked only in the recheck. The same failure is on p150, p152, p153 and p154, so it predates tonight's landings. Without verify the output is right. Back to GoalsB-5."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "OWNER ORDER 2026-11-14 ~21:00, standing overnight and superseding earlier orderings. Agents work ONLY this list, in this order, closing it out: (1) precompiled Core, #6328 c22/c37 and #6759; (2) speed plan steps 1-5 of #5479 exactly as its plan defines them (step 2 = #5479 c6 + #6328 c23; step 3 = #5479 c7 + #5910; step 4 = #5479 c8; step 5 = #5910 c6 + #5479 c2), with no other speed or size work until G11; (3) the memory kernel #6842, including c11; (4) G6; (5) G9; (6) G3; (7) G5; (8) G10; (9) G7. No other cards and no side work. Finished, ready work is never pulled: it lands. The only exceptions are fixes for failures that block the list's own work and owner-requested ballots, and Main decides them. TowerKeeper-1 (temporary, owner-approved) rebuilds the board: frozen cards untouched, nothing obsoleted without a ratified authority, no work lost."
         },
         {
@@ -96767,11 +96772,11 @@
         {
           "n": 11,
           "text": "D-CORE-FILE-ADAPTERS1=A is built (ratified 2026-11-13). The json reader, jsonl, cbor, csv and xml readers and writers take any value whose type implements the Prelude Reader or Writer trait; FileReader and FileWriter implement both (two thin wrapper methods over the compiler routes), and user code can name Reader and Writer as bounds. Crypto moves up beside files, and data, encoding.csv and net.ws move up to services, so no public path changes and json.parse no longer loads the file code. The Reader name clash with core.term's binary cursor is resolved as the ballot states (amending D-NETIO-CONTRACT1). Proof: a case passing a file, term.stdin() and a user impl MySource.Reader to json and csv readers on O0, O1 and O2; the layer census shows the file-adapter upward names gone; jet check Core clean with E1012 on.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T12:16:03.379Z"
+          "evidence": "Built on dev (byte traits c11a-d, landed through 5ce1d999d1/0987161e75/e2f8e873bd, and earlier layer moves). on batch compiler p155 (dev 49836bd978), 2026-11-15 01:48: jet test Compiler --profile cases --filter json_and_csv_readers_take_a_file_stdin_and_a_programs_own_source PASS 1 (a file, term.stdin() and a user Reader to json and csv readers, O0/O1/O2); JET_KEEP_GOING=1 jet check Core: ok, with the E1012 layer rule on, so no upward names remain. Core/package.jet puts crypto beside files and data, encoding.csv and net.ws in services (GoalsB-5's check).",
+          "at": "2026-11-15T06:49:36.837Z"
         },
         {
           "n": 12,
@@ -96794,11 +96799,11 @@
         {
           "n": 14,
           "text": "An explicit `#run` local value in a function body lands like an implicit one, instead of always forcing the program`s full post-finalization recheck (found by G11Speed-5 on the gate-p49 jet: such locals are created with local_value=false, so they never land). Proof: a case with an explicit #run local whose `--trace` shows no comptime.body.recheck and identical output under JET_RECHECK_VERIFY=1, plus a paired timing against the batch before.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T05:53:31.554Z"
+          "evidence": "on batch compiler p155 (dev 49836bd978), 2026-11-15 01:48: JET_RECHECK_VERIFY=1 jet test Compiler --profile cases --filter explicit_run_locals_land_in_their_bodies PASS 1 (no comptime.body.recheck, identical output under verify). Paired cold timing (GoalsB-5, 5 alternating rounds, fresh store): p49 has comptime.body.recheck every round, 682/57/59/51/72 ms; p155 has none, 107/132/89/79/73 ms, same output. The remaining per-local children merge in GoalsB-5-c1batch.",
+          "at": "2026-11-15T06:49:37.762Z"
         },
         {
           "n": 15,
@@ -96818,7 +96823,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-15T06:11:52.842Z",
+      "updated": "2026-11-15T06:49:38.655Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -218395,6 +218400,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T06:49:38.656Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T06:49:37.762Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ssy5wy",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T06:49:36.837Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ssy5wy",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T06:49:35.860Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0r02x8n",
+      "note": "#11"
+    },
     {
       "at": "2026-11-15T06:47:28.214Z",
       "by": "Main",
