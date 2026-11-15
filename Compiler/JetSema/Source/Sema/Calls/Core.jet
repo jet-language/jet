@@ -108,7 +108,7 @@ sema_call_source_import_target: fn(environment: SemaScopeEnvironment, program: S
     module_index: sema_scope_caller_index(environment, graph) ?? return None
     loop import_index in 0..<graph.modules[module_index].imports.len() {
         loop binding_index in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
-            if graph.modules[module_index].imports[import_index].bindings[binding_index].local != alias || graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.kind != SymbolKind.Import || graph.modules[module_index].imports[import_index].bindings[binding_index].declaration != None -> next
+            if graph.modules[module_index].imports[import_index].bindings[binding_index].local != alias || graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.kind != SymbolKind.Import || graph.modules[module_index].imports[import_index].bindings[binding_index].declaration_position != None -> next
             target_index: sema_registration_module_index(graph, graph.modules[module_index].imports[import_index].bindings[binding_index].target_module_identity) ?? return None
             module_name: graph.modules[target_index].module_name
             if sema_core_import_is_core(module_name) -> return None

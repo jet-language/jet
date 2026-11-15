@@ -1421,7 +1421,7 @@ sema_core_registration_imports_into: fn(registration_module: SemaRegistrationMod
                 if sema_core_import_offer(imports, only, SemaCoreImport{alias: module_alias, module_name: target, item: None, span: module_alias_span}) -> return
                 loop binding in registration.bindings {
                     // A Core submodule member (`use core.mem`) binds a namespace.
-                    if binding.declaration == None && binding.symbol.kind == SymbolKind.Import {
+                    if binding.declaration_position == None && binding.symbol.kind == SymbolKind.Import {
                         if sema_core_import_offer(imports, only, SemaCoreImport{alias: binding.local, module_name: module_text(table, binding.target_module_identity), item: None, span: binding.symbol.span}) -> return
                         next
                     }

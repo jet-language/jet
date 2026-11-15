@@ -310,14 +310,12 @@ sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnion
         sema_failure_union_settle_untyped(row, settled)
         return None
     }
-    // copy: the minted enum is stored twice in the graph: as a program item here and as the
-    // export's declaration below (`declaration: Val(item)`).
-    graph.modules[module_index].program.items.push(item.copy())
+    graph.modules[module_index].program.items.push(item.move())
     // copy: the export row stores its own symbol, while the registered symbol row stays in the
     // module, and `graph` is written (exports.push) while it is live.
     symbol: graph.modules[module_index].symbols[graph.modules[module_index].symbols.len() - 1].copy()
     module_identity: graph.modules[module_index].module_identity.copy()
-    if symbol.visibility > 0 -> graph.modules[module_index].exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration: Val(item), source_module_identity: module_identity, visibility: symbol.visibility})
+    if symbol.visibility > 0 -> graph.modules[module_index].exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration_position: sema_registration_declaration_position(graph.modules[module_index], symbol), source_module_identity: module_identity, visibility: symbol.visibility})
     trail.entries.push(SemaGraphUndo.ModuleAppend{module_index: module_index, mark: mark, name: owned})
     if !trail.nominal_indexes_saved {
         trail.entries.push(SemaGraphUndo.NominalIndexes{symbol_rows: graph.nominal_symbol_rows, slots: graph.nominal_row_slots, buckets: graph.nominal_row_buckets})
@@ -516,20 +514,16 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
         loop index in 0..<graph.modules[module_index].exports.len() {
             if slot_keys[slot].get(graph.modules[module_index].exports[index].symbol.id.id) == None -> next
             symbol: symbols.get(graph.modules[module_index].exports[index].symbol.id.id) ?? next
-            item: items.get(graph.modules[module_index].exports[index].symbol.id.id) ?? next
             trail.entries.push(SemaGraphUndo.ExportRow{module_index: module_index, position: index, old: graph.modules[module_index].exports[index]})
             graph.modules[module_index].exports[index].symbol = symbol
-            graph.modules[module_index].exports[index].declaration = Val(item)
         }
     }
     loop importer_index in 0..<graph.modules.len() {
         loop import_index in 0..<graph.modules[importer_index].imports.len() {
             loop binding_index in 0..<graph.modules[importer_index].imports[import_index].bindings.len() {
                 symbol: symbols.get(graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.id) ?? next
-                item: items.get(graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.id) ?? next
                 trail.entries.push(SemaGraphUndo.ImportBindingRow{module_index: importer_index, import_index: import_index, binding: binding_index, old: graph.modules[importer_index].imports[import_index].bindings[binding_index]})
                 graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol = symbol
-                graph.modules[importer_index].imports[import_index].bindings[binding_index].declaration = Val(item)
             }
         }
     }

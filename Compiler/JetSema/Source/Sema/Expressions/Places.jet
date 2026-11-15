@@ -1157,7 +1157,7 @@ sema_expression_module_member_unknown: fn(graph: SemaRegistrationGraph, module_i
     module_index: sema_registration_module_index(graph, module_identity) ?? return None
     loop import in graph.modules[module_index].imports {
         loop binding in import.bindings {
-            if binding.local != alias || binding.symbol.kind != SymbolKind.Import || binding.declaration != None -> next
+            if binding.local != alias || binding.symbol.kind != SymbolKind.Import || binding.declaration_position != None -> next
             target_index: sema_registration_module_index(graph, binding.target_module_identity) ?? return None
             target: graph.modules[target_index]
             if module_is_core(target.module_identity) -> return Val(sema_expression_core_member_unknown(target, member, member_span))

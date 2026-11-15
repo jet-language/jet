@@ -588,7 +588,10 @@ SemaRegistrationConstant: struct {
 SemaRegistrationExport: struct {
     name: String
     symbol: Symbol
-    declaration: Item?
+    // The position of the declaration in the `declarations` of module
+    // `source_module_identity`; None for a module import or a Core leaf with
+    // no source declaration. The row holds no copy of the declaration.
+    declaration_position: Int?
     source_module_identity: ModuleID
     visibility: Int
 }
@@ -597,7 +600,9 @@ SemaRegistrationImportBinding: struct {
     original: String
     local: String
     symbol: Symbol
-    declaration: Item?
+    // As SemaRegistrationExport.declaration_position, in module
+    // `target_module_identity`.
+    declaration_position: Int?
     target_module_identity: ModuleID
     // Resolved against this graph's fixed module order during registration;
     // Core namespace bindings may name a module that was not loaded.
@@ -2982,15 +2987,14 @@ sema_registration_item_has_foreign_name: fn(item: Item, name: String) -> Bool Ne
     false
 }
 
-// A named root resolves through the module's declaration positions; only a
+// The position of `symbol`'s declaration in `module_row.declarations`. A
+// named root resolves through the module's declaration positions; only a
 // foreign function (declared inside an extern block, which has no root name)
 // needs the scan over the module's declarations.
-sema_registration_declaration_for_symbol: fn(module_row: SemaRegistrationModule, symbol: Symbol) -> Item? {
-    // copy: an export row owns its declaration; the module row keeps its own.
-    if module_row.declaration_positions.get(symbol.name) == .Val(position) -> return Val(module_row.declarations[position].copy())
-    loop declaration in module_row.declarations {
-        // copy: as above, only the matched declaration is copied out.
-        if sema_registration_item_has_foreign_name(declaration, symbol.name) -> return Val(declaration.copy())
+sema_registration_declaration_position: fn(module_row: SemaRegistrationModule, symbol: Symbol) -> Int? {
+    if module_row.declaration_positions.get(symbol.name) == .Val(position) -> return Val(position)
+    loop (position, declaration) in module_row.declarations {
+        if sema_registration_item_has_foreign_name(declaration, symbol.name) -> return Val(position)
     }
     None
 }
@@ -3210,8 +3214,8 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
         // module_row.symbols, and module_row is written (exports.push) while it is live.
         symbol: module_row.symbols[symbol_index].copy()
         if symbol.visibility > 0 {
-            declaration: sema_registration_declaration_for_symbol(module_row, symbol)
-            module_row.exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration: declaration, source_module_identity: module_row.module_identity, visibility: symbol.visibility})
+            declaration_position: sema_registration_declaration_position(module_row, symbol)
+            module_row.exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration_position: declaration_position, source_module_identity: module_row.module_identity, visibility: symbol.visibility})
         }
     }
 
@@ -4376,8 +4380,8 @@ sema_registration_direct_symbol: fn(module_row: SemaRegistrationModule, name: St
     // lands on it after registration), while an export row holds a registration-time copy. A
     // module's symbol names are distinct, so its position map finds the one row of `name`.
     if sema_registration_symbol_position(module_row, name, name_rows_hash(name)) == .Val(index) {
-        declaration: sema_registration_declaration_for_symbol(module_row, module_row.symbols[index])
-        return Val(SemaRegistrationExport{name: name, symbol: module_row.symbols[index], declaration: declaration, source_module_identity: module_row.module_identity, visibility: module_row.symbols[index].visibility})
+        declaration_position: sema_registration_declaration_position(module_row, module_row.symbols[index])
+        return Val(SemaRegistrationExport{name: name, symbol: module_row.symbols[index], declaration_position: declaration_position, source_module_identity: module_row.module_identity, visibility: module_row.symbols[index].visibility})
     }
     loop export in module_row.exports {
         if export.name == name -> return Val(export)
@@ -4490,7 +4494,7 @@ sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index:
                     if local != name -> next
                     resolved: sema_registration_resolve_export(graph, target_index, item.original, module_row.module_identity, module_row.package_identity, next_seen) ?? next
                     if !sema_registration_visible(resolved.visibility, module_row.module_identity, module_row.package_identity, resolved.source_module_identity, graph.modules[target_index].package_identity) -> next
-                    return Val(SemaRegistrationExport{name: name, symbol: resolved.symbol, declaration: resolved.declaration, source_module_identity: resolved.source_module_identity, visibility: if import.declaration.is_pub -> 2 else -> 1})
+                    return Val(SemaRegistrationExport{name: name, symbol: resolved.symbol, declaration_position: resolved.declaration_position, source_module_identity: resolved.source_module_identity, visibility: if import.declaration.is_pub -> 2 else -> 1})
                 }
             }
             .File(_, _) | .Module(_, _) -> {
@@ -4500,7 +4504,7 @@ sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index:
                 module_row_text: module_text(graph.module_table, module_row.module_identity)
                 id: symbol_find(graph.symbols, symbol_key_text(SymbolKind.Import, module_row_text, module_text(graph.module_table, import.target_module_identity), name)) ?? panic("the module import `{name}` of `{module_row_text}` has no symbol (sema_registration_mint_module_imports)")
                 symbol: Symbol{id: id, kind: SymbolKind.Import, name: name.copy(), module_identity: module_row.module_identity, owner: None, span: import.declaration.alias_span, ty: None, visibility: visibility}
-                return Val(SemaRegistrationExport{name: name.copy(), symbol: symbol.move(), declaration: None, source_module_identity: import.target_module_identity, visibility: visibility})
+                return Val(SemaRegistrationExport{name: name.copy(), symbol: symbol.move(), declaration_position: None, source_module_identity: import.target_module_identity, visibility: visibility})
             }
         }
     }
@@ -4523,7 +4527,7 @@ sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index:
         id: symbol_find(graph.symbols, symbol_key_text(SymbolKind.Type, module_text(graph.module_table, module_row.module_identity), "", name)) ?? symbol_none()
         visibility: sema_registration_visibility(true, false)
         symbol: Symbol{id: id, kind: SymbolKind.Type, name: name, module_identity: module_row.module_identity, owner: None, span: Span{start: 0, end: 0}, ty: Val(Type.Named{name: name}), visibility: visibility}
-        return Val(SemaRegistrationExport{name: name, symbol: symbol, declaration: None, source_module_identity: module_row.module_identity, visibility: visibility})
+        return Val(SemaRegistrationExport{name: name, symbol: symbol, declaration_position: None, source_module_identity: module_row.module_identity, visibility: visibility})
     }
     None
 }
@@ -4650,7 +4654,7 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                     submodule_identity: module_intern(graph.module_table, submodule)
                     module_symbol: Symbol{id: symbol_mint(graph.symbols, SymbolKind.Import, source_text, submodule, local), kind: SymbolKind.Import, name: local, module_identity: submodule_identity, owner: None, span: declaration.span, ty: None, visibility: import_visibility}
                     submodule_index: sema_registration_core_unit_index(graph, submodule)
-                    sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: module_symbol, declaration: None, target_module_identity: submodule_identity, target_module_index: submodule_index, visibility: import_visibility})
+                    sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: module_symbol, declaration_position: None, target_module_identity: submodule_identity, target_module_index: submodule_index, visibility: import_visibility})
                     next
                 }
                 // A dependency package is one namespace: a member its import landed on stands for
@@ -4674,9 +4678,9 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                                 imported_symbol := export.symbol
                                 imported_symbol.name = local
                                 origin_index: sema_registration_cached_module_index(graph, export.source_module_identity, import_module_indices)
-                                sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: imported_symbol, declaration: export.declaration, target_module_identity: export.source_module_identity, target_module_index: origin_index, visibility: export.visibility})
+                                sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: imported_symbol, declaration_position: export.declaration_position, target_module_identity: export.source_module_identity, target_module_index: origin_index, visibility: export.visibility})
                                 if declaration.is_pub || declaration.is_package_pub {
-                                    graph.modules[module_index].exports.push(SemaRegistrationExport{name: local, symbol: imported_symbol, declaration: export.declaration, source_module_identity: export.source_module_identity, visibility: if declaration.is_pub -> 2 else -> 1})
+                                    graph.modules[module_index].exports.push(SemaRegistrationExport{name: local, symbol: imported_symbol, declaration_position: export.declaration_position, source_module_identity: export.source_module_identity, visibility: if declaration.is_pub -> 2 else -> 1})
                                 }
                             }
                         }
@@ -4698,14 +4702,15 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                             leaf_text: module_text(graph.module_table, leaf_identity)
                             import_visibility: graph.modules[module_index].imports[import_index].visibility
                             leaf_symbol: Symbol{id: symbol_mint(graph.symbols, SymbolKind.Foreign, leaf_text, "", item.original), kind: SymbolKind.Foreign, name: local, module_identity: leaf_identity, owner: None, span: declaration.span, ty: None, visibility: import_visibility}
-                            sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: leaf_symbol, declaration: None, target_module_identity: leaf_identity, target_module_index: Val(target_index), visibility: import_visibility})
+                            sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: leaf_symbol, declaration_position: None, target_module_identity: leaf_identity, target_module_index: Val(target_index), visibility: import_visibility})
                             next
                         }
                         direct: sema_registration_direct_symbol(graph.modules[target_index], item.original)
                         private_template := false
                         if direct == .Val(private_export) {
-                            if private_export.declaration == .Val(declared) {
-                                if declared == .GenericModule(_) -> private_template = true
+                            if private_export.declaration_position == .Val(position) {
+                                owner: sema_registration_module_index(graph, private_export.source_module_identity) ?? -1
+                                if owner >= 0 && graph.modules[owner].declarations[position] == .GenericModule(_) -> private_template = true
                             }
                         }
                         if {
@@ -4727,7 +4732,7 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                         import_visibility: graph.modules[module_index].imports[import_index].visibility
                         target_text: module_text(graph.module_table, target_identity)
                         module_symbol: Symbol{id: symbol_find(graph.symbols, symbol_key_text(SymbolKind.Import, source_text, target_text, declaration.alias)) ?? panic("the module import `{declaration.alias}` of `{source_text}` has no symbol (sema_registration_mint_module_imports)"), kind: SymbolKind.Import, name: declaration.alias, module_identity: target_identity, owner: None, span: declaration.alias_span, ty: None, visibility: import_visibility}
-                        sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: target_name, local: declaration.alias, symbol: module_symbol, declaration: None, target_module_identity: target_identity, target_module_index: Val(target_index), visibility: import_visibility})
+                        sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: target_name, local: declaration.alias, symbol: module_symbol, declaration_position: None, target_module_identity: target_identity, target_module_index: Val(target_index), visibility: import_visibility})
                     }
                 }
             }
