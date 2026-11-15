@@ -102,9 +102,11 @@ TLSPeerIdentity: struct {
     cipher_suite: String
     tls_version: TLSVersion
 }
+// Numbered as the protocol's version field (RFC 8446 section 4.1.2).
+#[Specified, Layout(U16)]
 TLSVersion: enum {
-    TLS12
-    TLS13
+    TLS12 = 771
+    TLS13 = 772
 }
 
 // A stream made by `client` or `__server`. `TLSStream{}` is a closed stream.
@@ -427,7 +429,6 @@ __config_error: fn(operation: String, message: String) -> IOError Never! {
 }
 
 __version_rank: fn(version: TLSVersion) -> Int Never! { if version == TLSVersion.TLS12 -> 12 else -> 13 }
-__version_code: fn(version: TLSVersion) -> Int Never! { if version == TLSVersion.TLS12 -> 771 else -> 772 }
 
 // A connection offers at most 16 protocols.
 __alpn_problem: fn(protocols: [String]) -> String Never! {
@@ -712,8 +713,8 @@ __client_context: fn(server_name: String, config: ClientConfig) -> __TLSContext 
     if __version_rank(config.min_version) > __version_rank(config.max_version) {
         return Err(__fail("TLS version bounds must be between TLS12 and TLS13 with min <= max"))
     }
-    context.conf.min_tls_version = __version_code(config.min_version)
-    context.conf.max_tls_version = __version_code(config.max_version)
+    context.conf.min_tls_version = config.min_version.to_int()
+    context.conf.max_tls_version = config.max_version.to_int()
     _: __add_alpn(context, config.alpn) ?? return Err(err)
     // The chain and the server name must verify.
     context.conf.authmode = ssldefs.SSL_VERIFY_REQUIRED
@@ -1917,11 +1918,7 @@ __peer_identity: fn(ssl: ssldefs.SSLContext, server_name: String) -> TLSPeerIden
     suite: ssltls.ssl_get_ciphersuite(ssl) ?? ""
     if suite == "" -> return Err(__fail("TLS verified peer did not expose a negotiated cipher suite"))
     version: ssl.tls_version
-    tls_version: if version == {
-        771 -> TLSVersion.TLS12
-        772 -> TLSVersion.TLS13
-        else -> { return Err(__fail("TLS verified peer negotiated unsupported protocol version: {version}")) }
-    }
+    tls_version: TLSVersion.from_int(version) ?? return Err(__fail("TLS verified peer negotiated unsupported protocol version: {version}"))
     leaf: chain[0].copy()
     Ok(TLSPeerIdentity{verified_server_name: server_name.copy(), leaf: leaf, certificate_chain: chain, cipher_suite: __suite_name(suite), tls_version: tls_version})
 }

@@ -915,11 +915,13 @@ hex_digit: fn(b: Int) -> Int {
 
 // ---- the portal's appearance settings
 
-// The colour scheme the desktop prefers.
+// The colour scheme the desktop prefers, numbered as the portal's
+// color-scheme setting.
+#[Specified, Layout(U8)]
 PortalScheme: enum {
-    NoPreference
-    Dark
-    Light
+    NoPreference = 0
+    Dark = 1
+    Light = 2
 }
 
 // The appearance the desktop asks apps for: `accent` is red, green and
@@ -1005,11 +1007,7 @@ apply_setting: fn(&look: PortalAppearance, key: String, value: DbusValue) -> Boo
 
 // color-scheme: 1 dark, 2 light, anything else no preference.
 set_scheme: fn(&look: PortalAppearance, n: Int) -> Bool {
-    scheme: if n == {
-        1 -> PortalScheme.Dark
-        2 -> PortalScheme.Light
-        else -> PortalScheme.NoPreference
-    }
+    scheme: PortalScheme.from_int(n) ?? PortalScheme.NoPreference
     if scheme == look.scheme -> return false
     look.scheme = scheme
     true

@@ -52,13 +52,15 @@ ImageFormat: enum {
 }
 
 // How the encoded pixels carry color: gray or red, green and blue, with or
-// without an alpha channel, or indexes into a palette.
+// without an alpha channel, or indexes into a palette. The numbers are PNG's
+// color types.
+#[Specified, Layout(U8)]
 ImageColor: enum {
-    Gray
-    GrayAlpha
-    RGB
-    RGBA
-    Indexed
+    Gray = 0
+    GrayAlpha = 4
+    RGB = 2
+    RGBA = 6
+    Indexed = 3
 }
 
 // The budgets a read keeps within, each a count that must be at least 1:
@@ -230,13 +232,7 @@ __png_header: fn(data: [U8], limits: Limits) -> PNGHeader ImageError! {
 }
 
 __png_color: fn(color_type: Int) -> ImageColor {
-    if color_type == {
-        2 -> ImageColor.RGB
-        3 -> ImageColor.Indexed
-        4 -> ImageColor.GrayAlpha
-        6 -> ImageColor.RGBA
-        else -> ImageColor.Gray
-    }
+    ImageColor.from_int(color_type) ?? ImageColor.Gray
 }
 
 // Samples per pixel for a valid color type and bit depth, else 0.
