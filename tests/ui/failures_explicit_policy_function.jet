@@ -1,12 +1,12 @@
-// The function's own `#Policy(failures: .Explicit)` asks for the mark in its
-// body only; the unmarked call in `loose` stays as written.
+// The function's own `#Policy(failures: .Explicit)`, written on its line,
+// asks for the mark in its body only; the unmarked call in `loose` stays as
+// written. On a line of its own the declaration is the module's.
 parse: fn(text: String) -> Int {
     if text == "" -> return Err("empty")
     text.count_bytes()
 }
 
-#Policy(failures: .Explicit)
-strict: fn(text: String) -> Int {
+#Policy(failures: .Explicit) strict: fn(text: String) -> Int {
     parse(text) + 1
 }
 

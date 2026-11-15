@@ -3279,7 +3279,10 @@ jet_cli_fmt_explicit_failures: fn(source: String, origin: String, color: Bool) -
 // `source` with the insertions `policy` asks for: `origin` must check clean
 // as written, apart from the reports `code` names ("" for none); then each
 // Safe insertion of a text in `texts` that sema gives with `policy` prepended
-// goes in, from the reports `code` names (any report for "").
+// goes in, from the reports `code` names (any report for ""). A file that
+// already declares the policy owes its marks as written: the prepended copy
+// is a second module declaration of the policy, which the check refuses, so
+// the file's own `code` reports give them.
 jet_cli_fmt_policy_marks: fn(source: String, origin: String, color: Bool, policy: String, code: String, texts: [String]) -> JetCLIFmtSource {
     if jet_cli_compile_file(origin, color, None, JetDriverCompileMode.Program) == {
         .Refused(refusal) -> return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(refusal.stderr)}
@@ -3292,21 +3295,8 @@ jet_cli_fmt_policy_marks: fn(source: String, origin: String, color: Bool, policy
             if blocking.len() > 0 -> return jet_cli_fmt_rejected(diagnostics)
         }
     }
-    shift: policy.len()
-    marks := [JetCLIFmtMark]{}
-    if jet_cli_compile_entry(origin, color, None, JetDriverCompileMode.Program, Val("{policy}{source}"), None) == .Compiled(result, snapshot) {
-        loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
-            owner: diagnostic.origin ?? next
-            first: diagnostic.edit ?? next
-            if owner.path != snapshot.entry_path || (code != "" && diagnostic.code != code) -> next
-            // Every report at one copy site asks for the one copy; a failure
-            // mark's report names its call, and a receiver chain's calls can
-            // all open at one byte, each with its own `(`.
-            report: if code != "" && diagnostic.span == .Val(at) -> at.start else -> 0
-            jet_cli_fmt_add_mark(marks, first, texts, shift, source.len(), report)
-            loop edit in diagnostic.fix_edits -> jet_cli_fmt_add_mark(marks, edit, texts, shift, source.len(), report)
-        }
-    }
+    prepended: jet_cli_compile_entry(origin, color, None, JetDriverCompileMode.Program, Val("{policy}{source}"), None)
+    marks := jet_cli_fmt_marks_of(prepended, code, texts, policy.len(), source.len()) ?? jet_cli_fmt_marks_of(jet_cli_compile_entry(origin, color, None, JetDriverCompileMode.Program, Val(source), None), code, texts, 0, source.len()) ?? [JetCLIFmtMark]{}
     marks.sort_by(fn(left: JetCLIFmtMark, right: JetCLIFmtMark) { left.site <=> right.site })
     marked := ""
     cursor := 0
@@ -3315,6 +3305,34 @@ jet_cli_fmt_policy_marks: fn(source: String, origin: String, color: Bool, policy
         cursor = mark.site
     }
     jet_cli_fmt_formatted("{marked}{source.slice(cursor..<source.len())}")
+}
+
+// The marks the Safe edits of the checked `compiled` give, `shift` bytes of
+// prepended policy ahead of the `length`-byte source. None when the check
+// gives no result, or, for a `code`, reports any other error.
+jet_cli_fmt_marks_of: fn(compiled: JetCLICompiled, code: String, texts: [String], shift: Int, length: Int) -> [JetCLIFmtMark]? {
+    if compiled == .Compiled(result, snapshot) {
+        diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+        if code != "" {
+            loop diagnostic in jet_cli_errors(diagnostics) {
+                if diagnostic.code != code -> return None
+            }
+        }
+        marks := [JetCLIFmtMark]{}
+        loop diagnostic in diagnostics {
+            owner: diagnostic.origin ?? next
+            first: diagnostic.edit ?? next
+            if owner.path != snapshot.entry_path || (code != "" && diagnostic.code != code) -> next
+            // Every report at one copy site asks for the one copy; a failure
+            // mark's report names its call, and a receiver chain's calls can
+            // all open at one byte, each with its own `(`.
+            report: if code != "" && diagnostic.span == .Val(at) -> at.start else -> 0
+            jet_cli_fmt_add_mark(marks, first, texts, shift, length, report)
+            loop edit in diagnostic.fix_edits -> jet_cli_fmt_add_mark(marks, edit, texts, shift, length, report)
+        }
+        return Val(marks)
+    }
+    None
 }
 
 jet_cli_fmt_add_mark: fn(marks: &[JetCLIFmtMark], edit: TextEdit, texts: [String], shift: Int, length: Int, report: Int) Never! {

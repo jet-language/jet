@@ -8,7 +8,7 @@
 // are pinned; a written contract stays as written.
 use {
     jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverVerbOutput, jet_driver_apply_edits, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[EnumDef, Func, Span, TextEdit, TFailureCarrier, Type, VariantPayload, ast_program]
+    jet_foundation.[EnumDef, Func, Span, TextEdit, TFailureCarrier, Type, VariantPayload, ast_program, type_unqualified_nominals]
     jet_lexer.[lex, Token, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACKET, TOKEN_RPAREN]
     jet_parser.[jfmt_fmt_error_contract, jfmt_fmt_type, jfmt_new, jfmt_out_text, parse_source]
     jet_sema.[sema_failure_inference_candidate]
@@ -109,9 +109,11 @@ jet_cli_pin_apply: fn(before: String, facts: JetCLIPinFacts) -> JetCLIFixApply? 
 jet_cli_pin_function: fn(function: Func, local: String, end: Int, tokens: [Token], facts: JetCLIPinFacts, declared: &[String:Bool], edits: &[TextEdit], tails: &[TextEdit]) {
     if !sema_failure_inference_candidate(function) -> return
     carrier: facts.carriers.get(local) ?? return
+    // The checked carrier names each nominal by its `module::` key; the
+    // contract and the minted enum's lookup read the name as written.
     error: if carrier == {
         .Infallible -> Type.Named{name: "Never"}
-        .Result(_, failure) -> failure
+        .Result(_, failure) -> type_unqualified_nominals(failure)
         .Optional(_) | .Diverges(_) -> return
     }
     contract: jet_cli_pin_contract_text(error)
@@ -197,6 +199,6 @@ jet_cli_pin_payload_text: fn(payload: VariantPayload) -> String {
 
 jet_cli_pin_type_text: fn(ty: Type) -> String {
     formatter := jfmt_new(ast_program(), "", [Token]{}, false)
-    jfmt_fmt_type(formatter, ty)
+    jfmt_fmt_type(formatter, type_unqualified_nominals(ty))
     jfmt_out_text(formatter)
 }
