@@ -1640,6 +1640,137 @@ os_fill_words_i64: fn(target: I64, word: I64, count: I64) {
     """
 }
 
+// The byte fill's leaves (RawWords.jet jet_rt_mem_fill_bytes). `word` holds
+// the fill byte in all eight lanes. A short class stores `count` bytes, a
+// count inside the class its name gives, from `target` with two overlapping
+// runs of the word, the first from the start and the last to the end; the 1
+// to 3 byte class stores the first, middle and last byte.
+#[Unsafe("the caller owns count writable bytes at target, and count is 1 through 3"), FFI(asm)]
+os_fill_1_3_i64: fn(target: I64, word: I64, count: I64) {
+    """
+    mov rax, {word}
+    mov rcx, {count}
+    shr rcx, 1
+    add rcx, {target}
+    mov byte ptr [{target}], al
+    mov byte ptr [rcx], al
+    mov rcx, {target}
+    add rcx, {count}
+    mov byte ptr [rcx + -1], al
+    ; clobbers rax, rcx
+    """
+}
+
+#[Unsafe("the caller owns count writable bytes at target, and count is 4 through 7"), FFI(asm)]
+os_fill_4_7_i64: fn(target: I64, word: I64, count: I64) {
+    """
+    mov rax, {word}
+    mov rcx, {target}
+    add rcx, {count}
+    mov dword ptr [{target}], eax
+    mov dword ptr [rcx + -4], eax
+    ; clobbers rax, rcx
+    """
+}
+
+#[Unsafe("the caller owns count writable bytes at target, and count is 8 through 16"), FFI(asm)]
+os_fill_8_16_i64: fn(target: I64, word: I64, count: I64) {
+    """
+    mov rax, {target}
+    add rax, {count}
+    mov qword ptr [{target}], {word}
+    mov qword ptr [rax + -8], {word}
+    ; clobbers rax
+    """
+}
+
+#[Unsafe("the caller owns count writable bytes at target, and count is 16 through 32"), FFI(asm)]
+os_fill_16_32_i64: fn(target: I64, word: I64, count: I64) {
+    """
+    mov rax, {target}
+    add rax, {count}
+    mov qword ptr [{target}], {word}
+    mov qword ptr [{target} + 8], {word}
+    mov qword ptr [rax + -16], {word}
+    mov qword ptr [rax + -8], {word}
+    ; clobbers rax
+    """
+}
+
+#[Unsafe("the caller owns count writable bytes at target, and count is 32 through 64"), FFI(asm)]
+os_fill_32_64_i64: fn(target: I64, word: I64, count: I64) {
+    """
+    mov rax, {target}
+    add rax, {count}
+    mov qword ptr [{target}], {word}
+    mov qword ptr [{target} + 8], {word}
+    mov qword ptr [{target} + 16], {word}
+    mov qword ptr [{target} + 24], {word}
+    mov qword ptr [rax + -32], {word}
+    mov qword ptr [rax + -24], {word}
+    mov qword ptr [rax + -16], {word}
+    mov qword ptr [rax + -8], {word}
+    ; clobbers rax
+    """
+}
+
+#[Unsafe("the caller owns count writable bytes at target, and count is 64 through 128"), FFI(asm)]
+os_fill_64_128_i64: fn(target: I64, word: I64, count: I64) {
+    """
+    mov rax, {target}
+    add rax, {count}
+    mov qword ptr [{target}], {word}
+    mov qword ptr [{target} + 8], {word}
+    mov qword ptr [{target} + 16], {word}
+    mov qword ptr [{target} + 24], {word}
+    mov qword ptr [{target} + 32], {word}
+    mov qword ptr [{target} + 40], {word}
+    mov qword ptr [{target} + 48], {word}
+    mov qword ptr [{target} + 56], {word}
+    mov qword ptr [rax + -64], {word}
+    mov qword ptr [rax + -56], {word}
+    mov qword ptr [rax + -48], {word}
+    mov qword ptr [rax + -40], {word}
+    mov qword ptr [rax + -32], {word}
+    mov qword ptr [rax + -24], {word}
+    mov qword ptr [rax + -16], {word}
+    mov qword ptr [rax + -8], {word}
+    ; clobbers rax
+    """
+}
+
+// One 64-byte step of the long byte fill.
+#[Unsafe("the caller owns 64 writable bytes at target"), FFI(asm)]
+os_fill_64_i64: fn(target: I64, word: I64) {
+    """
+    mov qword ptr [{target}], {word}
+    mov qword ptr [{target} + 8], {word}
+    mov qword ptr [{target} + 16], {word}
+    mov qword ptr [{target} + 24], {word}
+    mov qword ptr [{target} + 32], {word}
+    mov qword ptr [{target} + 40], {word}
+    mov qword ptr [{target} + 48], {word}
+    mov qword ptr [{target} + 56], {word}
+    """
+}
+
+// The byte fill's string store: `count` bytes from `target` upward, each the
+// low byte of `word`.
+#[Unsafe("the caller owns count writable bytes at target"), FFI(asm)]
+os_fill_string_i64: fn(target: I64, word: I64, count: I64) {
+    """
+    push {target}
+    push {word}
+    push {count}
+    pop rcx
+    pop rax
+    pop rdi
+    cld
+    rep stosb
+    ; clobbers rax, rcx, rdi
+    """
+}
+
 #[Unsafe("reads one byte from a live readable mapped address supplied by the caller"), FFI(asm)]
 os_load_u8: fn(address: I64) -> I64 {
     """

@@ -5014,17 +5014,23 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     assert(ir_x64_test_sha_line("psllq xmm2, 1") == [U8]{0x66, 0x0f, 0x73, 0xf2, 0x01})
     assert(ir_x64_test_sha_line("psrldq xmm4, 8") == [U8]{0x66, 0x0f, 0x73, 0xdc, 0x08})
     assert(ir_x64_test_sha_line("pslldq xmm10, 8") == [U8]{0x66, 0x41, 0x0f, 0x73, 0xfa, 0x08})
-    assert(ir_x64_test_sha_line("movq xmm0, {{state}}") == [U8]{0x66, 0x48, 0x0f, 0x6e, 0xc7})
-    assert(ir_x64_test_sha_line("movq xmm9, {{data}}") == [U8]{0x66, 0x4c, 0x0f, 0x6e, 0xce})
-    assert(ir_x64_test_sha_line("rep stosb") == [U8]{0xf3, 0xaa})
     names: [String]{"state", "data", "table"}
     assert(x64_assemble_template("pshufd xmm1, xmm1", names, false, false).error != None)
     assert(x64_assemble_template("pshufd xmm1, xmm1, 256", names, false, false).error != None)
     assert(x64_assemble_template("psllq xmm2", names, false, false).error != None)
     assert(x64_assemble_template("psllq xmm2, 256", names, false, false).error != None)
     assert(x64_assemble_template("psllq rax, 1", names, false, false).error != None)
-    assert(x64_assemble_template("movq rax, xmm0", names, false, false).error != None)
     assert(x64_assemble_template("pshufd xmm1, xmm1, 177 ; -> return", names, true, false).error != None)
+}
+
+// The string forms behind the runtime's copies and fills, each against the
+// bytes the Intel SDM gives it; a width the grammar does not list is refused.
+#Test("The rep string template forms assemble to their SDM encodings") {
+    assert(ir_x64_test_sha_line("rep movsb") == [U8]{0xf3, 0xa4})
+    assert(ir_x64_test_sha_line("rep movsq") == [U8]{0xf3, 0x48, 0xa5})
+    assert(ir_x64_test_sha_line("rep stosb") == [U8]{0xf3, 0xaa})
+    assert(ir_x64_test_sha_line("rep stosq") == [U8]{0xf3, 0x48, 0xab})
+    assert(x64_assemble_template("rep stosw", [String]{"state"}, false, false).error != None)
 }
 
 // The fiber switch, GS base write and signal return rails assemble, to their

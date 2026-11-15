@@ -163,6 +163,20 @@ web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: B
             web_i32(e, 64)
             web_memory_copy(e)
         }
+        // Every byte-fill leaf is memory.fill, which stores the value's low
+        // byte, as the leaf stores the word's.
+        "os_fill_1_3_i64" | "os_fill_4_7_i64" | "os_fill_8_16_i64" | "os_fill_16_32_i64" | "os_fill_32_64_i64" | "os_fill_64_128_i64" | "os_fill_string_i64" -> {
+            web_at(e, args[0])
+            web_at(e, args[1])
+            web_at(e, args[2])
+            web_memory_fill(e)
+        }
+        "os_fill_64_i64" -> {
+            web_at(e, args[0])
+            web_at(e, args[1])
+            web_i32(e, 64)
+            web_memory_fill(e)
+        }
         // count words from target, each the word: an i64.store loop over
         // the leaf's own address and count copies (t0, t1).
         "os_fill_words_i64" -> {

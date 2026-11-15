@@ -221,14 +221,19 @@ ir_core_mem_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, member: String,
 
 // A fill's stores at the word address `to`: plain data (no drop, nothing
 // ir_copy_needs) as one runtime fill of the value's bytes (JetRuntime
-// Collections.jet jet_rt_mem_fill), any other value as a copy of it stored
-// in each place.
+// RawWords.jet jet_rt_mem_fill, or for a lone byte value jet_rt_mem_fill_bytes
+// with the byte in its word), any other value as a copy of it stored in each
+// place.
 ir_core_mem_fill: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, to: Int, value: Int, row: Int, count: Int, total: Int) Never! {
     stride: ir_list_stride(m, row)
     if !ir_copy_needs(m, p, row) && m.types[row].drop == "" {
         // An aggregate's slot is its storage already; any other value is
         // stored raw into a frame cell, which takes no ownership of it.
         aggregate: ir_kind_of(m, b, value) == .Aggregate
+        if stride == 1 && !aggregate {
+            _: ir_runtime(m, b, "jet_rt_mem_fill_bytes", [Int]{to, value, total}, -1)
+            return
+        }
         source: if aggregate -> ir_address_at(m, b, value, 0) else -> ir_out_slot(m, b, (stride + 7) /% 8)
         if !aggregate -> ir_emit(b.f, IROp.Store, -1, source, 0, value, b.line)
         width: ir_word_const(m, b, stride)

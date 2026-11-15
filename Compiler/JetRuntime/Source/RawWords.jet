@@ -85,16 +85,21 @@ RT_MOVE_STRING_FROM: I64{2048}
 // List fill for native lowering (JetIR BuildRoutes.jet ir_list_fill_span):
 // `total` bytes at `target` become the `period` bytes at `source` repeated,
 // so a total that is not a whole number of periods ends with a partial one.
-// The source lies outside the target bytes. A period of 1, 2, 4 or 8 bytes
-// is one repeated word, stored with `rep stosq` and the tail's bytes. Any
-// other period is copied once, the filled prefix doubles onto itself up to
-// a chunk of at least RT_FILL_CHUNK bytes (a whole number of periods, so
-// every copy starts on a period), and that chunk repeats over the rest.
+// The source lies outside the target bytes. A 1-byte period is the byte
+// fill. A period of 2, 4 or 8 bytes is one repeated word, stored with
+// `rep stosq` and the tail's bytes. Any other period is copied once, the
+// filled prefix doubles onto itself up to a chunk of at least RT_FILL_CHUNK
+// bytes (a whole number of periods, so every copy starts on a period), and
+// that chunk repeats over the rest.
 RT_FILL_CHUNK: I64{16384}
 
 #Export(c) jet_rt_mem_fill: fn(target: I64, source: I64, period: I64, total: I64) {
     if (total <= I64{0} || period <= I64{0}) -> return
     #Unsafe("native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes") {
+        if (period == I64{1}) {
+            jet_rt_mem_fill_bytes(target, os_load_u8(source), total)
+            return
+        }
         if (I64{8} % period == I64{0}) {
             word := I64{0}
             lane := I64{0}
@@ -131,6 +136,47 @@ RT_FILL_CHUNK: I64{16384}
     }
 }
 
+// The byte fill for native lowering (JetIR BuildSentry.jet ir_core_mem_fill),
+// jet_rt_mem_fill and memset: `count` bytes at `target` become the low byte
+// of `value`. Up to 128 bytes, one leaf of the count's class stores them. A
+// longer fill stores its first 64 bytes, steps 64 bytes at a time from the
+// next 64-byte boundary, and ends with its last 64 bytes; from
+// RT_FILL_STRING_FROM bytes it is one string store instead.
+RT_FILL_STRING_FROM: I64{2048}
+
+#Export(c) jet_rt_mem_fill_bytes: fn(target: I64, value: I64, count: I64) {
+    #Unsafe("native lowering owns count writable bytes at target; each leaf stores only inside its class's count") {
+        // The byte in all eight lanes of a word.
+        word: wrapping(value.bit_and(I64{255}) * I64{72340172838076673})
+        if (count <= I64{16}) {
+            if (count >= I64{8}) {
+                os_fill_8_16_i64(target, word, count)
+            } else if (count >= I64{4}) {
+                os_fill_4_7_i64(target, word, count)
+            } else if (count > I64{0}) {
+                os_fill_1_3_i64(target, word, count)
+            }
+        } else if (count <= I64{32}) {
+            os_fill_16_32_i64(target, word, count)
+        } else if (count <= I64{64}) {
+            os_fill_32_64_i64(target, word, count)
+        } else if (count <= I64{128}) {
+            os_fill_64_128_i64(target, word, count)
+        } else if (count >= RT_FILL_STRING_FROM) {
+            os_fill_string_i64(target, word, count)
+        } else {
+            os_fill_64_i64(target, word)
+            last: wrapping(target + count - I64{64})
+            to := wrapping(target + I64{64}).bit_and(I64{-64})
+            loop to < last {
+                os_fill_64_i64(to, word)
+                to = wrapping(to + I64{64})
+            }
+            os_fill_64_i64(last, word)
+        }
+    }
+}
+
 // C's memory functions, under their C names, for the C a program links
 // beside the runtime (vendored and user C, and the code a C compiler writes
 // for struct copies): the runtime pack carries no libc copy of them.
@@ -146,26 +192,9 @@ RT_FILL_CHUNK: I64{16384}
     target
 }
 
-// The low byte of `value` in each of `count` bytes: whole words first, then
-// the tail.
+// The low byte of `value` in each of `count` bytes.
 #Export(c) memset: fn(target: I64, value: I64, count: I64) -> I64 {
-    if (count <= I64{0}) -> return target
-    byte: value.bit_and(I64{255})
-    words: count >> I64{3}
-    #Unsafe("C's caller owns count writable bytes at target") {
-        // The byte in all eight lanes of a word.
-        pattern: wrapping(byte * I64{72340172838076673})
-        word := I64{0}
-        loop word < words {
-            os_store_i64(wrapping(target + (word << I64{3})), pattern)
-            word += I64{1}
-        }
-        at := words << I64{3}
-        loop at < count {
-            os_store_u8(wrapping(target + at), byte)
-            at += I64{1}
-        }
-    }
+    jet_rt_mem_fill_bytes(target, value, count)
     target
 }
 

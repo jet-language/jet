@@ -21,14 +21,15 @@ release row (O2) must satisfy Jet / ceiling <= 1.00 in two measures:
 
 | | Jet | ceiling |
 | --- | --- | --- |
-| routines | `jet_rt_mem_fill` | `dispatch`, `fill_avx2`, `fill_sse2` |
+| routines | `jet_rt_mem_fill_bytes` | `dispatch`, `fill_avx2`, `fill_sse2` |
 | uses | `mem.fill<U8>(` lines of `run.jet` | `call [rsp]` lines of `ref.S` |
 | data | none | 8: the routine's stack slot |
 
 The `mem.fill` line names only the call. The pointer and the byte are
 computed on the lines before it, just as the reference loads its argument
-registers on lines outside the use. When the Jet fill moves to another
-runtime routine, name that routine in the `jet` side's `routines`.
+registers on lines outside the use. A `mem.fill<U8>` lowers to one call of
+`jet_rt_mem_fill_bytes` with the byte in a register. If the Jet fill moves to
+another runtime routine, name that routine in the `jet` side's `routines`.
 
 The package names `run.jet` as its memory kernel: the cell measures a raw
 memory primitive, so its one file holds the block's allocation and the reads
