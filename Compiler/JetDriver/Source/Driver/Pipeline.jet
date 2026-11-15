@@ -5187,6 +5187,13 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // every other compile hands them to registration.
     release_programs: !(checked_projection || request.mode == JetDriverCompileMode.Doc)
     registration_inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, foreign_provider_inputs, load.diagnostics, request.core_sources, release_programs) ?? return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Load), false, trace)
+    // A compile that reaches Core on demand (jet_driver_load_reach's
+    // `use_driven`) leaves Core's casing to the Core library's check.
+    if !kg.enabled && !request.every_core_body && request.core_tests == "" {
+        loop index in 0..<registration_inputs.len() {
+            if module_is_core(registration_inputs[index].module_identity) -> registration_inputs[index].check_casing = false
+        }
+    }
     // The graph counts its lookups only while a trace is open.
     counting := false
     if request.trace_sink == .Val(sink) {

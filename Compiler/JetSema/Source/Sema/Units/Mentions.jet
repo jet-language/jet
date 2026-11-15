@@ -23,9 +23,6 @@ sema_units_ident: fn(bytes: [U8], at: Int, end: Int) -> Bool Never! {
     scalar: String.from_bytes(bytes[at..<end]) ?? return false
     units_unicode.is_alphabetic(scalar) || units_unicode.is_numeric(scalar)
 }
-sema_units_ascii_digit: fn(byte: U8) -> Bool Never! {
-    byte >= (U8{48}) && byte <= (U8{57})
-}
 sema_units_scalar_end: fn(bytes: [U8], at: Int) -> Int Never! {
     end := at + 1
     loop end < bytes.len() && bytes[end] >= (U8{128}) && bytes[end] <= (U8{191}) -> end += 1
@@ -43,24 +40,41 @@ sema_units_mention_suffix: fn(rows: &[String:SemaUnitSuffixMention], bytes: [U8]
 // type names, the only names ever looked up; sema_units_catalog_names) are
 // indexed: the maps stay catalog-sized instead of holding every identifier
 // of the source. An identifier run is looked up by its bytes and only a
-// wanted one is built as a String.
+// wanted one is built as a String. Each scan decides an ASCII byte in place
+// (a scalar of one byte in valid UTF-8) and calls sema_units_scalar_end and
+// sema_units_ident only for a scalar past ASCII.
 sema_units_source_mentions: fn(source: String, wanted: NameTable) -> SemaUnitSourceMentions Never! {
     bytes: source.bytes()
+    count: bytes.len()
     identifiers := [String:Span]{}
     unqualified := [String:Bool]{}
     suffixes := [String:SemaUnitSuffixMention]{}
     at := 0
-    loop at < bytes.len() {
-        end := sema_units_scalar_end(bytes, at)
-        if !sema_units_ident(bytes, at, end) {
-            at = end
-            next
+    loop at < count {
+        byte: bytes[at]
+        if byte < (U8{128}) {
+            if !(byte == (U8{95}) || (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))) {
+                at += 1
+                next
+            }
+        } else {
+            end: sema_units_scalar_end(bytes, at)
+            if !sema_units_ident(bytes, at, end) {
+                at = end
+                next
+            }
         }
         start: at
-        loop at < bytes.len() {
-            end = sema_units_scalar_end(bytes, at)
-            if !sema_units_ident(bytes, at, end) -> break
-            at = end
+        loop at < count {
+            run_byte: bytes[at]
+            if run_byte < (U8{128}) {
+                if !(run_byte == (U8{95}) || (run_byte >= (U8{48}) && run_byte <= (U8{57})) || (run_byte >= (U8{65}) && run_byte <= (U8{90})) || (run_byte >= (U8{97}) && run_byte <= (U8{122}))) -> break
+                at += 1
+            } else {
+                end: sema_units_scalar_end(bytes, at)
+                if !sema_units_ident(bytes, at, end) -> break
+                at = end
+            }
         }
         if name_find_bytes(wanted, bytes, start, at) != None {
             run: String.from_bytes(bytes[start..<at]) ?? ""
@@ -70,9 +84,10 @@ sema_units_source_mentions: fn(source: String, wanted: NameTable) -> SemaUnitSou
         // Every scalar start of the run, as the ident loop above visited them.
         offset := start
         loop offset < at {
-            if offset > 0 && sema_units_ascii_digit(bytes[offset - 1]) && !sema_units_ascii_digit(bytes[offset]) -> sema_units_mention_suffix(suffixes, bytes, offset, at, false)
-            if offset + 5 <= at && bytes[offset] == (U8{102}) && bytes[offset + 1] == (U8{114}) && bytes[offset + 2] == (U8{111}) && bytes[offset + 3] == (U8{109}) && bytes[offset + 4] == (U8{95}) -> sema_units_mention_suffix(suffixes, bytes, offset + 5, at, true)
-            offset = sema_units_scalar_end(bytes, offset)
+            here: bytes[offset]
+            if offset > start && bytes[offset - 1] >= (U8{48}) && bytes[offset - 1] <= (U8{57}) && (here < (U8{48}) || here > (U8{57})) -> sema_units_mention_suffix(suffixes, bytes, offset, at, false)
+            if here == (U8{102}) && offset + 5 <= at && bytes[offset + 1] == (U8{114}) && bytes[offset + 2] == (U8{111}) && bytes[offset + 3] == (U8{109}) && bytes[offset + 4] == (U8{95}) -> sema_units_mention_suffix(suffixes, bytes, offset + 5, at, true)
+            offset = if here < (U8{128}) -> offset + 1 else -> sema_units_scalar_end(bytes, offset)
         }
     }
     sorted := [SemaUnitSuffixMention]{}

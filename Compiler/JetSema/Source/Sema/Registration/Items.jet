@@ -643,6 +643,10 @@ SemaRegistrationModuleInput: struct {
     // Filled by the driver: the module's file from its package root and its
     // package, which its Module record names (ModuleMeta.jet).
     meta: SemaModuleMetaSource{SemaModuleMetaSource{}}
+    // False for a Core module of a compile that reaches Core on demand: like
+    // the Core bodies no program calls, its casing is the Core library's check
+    // (`jet check Core`), which leaves this true.
+    check_casing: Bool{true}
 }
 
 SemaForeignImportBinding: struct {
@@ -3058,9 +3062,10 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
     // A module's field lines become its Module record before casing would
     // read them as constants. Core source carries no record.
     if !module_is_core(module_row.module_identity) -> sema_module_meta_lower(module_row.program, module_row.declared_module, owned.meta, module_row.source, diagnostics)
-    // Identifier casing is checked on the parsed source before
-    // any declaration is registered or rewritten.
-    sema_casing_program(module_row.program, diagnostics)
+    // Identifier casing is checked on the parsed source before any
+    // declaration is registered or rewritten, except where the input defers
+    // it (SemaRegistrationModuleInput.check_casing).
+    if owned.check_casing -> sema_casing_program(module_row.program, diagnostics)
     // E0932: `#Deprecated` retires a public item; checked
     // on the parsed items, inline module bodies included, before inline
     // modules are lowered.
