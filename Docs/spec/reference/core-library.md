@@ -1111,26 +1111,38 @@ They are bare bounds, so `fn<R: Reader>` needs no import:
 
 ```jet
 Reader: trait {
-    read: fn(&self, limit: Int) -> [U8] IOError!
+    read_bytes: fn(&self, limit: Int) -> [U8] IOError!
     read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!
 }
 
 Writer: trait {
     write_bytes: fn(&self, bytes: [U8]) IOError!
     flush: fn(&self) IOError!
+    write: fn(&self, text: String) IOError! {
+        self.write_bytes(text.bytes())
+    }
+    write_line: fn(&self, text: String) IOError! {
+        self.write_bytes("{text}\n".bytes())
+    }
 }
 ```
 
-`read` returns at most `limit` bytes, and an empty list means the end of the
-input. `read_into` appends at most `limit` bytes to the caller's `buffer` and
-returns how many it added; 0 means the end. A call through a bound passes
-each argument with the access the trait declares, so `source.read_into(out,
-n)` grows the caller's `out` in place. An implementation must declare the
-same access for each parameter that the trait writes (`&`) or moves (`&&`);
-`read_into: fn(&self, buffer: [U8], limit: Int)` is E0907.
+`read_bytes` returns at most `limit` bytes, and an empty list means the end
+of the input. `read_into` appends at most `limit` bytes to the caller's
+`buffer` and returns how many it added; 0 means the end. A call through a
+bound passes each argument with the access the trait declares, so
+`source.read_into(out, n)` grows the caller's `out` in place. An
+implementation must declare the same access for each parameter that the
+trait writes (`&`) or moves (`&&`); `read_into: fn(&self, buffer: [U8],
+limit: Int)` is E0907.
 
 `write_bytes` writes all of `bytes` or fails; `flush` pushes what the sink
-holds on to its destination.
+holds on to its destination. `write` and `write_line` take text and have
+default bodies, so a writer that implements only `write_bytes` and `flush`
+answers both, on its own type and through a `W: Writer` bound; a writer may
+write its own `write` or `write_line` instead. A default calls only methods
+every implementation writes. Handing bytes to `write` is E0112, and its fix
+names `write_bytes`.
 
 core.files' `FileReader` implements `Reader` and its `FileWriter` implements
 `Writer`: `write_bytes` hands over every byte, and the bytes stay buffered
@@ -1138,6 +1150,9 @@ until `flush`, `fsync` or close. core.term's binary cursor
 (`Reader.over(bytes)`) and standard input (`term.stdin()`) implement
 `Reader`, and both refuse a `limit` that is not positive with
 `IOError.InvalidInput`. The cursor hands out the bytes it has not yet read.
+core.term's `Stdout` and `Stderr` implement `Writer` with their own `write`
+and `write_line`. `FileReader`, the cursor and standard input also answer
+`read`, the old name for `read_bytes`.
 Because these methods write the handle (`&self`), a handle that is read or
 written lives in a mutable binding (`reader := files.open(path)`) and a helper
 that reads one takes it as `&FileReader` (E0111 and E0205 otherwise).
@@ -3064,8 +3079,10 @@ redacted receipt output.
 | `child.kill()` / `.terminate()` / `.interrupt()` | `Unit IOError!` | Send the corresponding termination request. |
 | `child.stdin.write(bytes)` | `Int IOError!` | Write once to a streamed child input and return how many bytes the pipe took. |
 | `child.stdin.write_all(bytes)` / `.write_text(text)` | `Unit IOError!` | Write every byte, or the UTF-8 bytes of the text. |
+| `child.stdin.write_some(bytes)` / `child.stdin.write_bytes(bytes)` | `Int IOError!` / `Unit IOError!` | The byte names of `write` and `write_all`: one partial write that returns the count taken, or every byte. |
 | `child.stdin.close()` | `Unit` | Close a streamed child input; repeated close is harmless. |
 | `child.stdout.read(limit)` / `child.stderr.read(limit)` | `[U8] IOError!` | Read up to `limit` bytes from the shared buffered pipe position; an empty list is end of input, and a limit below one is `IOError.InvalidInput` before any read. |
+| `child.stdout.read_bytes(limit)` / `child.stderr.read_bytes(limit)` | `[U8] IOError!` | The byte name of `read(limit)`. |
 | `child.stdout.chunks(size)` / `child.stderr.chunks(size)` | loop source of `[U8]` | Yield each non-empty piece of at most `size` bytes (default 65536) from the shared buffered pipe position. The loop ends at end of input or at the first failed read; a size below one ends it before any read. |
 | `child.stdout.lines()` / `child.stderr.lines()` | line stream | Read from the shared buffered pipe position, removing one LF and its preceding CR only. A final bare CR remains; invalid UTF-8 is `IOError.Other` on `process output`. The parent remains responsible for draining it. |
 
@@ -6076,6 +6093,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `tcp_read(stream: &TCPStream) -[Net, Time.Wait]> String NetError!` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] NetError!` | text/bytes | Read from a TCP stream. |
 | `tcp_read_text(stream, n) -[Net, Time.Wait]> String NetError!` | text | Read and decode up to `n` bytes. No byte is lost: a character the read cuts stays for the next read, and one that starts the read is read whole, up to 3 bytes past `n`. Bytes that are not UTF-8, and a character the end of the stream cuts, fail each text read and stay for `tcp_read_bytes`. |
 | `stream.read_into(buffer: &[U8], limit)` / `stream.read_into(buffer, limit, deadline:)` on `TCPStream` | `Int NetError!` | Append one read of up to `limit` bytes (at most 16 MiB) to the caller's `buffer` and return the count; 0 is the end of the stream, and a limit below one is `.InvalidInput`. The bytes go straight into the buffer, so a loop that clears and reuses one buffer allocates nothing per read. A carry an earlier text read left is appended first. |
+| `stream.read_bytes(limit)` / `stream.write_some(bytes)` / `stream.write_bytes(bytes)` on `TCPStream`, each also with `deadline:` | `[U8] NetError!` / `Int NetError!` / `Unit NetError!` | The byte names of the stream's `read(limit)`, `write(bytes)` and `write_all(bytes)`: one bounded read, one partial write that returns the count taken, and a write of every byte. |
 | `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit NetError!` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Int NetError!` | unit/count | Write text or bytes. |
 | `tcp_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit NetError!` / `tcp_write_text(stream, text) -[Net, Time.Wait]> Unit NetError!` | unit | Write all bytes or text. |
 | `tcp_shutdown(stream, how: NetShutdown) -[Net]> Unit NetError!` / `tcp_close(stream) -[Net]> Unit NetError!` | — | Shut down or close a stream. |
@@ -6097,6 +6115,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `unix_accept(listener) -[Net, Time.Wait]> UnixStream NetError!` / `unix_read(stream) -[Net, Time.Wait]> String NetError!` | stream/text | Accept or read a Unix stream. |
 | `unix_write(stream, text) -[Net, Time.Wait]> Unit NetError!` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] NetError!` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
 | `stream.read_into(buffer: &[U8], limit, deadline:)` on `UnixStream` | `Int NetError!` | The TCP `read_into` with an explicit deadline, retrying an interrupted read. |
+| `stream.read_bytes(limit, deadline:)` / `stream.write_bytes(bytes, deadline:)` on `UnixStream` | `[U8] NetError!` / `Unit NetError!` | The byte names of the stream's `read` and `write`. |
 | `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit NetError!` / `unix_shutdown(stream, how) -[Net]> Unit NetError!` / `unix_close(stream) -[Net]> Unit NetError!` | — | Write all bytes or close the same Unix stream. |
 | `unix_send(&stream, bytes: [U8], fds: [core.sys.Fd]) -[Net, Time.Wait]> Unit NetError!` | — | Send every byte with `fds` attached (SCM_RIGHTS) to the first byte; at least one byte, at most 253 descriptors. The peer gets its own copies. Partial sends and `EINTR` resume. |
 | `unix_receive(&stream, max: Int) -[Net, Time.Wait]> UnixMessage NetError!` | message | At most `max` bytes (1 B to 16 MiB) of one message and the descriptors that rode with it, each an owned close-on-exec `core.sys.Fd`. A message whose descriptors were cut short (`MSG_CTRUNC`) closes the ones that arrived and fails with `.Protocol`. Empty bytes and no descriptors mean the peer closed. |

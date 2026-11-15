@@ -510,13 +510,14 @@ sema_process_terminal_method: fn(receiver: Expr, receiver_value: TExpr, method: 
 }
 
 sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    // `write(bytes)` is one partial write that reports the count taken;
-    // `write_all(bytes)` and `write_text(text)` write every byte.
+    // `write_some(bytes)` (also `write`) is one partial write that reports
+    // the count taken; `write_bytes(bytes)` (also `write_all`) and
+    // `write_text(text)` write every byte.
     result: if method == {
-        "write" -> {
+        "write" | "write_some" -> {
             if args.len() == 1 -> Val(sema_process_io_result(Type.Int)) else -> None
         }
-        "write_all" | "write_text" -> {
+        "write_all" | "write_bytes" | "write_text" -> {
             if args.len() == 1 -> Val(sema_process_io_result(Type.Named{name: "Unit"})) else -> None
         }
         "close" -> {
@@ -524,7 +525,7 @@ sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
         }
         else -> None
     }
-    if method != "write" && method != "write_all" && method != "write_text" && method != "close" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if method != "write" && method != "write_some" && method != "write_all" && method != "write_bytes" && method != "write_text" && method != "close" -> return SemaMethodSpecialCheck{handled: false, value: None}
     required_arity: if method == "close" -> 0 else -> 1
     if args.len() != required_arity {
         sema_process_wrong_arity(method, required_arity, args.len(), span, diagnostics)
@@ -533,14 +534,14 @@ sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
     }
     required: if method == {
         "write_text" -> [Type]{Type.String}
-        "write" | "write_all" -> [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}
+        "write" | "write_some" | "write_all" | "write_bytes" -> [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}
         else -> [Type]{}
     }
     values: sema_process_check_args(args, required, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_process_check_method_ownership(receiver, "ProcessStdin.{method}", args, required, [Bool]{}, AccessConvention.Read, span, scopes, state, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     operation: if method == {
-        "write" -> THandleOp.ProcessStdinWrite
-        "write_all" -> THandleOp.ProcessStdinWriteAll
+        "write" | "write_some" -> THandleOp.ProcessStdinWrite
+        "write_all" | "write_bytes" -> THandleOp.ProcessStdinWriteAll
         "write_text" -> THandleOp.ProcessStdinWriteText
         else -> THandleOp.ProcessStdinClose
     }
@@ -548,7 +549,7 @@ sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
 }
 
 sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if method != "lines" && method != "read" && method != "chunks" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if method != "lines" && method != "read" && method != "read_bytes" && method != "chunks" -> return SemaMethodSpecialCheck{handled: false, value: None}
     required_arity: if method == "lines" -> 0 else if method == "chunks" && args.len() == 0 -> 0 else -> 1
     if args.len() != required_arity {
         sema_process_wrong_arity(method, required_arity, args.len(), span, diagnostics)
@@ -560,8 +561,9 @@ sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     required: if required_arity == 1 -> [Type]{Type.Int} else -> [Type]{}
     values: sema_process_check_args(args, required, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_process_check_method_ownership(receiver, api, args, required, [Bool]{}, AccessConvention.Read, span, scopes, state, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    // `read(max)`: Read::read on the pipe, up to `max` bytes, empty at EOF.
-    if method == "read" {
+    // `read_bytes(max)` (also `read`): Read::read on the pipe, up to `max`
+    // bytes, empty at EOF.
+    if method == "read" || method == "read_bytes" {
         operation: if stream_name == "ProcessStderrStream" -> THandleOp.ProcessStderrRead else -> THandleOp.ProcessStdoutRead
         return sema_process_finish(receiver_value, operation, values, sema_process_io_result(Type.List{element: Type.IntN{signed: false, bits: 8}}), "Exec", api, span, expected, environment, program, scopes, context, diagnostics)
     }

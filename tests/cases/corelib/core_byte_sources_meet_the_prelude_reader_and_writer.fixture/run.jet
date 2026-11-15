@@ -20,7 +20,7 @@ drain: fn<R: Reader>(&source: R, step: Int) -> [U8] IOError! {
 pipe: fn<R: Reader, W: Writer>(&source: R, &sink: W, step: Int) -> Int IOError! {
     total := 0
     loop {
-        chunk: source.read(step) ?? return Err(err)
+        chunk: source.read_bytes(step) ?? return Err(err)
         if chunk.len() == 0 -> break
         sink.write_bytes(chunk) ?? return Err(err)
         total += chunk.len()
@@ -31,10 +31,10 @@ pipe: fn<R: Reader, W: Writer>(&source: R, &sink: W, step: Int) -> Int IOError! 
 
 text: fn(bytes: [U8]) -> String { String.from_bytes(bytes) ?? "<not UTF-8>" }
 
-// The cursor's own `read` and `read_into`, called on its named type: six
-// bytes, then up to three more appended to a buffer.
+// The cursor's own `read_bytes` and `read_into`, called on its named type:
+// six bytes, then up to three more appended to a buffer.
 cursor_parts: fn(cursor: &term.Reader) -> String IOError! {
-    head: cursor.read(6) ?? return Err(err)
+    head: cursor.read_bytes(6) ?? return Err(err)
     rest := [U8]{}
     count: cursor.read_into(rest, 3) ?? return Err(err)
     Ok("{text(head)}|{count} {text(rest)}")

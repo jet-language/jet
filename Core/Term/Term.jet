@@ -31,6 +31,8 @@ Reader: struct {
     fd: Int
 
     impl Reader {
+        read_bytes: fn(&self, limit: Int) -> [U8] IOError! { __cursor_read(self, limit) }
+
         read: fn(&self, limit: Int) -> [U8] IOError! { __cursor_read(self, limit) }
 
         read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
@@ -66,13 +68,17 @@ StdinHandle: struct {
     // As the Prelude `Reader`, standard input hands out up to `limit` bytes,
     // waiting until it has them or the input ends; an empty list is the end.
     impl Reader {
-        read: fn(&self, limit: Int) -[IO, Time.Wait]> [U8] IOError! {
+        read_bytes: fn(&self, limit: Int) -[IO, Time.Wait]> [U8] IOError! {
             if limit <= 0 -> return Err(terminal_invalid("the read limit must be positive"))
             __take_bytes(limit)
         }
 
+        read: fn(&self, limit: Int) -[IO, Time.Wait]> [U8] IOError! {
+            self.read_bytes(limit)
+        }
+
         read_into: fn(&self, buffer: &[U8], limit: Int) -[IO, Time.Wait]> Int IOError! {
-            bytes: self.read(limit) ?? return Err(err)
+            bytes: self.read_bytes(limit) ?? return Err(err)
             count: bytes.len()
             buffer.extend(bytes)
             Ok(count)
@@ -110,42 +116,51 @@ __InputLines: struct {
     }
 }
 
+// Standard output as the Prelude `Writer`. Its `write` and `write_line` take
+// the screen's own text path rather than the trait's defaults.
 Stdout: struct {
     fd: Int
 
-    write: fn(&self, text: String) IOError! -[IO]> {
-        stdio_write(text, false, false)
+    impl Writer {
+        write_bytes: fn(&self, bytes: [U8]) IOError! -[IO]> {
+            stdio_bytes(bytes, false)
+        }
+        flush: fn(&self) IOError! -[IO]> {
+            stdio_flush(false)
+        }
+        write: fn(&self, text: String) IOError! -[IO]> {
+            stdio_write(text, false, false)
+        }
+        write_line: fn(&self, text: String) IOError! -[IO]> {
+            stdio_write(text, true, false)
+        }
     }
-    write_line: fn(&self, text: String) IOError! -[IO]> {
-        stdio_write(text, true, false)
-    }
-    write_bytes: fn(&self, bytes: [U8]) IOError! -[IO]> {
-        stdio_bytes(bytes, false)
-    }
-    flush: fn(&self) IOError! -[IO]> {
-        stdio_flush(false)
-    }
+
     // A pure query: the read receiver lets a temporary ask (`stdout().is_tty()`).
     is_tty: fn(self) -[IO]> Bool Never! {
         rt.stdout_terminal()
     }
 }
 
+// Standard error as the Prelude `Writer`, as Stdout is.
 Stderr: struct {
     fd: Int
 
-    write: fn(&self, text: String) IOError! -[IO]> {
-        stdio_write(text, false, true)
+    impl Writer {
+        write_bytes: fn(&self, bytes: [U8]) IOError! -[IO]> {
+            stdio_bytes(bytes, true)
+        }
+        flush: fn(&self) IOError! -[IO]> {
+            stdio_flush(true)
+        }
+        write: fn(&self, text: String) IOError! -[IO]> {
+            stdio_write(text, false, true)
+        }
+        write_line: fn(&self, text: String) IOError! -[IO]> {
+            stdio_write(text, true, true)
+        }
     }
-    write_line: fn(&self, text: String) IOError! -[IO]> {
-        stdio_write(text, true, true)
-    }
-    write_bytes: fn(&self, bytes: [U8]) IOError! -[IO]> {
-        stdio_bytes(bytes, true)
-    }
-    flush: fn(&self) IOError! -[IO]> {
-        stdio_flush(true)
-    }
+
     is_tty: fn(self) -[IO]> Bool Never! {
         rt.stderr_terminal()
     }

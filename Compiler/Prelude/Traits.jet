@@ -36,6 +36,11 @@
 // `Literal: module` holds the literal capabilities, named `Literal.Int` and
 // `Literal.Float`; each one's `from_literal` parameter is the literal's source,
 // and an impl writes it `#run fn`.
+//
+// A method written with a body is a default: an impl that leaves it out gets
+// the body as its own method, which calls the impl's other methods. A default
+// never calls a method that has a default itself, so no pair of defaults can
+// call each other forever.
 
 // `a + b`.
 Add: trait {
@@ -241,21 +246,30 @@ Driver: trait {
 }
 
 // A byte source: core.files's FileReader, and any type the streaming codecs
-// of core.encoding read from. `read_into` appends at most `limit` bytes to
-// `buffer` and answers how many, 0 at the end of the input.
+// of core.encoding read from. `read_bytes` hands out at most `limit` bytes,
+// an empty list at the end of the input; `read_into` appends at most `limit`
+// bytes to `buffer` and answers how many, 0 at the end of the input.
 Reader: trait {
     bare_bound: Bool{true}
-    read: fn(&self, limit: Int) -> [U8] IOError!
+    read_bytes: fn(&self, limit: Int) -> [U8] IOError!
     read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!
 }
 
-// A byte sink: core.files's FileWriter, and any type the streaming codecs
-// of core.encoding write to. `write_bytes` writes all of `bytes`; `flush`
-// pushes what the sink holds on to its destination.
+// A byte sink: core.files's FileWriter, the screen, and any type the
+// streaming codecs of core.encoding write to. `write_bytes` writes all of
+// `bytes`; `flush` pushes what the sink holds on to its destination. `write`
+// and `write_line` take text, and by default write its bytes through
+// `write_bytes`.
 Writer: trait {
     bare_bound: Bool{true}
     write_bytes: fn(&self, bytes: [U8]) IOError!
     flush: fn(&self) IOError!
+    write: fn(&self, text: String) IOError! {
+        self.write_bytes(text.bytes())
+    }
+    write_line: fn(&self, text: String) IOError! {
+        self.write_bytes("{text}\n".bytes())
+    }
 }
 
 // A value a transaction restores on rollback.

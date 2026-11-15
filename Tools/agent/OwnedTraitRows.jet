@@ -8,7 +8,9 @@
 // text in one strict shape: `Name: trait {` blocks, with `Literal: module {`
 // around the literal capabilities, whose members are `column: Bool{true}` or
 // `column: String{"…"}` facts, `Name: type` associated types and
-// `name: fn(…)` requirements ending `Never!` or `Error!`.
+// `name: fn(…)` requirements ending `Never!` or `Error!`. A requirement ending
+// `Error! {` is a default: its body runs to the `}` at its own indent, and
+// its row carries the whole method as written.
 // Usage: jet Tools/agent/OwnedTraitRows.jet [--check|--write]
 // --check fails when a copy differs from what the declarations give it;
 // --write rewrites the copies.
@@ -74,6 +76,8 @@ TraitMethod: struct {
     returns: String
     // `Never` or the written error type.
     error: String
+    // A default: the method, header and body, at no indent; "" for none.
+    default_source: String{""}
 }
 
 // One `Name: trait` block as written.
@@ -192,7 +196,23 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
                     if associated.contains(declared.groups[0]) -> return Err(rows_fail("line {index}: {context}: `{declared.groups[0]}: type` is declared twice"))
                     associated.push(declared.groups[0].copy())
                 }
-                METHOD_OPEN.match(body) != None -> methods.push(parse_method(body, "line {index}: {context}") ?? return Err(err))
+                METHOD_OPEN.match(body) != None && !body.ends_with(" {{") -> methods.push(parse_method(body, "line {index}: {context}") ?? return Err(err))
+                METHOD_OPEN.match(body) != None -> {
+                    method := parse_method(body.remove_suffix(" {{"), "line {index}: {context}") ?? return Err(err)
+                    written := [String]{body.copy()}
+                    close: "{member_indent}}}"
+                    loop index < lines.len() && lines[index] != close {
+                        inner: lines[index]
+                        index += 1
+                        if inner.trim() != "" && !inner.starts_with("{member_indent}    ") -> return Err(rows_fail("line {index}: {context}: a default body sits one level in from its method, found `{inner}`"))
+                        written.push(inner.remove_prefix(member_indent))
+                    }
+                    if index >= lines.len() -> return Err(rows_fail("line {index}: {context}: the default `{method.name}` is not closed"))
+                    index += 1
+                    written.push("}}")
+                    method.default_source = written.join("\n")
+                    methods.push(method)
+                }
                 true -> return Err(rows_fail("line {index}: {context}: expected a fact column, `Name: type` or `name: fn(…)`, found `{body}`"))
             }
         }
@@ -278,7 +298,24 @@ render_method: fn(method: TraitMethod, any_receiver: Bool, context: String) -> S
         params.push("OwnedParam{{name: \"{param.name}\", access: AccessConvention.{access}, ty: {ty}}}")
     }
     returns: render_returns(method, where) ?? return Err(err)
-    Ok("OwnedMethod{{name: \"{method.name}\", receiver: {receiver}, params: [OwnedParam]{{{params.join(", ")}}}, returns: {returns}}}")
+    written: if method.default_source == "" -> "" else -> ", default_source: Val(\"{jet_text(method.default_source)}\")"
+    Ok("OwnedMethod{{name: \"{method.name}\", receiver: {receiver}, params: [OwnedParam]{{{params.join(", ")}}}, returns: {returns}{written}}}")
+}
+
+// `text` as the inside of a Jet string literal.
+jet_text: fn(text: String) -> String Never! {
+    text.replace("\\", "\\\\").replace("\"", "\\\"").replace("{{", "{{{{").replace("}}", "}}}}").replace("\n", "\\n")
+}
+
+// A default calls no method that has a default, its own included, so no
+// default can reach itself.
+check_defaults: fn(source: TraitSource, context: String) OwnedTraitRowsError! {
+    loop method in source.methods {
+        if method.default_source == "" -> next
+        loop other in source.methods {
+            if other.default_source != "" && method.default_source.contains("self.{other.name}(") -> return Err(rows_fail("{context}: the default `{method.name}` calls `{other.name}`, which has a default; a default calls only methods every impl writes"))
+        }
+    }
 }
 
 quoted: fn(names: [String]) -> String Never! {
@@ -317,6 +354,10 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
     kind: if kinds.len() == 1 -> kinds[0].copy() else -> "methods"
     if kind != "methods" && (fact(source, "shares") != None || flag(source, "any_receiver")) -> return Err(rows_fail("{context}: `shares` and `any_receiver` belong to a methods trait"))
     if kind != "operators" && flag(source, "commutative") -> return Err(rows_fail("{context}: `commutative` belongs to an operator trait"))
+    loop method in source.methods {
+        if kind != "methods" && method.default_source != "" -> return Err(rows_fail("{context}: only a methods trait gives a default"))
+    }
+    check_defaults(source, context) ?? return Err(err)
     loop name in words(source, "requires") {
         if name == source.name || !declared(traits, name) -> return Err(rows_fail("{context}: `requires` names `{name}`, which is not another trait here"))
     }
@@ -509,6 +550,17 @@ MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}}\n    ope
     block: render_dictionary_rows(MINIMAL_TRAITS) ?? panic(err.message)
     assert(block.contains("{{token: \"Bundle\", query: \"bundle\", display_query: \"#bundle\", registry_name: \"OWNED_TRAITS\","))
     assert(block.contains("text: \"On a struct or enum, derives `Driver` from its fields; `#!Bundle` refuses it.\""))
+}
+
+SINK_TRAIT: "Sink: trait {{\n    put: fn(&self, bytes: [U8]) IOError!\n    say: fn(&self, text: String) IOError! {{\n        self.put(\"{{text}}\".bytes())\n    }}\n}}\n"
+
+#Test("a default carries its method as written, and calls no default") {
+    rendered: render_rows(SINK_TRAIT, true) ?? panic("the sink trait did not render: {err.message}")
+    assert(rendered.contains("OwnedMethod{{name: \"put\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"bytes\", access: AccessConvention.Read, ty: Type.List{{element: Type.IntN{{signed: false, bits: 8}}}}}}}}, returns: Val(Type.Result{{ok: Type.Named{{name: \"Unit\"}}, err: Type.Named{{name: \"IOError\"}}}})}},"))
+    assert(rendered.contains("returns: Val(Type.Result{{ok: Type.Named{{name: \"Unit\"}}, err: Type.Named{{name: \"IOError\"}}}}), default_source: Val(\"say: fn(&self, text: String) IOError! {{{{\\n    self.put(\\\"{{{{text}}}}\\\".bytes())\\n}}}}\")}},"))
+    assert(rows_error(SINK_TRAIT.replace("self.put(", "self.say(")).contains("the default `say` calls `say`, which has a default"))
+    assert(rows_error(SINK_TRAIT.replace("        self.put", "    self.put")).contains("a default body sits one level in"))
+    assert(rows_error(SINK_TRAIT.replace("    }}\n}}\n", "")).contains("the default `say` is not closed"))
 }
 
 #Test("a declaration that breaks the source rules is refused") {
