@@ -60,6 +60,7 @@ use {
         TOKEN_IDENT,
         TOKEN_INT,
         TOKEN_KW_FN,
+        TOKEN_KW_PRIV,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
         TOKEN_LINE_COMMENT,
@@ -168,7 +169,8 @@ JetDriverReachDeclaration: struct {
 // leave with their rows (jet_driver_reach_strip). A function the Core
 // cutover drops leaves the tokens outright. A declaration is held only when
 // its own tokens decide its parse: it carries no marker, on its own line or
-// on a line of its own above it, and no visibility word, a function no type
+// on a line of its own above it, no visibility word but a plain `priv` (which
+// its stub keeps), a function no type
 // parameters and no variant head and a `{ … }` body, and a constant a list,
 // number, string, character or negated value (never a module instance's
 // path); and a unit with a fence, an authored `;` or a file rule
@@ -268,6 +270,10 @@ jet_driver_reach_hold: fn(lexed: &Lexed, cutover_module: String, owned_members: 
         loop code < to && jet_driver_reach_trivia(lexed.tokens[code].kind) -> code += 1
         follows_marker: marked
         if code < to && lexed.tokens[code].kind != TOKEN_SEMI -> marked = lexed.tokens[code].kind == TOKEN_HASH || lexed.tokens[code].kind == TOKEN_AT
+        // A plain `priv` stays on the stub, so the stub is as private as the
+        // declaration that takes its place.
+        private: code + 1 < to && lexed.tokens[code].kind == TOKEN_KW_PRIV && lexed.tokens[code + 1].kind == TOKEN_IDENT
+        if private -> code += 1
         if follows_marker || code + 3 >= to || lexed.tokens[code].kind != TOKEN_IDENT || lexed.tokens[code + 1].kind != TOKEN_COLON -> next
         last := to - 1
         loop last > code && (lexed.tokens[last].kind == TOKEN_SEMI || jet_driver_reach_trivia(lexed.tokens[last].kind)) -> last -= 1
@@ -292,6 +298,7 @@ jet_driver_reach_hold: fn(lexed: &Lexed, cutover_module: String, owned_members: 
         }
         colon: lexed.tokens[code + 1].span.end
         head: Span{start: colon, end: colon}
+        if private -> out.push(lexed.tokens[code - 1])
         out.push(lexed.tokens[code])
         out.push(lexed.tokens[code + 1])
         out.push(token_synthetic(TOKEN_KW_FN, head))
