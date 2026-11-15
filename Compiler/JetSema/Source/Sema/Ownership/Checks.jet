@@ -249,6 +249,8 @@ SemaOwnershipReference: struct {
     def_span: Span
     use_span: Span
     kind: SemaOwnershipReferenceKind
+    // The anchor's bucket in SemaOwnershipAnchors (sema_ownership_anchor_key).
+    anchor: Int
 }
 // A typed place whose own Close implementation needs the complete value.
 SemaOwnershipCloseOwner: struct {
@@ -955,7 +957,7 @@ sema_ownership_truncate_declarations: fn(state: &SemaOwnershipState, count: Int)
 // Appends one reference row and keeps the key's reference totals.
 sema_ownership_push_reference: fn(state: &SemaOwnershipState, reference: &&SemaOwnershipReference) Never! {
     row: state.references.len()
-    sema_ownership_anchor_add(state.anchors, reference.use_span.start, row)
+    sema_ownership_anchor_add(state.anchors, reference.anchor, row)
     slot: sema_ownership_key_slot(state, reference.def_key)
     state.key_facts[slot].references += 1
     if reference.kind == SemaOwnershipReferenceKind.Write -> state.key_facts[slot].writes += 1
@@ -965,7 +967,7 @@ sema_ownership_push_reference: fn(state: &SemaOwnershipState, reference: &&SemaO
 sema_ownership_truncate_references: fn(state: &SemaOwnershipState, count: Int) Never! {
     loop state.references.len() > count {
         reference: state.references.pop() ?? return
-        if state.anchors.slots.get(reference.use_span.start) == .Val(anchor_slot) -> _ := state.anchors.rows[anchor_slot].pop()
+        if state.anchors.slots.get(reference.anchor) == .Val(anchor_slot) -> _ := state.anchors.rows[anchor_slot].pop()
         slot: name_rows_get_text(state.key_slots, reference.def_key) ?? next
         state.key_facts[slot].references -= 1
         if reference.kind == SemaOwnershipReferenceKind.Write -> state.key_facts[slot].writes -= 1
@@ -1193,7 +1195,8 @@ sema_ownership_note_reference: fn(state: &SemaOwnershipState, name: String, use_
         sema_ownership_mark_dirty(state, fact_index)
         sema_ownership_mark_dirty(state, first)
     }
-    sema_ownership_push_reference(state, SemaOwnershipReference{name: name, def_key: def_key, def_span: scopes.bindings[index].symbol.span, use_span: use_span, kind: kind})
+    anchor: sema_ownership_anchor_key(def_key, use_span)
+    sema_ownership_push_reference(state, SemaOwnershipReference{name: name, def_key: def_key, def_span: scopes.bindings[index].symbol.span, use_span: use_span, kind: kind, anchor: anchor})
     true
 }
 
@@ -1263,29 +1266,40 @@ sema_ownership_recompute_reference_counts: fn(state: &SemaOwnershipState) Never!
 
 // Exact reference anchor: definition key, use span and kind (a compound
 // update reads and writes its target at one span, and both rows count).
-// Rows of a reference list bucketed by use-span start, so a lookup compares a
-// few rows instead of formatting and hashing a text key per reference.
+// Rows of a reference list bucketed by sema_ownership_anchor_key, so a lookup
+// compares a few rows instead of formatting and hashing a text key per
+// reference.
 SemaOwnershipAnchors: struct {
     slots: [Int:Int]
     rows: [[Int]]
 }
 
-sema_ownership_anchor_add: fn(anchors: &SemaOwnershipAnchors, start: Int, row: Int) Never! {
-    if anchors.slots.get(start) == .Val(slot) {
+// The bucket of an anchor: its use span and its definition key. A body whose
+// nodes all carry one span (a generated codec's) still spreads its references
+// over one bucket per binding, so a lookup stays a few rows instead of every
+// reference before it.
+sema_ownership_anchor_key: fn(def_key: String, use_span: Span) -> Int Never! {
+    hash := sema_name_reference_hash_mix(def_key.hash(), use_span.start)
+    hash = sema_name_reference_hash_mix(hash, use_span.end)
+    Int{hash.bit_and(U64{0x3fffffffffffffff})}
+}
+
+sema_ownership_anchor_add: fn(anchors: &SemaOwnershipAnchors, key: Int, row: Int) Never! {
+    if anchors.slots.get(key) == .Val(slot) {
         anchors.rows[slot].push(row)
         return
     }
-    anchors.slots[start] = anchors.rows.len()
+    anchors.slots[key] = anchors.rows.len()
     anchors.rows.push([Int]{row})
 }
 
 // Whether a row of `merged` before `limit` (bucketed in `anchors`) has the
 // anchor of `reference`.
 sema_ownership_anchor_held: fn(merged: [SemaOwnershipReference], anchors: SemaOwnershipAnchors, limit: Int, reference: SemaOwnershipReference) -> Bool Never! {
-    slot: anchors.slots.get(reference.use_span.start) ?? return false
+    slot: anchors.slots.get(reference.anchor) ?? return false
     loop row in anchors.rows[slot] {
         if row >= limit -> return false
-        if merged[row].use_span.end == reference.use_span.end && merged[row].def_key == reference.def_key && merged[row].kind == reference.kind -> return true
+        if merged[row].use_span.start == reference.use_span.start && merged[row].use_span.end == reference.use_span.end && merged[row].def_key == reference.def_key && merged[row].kind == reference.kind -> return true
     }
     false
 }
@@ -6066,7 +6080,7 @@ sema_ownership_join_declaration: fn(index: SemaOwnershipState, limit: Int, keys:
 sema_ownership_join_reference: fn(index: SemaOwnershipState, limit: Int, anchors: &SemaOwnershipAnchors, joined: &[SemaOwnershipReference], reference: SemaOwnershipReference) Never! {
     if sema_ownership_anchor_held(index.references, index.anchors, limit, reference) -> return
     if sema_ownership_anchor_held(joined, anchors, joined.len(), reference) -> return
-    sema_ownership_anchor_add(anchors, reference.use_span.start, joined.len())
+    sema_ownership_anchor_add(anchors, reference.anchor, joined.len())
     joined.push(reference.copy())
 }
 
