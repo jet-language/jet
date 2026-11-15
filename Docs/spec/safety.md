@@ -229,15 +229,15 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 --inventory` lists each region with its actions and kernel, and
 `--inventory --json` prints the same for tools.
 
-<!-- memory-kernel:outside 514 -->
+<!-- memory-kernel:outside 294 -->
 <!-- unsafe-ratchet:begin -->
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1546,
+  "total": 1369,
   "counts": {
-    "Compiler": 796,
-    "Core": 182,
+    "Compiler": 627,
+    "Core": 174,
     "Docs": 10,
     "Examples": 42,
     "Jetpack": 8,
@@ -1200,7 +1200,7 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1996,
+      "line": 2036,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -1235,217 +1235,224 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 227,
+      "line": 201,
+      "column": 5,
+      "reason": "a fresh shared mapping of the descriptor aliases no heap block; a failed syscall maps nothing"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 209,
+      "column": 5,
+      "reason": "the caller owns these whole pages of its own mapping and keeps no live value in them"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 244,
       "column": 5,
       "reason": "the root and span tables are process-lifetime mappings, zero where nothing is registered, whose aligned words are read atomically on x86"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 243,
+      "line": 260,
       "column": 5,
       "reason": "the held page lock serializes every table write; a fresh table is zero-filled before the aligned store that publishes it, and the units written lie in spans mapped first"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 334,
+      "line": 351,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 337,
+      "line": 354,
       "column": 5,
       "reason": "the fresh state page is private to initialization, which precedes every allocation"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 353,
+      "line": 370,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 384,
+      "line": 401,
       "column": 5,
       "reason": "initialization wrote the arena table word once, before any allocation"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 399,
+      "line": 416,
       "column": 5,
       "reason": "reads the stack pointer register only; nothing is dereferenced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 413,
+      "line": 430,
       "column": 9,
       "reason": "the live totals are process-lifetime arena words; the quiescent caller needs no lock to read them"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 442,
+      "line": 459,
       "column": 5,
       "reason": "root is an aligned lock word in the process-lifetime state mapping; CAS/xchg acquire all metadata it protects and the futex wait only reads that word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 457,
+      "line": 474,
       "column": 5,
       "reason": "the calling thread holds this lock; xchg publishes its completed metadata updates and reports sleepers, and the futex wake only names the word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 498,
+      "line": 515,
       "column": 5,
       "reason": "slab and its linked neighbours are live heap-owned headers protected by the held heap lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 516,
+      "line": 533,
       "column": 5,
       "reason": "head and slab are live heap-owned metadata protected by the held heap lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 550,
+      "line": 567,
       "column": 5,
       "reason": "the slab-region lock owns the cursor, end and free-slab stack words and every stacked slab's link word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 588,
+      "line": 605,
       "column": 5,
       "reason": "the slab-region lock owns the free-slab stack; the slab is unlinked from every class list and holds no live or cached block"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 604,
+      "line": 621,
       "column": 5,
       "reason": "madvise only changes the page size of the fresh private region"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 616,
+      "line": 633,
       "column": 5,
       "reason": "the slab is this arena's alone: fresh from its region or off the free-slab stack; the held arena lock excludes all list readers"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 642,
+      "line": 659,
       "column": 5,
       "reason": "the held arena lock protects the class list, the slab's free links, carve word and live count, the retained count and the arena live total; row is the caller's exclusive cache row; the blocks leave the slab before any caller sees them"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 693,
+      "line": 710,
       "column": 5,
       "reason": "the held arena lock protects the slab's free links, carve word, live count, class list, retained count and live total; the block is no longer any payload or cache entry"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 722,
+      "line": 739,
       "column": 5,
       "reason": "the held arena lock makes the arena's scratch row exclusive; it is emptied again before the lock is released"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 731,
+      "line": 748,
       "column": 5,
       "reason": "block is this caller's exclusive block; its two cached words are read before the payload header overwrites them"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 746,
+      "line": 763,
       "column": 5,
       "reason": "row is this thread's private cache row"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 764,
+      "line": 781,
       "column": 5,
       "reason": "row is this thread's private cache row; the flag is idempotent: every writer stores the same 1"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 779,
+      "line": 796,
       "column": 5,
       "reason": "row is this thread's private cache row and block its cached head; both cached words are read before the payload header overwrites them"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 794,
+      "line": 811,
       "column": 5,
       "reason": "row is this thread's private cache row; each cached block's slab is live while the block is cached, so its arena word is readable, and the block returns under that arena's lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 825,
+      "line": 842,
       "column": 9,
       "reason": "row is one of this thread's eight private cache rows"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 839,
+      "line": 856,
       "column": 5,
       "reason": "tcb is a live TCB whose eight cache rows start at @320"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 848,
+      "line": 865,
       "column": 9,
       "reason": "row is one of the TCB's eight cache rows, which only the thread running on it touches"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 869,
+      "line": 886,
       "column": 13,
       "reason": "row is one of the running TCB's eight private cache rows"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 910,
+      "line": 927,
       "column": 9,
       "reason": "row is one of the switched-out fiber's eight cache rows, which no thread runs on now"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 997,
-      "column": 9,
-      "reason": "row is one of the running TCB's kept-mapping rows, which only the thread running on it touches"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1019,
+      "line": 1014,
       "column": 9,
       "reason": "row is one of the running TCB's kept-mapping rows, which only the thread running on it touches"
     },
@@ -1453,393 +1460,365 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
       "line": 1036,
+      "column": 9,
+      "reason": "row is one of the running TCB's kept-mapping rows, which only the thread running on it touches"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 1053,
       "column": 5,
       "reason": "the large-cache lock owns every class list; the mapping's first word is no live payload once it is freed"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1095,
+      "line": 1112,
       "column": 5,
       "reason": "the large-cache lock owns every class list and its link words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1131,
+      "line": 1148,
       "column": 5,
       "reason": "pointer's two header words and the aligned payload are wholly within this page-rounded class mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1152,
+      "line": 1169,
       "column": 5,
       "reason": "pointer is a live direct allocation of exactly `size` bytes at align 1 whose two header words name its mapping and the mapping's bytes; the mode and tracked-count words are aligned words read atomically on x86, as alloc_reserve and alloc_untrack read them; a refused mremap leaves the mapping as it was"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1188,
+      "line": 1205,
       "column": 9,
       "reason": "row is this thread's private cache row"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1207,
+      "line": 1224,
       "column": 5,
       "reason": "the caller holds the policy lock and cell is a counter in alloc_root"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1215,
+      "line": 1232,
       "column": 5,
       "reason": "the aligned mode word is read atomically on x86; system allocation needs no policy lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1221,
+      "line": 1238,
       "column": 5,
       "reason": "the policy lock exclusively owns the mode, cap and accounting words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1250,
+      "line": 1267,
       "column": 5,
       "reason": "the policy lock exclusively owns live bytes; restoration does not erase outstanding tracked blocks"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1264,
+      "line": 1281,
       "column": 5,
       "reason": "the held policy lock serializes all native allocator configuration and reservations"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1281,
+      "line": 1298,
       "column": 5,
       "reason": "the policy lock serializes restoration with native reserve and free; tracked blocks remain in the side table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1295,
+      "line": 1312,
       "column": 5,
       "reason": "the policy lock protects this bounded fact word in alloc_root"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1310,
+      "line": 1327,
       "column": 5,
       "reason": "the private raw-heap node is fully initialized before linking under the policy/tracker lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1323,
+      "line": 1340,
       "column": 5,
       "reason": "the process-lifetime tracker count is an aligned x86 word; a zero count avoids any lookup or lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1330,
+      "line": 1347,
       "column": 5,
       "reason": "the policy/tracker lock exclusively owns all side-table links and count"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1610,
+      "line": 1627,
       "column": 5,
       "reason": "reads the stack pointer register only; nothing is dereferenced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1849,
+      "line": 1866,
       "column": 13,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1893,
+      "line": 1910,
       "column": 13,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1944,
+      "line": 1961,
       "column": 17,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 1977,
+      "line": 1994,
       "column": 21,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2018,
+      "line": 2035,
       "column": 13,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2057,
+      "line": 2074,
       "column": 17,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2104,
+      "line": 2121,
       "column": 13,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose two cached words are read before the payload header overwrites them; an align-1 payload at block + 16 needs no alignment"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2132,
+      "line": 2149,
       "column": 13,
       "reason": "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the caller frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2170,
+      "line": 2187,
       "column": 9,
       "reason": "row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2186,
+      "line": 2203,
       "column": 5,
       "reason": "the lowering returns this still-live direct allocation with exactly its original size and alignment"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2198,
+      "line": 2215,
       "column": 5,
       "reason": "the caller's live payload header names its slab, whose arena word is fixed when the slab is created"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2203,
+      "line": 2220,
       "column": 5,
       "reason": "the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under its arena's lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2258,
+      "line": 2275,
       "column": 5,
       "reason": "the fresh state page and stub page are private to initialization, which precedes every allocation; the stub page becomes read+execute before any call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2265,
+      "line": 2282,
       "column": 5,
       "reason": "checked-heap start runs during runtime-init, before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2279,
+      "line": 2296,
       "column": 5,
       "reason": "the checked-mode stub only copies rbp to rax and returns; a missing stub leaves no chain"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2287,
+      "line": 2304,
       "column": 13,
       "reason": "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2293,
+      "line": 2310,
       "column": 9,
       "reason": "out lends count writable words: a checked block's chain words or a trap's scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2307,
+      "line": 2324,
       "column": 5,
       "reason": "block is this caller's fresh heap block of prefix + size + 8 bytes; every word written lies in block .. pointer + size + 8"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2331,
+      "line": 2348,
       "column": 5,
       "reason": "a checked payload's canary word precedes it; the quarantine lock orders racing frees of one block"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2340,
+      "line": 2357,
       "column": 5,
       "reason": "the live canary proves pointer is a checked payload whose header and tail this free now owns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2353,
+      "line": 2370,
       "column": 5,
       "reason": "the quarantine lock owns the ring and its counters; every parked block is freed and owned by the quarantine"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2388,
+      "line": 2405,
       "column": 5,
       "reason": "aligned whole-word stores; each checked take or give loads its observer word once"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2397,
+      "line": 2414,
       "column": 5,
       "reason": "the freeing caller owns size payload bytes at pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2412,
+      "line": 2429,
       "column": 5,
       "reason": "pointer is a parked checked payload owned by the quarantine; its header, payload and tail stay mapped until retired"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2435,
+      "line": 2452,
       "column": 5,
       "reason": "the freed canary proved the checked header"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2444,
+      "line": 2461,
       "column": 5,
       "reason": "pointer is an inspected parked checked payload; its header still names the enclosing block and layout"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2471,
+      "line": 2488,
       "column": 5,
       "reason": "the quarantine lock owns the ring and its counters"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2487,
+      "line": 2504,
       "column": 5,
       "reason": "data lends length readable bytes; write retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2523,
+      "line": 2540,
       "column": 5,
       "reason": "path is a fresh private page; the image is mapped read-only and only read"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2547,
+      "line": 2564,
       "column": 5,
       "reason": "image is a read-only private mapping of this executable's ELF64 file; its program header table lies inside it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2576,
+      "line": 2593,
       "column": 9,
       "reason": "image is a read-only private mapping of this executable's ELF64 file; every offset read comes from its own section and symbol tables"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2619,
+      "line": 2636,
       "column": 9,
       "reason": "words lends count readable chain words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2663,
+      "line": 2680,
       "column": 9,
       "reason": "the live canary proved the checked header"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2709,
+      "line": 2726,
       "column": 5,
       "reason": "remaining is in 1..=8, so write borrows only the initialized stack word; a short write advances within it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 2766,
+      "line": 2783,
       "column": 5,
       "reason": "the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Atomic.jet",
-      "line": 14,
-      "column": 5,
-      "reason": "place is caller-owned aligned8 private unpublished storage for one atomic word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Atomic.jet",
-      "line": 19,
-      "column": 5,
-      "reason": "place borrows one aligned8 live atomic word; x86 aligned MOV is the SeqCst load mapping"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Atomic.jet",
-      "line": 24,
-      "column": 5,
-      "reason": "place borrows one aligned8 live atomic word; XCHG is the full-barrier SeqCst store mapping"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Atomic.jet",
-      "line": 29,
-      "column": 5,
-      "reason": "place borrows one aligned8 live atomic word; LOCK CMPXCHG orders success and failure SeqCst"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Atomic.jet",
-      "line": 34,
-      "column": 5,
-      "reason": "place borrows one aligned8 live atomic word; LOCK XADD returns the previous wrapping64 value SeqCst"
     },
     {
       "package": "Compiler",
@@ -1851,121 +1830,16 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CAbiSession.jet",
-      "line": 20,
+      "line": 21,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CAbiSession.jet",
-      "line": 28,
+      "line": 27,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ClosureRefs.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "the caller's owned reference keeps the aligned closure header live; locked compare-exchange atomically publishes one more owner"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ClosureRefs.jet",
-      "line": 20,
-      "column": 5,
-      "reason": "consumes one reference to an aligned live closure header; locked compare-exchange provides release ordering and last-owner acquire before its release helper"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/CodecCSV.jet",
-      "line": 264,
-      "column": 5,
-      "reason": "checked native Decode callback; the tree, value slot and out words stay live for the synchronous call"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "data lends index's initialized packed native U8 element"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 14,
-      "column": 5,
-      "reason": "data owns index's writable packed native U8 element"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 113,
-      "column": 5,
-      "reason": "native lowering owns both live ranges of count bytes; each leaf loads all its bytes before it stores any, and the steps run in the order the overlap requires"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 165,
-      "column": 5,
-      "reason": "native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 223,
-      "column": 5,
-      "reason": "C's caller owns count writable bytes at target"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 246,
-      "column": 5,
-      "reason": "C's caller owns count readable bytes at left and at right"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 279,
-      "column": 5,
-      "reason": "checked native value-returning callback; its raw argument stays valid for the synchronous call"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 285,
-      "column": 5,
-      "reason": "checked native value-returning callback; both raw arguments stay valid for the synchronous call"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 291,
-      "column": 5,
-      "reason": "checked unary closure adapter with borrowed environment, input and output slots"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 297,
-      "column": 5,
-      "reason": "checked binary closure adapter with live environment, inputs and output slots"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 303,
-      "column": 5,
-      "reason": "checked native Unit callback; its raw argument stays valid for the synchronous call"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 309,
-      "column": 5,
-      "reason": "checked Unit clone callback; source remains live and target lends writable output storage"
     },
     {
       "package": "Compiler",
@@ -1991,30 +1865,9 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerHost.jet",
-      "line": 128,
-      "column": 5,
-      "reason": "startup lends the start stack: the null-terminated envp array, then the auxiliary vector's [type, value] pairs up to AT_NULL"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/CompilerHost.jet",
-      "line": 149,
+      "line": 152,
       "column": 5,
       "reason": "page is a fresh private page: the path, then the [type, value] pairs read into it"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/CompilerHost.jet",
-      "line": 238,
-      "column": 5,
-      "reason": "AT_PHDR lends the program header table the kernel mapped, AT_PHNUM rows of 56 bytes; a PT_NOTE row's p_vaddr and p_filesz bound its mapped read-only notes, and a note is read only inside that bound"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/CompilerHost.jet",
-      "line": 264,
-      "column": 5,
-      "reason": "note is a mapped part note host_image_part found; its first word holds the descriptor size"
     },
     {
       "package": "Compiler",
@@ -2110,7 +1963,7 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Comptime.jet",
-      "line": 14,
+      "line": 15,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -2120,13 +1973,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 89,
       "column": 5,
       "reason": "the filter is installed once, on the image's only thread, before any call it traps"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
-      "line": 127,
-      "column": 13,
-      "reason": "the compiler calls an entry of this image's table, or a runtime export it resolved, on the word arguments that entry's System V signature takes"
     },
     {
       "package": "Compiler",
@@ -2148,13 +1994,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 287,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/CountMinSketch.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "caller holds this native CMS mutex and owns the initialized four-byte counter"
     },
     {
       "package": "Compiler",
@@ -2194,7 +2033,7 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CryptoAes.jet",
-      "line": 243,
+      "line": 246,
       "column": 5,
       "reason": "y and h hold one block, the range check keeps every block inside the length borrowed bytes, and the powers table holds four"
     },
@@ -2208,86 +2047,9 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CryptoEntropy.jet",
-      "line": 51,
-      "column": 13,
-      "reason": "the test/fault harness owns the synchronous callback and context until reset; the callback borrows only this writable suffix"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/CryptoEntropy.jet",
       "line": 56,
       "column": 5,
       "reason": "Linux getrandom flags0 writes only the exclusively borrowed writable span and retains no address; kernel negative errno is preserved"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/DataEvent.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "address borrows an initialized word in a live native DataEvent or List"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/DataEvent.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "address owns a writable word in a native DataEvent"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/DataLimits.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "address borrows an initialized word in a live native limits carrier"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/DataLimits.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "address owns a writable word in a native limits carrier or getter out slot"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Display.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "borrows an initialized aligned word in an E4 header, exact-Int node or owned formatter workspace"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Display.jet",
-      "line": 14,
-      "column": 5,
-      "reason": "writes an aligned word in an exclusively owned formatter workspace or fresh E4 header"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Display.jet",
-      "line": 20,
-      "column": 5,
-      "reason": "reads one initialized byte in an owned formatter digit buffer or borrowed exact-Int limb"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Display.jet",
-      "line": 26,
-      "column": 5,
-      "reason": "writes one byte in an exclusively owned formatter buffer; value is in 0..255"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Dyn.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "address borrows an initialized word in a live native Dyn or List"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Dyn.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "address owns a writable word in a native Dyn or List"
     },
     {
       "package": "Compiler",
@@ -2305,31 +2067,10 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/EncodingErrors.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "borrows an initialized aligned word in a live encoding carrier or option input"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/EncodingErrors.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "owns a writable aligned word in a fresh encoding carrier or caller output"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/EnvOverlay.jet",
       "line": 44,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/EnvRoutes.jet",
-      "line": 18,
-      "column": 5,
-      "reason": "removed lends exactly one initialized writable C bool byte; no adjacent padding belongs to this output"
     },
     {
       "package": "Compiler",
@@ -2522,136 +2263,66 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/GeometryGlue.jet",
-      "line": 4,
+      "file": "Compiler/JetRuntime/Source/Host.jet",
+      "line": 19,
       "column": 5,
-      "reason": "borrows an initialized aligned word inside a live native geometry carrier"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/GeometryGlue.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "owns a writable aligned word in a fresh native geometry carrier"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HTTPBody.jet",
-      "line": 37,
-      "column": 5,
-      "reason": "borrows an initialized word in the live body, chunks, closure, List or E4 allocation"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HTTPBody.jet",
-      "line": 43,
-      "column": 5,
-      "reason": "owns the word, or holds the body's transition lock for this state field"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HTTPBody.jet",
-      "line": 49,
-      "column": 5,
-      "reason": "atomic refcount, take/close flag or transition lock in a live body allocation"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HTTPBody.jet",
-      "line": 100,
-      "column": 5,
-      "reason": "the last closure reference calls its generated release(box), which drops captures and frees the box"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HTTPBody.jet",
-      "line": 205,
-      "column": 5,
-      "reason": "the claimed closer code has the audited code(box) ABI, with no transition lock held"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HTTPBody.jet",
-      "line": 318,
-      "column": 17,
-      "reason": "reader code(box, descriptor) borrows exactly count writable U8 bytes; no body lock is held"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HTTPBody.jet",
-      "line": 371,
-      "column": 17,
-      "reason": "the source holds count initialized UTF8 or raw reader bytes"
+      "reason": "TCGETS writes its termios into the fresh mapping's scratch at 32 and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 14,
+      "line": 23,
       "column": 5,
-      "reason": "runtime startup owns a fresh anonymous mapping before any program thread exists"
+      "reason": "runtime startup publishes the root before any program thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 28,
+      "line": 32,
       "column": 5,
       "reason": "rt_sigaction synchronously borrows the four-word SIG_IGN action; no signal handler or restorer runs for ignored SIGPIPE"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 45,
+      "line": 49,
       "column": 5,
       "reason": "the caller lends length readable bytes for the complete synchronous write"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 60,
+      "line": 64,
       "column": 5,
-      "reason": "the output lock exclusively owns the initialized buffer and length"
+      "reason": "the output lock exclusively owns the initialized buffer and length; write borrows its pending bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 95,
-      "column": 5,
-      "reason": "the caller lends length bytes; the output lock owns the destination buffer"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 158,
+      "line": 162,
       "column": 5,
       "reason": "bytes lends length readable bytes; writev borrows its own LF until return"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 175,
+      "line": 179,
       "column": 5,
       "reason": "the held host lock lends enough scratch for Linux TCGETS"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 235,
+      "line": 239,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 243,
+      "line": 262,
       "column": 5,
-      "reason": "value is a borrowed E4 JetCText header; stdout copies its bytes before returning"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 255,
-      "column": 5,
-      "reason": "value is a borrowed E4 JetCText header; writev borrows its bytes and its own LF until return"
+      "reason": "writev borrows the header's bytes and its own LF until return"
     },
     {
       "package": "Compiler",
@@ -2659,13 +2330,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 34,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 132,
-      "column": 9,
-      "reason": "the retired entry owned this mapping of exactly `size` bytes and no token names it now"
     },
     {
       "package": "Compiler",
@@ -2694,34 +2358,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 423,
       "column": 9,
       "reason": "packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 455,
-      "column": 9,
-      "reason": "a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 469,
-      "column": 9,
-      "reason": "the mapping made above was never filed, so this is its only owner"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 534,
-      "column": 9,
-      "reason": "host_shared_span proved end bytes from base lie inside the live mapping and end <= length bounds data's packed bytes; start + span <= end"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 589,
-      "column": 5,
-      "reason": "host_shared_span proved count * 4 bytes from base lie inside the live mapping"
     },
     {
       "package": "Compiler",
@@ -2761,105 +2397,77 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "the caller borrows a live FD72 or runtime scratch word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 14,
-      "column": 5,
-      "reason": "the caller owns the FD72 lock or exclusive runtime scratch word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 54,
-      "column": 5,
-      "reason": "the fresh path allocation includes its terminator byte"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 285,
+      "line": 278,
       "column": 9,
       "reason": "the caller lends 128 writable bytes for portable stat facts"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 379,
+      "line": 372,
       "column": 5,
       "reason": "the terminated borrowed path and 128-byte stat fact output are live for the syscall"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 430,
-      "column": 5,
-      "reason": "the caller lends one writable Bool byte"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 446,
+      "line": 438,
       "column": 9,
       "reason": "the held directory and terminated source-approved single name stay live through openat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 469,
+      "line": 461,
       "column": 9,
       "reason": "the held directory and terminated final name live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat; no read access or link traversal"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 477,
+      "line": 469,
       "column": 9,
       "reason": "openat returned an exclusively owned descriptor and the caller lends StatFacts128; fstat copies initialized scalar facts"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 507,
+      "line": 499,
       "column": 9,
       "reason": "the descriptor is held live, output begins with the borrowed empty pathname, statx writes only its private stack frame"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 518,
+      "line": 510,
       "column": 5,
       "reason": "the terminated source-approved path and three writable birth-time output words stay live through statx"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 572,
+      "line": 564,
       "column": 5,
       "reason": "both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 602,
+      "line": 594,
       "column": 9,
       "reason": "the held directory, terminated plain name and writable byte range are borrowed only through readlinkat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 628,
+      "line": 620,
       "column": 5,
       "reason": "held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 648,
+      "line": 640,
       "column": 9,
       "reason": "the held fd and stack-local source-validated winsize word live only through ioctl"
     },
@@ -2928,202 +2536,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 21,
-      "column": 5,
-      "reason": "value transfers one 56-byte error header and its nullable owned E4 text children"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 32,
-      "column": 5,
-      "reason": "value borrows the complete error header; result exclusively owns 56 fresh bytes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 68,
-      "column": 5,
-      "reason": "value exclusively owns a new initialized IOError with two owned text children; error lends the caller's pointer slot"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 85,
-      "column": 5,
-      "reason": "value lends five initialized context words; result exclusively owns its header and cloned nullable E4 children"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 101,
-      "column": 5,
-      "reason": "value transfers its 40-byte header and two independently owned nullable text children"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 117,
-      "column": 9,
-      "reason": "the optional code box borrows one initialized exact-Int word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 123,
-      "column": 5,
-      "reason": "nullable option boxes lend one initialized payload word; value owns cloned texts and the complete new context"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 134,
-      "column": 5,
-      "reason": "value borrows an initialized context header"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 138,
-      "column": 5,
-      "reason": "value borrows a context; some lends the writable pointer output for a present field"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 150,
-      "column": 5,
-      "reason": "value borrows a context; some lends the writable exact-Int word output for a present field"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 158,
-      "column": 5,
-      "reason": "value borrows an initialized error header"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 162,
-      "column": 5,
-      "reason": "value borrows a complete error header; the selected payload must match its canonical tag"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 173,
-      "column": 5,
-      "reason": "context transfers its initialized five words and text owners into the fresh error; only the context header is then freed"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 187,
-      "column": 5,
-      "reason": "value borrows an initialized ResourceLimit error"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostIO.jet",
-      "line": 202,
-      "column": 5,
-      "reason": "value exclusively owns seven initialized words; ResourceLimit has no text children"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNet.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "value exclusively owns four initialized words; inputs lend exact Int owners and a valid E4 message"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNet.jet",
-      "line": 18,
-      "column": 5,
-      "reason": "value lends the complete immutable carrier and all three owned children"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNet.jet",
-      "line": 25,
-      "column": 5,
-      "reason": "value transfers its 32-byte header, two independently retained Int words and owned E4 message"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNet.jet",
-      "line": 34,
-      "column": 5,
-      "reason": "value lends the immutable carrier; return retains its exact Int field"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNet.jet",
-      "line": 38,
-      "column": 5,
-      "reason": "value lends the initialized presence word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNet.jet",
-      "line": 42,
-      "column": 5,
-      "reason": "value lends the immutable carrier; return retains its exact Int field"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNet.jet",
-      "line": 46,
-      "column": 5,
-      "reason": "value lends the immutable carrier; return deep-clones its owned E4 message"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNetAddress.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "value lends a complete initialized network header"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNetAddress.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "value exclusively owns the network header or its mutex"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNetAddress.jet",
-      "line": 38,
-      "column": 5,
-      "reason": "value owns sixteen octets; bytes lends length initialized U8 elements"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNetAddress.jet",
-      "line": 50,
-      "column": 5,
-      "reason": "value lends IP24; data owns length initialized native U8 elements; output receives ownership"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNetAddress.jet",
-      "line": 83,
-      "column": 5,
-      "reason": "bytes lends width initialized little-endian bytes (width<=8)"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNetAddress.jet",
-      "line": 93,
-      "column": 5,
-      "reason": "bytes owns width writable little-endian bytes (width<=8)"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetLookup.jet",
       "line": 223,
       "column": 5,
@@ -3180,20 +2592,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNetResolver.jet",
-      "line": 40,
-      "column": 5,
-      "reason": "host lends length E4 bytes; outputs lend their writable pointer/count words"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostNetResolver.jet",
-      "line": 58,
-      "column": 5,
-      "reason": "name owns a trailing NUL byte"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostParallelism.jet",
       "line": 451,
       "column": 5,
@@ -3215,13 +2613,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostPipe.jet",
-      "line": 165,
-      "column": 13,
-      "reason": "the FD72 lock protects this initialized refill-buffer byte"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
       "line": 8,
       "column": 5,
@@ -3230,58 +2621,30 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 97,
-      "column": 5,
-      "reason": "the caller lends the C-ABI tuple's Bool byte and two writable Int words"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 160,
+      "line": 159,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 191,
+      "line": 193,
       "column": 5,
-      "reason": "buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words"
+      "reason": "buffer owns the sixteen-byte struct rlimit64 the kernel writes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 211,
+      "line": 215,
       "column": 5,
       "reason": "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 227,
-      "column": 5,
-      "reason": "buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 241,
-      "column": 5,
-      "reason": "some lends a writable C-ABI Option success word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 251,
+      "line": 255,
       "column": 5,
       "reason": "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 263,
-      "column": 5,
-      "reason": "read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots"
     },
     {
       "package": "Compiler",
@@ -3321,23 +2684,9 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSockets.jet",
-      "line": 136,
-      "column": 5,
-      "reason": "data lends length native U8 elements; output owns length compact bytes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostSockets.jet",
       "line": 150,
       "column": 9,
       "reason": "the held FD72 lock lends its live nonblocking socket; packed lends exactly length bytes; no pointer survives recvfrom/sendto"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostSockets.jet",
-      "line": 155,
-      "column": 13,
-      "reason": "recvfrom initialized result compact bytes; data owns the corresponding mutable native U8 slots"
     },
     {
       "package": "Compiler",
@@ -3352,27 +2701,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 203,
       "column": 9,
       "reason": "private scratch lends sockaddr/socklen and packed lends length mutable bytes; MSG_TRUNC returns the complete datagram length while writing at most length bytes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostSockets.jet",
-      "line": 212,
-      "column": 17,
-      "reason": "recvfrom initialized used compact bytes; the caller owns used mutable native U8 elements"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostSockets.jet",
-      "line": 236,
-      "column": 5,
-      "reason": "path lends its immutable E4 bytes for std-compatible sockaddr_un validation"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 250,
-      "column": 17,
-      "reason": "Linux TCGETS initialized the 36-byte termios buffer; cfmakeraw sets VMIN=1, VTIME=0 in its control-character array"
     },
     {
       "package": "Compiler",
@@ -3398,44 +2726,37 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 493,
+      "line": 495,
       "column": 5,
-      "reason": "mprotect makes the lowest page of this spawn's fresh mapping the guard; the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes"
+      "reason": "the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 885,
+      "line": 886,
       "column": 9,
       "reason": "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 964,
+      "line": 965,
       "column": 21,
       "reason": "readlink borrows the NUL-terminated output path and writes at most p (or the one dummy) bytes of the owned stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 1003,
+      "line": 1004,
       "column": 5,
       "reason": "getcwd writes at most 4097 bytes of the owned stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 1060,
+      "line": 1061,
       "column": 5,
       "reason": "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 1079,
-      "column": 5,
-      "reason": "successful realpath NUL-terminates its result within the PATH_MAX byte buffer"
     },
     {
       "package": "Compiler",
@@ -3447,170 +2768,30 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 52,
-      "column": 5,
-      "reason": "bytes borrows one live NUL-terminated startup string"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 102,
+      "line": 101,
       "column": 5,
       "reason": "host argument registration is single-threaded and precedes user code"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 113,
+      "line": 112,
       "column": 5,
       "reason": "host argument registration is single-threaded and precedes user code"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 127,
+      "line": 144,
       "column": 5,
-      "reason": "startup lends the immutable, null-terminated envp pointer array and its NUL-terminated entries"
+      "reason": "registration is single-threaded and precedes user code"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 141,
-      "column": 5,
-      "reason": "pending exclusively owns raw_count + 2 words; registration is single-threaded and precedes user code"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 159,
-      "column": 5,
-      "reason": "rows exclusively owns raw_count index records; startup lends every pointed-to NUL string"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 180,
-      "column": 5,
-      "reason": "storage exclusively owns total_bytes; each source row lends its NUL string for this capture call, and published rows point only into the owned block"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 192,
+      "line": 193,
       "column": 5,
       "reason": "the index is published once: by single-threaded registration, or inside host_environment_require's once before it completes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 222,
-      "column": 5,
-      "reason": "bytes lends one live NUL-terminated startup string"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 236,
-      "column": 5,
-      "reason": "startup lends length bytes; data exclusively owns length initialized packed bytes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 249,
-      "column": 5,
-      "reason": "output lends a 24-byte native [U8] header and receives ownership of data"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 263,
-      "column": 5,
-      "reason": "row borrows a complete immutable startup index record"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 278,
-      "column": 5,
-      "reason": "row borrows its immutable record; data_out lends one writable pointer word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 287,
-      "column": 5,
-      "reason": "row borrows its immutable record; data_out lends one writable pointer word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 303,
-      "column": 5,
-      "reason": "startup lends argc initialized argv pointers and their immutable NUL strings"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 317,
-      "column": 5,
-      "reason": "argv[1] is an immutable startup string of `length` bytes; data lends the job name's static bytes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 339,
-      "column": 9,
-      "reason": "argv[1] is an immutable startup string of `length` bytes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 385,
-      "column": 5,
-      "reason": "startup lends argc initialized argv pointers and their immutable NUL strings"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 403,
-      "column": 5,
-      "reason": "the startup index and key bytes are immutable borrowed data"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 458,
-      "column": 5,
-      "reason": "envp is a live null-terminated pointer array of NUL-terminated rows"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartupOutputFacts.jet",
-      "line": 21,
-      "column": 5,
-      "reason": "value borrows a complete immutable startup NUL string; output lends one writable U64 word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartupOutputFacts.jet",
-      "line": 48,
-      "column": 5,
-      "reason": "value borrows length immutable captured startup bytes; no pointer escapes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartupOutputFacts.jet",
-      "line": 82,
-      "column": 5,
-      "reason": "the held Host lock lends 16 writable bytes of its existing ioctl scratch; the canonical lookup retains no key pointer"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartupOutputFacts.jet",
-      "line": 92,
-      "column": 5,
-      "reason": "output exclusively borrows the paired initialized empty Source out-record; no owner is overwritten"
     },
     {
       "package": "Compiler",
@@ -3621,66 +2802,10 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartupOutputFacts.jet",
-      "line": 147,
-      "column": 13,
-      "reason": "the paired Source owner receives the sole native U8 buffer with exact LEN/CAP/DATA; no raw pointer is cast into a List value"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStdio.jet",
-      "line": 56,
-      "column": 5,
-      "reason": "text lends an E4 header and its bytes for this synchronous write; writev borrows its own stack LF"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStdio.jet",
-      "line": 82,
-      "column": 5,
-      "reason": "the caller lends the tuple's exact-Int word and Bool byte outputs"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStdio.jet",
-      "line": 92,
-      "column": 5,
-      "reason": "some lends the route's zeroed Text out slot"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostTime.jet",
       "line": 16,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostTime.jet",
-      "line": 57,
-      "column": 5,
-      "reason": "before_out lends the tuple's one writable Bool byte"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostTime.jet",
-      "line": 150,
-      "column": 5,
-      "reason": "path lends length bytes; std file open rejects embedded NUL"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostTime.jet",
-      "line": 158,
-      "column": 5,
-      "reason": "name owns its trailing NUL byte"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostTime.jet",
-      "line": 194,
-      "column": 13,
-      "reason": "bytes lends used initialized bytes; data owns used native U8 elements"
     },
     {
       "package": "Compiler",
@@ -3699,168 +2824,112 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "borrow an initialized word in a live exact-Int carrier"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 16,
-      "column": 5,
-      "reason": "write an initialized word in a uniquely owned exact-Int workspace"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 22,
-      "column": 5,
-      "reason": "borrow four initialized bytes in a live limb buffer; no adjacent limb is read"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 28,
-      "column": 5,
-      "reason": "write four bytes in a uniquely owned limb buffer; value is an unsigned 32-bit limb"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 434,
-      "column": 9,
-      "reason": "the caller holds an existing owner; atomic retain cannot race final-owner retirement"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 455,
-      "column": 9,
-      "reason": "the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 460,
+      "line": 451,
       "column": 13,
       "reason": "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/IntHazard.jet",
-      "line": 13,
+      "line": 14,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/IntHazard.jet",
-      "line": 92,
-      "column": 5,
-      "reason": "the native numeric forwarder lends a pure reload callback and its live closure context for this synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/JourneyTLS.jet",
-      "line": 22,
-      "column": 5,
-      "reason": "runtime-init runs before any other thread exists"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/LogicalEnvironment.jet",
-      "line": 115,
-      "column": 5,
-      "reason": "host argument registration is single-threaded and precedes user code"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Main.jet",
       "line": 23,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/LogicalEnvironment.jet",
+      "line": 116,
+      "column": 5,
+      "reason": "host argument registration is single-threaded and precedes user code"
+    },
+    {
+      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 50,
+      "line": 24,
+      "column": 5,
+      "reason": "runtime-init runs before any other thread exists"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Main.jet",
+      "line": 49,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 66,
+      "line": 65,
       "column": 5,
       "reason": "an idempotent flag: every writer stores the same 1"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 81,
+      "line": 80,
       "column": 5,
       "reason": "a whole-word setting: each setter stores one aligned word and the last setter wins, which is what setting it means"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 124,
+      "line": 123,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 129,
+      "line": 128,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 135,
+      "line": 134,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 190,
+      "line": 189,
       "column": 5,
       "reason": "only the main thread running jet_rt_main writes its root control"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 267,
+      "line": 266,
       "column": 5,
       "reason": "only the main thread running jet_rt_main writes its root control"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 271,
+      "line": 270,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 274,
-      "column": 5,
-      "reason": "entry is the loader/object's checked executable System V void(void) address, not a closure header"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 280,
+      "line": 279,
       "column": 5,
       "reason": "only the main thread running jet_rt_main writes its root control"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 307,
+      "line": 306,
       "column": 5,
       "reason": "the entry has returned and drained its workers; only the main thread runs here"
     },
@@ -3873,57 +2942,8 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/MemStorage.jet",
-      "line": 27,
-      "column": 5,
-      "reason": "address borrows an initialized word in a native allocator header, descriptor, drop record, or Fixed metadata span"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/MemStorage.jet",
-      "line": 30,
-      "column": 5,
-      "reason": "address exclusively owns one aligned writable allocator or Fixed metadata word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/MemStorage.jet",
-      "line": 88,
-      "column": 5,
-      "reason": "code is the Lower-generated address-based lazy.drop thunk for the initialized value at pointer; its SysV result is Unit and discarded, and no allocator lock is held"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Memo.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "address borrows an aligned word of a live memo cell or its entry array"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Memo.jet",
-      "line": 13,
-      "column": 5,
-      "reason": "address is an aligned word of a memo cell or entry array the caller's lock owns"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/NativeLayoutABI.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "thread-confined live Layout storage lends this initialized aligned word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/NativeLayoutABI.jet",
-      "line": 14,
-      "column": 5,
-      "reason": "thread-confined native Layout storage owns this aligned word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/NativeLayoutABI.jet",
-      "line": 78,
+      "line": 76,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -3936,64 +2956,43 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/NetRoutes.jet",
-      "line": 234,
-      "column": 9,
-      "reason": "the owned terminated host copy truncates at its validated scope suffix"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/NetRoutes.jet",
-      "line": 555,
-      "column": 9,
-      "reason": "output lends the C ABI bool result byte, not an eight-byte word"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/NetUnix.jet",
-      "line": 220,
-      "column": 13,
-      "reason": "fds lends count initialized exact Int words"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/NetUnix.jet",
-      "line": 377,
+      "line": 375,
       "column": 5,
       "reason": "private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/NetUnix.jet",
-      "line": 468,
+      "line": 466,
       "column": 13,
       "reason": "the FD72 lock keeps the descriptor live and unreused for the whole ppoll; scratch lends the pollfd and timespec"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Observe.jet",
-      "line": 18,
+      "line": 19,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Observe.jet",
-      "line": 25,
+      "line": 24,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Observe.jet",
-      "line": 217,
+      "line": 216,
       "column": 5,
       "reason": "an idempotent flag: every writer stores the same 1"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Observe.jet",
-      "line": 387,
+      "line": 386,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same code address"
     },
@@ -4024,13 +3023,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 516,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Parallel.jet",
-      "line": 51,
-      "column": 9,
-      "reason": "checked System V (env,start,end)->Unit callback; env remains borrowed and each range has exclusive output slots"
     },
     {
       "package": "Compiler",
@@ -4066,41 +3058,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 74,
       "column": 5,
       "reason": "one write of a stack-local word, which the kernel copies before the call returns"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/PluginHost.jet",
-      "line": 123,
-      "column": 5,
-      "reason": "the linked guest entry reads the live instance and argument area only for this synchronous call"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ProcessExecutionCollect.jet",
-      "line": 352,
-      "column": 9,
-      "reason": "ok is the canonical writable Bool output slot"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ProcessExecutionCollect.jet",
-      "line": 360,
-      "column": 5,
-      "reason": "ok lends exactly the C ABI Bool byte"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ProcessExecutionCollect.jet",
-      "line": 469,
-      "column": 13,
-      "reason": "the child mutex holds the capture builder's initialized bytes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ProcessRoutes.jet",
-      "line": 125,
-      "column": 5,
-      "reason": "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC"
     },
     {
       "package": "Compiler",
@@ -4202,6 +3159,139 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "address borrows an initialized aligned word in a live native layout the caller holds"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "address is an aligned word of native storage the caller owns or holds the lock for"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 21,
+      "column": 5,
+      "reason": "address borrows an initialized byte inside the caller's live buffer"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 27,
+      "column": 5,
+      "reason": "address is one exclusively owned writable byte and value is a byte"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 45,
+      "column": 5,
+      "reason": "native lowering owns both live ranges of count bytes; each leaf loads all its bytes before it stores any, and the steps run in the order the overlap requires"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 97,
+      "column": 5,
+      "reason": "native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 155,
+      "column": 5,
+      "reason": "C's caller owns count writable bytes at target"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 178,
+      "column": 5,
+      "reason": "C's caller owns count readable bytes at left and at right"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 196,
+      "column": 5,
+      "reason": "checked native value-returning callback; its raw argument stays valid for the synchronous call"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 202,
+      "column": 5,
+      "reason": "checked native value-returning callback; both raw arguments stay valid for the synchronous call"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 208,
+      "column": 5,
+      "reason": "checked unary closure adapter with borrowed environment, input and output slots"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 214,
+      "column": 5,
+      "reason": "checked binary closure adapter with live environment, inputs and output slots"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 220,
+      "column": 5,
+      "reason": "checked native Unit callback; its raw argument stays valid for the synchronous call"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 226,
+      "column": 5,
+      "reason": "checked Unit clone callback; source remains live and target lends writable output storage"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 232,
+      "column": 5,
+      "reason": "checked native entry or runtime export whose System V signature takes five words, all live for the synchronous call"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 238,
+      "column": 5,
+      "reason": "checked executable System V void(void) address"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 244,
+      "column": 5,
+      "reason": "checked native Unit callback; its three raw arguments stay valid for the synchronous call"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 252,
+      "column": 5,
+      "reason": "checked code(box) address; the box stays live for the synchronous call"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/RawWords.jet",
+      "line": 258,
+      "column": 5,
+      "reason": "checked code(box, argument) address; the box and argument stay live for the synchronous call"
+    },
+    {
+      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Reactive.jet",
       "line": 34,
       "column": 5,
@@ -4220,55 +3310,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 235,
       "column": 5,
       "reason": "the terminated path and the 128-byte stat fact row are live for the syscall"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ReceiptSections.jet",
-      "line": 334,
-      "column": 13,
-      "reason": "the path copy owns its terminator byte and every byte before it"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ReceiptSections.jet",
-      "line": 353,
-      "column": 13,
-      "reason": "the path copy owns every byte before its terminator"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Refcount.jet",
-      "line": 31,
-      "column": 5,
-      "reason": "count addresses the aligned prefix word of a live refcounted block the caller holds"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Refcount.jet",
-      "line": 37,
-      "column": 5,
-      "reason": "count addresses the aligned prefix word of a block the caller just allocated and still owns exclusively"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Refcount.jet",
-      "line": 43,
-      "column": 5,
-      "reason": "LOCK XADD on the aligned prefix word of a live refcounted block; the caller's reference keeps it live"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Refcount.jet",
-      "line": 70,
-      "column": 9,
-      "reason": "count addresses the aligned prefix word of a live refcounted block whose only reference the caller holds"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Refcount.jet",
-      "line": 90,
-      "column": 9,
-      "reason": "LOCK CMPXCHG on the aligned prefix word of a live refcounted block; the caller's reference keeps it live"
     },
     {
       "package": "Compiler",
@@ -4336,65 +3377,37 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "some lends a writable C-ABI Option success word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 96,
+      "line": 97,
       "column": 5,
       "reason": "close(2) releases a descriptor this route opened"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 106,
+      "line": 107,
       "column": 9,
       "reason": "read(2) fills at most the caller's remaining owned bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 128,
+      "line": 129,
       "column": 9,
       "reason": "socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC) retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 144,
+      "line": 145,
       "column": 9,
       "reason": "connect(2) reads the owned 23-byte address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 160,
+      "line": 161,
       "column": 9,
       "reason": "sendto(2) with MSG_NOSIGNAL reads the owned request"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 409,
-      "column": 5,
-      "reason": "param owns an initialized struct sched_param; the caller lends the tuple's Bool byte and three Int words"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 494,
-      "column": 5,
-      "reason": "the caller lends the tuple's Bool byte and four Int words"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 529,
-      "column": 5,
-      "reason": "info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words"
     },
     {
       "package": "Compiler",
@@ -4405,43 +3418,22 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 576,
-      "column": 5,
-      "reason": "buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteTerm.jet",
-      "line": 58,
-      "column": 5,
-      "reason": "the caller lends the tuple's Bool byte, Text word and Option<Text> tag/payload words"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/RouteTerm.jet",
-      "line": 229,
-      "column": 5,
-      "reason": "the caller lends the tuple's Text word and Option<Text> tag/payload words"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/RouteTerm.jet",
-      "line": 332,
+      "line": 331,
       "column": 13,
       "reason": "written under the host lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteTerm.jet",
-      "line": 343,
+      "line": 342,
       "column": 5,
       "reason": "TCGETS writes the kernel termios into the caller's writable 64-byte struct"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteTerm.jet",
-      "line": 351,
+      "line": 350,
       "column": 5,
       "reason": "TCSETS reads the kernel termios from the caller's initialized struct"
     },
@@ -4458,20 +3450,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 100,
       "column": 9,
       "reason": "written under the host lock"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ScalarReflectGlue.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "borrows an initialized aligned word in a live scalar/reflection carrier"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/ScalarReflectGlue.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "owns a writable aligned word in a native scalar/reflection carrier"
     },
     {
       "package": "Compiler",
@@ -4546,7 +3524,7 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1073,
+      "line": 1074,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -4567,21 +3545,21 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1590,
+      "line": 1591,
       "column": 5,
       "reason": "gettid takes no arguments and retains nothing"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1841,
+      "line": 1843,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1883,
+      "line": 1885,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
@@ -4637,7 +3615,7 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sentry.jet",
-      "line": 14,
+      "line": 15,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -4672,21 +3650,21 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Shared.jet",
-      "line": 461,
+      "line": 462,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/SharedTransactions.jet",
-      "line": 17,
+      "line": 18,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/SharedTransactions.jet",
-      "line": 23,
+      "line": 22,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -4916,69 +3894,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/TestSuite.jet",
-      "line": 92,
-      "column": 5,
-      "reason": "the pinned named-fn box code takes its box and writable inline 16B result storage"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Text.jet",
-      "line": 19,
-      "column": 5,
-      "reason": "address borrows an initialized word in a live text or iterator header"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Text.jet",
-      "line": 25,
-      "column": 5,
-      "reason": "address is an exclusively owned writable header word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Text.jet",
-      "line": 29,
-      "column": 5,
-      "reason": "address borrows an initialized byte inside the caller's live buffer"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Text.jet",
-      "line": 35,
-      "column": 5,
-      "reason": "address is one exclusively owned writable byte and value is a byte"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/TextGlue.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "borrows an initialized aligned word in a live native text diagnostic"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/TextGlue.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "owns a writable aligned word in a fresh native text diagnostic"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/TextMethods.jet",
-      "line": 146,
-      "column": 9,
-      "reason": "item0 lends the C-ABI tuple's one writable Bool byte"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/TextMethods.jet",
-      "line": 151,
-      "column": 5,
-      "reason": "item0 lends the C-ABI tuple's one writable Bool byte"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
       "line": 96,
       "column": 5,
@@ -5126,73 +4041,17 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/TimeGlue.jet",
-      "line": 3,
-      "column": 5,
-      "reason": "borrows an initialized aligned word inside a native time carrier"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/TimeGlue.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "owns a writable aligned word inside a fresh native time carrier"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Trap.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "the caller borrows an initialized word of a live JetText or static require descriptor"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Trap.jet",
-      "line": 14,
-      "column": 5,
-      "reason": "the caller borrows exactly one initialized byte of a live UTF-8 carrier"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Trap.jet",
-      "line": 20,
-      "column": 5,
-      "reason": "the caller owns eight writable bytes in a scratch mapping or allocated JetText storage"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Trap.jet",
-      "line": 26,
-      "column": 5,
-      "reason": "address is one writable byte in the allocated debug-text buffer; value is a byte"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Trap.jet",
-      "line": 32,
+      "line": 21,
       "column": 5,
       "reason": "audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Trap.jet",
-      "line": 90,
+      "line": 79,
       "column": 9,
       "reason": "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Trap.jet",
-      "line": 154,
-      "column": 9,
-      "reason": "jet_ctx_on_stop_arm installed jet_rt_context_on_stop, a runtime export whose System V signature takes these five words"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Trap.jet",
-      "line": 159,
-      "column": 5,
-      "reason": "the serve entry installed jet_rt_comptime_serve_stop, a runtime export whose System V signature takes these five words"
     },
     {
       "package": "Compiler",
@@ -5224,52 +4083,24 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/UiCarriersEnums.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "address borrows an initialized native UI carrier or E4 header word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/UiCarriersEnums.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "address exclusively owns one writable native UI carrier word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Unicode.jet",
-      "line": 247,
-      "column": 5,
-      "reason": "some is the caller's writable aligned Option<Int> payload slot, written only on success"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/VaultTestHooks.jet",
-      "line": 22,
+      "line": 23,
       "column": 5,
       "reason": "written under the TLS registry mutex"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/VaultTestHooks.jet",
-      "line": 27,
+      "line": 28,
       "column": 5,
       "reason": "written under the TLS registry mutex"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/VaultTestHooks.jet",
-      "line": 184,
+      "line": 185,
       "column": 5,
       "reason": "written under the vault test backup mutex"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/World.jet",
-      "line": 93,
-      "column": 5,
-      "reason": "registered provider code remains live at this world/lease boundary; output lends one writable word"
     },
     {
       "package": "Compiler",
@@ -5277,20 +4108,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 500,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/XMLGlue.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "borrows an initialized aligned word in a live XML carrier or optional input"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/XMLGlue.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "owns a writable aligned word in a fresh XML carrier or caller output"
     },
     {
       "package": "Compiler",
@@ -5826,20 +4643,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "Core",
-      "file": "Core/Crypto/Cipher.jet",
-      "line": 85,
-      "column": 5,
-      "reason": "Core cipher workspace reserves its complete operation-owned word capacity before filling"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Crypto/Cipher.jet",
-      "line": 101,
-      "column": 5,
-      "reason": "Core cipher output reserves its exact public output width before filling"
-    },
-    {
-      "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
       "line": 292,
       "column": 5,
@@ -5949,27 +4752,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 338,
       "column": 1,
       "reason": "crypto expert: the caller takes custody of the X25519 private key's raw bytes and wipes them"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Crypto/ExpertCt.jet",
-      "line": 13,
-      "column": 5,
-      "reason": "Core fixed-limb workspace reserves its complete operation-owned word capacity before filling"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Crypto/ExpertCt.jet",
-      "line": 39,
-      "column": 5,
-      "reason": "Core fixed-limb extraction reserves its exact public output width before filling"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Crypto/ExpertCt.jet",
-      "line": 325,
-      "column": 5,
-      "reason": "Core Ed25519 hashing reserves the exact combined public part lengths before filling"
     },
     {
       "package": "Core",
@@ -6352,77 +5134,63 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1174,
-      "column": 5,
-      "reason": "the byte position was checked against this String's storage length"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/Stream.jet",
-      "line": 1738,
+      "line": 1734,
       "column": 5,
       "reason": "the shared UTF-8 validator accepted this exact owned formatter buffer"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1753,
+      "line": 1749,
       "column": 13,
       "reason": "every byte before the closing quote is printable ASCII, so it is whole UTF-8"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1911,
+      "line": 1907,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1916,
+      "line": 1912,
       "column": 13,
       "reason": "project the native compiler-private Bytes carrier into its event"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1982,
+      "line": 1978,
       "column": 13,
       "reason": "classify the private Bytes carrier without borrowing or exposing its payload"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2126,
+      "line": 2122,
       "column": 5,
       "reason": "owned validated UTF-8 allocation transfers in the encoding source seam"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2162,
+      "line": 2158,
       "column": 5,
       "reason": "exercise the typed Encode byte carrier at the JSON preflight boundary"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/XmlEngine.jet",
-      "line": 139,
-      "column": 5,
-      "reason": "all callers iterate or check the UTF-8 byte bounds before borrowing this byte"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/XmlEngine.jet",
-      "line": 177,
+      "line": 175,
       "column": 5,
       "reason": "the caller selected a scalar-aligned window of validated UTF-8 bytes"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/XmlEngine.jet",
-      "line": 2678,
+      "line": 2676,
       "column": 5,
       "reason": "attribute whitespace compaction preserves the already validated UTF-8 byte sequence"
     },
@@ -7073,14 +5841,7 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Core",
       "file": "Core/Testing/Testing.jet",
-      "line": 1389,
-      "column": 5,
-      "reason": "the caller bounded this byte position by the String storage length"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Testing/Testing.jet",
-      "line": 1410,
+      "line": 1408,
       "column": 5,
       "reason": "all appended bytes came from complete UTF-8 strings or ASCII"
     },
@@ -11075,14 +9836,14 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 796 |
-| Core | 182 |
+| Compiler | 627 |
+| Core | 174 |
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 7 |
 | tests | 501 |
-| **total** | **1546** |
+| **total** | **1369** |
 
 ### Regions
 
@@ -11224,123 +9985,102 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2230:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2240:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2342:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1996:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2036:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 147:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 155:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 178:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 192:5 | "the caller has removed this mapping from all heap lists and no payload remains live" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 227:5 | "the root and span tables are process-lifetime mappings, zero where nothing is registered, whose aligned words are read atomically on x86" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 243:5 | "the held page lock serializes every table write; a fresh table is zero-filled before the aligned store that publishes it, and the units written lie in spans mapped first" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 334:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 337:5 | "the fresh state page is private to initialization, which precedes every allocation" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 353:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 384:5 | "initialization wrote the arena table word once, before any allocation" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 399:5 | "reads the stack pointer register only; nothing is dereferenced" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 413:9 | "the live totals are process-lifetime arena words; the quiescent caller needs no lock to read them" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 442:5 | "root is an aligned lock word in the process-lifetime state mapping; CAS/xchg acquire all metadata it protects and the futex wait only reads that word" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 457:5 | "the calling thread holds this lock; xchg publishes its completed metadata updates and reports sleepers, and the futex wake only names the word" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 498:5 | "slab and its linked neighbours are live heap-owned headers protected by the held heap lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 516:5 | "head and slab are live heap-owned metadata protected by the held heap lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 550:5 | "the slab-region lock owns the cursor, end and free-slab stack words and every stacked slab's link word" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 588:5 | "the slab-region lock owns the free-slab stack; the slab is unlinked from every class list and holds no live or cached block" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 604:5 | "madvise only changes the page size of the fresh private region" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 616:5 | "the slab is this arena's alone: fresh from its region or off the free-slab stack; the held arena lock excludes all list readers" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 642:5 | "the held arena lock protects the class list, the slab's free links, carve word and live count, the retained count and the arena live total; row is the caller's exclusive cache row; the blocks leave the slab before any caller sees them" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 693:5 | "the held arena lock protects the slab's free links, carve word, live count, class list, retained count and live total; the block is no longer any payload or cache entry" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 722:5 | "the held arena lock makes the arena's scratch row exclusive; it is emptied again before the lock is released" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 731:5 | "block is this caller's exclusive block; its two cached words are read before the payload header overwrites them" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 746:5 | "row is this thread's private cache row" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 764:5 | "row is this thread's private cache row; the flag is idempotent: every writer stores the same 1" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 779:5 | "row is this thread's private cache row and block its cached head; both cached words are read before the payload header overwrites them" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 794:5 | "row is this thread's private cache row; each cached block's slab is live while the block is cached, so its arena word is readable, and the block returns under that arena's lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 825:9 | "row is one of this thread's eight private cache rows" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 839:5 | "tcb is a live TCB whose eight cache rows start at @320" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 848:9 | "row is one of the TCB's eight cache rows, which only the thread running on it touches" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 869:13 | "row is one of the running TCB's eight private cache rows" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 910:9 | "row is one of the switched-out fiber's eight cache rows, which no thread runs on now" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 997:9 | "row is one of the running TCB's kept-mapping rows, which only the thread running on it touches" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1019:9 | "row is one of the running TCB's kept-mapping rows, which only the thread running on it touches" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1036:5 | "the large-cache lock owns every class list; the mapping's first word is no live payload once it is freed" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1095:5 | "the large-cache lock owns every class list and its link words" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1131:5 | "pointer's two header words and the aligned payload are wholly within this page-rounded class mapping" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1152:5 | "pointer is a live direct allocation of exactly `size` bytes at align 1 whose two header words name its mapping and the mapping's bytes; the mode and tracked-count words are aligned words read atomically on x86, as alloc_reserve and alloc_untrack read them; a refused mremap leaves the mapping as it was" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1188:9 | "row is this thread's private cache row" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1207:5 | "the caller holds the policy lock and cell is a counter in alloc_root" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1215:5 | "the aligned mode word is read atomically on x86; system allocation needs no policy lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1221:5 | "the policy lock exclusively owns the mode, cap and accounting words" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1250:5 | "the policy lock exclusively owns live bytes; restoration does not erase outstanding tracked blocks" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1264:5 | "the held policy lock serializes all native allocator configuration and reservations" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1281:5 | "the policy lock serializes restoration with native reserve and free; tracked blocks remain in the side table" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1295:5 | "the policy lock protects this bounded fact word in alloc_root" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1310:5 | "the private raw-heap node is fully initialized before linking under the policy/tracker lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1323:5 | "the process-lifetime tracker count is an aligned x86 word; a zero count avoids any lookup or lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1330:5 | "the policy/tracker lock exclusively owns all side-table links and count" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1610:5 | "reads the stack pointer register only; nothing is dereferenced" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1849:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align &lt;= 8 payload at block + header is aligned because blocks start 32-aligned" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1893:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1944:17 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1977:21 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2018:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align &lt;= 8 payload at block + header is aligned because blocks start 32-aligned" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2057:17 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2104:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose two cached words are read before the payload header overwrites them; an align-1 payload at block + 16 needs no alignment" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2132:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the caller frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2170:9 | "row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2186:5 | "the lowering returns this still-live direct allocation with exactly its original size and alignment" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2198:5 | "the caller's live payload header names its slab, whose arena word is fixed when the slab is created" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2203:5 | "the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under its arena's lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2258:5 | "the fresh state page and stub page are private to initialization, which precedes every allocation; the stub page becomes read+execute before any call" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2265:5 | "checked-heap start runs during runtime-init, before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2279:5 | "the checked-mode stub only copies rbp to rax and returns; a missing stub leaves no chain" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2287:13 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2293:9 | "out lends count writable words: a checked block's chain words or a trap's scratch page" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2307:5 | "block is this caller's fresh heap block of prefix + size + 8 bytes; every word written lies in block .. pointer + size + 8" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2331:5 | "a checked payload's canary word precedes it; the quarantine lock orders racing frees of one block" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2340:5 | "the live canary proves pointer is a checked payload whose header and tail this free now owns" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2353:5 | "the quarantine lock owns the ring and its counters; every parked block is freed and owned by the quarantine" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2388:5 | "aligned whole-word stores; each checked take or give loads its observer word once" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2397:5 | "the freeing caller owns size payload bytes at pointer" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2412:5 | "pointer is a parked checked payload owned by the quarantine; its header, payload and tail stay mapped until retired" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2435:5 | "the freed canary proved the checked header" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2444:5 | "pointer is an inspected parked checked payload; its header still names the enclosing block and layout" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2471:5 | "the quarantine lock owns the ring and its counters" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2487:5 | "data lends length readable bytes; write retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2523:5 | "path is a fresh private page; the image is mapped read-only and only read" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2547:5 | "image is a read-only private mapping of this executable's ELF64 file; its program header table lies inside it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2576:9 | "image is a read-only private mapping of this executable's ELF64 file; every offset read comes from its own section and symbol tables" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2619:9 | "words lends count readable chain words" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2663:9 | "the live canary proved the checked header" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2709:5 | "remaining is in 1..=8, so write borrows only the initialized stack word; a short write advances within it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2766:5 | "the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed" |
-| Compiler | Compiler/JetRuntime/Source/Atomic.jet | 14:5 | "place is caller-owned aligned8 private unpublished storage for one atomic word" |
-| Compiler | Compiler/JetRuntime/Source/Atomic.jet | 19:5 | "place borrows one aligned8 live atomic word; x86 aligned MOV is the SeqCst load mapping" |
-| Compiler | Compiler/JetRuntime/Source/Atomic.jet | 24:5 | "place borrows one aligned8 live atomic word; XCHG is the full-barrier SeqCst store mapping" |
-| Compiler | Compiler/JetRuntime/Source/Atomic.jet | 29:5 | "place borrows one aligned8 live atomic word; LOCK CMPXCHG orders success and failure SeqCst" |
-| Compiler | Compiler/JetRuntime/Source/Atomic.jet | 34:5 | "place borrows one aligned8 live atomic word; LOCK XADD returns the previous wrapping64 value SeqCst" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 201:5 | "a fresh shared mapping of the descriptor aliases no heap block; a failed syscall maps nothing" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 209:5 | "the caller owns these whole pages of its own mapping and keeps no live value in them" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 244:5 | "the root and span tables are process-lifetime mappings, zero where nothing is registered, whose aligned words are read atomically on x86" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 260:5 | "the held page lock serializes every table write; a fresh table is zero-filled before the aligned store that publishes it, and the units written lie in spans mapped first" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 351:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 354:5 | "the fresh state page is private to initialization, which precedes every allocation" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 370:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 401:5 | "initialization wrote the arena table word once, before any allocation" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 416:5 | "reads the stack pointer register only; nothing is dereferenced" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 430:9 | "the live totals are process-lifetime arena words; the quiescent caller needs no lock to read them" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 459:5 | "root is an aligned lock word in the process-lifetime state mapping; CAS/xchg acquire all metadata it protects and the futex wait only reads that word" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 474:5 | "the calling thread holds this lock; xchg publishes its completed metadata updates and reports sleepers, and the futex wake only names the word" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 515:5 | "slab and its linked neighbours are live heap-owned headers protected by the held heap lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 533:5 | "head and slab are live heap-owned metadata protected by the held heap lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 567:5 | "the slab-region lock owns the cursor, end and free-slab stack words and every stacked slab's link word" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 605:5 | "the slab-region lock owns the free-slab stack; the slab is unlinked from every class list and holds no live or cached block" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 621:5 | "madvise only changes the page size of the fresh private region" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 633:5 | "the slab is this arena's alone: fresh from its region or off the free-slab stack; the held arena lock excludes all list readers" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 659:5 | "the held arena lock protects the class list, the slab's free links, carve word and live count, the retained count and the arena live total; row is the caller's exclusive cache row; the blocks leave the slab before any caller sees them" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 710:5 | "the held arena lock protects the slab's free links, carve word, live count, class list, retained count and live total; the block is no longer any payload or cache entry" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 739:5 | "the held arena lock makes the arena's scratch row exclusive; it is emptied again before the lock is released" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 748:5 | "block is this caller's exclusive block; its two cached words are read before the payload header overwrites them" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 763:5 | "row is this thread's private cache row" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 781:5 | "row is this thread's private cache row; the flag is idempotent: every writer stores the same 1" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 796:5 | "row is this thread's private cache row and block its cached head; both cached words are read before the payload header overwrites them" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 811:5 | "row is this thread's private cache row; each cached block's slab is live while the block is cached, so its arena word is readable, and the block returns under that arena's lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 842:9 | "row is one of this thread's eight private cache rows" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 856:5 | "tcb is a live TCB whose eight cache rows start at @320" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 865:9 | "row is one of the TCB's eight cache rows, which only the thread running on it touches" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 886:13 | "row is one of the running TCB's eight private cache rows" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 927:9 | "row is one of the switched-out fiber's eight cache rows, which no thread runs on now" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1014:9 | "row is one of the running TCB's kept-mapping rows, which only the thread running on it touches" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1036:9 | "row is one of the running TCB's kept-mapping rows, which only the thread running on it touches" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1053:5 | "the large-cache lock owns every class list; the mapping's first word is no live payload once it is freed" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1112:5 | "the large-cache lock owns every class list and its link words" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1148:5 | "pointer's two header words and the aligned payload are wholly within this page-rounded class mapping" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1169:5 | "pointer is a live direct allocation of exactly `size` bytes at align 1 whose two header words name its mapping and the mapping's bytes; the mode and tracked-count words are aligned words read atomically on x86, as alloc_reserve and alloc_untrack read them; a refused mremap leaves the mapping as it was" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1205:9 | "row is this thread's private cache row" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1224:5 | "the caller holds the policy lock and cell is a counter in alloc_root" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1232:5 | "the aligned mode word is read atomically on x86; system allocation needs no policy lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1238:5 | "the policy lock exclusively owns the mode, cap and accounting words" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1267:5 | "the policy lock exclusively owns live bytes; restoration does not erase outstanding tracked blocks" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1281:5 | "the held policy lock serializes all native allocator configuration and reservations" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1298:5 | "the policy lock serializes restoration with native reserve and free; tracked blocks remain in the side table" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1312:5 | "the policy lock protects this bounded fact word in alloc_root" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1327:5 | "the private raw-heap node is fully initialized before linking under the policy/tracker lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1340:5 | "the process-lifetime tracker count is an aligned x86 word; a zero count avoids any lookup or lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1347:5 | "the policy/tracker lock exclusively owns all side-table links and count" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1627:5 | "reads the stack pointer register only; nothing is dereferenced" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1866:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align &lt;= 8 payload at block + header is aligned because blocks start 32-aligned" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1910:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1961:17 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 1994:21 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2035:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align &lt;= 8 payload at block + header is aligned because blocks start 32-aligned" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2074:17 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2121:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose two cached words are read before the payload header overwrites them; an align-1 payload at block + 16 needs no alignment" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2149:13 | "GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the caller frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2187:9 | "row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2203:5 | "the lowering returns this still-live direct allocation with exactly its original size and alignment" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2215:5 | "the caller's live payload header names its slab, whose arena word is fixed when the slab is created" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2220:5 | "the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under its arena's lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2275:5 | "the fresh state page and stub page are private to initialization, which precedes every allocation; the stub page becomes read+execute before any call" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2282:5 | "checked-heap start runs during runtime-init, before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2296:5 | "the checked-mode stub only copies rbp to rax and returns; a missing stub leaves no chain" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2304:13 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2310:9 | "out lends count writable words: a checked block's chain words or a trap's scratch page" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2324:5 | "block is this caller's fresh heap block of prefix + size + 8 bytes; every word written lies in block .. pointer + size + 8" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2348:5 | "a checked payload's canary word precedes it; the quarantine lock orders racing frees of one block" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2357:5 | "the live canary proves pointer is a checked payload whose header and tail this free now owns" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2370:5 | "the quarantine lock owns the ring and its counters; every parked block is freed and owned by the quarantine" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2405:5 | "aligned whole-word stores; each checked take or give loads its observer word once" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2414:5 | "the freeing caller owns size payload bytes at pointer" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2429:5 | "pointer is a parked checked payload owned by the quarantine; its header, payload and tail stay mapped until retired" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2452:5 | "the freed canary proved the checked header" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2461:5 | "pointer is an inspected parked checked payload; its header still names the enclosing block and layout" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2488:5 | "the quarantine lock owns the ring and its counters" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2504:5 | "data lends length readable bytes; write retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2540:5 | "path is a fresh private page; the image is mapped read-only and only read" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2564:5 | "image is a read-only private mapping of this executable's ELF64 file; its program header table lies inside it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2593:9 | "image is a read-only private mapping of this executable's ELF64 file; every offset read comes from its own section and symbol tables" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2636:9 | "words lends count readable chain words" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2680:9 | "the live canary proved the checked header" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2726:5 | "remaining is in 1..=8, so write borrows only the initialized stack word; a short write advances within it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 2783:5 | "the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed" |
 | Compiler | Compiler/JetRuntime/Source/Authority.jet | 331:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/CAbiSession.jet | 20:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/CAbiSession.jet | 28:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/ClosureRefs.jet | 9:5 | "the caller's owned reference keeps the aligned closure header live; locked compare-exchange atomically publishes one more owner" |
-| Compiler | Compiler/JetRuntime/Source/ClosureRefs.jet | 20:5 | "consumes one reference to an aligned live closure header; locked compare-exchange provides release ordering and last-owner acquire before its release helper" |
-| Compiler | Compiler/JetRuntime/Source/CodecCSV.jet | 264:5 | "checked native Decode callback; the tree, value slot and out words stay live for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 9:5 | "data lends index's initialized packed native U8 element" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 14:5 | "data owns index's writable packed native U8 element" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 113:5 | "native lowering owns both live ranges of count bytes; each leaf loads all its bytes before it stores any, and the steps run in the order the overlap requires" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 165:5 | "native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 223:5 | "C's caller owns count writable bytes at target" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 246:5 | "C's caller owns count readable bytes at left and at right" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 279:5 | "checked native value-returning callback; its raw argument stays valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 285:5 | "checked native value-returning callback; both raw arguments stay valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 291:5 | "checked unary closure adapter with borrowed environment, input and output slots" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 297:5 | "checked binary closure adapter with live environment, inputs and output slots" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 303:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 309:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
+| Compiler | Compiler/JetRuntime/Source/CAbiSession.jet | 21:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/CAbiSession.jet | 27:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 236:9 | "the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes" |
 | Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 257:5 | "name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes" |
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 9:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 128:5 | "startup lends the start stack: the null-terminated envp array, then the auxiliary vector's [type, value] pairs up to AT_NULL" |
-| Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 149:5 | "page is a fresh private page: the path, then the [type, value] pairs read into it" |
-| Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 238:5 | "AT_PHDR lends the program header table the kernel mapped, AT_PHNUM rows of 56 bytes; a PT_NOTE row's p_vaddr and p_filesz bound its mapped read-only notes, and a note is read only inside that bound" |
-| Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 264:5 | "note is a mapped part note host_image_part found; its first word holds the descriptor size" |
+| Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 152:5 | "page is a fresh private page: the path, then the [type, value] pairs read into it" |
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 48:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 236:5 | "the descriptor is this map's own; mmap creates exactly length read-only private bytes; the map owner alone unmaps them" |
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 241:5 | "closes a temp-file descriptor this map alone owns" |
@@ -11354,38 +10094,22 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 399:9 | "written under the map registry mutex, before any lease can name a slot" |
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 454:9 | "memfd_create reads the slot's NUL-terminated name word; MFD_CLOEXEC" |
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 475:5 | "MAP_FIXED replaces exactly the held map's own read-only private pages with the same length of its copy; borrowed views keep their addresses" |
-| Compiler | Compiler/JetRuntime/Source/Comptime.jet | 14:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Comptime.jet | 15:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 89:5 | "the filter is installed once, on the image's only thread, before any call it traps" |
-| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 127:13 | "the compiler calls an entry of this image's table, or a runtime export it resolved, on the word arguments that entry's System V signature takes" |
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 174:13 | "the compiler admits between calls of the one thread it drives; the handler only reads the flag" |
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 189:5 | "the serve entry runs once, on the image's only thread, before it serves" |
 | Compiler | Compiler/JetRuntime/Source/Context.jet | 287:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/CountMinSketch.jet | 8:5 | "caller holds this native CMS mutex and owns the initialized four-byte counter" |
 | Compiler | Compiler/JetRuntime/Source/Coverage.jet | 20:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CryptoAes.jet | 23:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CryptoAes.jet | 30:5 | "cpuid only reports processor identification" |
 | Compiler | Compiler/JetRuntime/Source/CryptoAes.jet | 63:5 | "the caller holds (rounds + 1) round keys at keys and four blocks at src, mask and out" |
 | Compiler | Compiler/JetRuntime/Source/CryptoAes.jet | 99:5 | "the caller holds (rounds + 1) round keys at keys and one block at src, pre, post, out and chain" |
-| Compiler | Compiler/JetRuntime/Source/CryptoAes.jet | 243:5 | "y and h hold one block, the range check keeps every block inside the length borrowed bytes, and the powers table holds four" |
+| Compiler | Compiler/JetRuntime/Source/CryptoAes.jet | 246:5 | "y and h hold one block, the range check keeps every block inside the length borrowed bytes, and the powers table holds four" |
 | Compiler | Compiler/JetRuntime/Source/CryptoEntropy.jet | 20:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/CryptoEntropy.jet | 51:13 | "the test/fault harness owns the synchronous callback and context until reset; the callback borrows only this writable suffix" |
 | Compiler | Compiler/JetRuntime/Source/CryptoEntropy.jet | 56:5 | "Linux getrandom flags0 writes only the exclusively borrowed writable span and retains no address; kernel negative errno is preserved" |
-| Compiler | Compiler/JetRuntime/Source/DataEvent.jet | 5:5 | "address borrows an initialized word in a live native DataEvent or List" |
-| Compiler | Compiler/JetRuntime/Source/DataEvent.jet | 8:5 | "address owns a writable word in a native DataEvent" |
-| Compiler | Compiler/JetRuntime/Source/DataLimits.jet | 5:5 | "address borrows an initialized word in a live native limits carrier" |
-| Compiler | Compiler/JetRuntime/Source/DataLimits.jet | 8:5 | "address owns a writable word in a native limits carrier or getter out slot" |
-| Compiler | Compiler/JetRuntime/Source/Display.jet | 8:5 | "borrows an initialized aligned word in an E4 header, exact-Int node or owned formatter workspace" |
-| Compiler | Compiler/JetRuntime/Source/Display.jet | 14:5 | "writes an aligned word in an exclusively owned formatter workspace or fresh E4 header" |
-| Compiler | Compiler/JetRuntime/Source/Display.jet | 20:5 | "reads one initialized byte in an owned formatter digit buffer or borrowed exact-Int limb" |
-| Compiler | Compiler/JetRuntime/Source/Display.jet | 26:5 | "writes one byte in an exclusively owned formatter buffer; value is in 0..255" |
-| Compiler | Compiler/JetRuntime/Source/Dyn.jet | 7:5 | "address borrows an initialized word in a live native Dyn or List" |
-| Compiler | Compiler/JetRuntime/Source/Dyn.jet | 10:5 | "address owns a writable word in a native Dyn or List" |
 | Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 109:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 136:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/EncodingErrors.jet | 5:5 | "borrows an initialized aligned word in a live encoding carrier or option input" |
-| Compiler | Compiler/JetRuntime/Source/EncodingErrors.jet | 8:5 | "owns a writable aligned word in a fresh encoding carrier or caller output" |
 | Compiler | Compiler/JetRuntime/Source/EnvOverlay.jet | 44:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/EnvRoutes.jet | 18:5 | "removed lends exactly one initialized writable C bool byte; no adjacent padding belongs to this output" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 52:5 | "the image's entry calls this before it starts any other thread" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 69:9 | "jet_rt_main calls this on the main thread before the entry runs" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 85:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature" |
@@ -11413,55 +10137,36 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 35:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 34:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
 | Compiler | Compiler/JetRuntime/Source/FilesWalk.jet | 36:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/GeometryGlue.jet | 4:5 | "borrows an initialized aligned word inside a live native geometry carrier" |
-| Compiler | Compiler/JetRuntime/Source/GeometryGlue.jet | 7:5 | "owns a writable aligned word in a fresh native geometry carrier" |
-| Compiler | Compiler/JetRuntime/Source/HTTPBody.jet | 37:5 | "borrows an initialized word in the live body, chunks, closure, List or E4 allocation" |
-| Compiler | Compiler/JetRuntime/Source/HTTPBody.jet | 43:5 | "owns the word, or holds the body's transition lock for this state field" |
-| Compiler | Compiler/JetRuntime/Source/HTTPBody.jet | 49:5 | "atomic refcount, take/close flag or transition lock in a live body allocation" |
-| Compiler | Compiler/JetRuntime/Source/HTTPBody.jet | 100:5 | "the last closure reference calls its generated release(box), which drops captures and frees the box" |
-| Compiler | Compiler/JetRuntime/Source/HTTPBody.jet | 205:5 | "the claimed closer code has the audited code(box) ABI, with no transition lock held" |
-| Compiler | Compiler/JetRuntime/Source/HTTPBody.jet | 318:17 | "reader code(box, descriptor) borrows exactly count writable U8 bytes; no body lock is held" |
-| Compiler | Compiler/JetRuntime/Source/HTTPBody.jet | 371:17 | "the source holds count initialized UTF8 or raw reader bytes" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 14:5 | "runtime startup owns a fresh anonymous mapping before any program thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 28:5 | "rt_sigaction synchronously borrows the four-word SIG_IGN action; no signal handler or restorer runs for ignored SIGPIPE" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 45:5 | "the caller lends length readable bytes for the complete synchronous write" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 60:5 | "the output lock exclusively owns the initialized buffer and length" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 95:5 | "the caller lends length bytes; the output lock owns the destination buffer" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 158:5 | "bytes lends length readable bytes; writev borrows its own LF until return" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 175:5 | "the held host lock lends enough scratch for Linux TCGETS" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 235:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 243:5 | "value is a borrowed E4 JetCText header; stdout copies its bytes before returning" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 255:5 | "value is a borrowed E4 JetCText header; writev borrows its bytes and its own LF until return" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 19:5 | "TCGETS writes its termios into the fresh mapping's scratch at 32 and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 23:5 | "runtime startup publishes the root before any program thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 32:5 | "rt_sigaction synchronously borrows the four-word SIG_IGN action; no signal handler or restorer runs for ignored SIGPIPE" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 49:5 | "the caller lends length readable bytes for the complete synchronous write" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 64:5 | "the output lock exclusively owns the initialized buffer and length; write borrows its pending bytes" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 162:5 | "bytes lends length readable bytes; writev borrows its own LF until return" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 179:5 | "the held host lock lends enough scratch for Linux TCGETS" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 239:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 262:5 | "writev borrows the header's bytes and its own LF until return" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 34:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 132:9 | "the retired entry owned this mapping of exactly `size` bytes and no token names it now" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 170:9 | "bytes owns cap writable bytes; pread retains no pointer and the caller's Fd keeps the descriptor open" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 361:9 | "scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 388:9 | "bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 423:9 | "packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 455:9 | "a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 469:9 | "the mapping made above was never filed, so this is its only owner" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 534:9 | "host_shared_span proved end bytes from base lie inside the live mapping and end &lt;= length bounds data's packed bytes; start + span &lt;= end" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 589:5 | "host_shared_span proved count * 4 bytes from base lie inside the live mapping" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 9:9 | "getdents supplies a live terminated name; openat describes the entry without following links" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 15:13 | "the owned descriptor and full Linux stat buffer live through fstat and close" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 46:9 | "an owned fresh directory descriptor and writable getdents64 buffer" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 79:5 | "close the fresh stream descriptor once after reading" |
 | Compiler | Compiler/JetRuntime/Source/HostFileLock.jet | 83:5 | "the borrowed lock descriptor and 128 writable stat-fact bytes live through fstat" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 8:5 | "the caller borrows a live FD72 or runtime scratch word" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 14:5 | "the caller owns the FD72 lock or exclusive runtime scratch word" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 54:5 | "the fresh path allocation includes its terminator byte" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 285:9 | "the caller lends 128 writable bytes for portable stat facts" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 379:5 | "the terminated borrowed path and 128-byte stat fact output are live for the syscall" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 430:5 | "the caller lends one writable Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 446:9 | "the held directory and terminated source-approved single name stay live through openat" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 469:9 | "the held directory and terminated final name live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat; no read access or link traversal" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 477:9 | "openat returned an exclusively owned descriptor and the caller lends StatFacts128; fstat copies initialized scalar facts" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 507:9 | "the descriptor is held live, output begins with the borrowed empty pathname, statx writes only its private stack frame" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 518:5 | "the terminated source-approved path and three writable birth-time output words stay live through statx" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 572:5 | "both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 602:9 | "the held directory, terminated plain name and writable byte range are borrowed only through readlinkat" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 628:5 | "held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 648:9 | "the held fd and stack-local source-validated winsize word live only through ioctl" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 278:9 | "the caller lends 128 writable bytes for portable stat facts" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 372:5 | "the terminated borrowed path and 128-byte stat fact output are live for the syscall" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 438:9 | "the held directory and terminated source-approved single name stay live through openat" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 461:9 | "the held directory and terminated final name live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat; no read access or link traversal" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 469:9 | "openat returned an exclusively owned descriptor and the caller lends StatFacts128; fstat copies initialized scalar facts" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 499:9 | "the descriptor is held live, output begins with the borrowed empty pathname, statx writes only its private stack frame" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 510:5 | "the terminated source-approved path and three writable birth-time output words stay live through statx" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 564:5 | "both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 594:9 | "the held directory, terminated plain name and writable byte range are borrowed only through readlinkat" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 620:5 | "held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 640:9 | "the held fd and stack-local source-validated winsize word live only through ioctl" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 15:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 206:13 | "the owned walk descriptor and terminated part live through openat" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 271:13 | "the walk directory and terminated final part live through openat" |
@@ -11471,34 +10176,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 560:21 | "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 637:5 | "both walk directories and terminated final parts live through renameat/renameat2" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 651:9 | "both walk directories and terminated final parts live through linkat" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 21:5 | "value transfers one 56-byte error header and its nullable owned E4 text children" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 32:5 | "value borrows the complete error header; result exclusively owns 56 fresh bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 68:5 | "value exclusively owns a new initialized IOError with two owned text children; error lends the caller's pointer slot" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 85:5 | "value lends five initialized context words; result exclusively owns its header and cloned nullable E4 children" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 101:5 | "value transfers its 40-byte header and two independently owned nullable text children" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 117:9 | "the optional code box borrows one initialized exact-Int word" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 123:5 | "nullable option boxes lend one initialized payload word; value owns cloned texts and the complete new context" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 134:5 | "value borrows an initialized context header" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 138:5 | "value borrows a context; some lends the writable pointer output for a present field" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 150:5 | "value borrows a context; some lends the writable exact-Int word output for a present field" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 158:5 | "value borrows an initialized error header" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 162:5 | "value borrows a complete error header; the selected payload must match its canonical tag" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 173:5 | "context transfers its initialized five words and text owners into the fresh error; only the context header is then freed" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 187:5 | "value borrows an initialized ResourceLimit error" |
-| Compiler | Compiler/JetRuntime/Source/HostIO.jet | 202:5 | "value exclusively owns seven initialized words; ResourceLimit has no text children" |
-| Compiler | Compiler/JetRuntime/Source/HostNet.jet | 8:5 | "value exclusively owns four initialized words; inputs lend exact Int owners and a valid E4 message" |
-| Compiler | Compiler/JetRuntime/Source/HostNet.jet | 18:5 | "value lends the complete immutable carrier and all three owned children" |
-| Compiler | Compiler/JetRuntime/Source/HostNet.jet | 25:5 | "value transfers its 32-byte header, two independently retained Int words and owned E4 message" |
-| Compiler | Compiler/JetRuntime/Source/HostNet.jet | 34:5 | "value lends the immutable carrier; return retains its exact Int field" |
-| Compiler | Compiler/JetRuntime/Source/HostNet.jet | 38:5 | "value lends the initialized presence word" |
-| Compiler | Compiler/JetRuntime/Source/HostNet.jet | 42:5 | "value lends the immutable carrier; return retains its exact Int field" |
-| Compiler | Compiler/JetRuntime/Source/HostNet.jet | 46:5 | "value lends the immutable carrier; return deep-clones its owned E4 message" |
-| Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 5:5 | "value lends a complete initialized network header" |
-| Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 8:5 | "value exclusively owns the network header or its mutex" |
-| Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 38:5 | "value owns sixteen octets; bytes lends length initialized U8 elements" |
-| Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 50:5 | "value lends IP24; data owns length initialized native U8 elements; output receives ownership" |
-| Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 83:5 | "bytes lends width initialized little-endian bytes (width&lt;=8)" |
-| Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 93:5 | "bytes owns width writable little-endian bytes (width&lt;=8)" |
 | Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 223:5 | "socket(AF_UNIX, SOCK_DGRAM&#124;SOCK_CLOEXEC, 0) takes no pointer" |
 | Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 238:5 | "ioctl(SIOCGIFINDEX) reads and writes exactly the owned 40-byte ifreq; close releases the descriptor opened here" |
 | Compiler | Compiler/JetRuntime/Source/HostNetLookup.jet | 298:5 | "open(2) reads the owned NUL-terminated path; O_RDONLY&#124;O_CLOEXEC retains no pointer" |
@@ -11507,138 +10184,73 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 42:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 82:5 | "the shard lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 113:9 | "events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer" |
-| Compiler | Compiler/JetRuntime/Source/HostNetResolver.jet | 40:5 | "host lends length E4 bytes; outputs lend their writable pointer/count words" |
-| Compiler | Compiler/JetRuntime/Source/HostNetResolver.jet | 58:5 | "name owns a trailing NUL byte" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 451:5 | "sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 526:9 | "the probe answer is fixed for the process; a racing probe stores the same word" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 534:5 | "cpuid and xgetbv only report processor identification and the OS-enabled state" |
-| Compiler | Compiler/JetRuntime/Source/HostPipe.jet | 165:13 | "the FD72 lock protects this initialized refill-buffer byte" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 8:5 | "the audited caller supplies the Linux syscall's valid word arguments" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 97:5 | "the caller lends the C-ABI tuple's Bool byte and two writable Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 160:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 191:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 211:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 227:5 | "buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 241:5 | "some lends a writable C-ABI Option success word" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 251:5 | "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 263:5 | "read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 159:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 193:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel writes" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 215:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 255:5 | "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 13:9 | "the FD72 lock prevents native descriptor close/reuse throughout this nonblocking syscall" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 55:13 | "accept4 retains no address pointers and atomically sets CLOEXEC/NONBLOCK on the accepted socket" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 62:13 | "private scratch lends sockaddr bytes and its exact 4B socklen; accept4 retains neither pointer" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 97:9 | "private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 112:9 | "private scratch lends exactly one native int; setsockopt retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 136:5 | "data lends length native U8 elements; output owns length compact bytes" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 150:9 | "the held FD72 lock lends its live nonblocking socket; packed lends exactly length bytes; no pointer survives recvfrom/sendto" |
-| Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 155:13 | "recvfrom initialized result compact bytes; data owns the corresponding mutable native U8 slots" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 186:9 | "the FD72 lock retains the socket; private scratch lends sockaddr bytes; packed lends length bytes; sendto retains no pointers" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 203:9 | "private scratch lends sockaddr/socklen and packed lends length mutable bytes; MSG_TRUNC returns the complete datagram length while writing at most length bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 212:17 | "recvfrom initialized used compact bytes; the caller owns used mutable native U8 elements" |
-| Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 236:5 | "path lends its immutable E4 bytes for std-compatible sockaddr_un validation" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 250:17 | "Linux TCGETS initialized the 36-byte termios buffer; cfmakeraw sets VMIN=1, VTIME=0 in its control-character array" |
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 329:13 | "rt_sigaction borrows four initialized stack words; no allocator, mutex or TLS is touched after fork" |
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 432:13 | "rt_sigaction writes the four-word old action into this spawn's block; no allocator, mutex or TLS is touched in the child" |
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 442:5 | "rt_sigprocmask reads the parent's saved mask word in this spawn's block" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 493:5 | "mprotect makes the lowest page of this spawn's fresh mapping the guard; the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 885:9 | "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 964:21 | "readlink borrows the NUL-terminated output path and writes at most p (or the one dummy) bytes of the owned stack" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 1003:5 | "getcwd writes at most 4097 bytes of the owned stack" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 1060:5 | "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 1079:5 | "successful realpath NUL-terminates its result within the PATH_MAX byte buffer" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 495:5 | "the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 886:9 | "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 965:21 | "readlink borrows the NUL-terminated output path and writes at most p (or the one dummy) bytes of the owned stack" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 1004:5 | "getcwd writes at most 4097 bytes of the owned stack" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 1061:5 | "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 38:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 52:5 | "bytes borrows one live NUL-terminated startup string" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 102:5 | "host argument registration is single-threaded and precedes user code" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 113:5 | "host argument registration is single-threaded and precedes user code" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 127:5 | "startup lends the immutable, null-terminated envp pointer array and its NUL-terminated entries" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 141:5 | "pending exclusively owns raw_count + 2 words; registration is single-threaded and precedes user code" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 159:5 | "rows exclusively owns raw_count index records; startup lends every pointed-to NUL string" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 180:5 | "storage exclusively owns total_bytes; each source row lends its NUL string for this capture call, and published rows point only into the owned block" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 192:5 | "the index is published once: by single-threaded registration, or inside host_environment_require's once before it completes" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 222:5 | "bytes lends one live NUL-terminated startup string" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 236:5 | "startup lends length bytes; data exclusively owns length initialized packed bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 249:5 | "output lends a 24-byte native [U8] header and receives ownership of data" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 263:5 | "row borrows a complete immutable startup index record" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 278:5 | "row borrows its immutable record; data_out lends one writable pointer word" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 287:5 | "row borrows its immutable record; data_out lends one writable pointer word" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 303:5 | "startup lends argc initialized argv pointers and their immutable NUL strings" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 317:5 | "argv[1] is an immutable startup string of `length` bytes; data lends the job name's static bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 339:9 | "argv[1] is an immutable startup string of `length` bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 385:5 | "startup lends argc initialized argv pointers and their immutable NUL strings" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 403:5 | "the startup index and key bytes are immutable borrowed data" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 458:5 | "envp is a live null-terminated pointer array of NUL-terminated rows" |
-| Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 21:5 | "value borrows a complete immutable startup NUL string; output lends one writable U64 word" |
-| Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 48:5 | "value borrows length immutable captured startup bytes; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 82:5 | "the held Host lock lends 16 writable bytes of its existing ioctl scratch; the canonical lookup retains no key pointer" |
-| Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 92:5 | "output exclusively borrows the paired initialized empty Source out-record; no owner is overwritten" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 101:5 | "host argument registration is single-threaded and precedes user code" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 112:5 | "host argument registration is single-threaded and precedes user code" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 144:5 | "registration is single-threaded and precedes user code" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 193:5 | "the index is published once: by single-threaded registration, or inside host_environment_require's once before it completes" |
 | Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 115:5 | "Host startup already initialized its process-lifetime mapping; the held lock owns ioctl scratch32..47 and FIRST raw lookup only borrows the immutable captured index" |
-| Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 147:13 | "the paired Source owner receives the sole native U8 buffer with exact LEN/CAP/DATA; no raw pointer is cast into a List value" |
-| Compiler | Compiler/JetRuntime/Source/HostStdio.jet | 56:5 | "text lends an E4 header and its bytes for this synchronous write; writev borrows its own stack LF" |
-| Compiler | Compiler/JetRuntime/Source/HostStdio.jet | 82:5 | "the caller lends the tuple's exact-Int word and Bool byte outputs" |
-| Compiler | Compiler/JetRuntime/Source/HostStdio.jet | 92:5 | "some lends the route's zeroed Text out slot" |
 | Compiler | Compiler/JetRuntime/Source/HostTime.jet | 16:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 57:5 | "before_out lends the tuple's one writable Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 150:5 | "path lends length bytes; std file open rejects embedded NUL" |
-| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 158:5 | "name owns its trailing NUL byte" |
-| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 194:13 | "bytes lends used initialized bytes; data owns used native U8 elements" |
 | Compiler | Compiler/JetRuntime/Source/HostTiming.jet | 26:9 | "the probe answer is fixed for the process; a racing probe stores the same word" |
 | Compiler | Compiler/JetRuntime/Source/HostTiming.jet | 35:5 | "cpuid only reports processor identification" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 10:5 | "borrow an initialized word in a live exact-Int carrier" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 16:5 | "write an initialized word in a uniquely owned exact-Int workspace" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 22:5 | "borrow four initialized bytes in a live limb buffer; no adjacent limb is read" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 28:5 | "write four bytes in a uniquely owned limb buffer; value is an unsigned 32-bit limb" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 434:9 | "the caller holds an existing owner; atomic retain cannot race final-owner retirement" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 455:9 | "the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 460:13 | "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement" |
-| Compiler | Compiler/JetRuntime/Source/IntHazard.jet | 13:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/IntHazard.jet | 92:5 | "the native numeric forwarder lends a pure reload callback and its live closure context for this synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/JourneyTLS.jet | 22:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/LogicalEnvironment.jet | 115:5 | "host argument registration is single-threaded and precedes user code" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 23:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 50:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 66:5 | "an idempotent flag: every writer stores the same 1" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 81:5 | "a whole-word setting: each setter stores one aligned word and the last setter wins, which is what setting it means" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 124:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 129:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 135:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 190:5 | "only the main thread running jet_rt_main writes its root control" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 267:5 | "only the main thread running jet_rt_main writes its root control" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 271:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 274:5 | "entry is the loader/object's checked executable System V void(void) address, not a closure header" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 280:5 | "only the main thread running jet_rt_main writes its root control" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 307:5 | "the entry has returned and drained its workers; only the main thread runs here" |
+| Compiler | Compiler/JetRuntime/Source/Int.jet | 451:13 | "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement" |
+| Compiler | Compiler/JetRuntime/Source/IntHazard.jet | 14:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/JourneyTLS.jet | 23:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/LogicalEnvironment.jet | 116:5 | "host argument registration is single-threaded and precedes user code" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 24:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 49:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 65:5 | "an idempotent flag: every writer stores the same 1" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 80:5 | "a whole-word setting: each setter stores one aligned word and the last setter wins, which is what setting it means" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 123:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 128:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 134:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 189:5 | "only the main thread running jet_rt_main writes its root control" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 266:5 | "only the main thread running jet_rt_main writes its root control" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 270:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 279:5 | "only the main thread running jet_rt_main writes its root control" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 306:5 | "the entry has returned and drained its workers; only the main thread runs here" |
 | Compiler | Compiler/JetRuntime/Source/MemRegistry.jet | 20:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/MemStorage.jet | 27:5 | "address borrows an initialized word in a native allocator header, descriptor, drop record, or Fixed metadata span" |
-| Compiler | Compiler/JetRuntime/Source/MemStorage.jet | 30:5 | "address exclusively owns one aligned writable allocator or Fixed metadata word" |
-| Compiler | Compiler/JetRuntime/Source/MemStorage.jet | 88:5 | "code is the Lower-generated address-based lazy.drop thunk for the initialized value at pointer; its SysV result is Unit and discarded, and no allocator lock is held" |
-| Compiler | Compiler/JetRuntime/Source/Memo.jet | 10:5 | "address borrows an aligned word of a live memo cell or its entry array" |
-| Compiler | Compiler/JetRuntime/Source/Memo.jet | 13:5 | "address is an aligned word of a memo cell or entry array the caller's lock owns" |
-| Compiler | Compiler/JetRuntime/Source/NativeLayoutABI.jet | 11:5 | "thread-confined live Layout storage lends this initialized aligned word" |
-| Compiler | Compiler/JetRuntime/Source/NativeLayoutABI.jet | 14:5 | "thread-confined native Layout storage owns this aligned word" |
-| Compiler | Compiler/JetRuntime/Source/NativeLayoutABI.jet | 78:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/NativeLayoutABI.jet | 76:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/NativeLayoutText.jet | 62:5 | "runtime-init (jet_rt_layout_init) runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/NetRoutes.jet | 234:9 | "the owned terminated host copy truncates at its validated scope suffix" |
-| Compiler | Compiler/JetRuntime/Source/NetRoutes.jet | 555:9 | "output lends the C ABI bool result byte, not an eight-byte word" |
-| Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 220:13 | "fds lends count initialized exact Int words" |
-| Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 377:5 | "private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer" |
-| Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 468:13 | "the FD72 lock keeps the descriptor live and unreused for the whole ppoll; scratch lends the pollfd and timespec" |
-| Compiler | Compiler/JetRuntime/Source/Observe.jet | 18:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Observe.jet | 25:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Observe.jet | 217:5 | "an idempotent flag: every writer stores the same 1" |
-| Compiler | Compiler/JetRuntime/Source/Observe.jet | 387:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 375:5 | "private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer" |
+| Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 466:13 | "the FD72 lock keeps the descriptor live and unreused for the whole ppoll; scratch lends the pollfd and timespec" |
+| Compiler | Compiler/JetRuntime/Source/Observe.jet | 19:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Observe.jet | 24:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Observe.jet | 216:5 | "an idempotent flag: every writer stores the same 1" |
+| Compiler | Compiler/JetRuntime/Source/Observe.jet | 386:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 70:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 118:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 247:5 | "vetted Observe Linux file/clock syscalls borrow native buffers only for their duration" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 516:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Parallel.jet | 51:9 | "checked System V (env,start,end)-&gt;Unit callback; env remains borrowed and each range has exclusive output slots" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 38:5 | "the observation start runs before the timer whose handler reads these is armed" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 46:5 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 52:9 | "setitimer borrows the four-word itimerval on the stack" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 57:9 | "no timer is armed, so no handler reads the descriptor" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 74:5 | "one write of a stack-local word, which the kernel copies before the call returns" |
-| Compiler | Compiler/JetRuntime/Source/PluginHost.jet | 123:5 | "the linked guest entry reads the live instance and argument area only for this synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 352:9 | "ok is the canonical writable Bool output slot" |
-| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 360:5 | "ok lends exactly the C ABI Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 469:13 | "the child mutex holds the capture builder's initialized bytes" |
-| Compiler | Compiler/JetRuntime/Source/ProcessRoutes.jet | 125:5 | "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 17:5 | "the kernel enters this restorer only from a returning handler, on its signal frame" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 25:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 48:9 | "written under the scheduler root mutex" |
@@ -11653,16 +10265,28 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 181:5 | "cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 189:9 | "cell lends the new and old signal masks and the group id to rt_sigprocmask and TIOCSPGRP" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 197:9 | "cell lends the group id to TIOCSPGRP and the old mask to rt_sigprocmask" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 11:5 | "address borrows an initialized aligned word in a live native layout the caller holds" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 17:5 | "address is an aligned word of native storage the caller owns or holds the lock for" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 21:5 | "address borrows an initialized byte inside the caller's live buffer" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 27:5 | "address is one exclusively owned writable byte and value is a byte" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 45:5 | "native lowering owns both live ranges of count bytes; each leaf loads all its bytes before it stores any, and the steps run in the order the overlap requires" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 97:5 | "native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 155:5 | "C's caller owns count writable bytes at target" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 178:5 | "C's caller owns count readable bytes at left and at right" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 196:5 | "checked native value-returning callback; its raw argument stays valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 202:5 | "checked native value-returning callback; both raw arguments stay valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 208:5 | "checked unary closure adapter with borrowed environment, input and output slots" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 214:5 | "checked binary closure adapter with live environment, inputs and output slots" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 220:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 226:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 232:5 | "checked native entry or runtime export whose System V signature takes five words, all live for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 238:5 | "checked executable System V void(void) address" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 244:5 | "checked native Unit callback; its three raw arguments stay valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 252:5 | "checked code(box) address; the box stays live for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 258:5 | "checked code(box, argument) address; the box and argument stay live for the synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 34:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 74:5 | "the observer id is a label nothing reads back; a racing creator can only repeat a label" |
 | Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 235:5 | "the terminated path and the 128-byte stat fact row are live for the syscall" |
-| Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 334:13 | "the path copy owns its terminator byte and every byte before it" |
-| Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 353:13 | "the path copy owns every byte before its terminator" |
-| Compiler | Compiler/JetRuntime/Source/Refcount.jet | 31:5 | "count addresses the aligned prefix word of a live refcounted block the caller holds" |
-| Compiler | Compiler/JetRuntime/Source/Refcount.jet | 37:5 | "count addresses the aligned prefix word of a block the caller just allocated and still owns exclusively" |
-| Compiler | Compiler/JetRuntime/Source/Refcount.jet | 43:5 | "LOCK XADD on the aligned prefix word of a live refcounted block; the caller's reference keeps it live" |
-| Compiler | Compiler/JetRuntime/Source/Refcount.jet | 70:9 | "count addresses the aligned prefix word of a live refcounted block whose only reference the caller holds" |
-| Compiler | Compiler/JetRuntime/Source/Refcount.jet | 90:9 | "LOCK CMPXCHG on the aligned prefix word of a live refcounted block; the caller's reference keeps it live" |
 | Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 93:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 401:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 31:5 | "runtime-init runs before any other thread exists" |
@@ -11672,26 +10296,17 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 89:5 | "the log start runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 98:5 | "the entry function configures before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAMath.jet | 13:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 7:5 | "some lends a writable C-ABI Option success word" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 96:5 | "close(2) releases a descriptor this route opened" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 106:9 | "read(2) fills at most the caller's remaining owned bytes" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 128:9 | "socket(AF_UNIX, SOCK_STREAM&#124;SOCK_CLOEXEC) retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 144:9 | "connect(2) reads the owned 23-byte address" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 160:9 | "sendto(2) with MSG_NOSIGNAL reads the owned request" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 409:5 | "param owns an initialized struct sched_param; the caller lends the tuple's Bool byte and three Int words" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 494:5 | "the caller lends the tuple's Bool byte and four Int words" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 529:5 | "info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 97:5 | "close(2) releases a descriptor this route opened" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 107:9 | "read(2) fills at most the caller's remaining owned bytes" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 129:9 | "socket(AF_UNIX, SOCK_STREAM&#124;SOCK_CLOEXEC) retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 145:9 | "connect(2) reads the owned 23-byte address" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 161:9 | "sendto(2) with MSG_NOSIGNAL reads the owned request" |
 | Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 561:5 | "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 576:5 | "buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words" |
-| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 58:5 | "the caller lends the tuple's Bool byte, Text word and Option&lt;Text&gt; tag/payload words" |
-| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 229:5 | "the caller lends the tuple's Text word and Option&lt;Text&gt; tag/payload words" |
-| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 332:13 | "written under the host lock" |
-| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 343:5 | "TCGETS writes the kernel termios into the caller's writable 64-byte struct" |
-| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 351:5 | "TCSETS reads the kernel termios from the caller's initialized struct" |
+| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 331:13 | "written under the host lock" |
+| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 342:5 | "TCGETS writes the kernel termios into the caller's writable 64-byte struct" |
+| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 350:5 | "TCSETS reads the kernel termios from the caller's initialized struct" |
 | Compiler | Compiler/JetRuntime/Source/RouteTesting.jet | 91:13 | "written under the host lock" |
 | Compiler | Compiler/JetRuntime/Source/RouteTesting.jet | 100:9 | "written under the host lock" |
-| Compiler | Compiler/JetRuntime/Source/ScalarReflectGlue.jet | 4:5 | "borrows an initialized aligned word in a live scalar/reflection carrier" |
-| Compiler | Compiler/JetRuntime/Source/ScalarReflectGlue.jet | 7:5 | "owns a writable aligned word in a native scalar/reflection carrier" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 44:5 | "idempotent flags: every writer stores the same 1, the held one first" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 53:5 | "an idempotent flag: every writer stores the same 1" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 65:5 | "the monitor is the only thread that clears the flag; an arm it races restores it" |
@@ -11702,12 +10317,12 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 391:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 713:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 850:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1073:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1074:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1325:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1358:5 | "openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1590:5 | "gettid takes no arguments and retains nothing" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1841:9 | "sched_yield retains no memory and yields this OS thread" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1883:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1591:5 | "gettid takes no arguments and retains nothing" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1843:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1885:9 | "sched_yield retains no memory and yields this OS thread" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 13:5 | "address names bytes bytes of live storage the caller owns or is freeing; effectful asm stores wipe every byte before release or reuse" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 38:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 110:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |
@@ -11715,14 +10330,14 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 147:5 | "bytes is the moved native [U8] header; secret is fresh aligned24B storage and takes over its buffer reference without copying secret material" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 169:5 | "secret is fresh aligned24B storage this call owns exclusively" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 188:5 | "secret is a live exclusively borrowed native24B Secret header; len/cap/data follow the native List layout and all byte owners remain inside its buffer" |
-| Compiler | Compiler/JetRuntime/Source/Sentry.jet | 14:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Sentry.jet | 15:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Sha256.jet | 239:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Sha256.jet | 246:5 | "cpuid only reports processor identification" |
 | Compiler | Compiler/JetRuntime/Source/Sha256.jet | 269:9 | "the state list holds eight U32 words, and the range check keeps each block inside the length borrowed bytes" |
 | Compiler | Compiler/JetRuntime/Source/Shared.jet | 58:5 | "x86 pause only hints that this thread is waiting in a spin loop; no memory is touched" |
-| Compiler | Compiler/JetRuntime/Source/Shared.jet | 461:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/SharedTransactions.jet | 17:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/SharedTransactions.jet | 23:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Shared.jet | 462:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/SharedTransactions.jet | 18:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/SharedTransactions.jet | 22:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 12:5 | "borrows an aligned live synchronization word" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 16:5 | "publishes an aligned live synchronization word with x86 release ordering" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 22:5 | "atomic exchange on an aligned live synchronization word" |
@@ -11755,15 +10370,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetRuntime/Source/TestReads.jet | 172:5 | "data lends `length` initialized bytes to one write" |
 | Compiler | Compiler/JetRuntime/Source/TestSuite.jet | 24:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TestSuite.jet | 83:5 | "`test: fn` calls `t.run()` on the harness's main thread, before any test task exists" |
-| Compiler | Compiler/JetRuntime/Source/TestSuite.jet | 92:5 | "the pinned named-fn box code takes its box and writable inline 16B result storage" |
-| Compiler | Compiler/JetRuntime/Source/Text.jet | 19:5 | "address borrows an initialized word in a live text or iterator header" |
-| Compiler | Compiler/JetRuntime/Source/Text.jet | 25:5 | "address is an exclusively owned writable header word" |
-| Compiler | Compiler/JetRuntime/Source/Text.jet | 29:5 | "address borrows an initialized byte inside the caller's live buffer" |
-| Compiler | Compiler/JetRuntime/Source/Text.jet | 35:5 | "address is one exclusively owned writable byte and value is a byte" |
-| Compiler | Compiler/JetRuntime/Source/TextGlue.jet | 4:5 | "borrows an initialized aligned word in a live native text diagnostic" |
-| Compiler | Compiler/JetRuntime/Source/TextGlue.jet | 7:5 | "owns a writable aligned word in a fresh native text diagnostic" |
-| Compiler | Compiler/JetRuntime/Source/TextMethods.jet | 146:9 | "item0 lends the C-ABI tuple's one writable Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/TextMethods.jet | 151:5 | "item0 lends the C-ABI tuple's one writable Bool byte" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 96:5 | "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 106:5 | "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 113:5 | "gettid identifies this thread without reading its inherited GS" |
@@ -11785,30 +10391,16 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 923:13 | "tgkill names a live registered thread of this process" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 961:9 | "a credential system call takes word arguments and retains no memory" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 973:13 | "written under the registry mutex, before any handler can run" |
-| Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 3:5 | "borrows an initialized aligned word inside a native time carrier" |
-| Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 6:5 | "owns a writable aligned word inside a fresh native time carrier" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 8:5 | "the caller borrows an initialized word of a live JetText or static require descriptor" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 14:5 | "the caller borrows exactly one initialized byte of a live UTF-8 carrier" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 20:5 | "the caller owns eight writable bytes in a scratch mapping or allocated JetText storage" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 26:5 | "address is one writable byte in the allocated debug-text buffer; value is a byte" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 32:5 | "audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 90:9 | "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 154:9 | "jet_ctx_on_stop_arm installed jet_rt_context_on_stop, a runtime export whose System V signature takes these five words" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 159:5 | "the serve entry installed jet_rt_comptime_serve_stop, a runtime export whose System V signature takes these five words" |
+| Compiler | Compiler/JetRuntime/Source/Trap.jet | 21:5 | "audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor" |
+| Compiler | Compiler/JetRuntime/Source/Trap.jet | 79:9 | "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 59:5 | "a web page's module runs on one thread" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 71:5 | "only an attached web build records, on its one thread" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 81:5 | "a web page's module runs on one thread" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 109:9 | "written under the host lock" |
-| Compiler | Compiler/JetRuntime/Source/UiCarriersEnums.jet | 5:5 | "address borrows an initialized native UI carrier or E4 header word" |
-| Compiler | Compiler/JetRuntime/Source/UiCarriersEnums.jet | 10:5 | "address exclusively owns one writable native UI carrier word" |
-| Compiler | Compiler/JetRuntime/Source/Unicode.jet | 247:5 | "some is the caller's writable aligned Option&lt;Int&gt; payload slot, written only on success" |
-| Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 22:5 | "written under the TLS registry mutex" |
-| Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 27:5 | "written under the TLS registry mutex" |
-| Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 184:5 | "written under the vault test backup mutex" |
-| Compiler | Compiler/JetRuntime/Source/World.jet | 93:5 | "registered provider code remains live at this world/lease boundary; output lends one writable word" |
+| Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 23:5 | "written under the TLS registry mutex" |
+| Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 28:5 | "written under the TLS registry mutex" |
+| Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 185:5 | "written under the vault test backup mutex" |
 | Compiler | Compiler/JetRuntime/Source/WsRoutes.jet | 500:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/XMLGlue.jet | 4:5 | "borrows an initialized aligned word in a live XML carrier or optional input" |
-| Compiler | Compiler/JetRuntime/Source/XMLGlue.jet | 7:5 | "owns a writable aligned word in a fresh XML carrier or caller output" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 11:5 | "a failed allocator witness terminates this isolated test process" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 27:5 | "both allocations own count bytes; touching their endpoints must not alias each other or their metadata" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 71:5 | "first's private header names its live slab, whose arena word is fixed" |
@@ -11885,8 +10477,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 368:5 | "the case explicitly authorizes signalling its own spawned child" |
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 30:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
 | Core | Core/Auth/Auth.jet | 114:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
-| Core | Core/Crypto/Cipher.jet | 85:5 | "Core cipher workspace reserves its complete operation-owned word capacity before filling" |
-| Core | Core/Crypto/Cipher.jet | 101:5 | "Core cipher output reserves its exact public output width before filling" |
 | Core | Core/Crypto/Crypto.jet | 292:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
 | Core | Core/Crypto/Crypto.jet | 298:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
 | Core | Core/Crypto/Crypto.jet | 303:5 | "vault key import: construct the typed recipient unlock request" |
@@ -11903,9 +10493,6 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Core | Core/Crypto/Expert.jet | 334:1 | "crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them" |
 | Core | Core/Crypto/Expert.jet | 336:1 | "crypto expert: the caller takes custody of the signing seed's raw bytes and wipes them" |
 | Core | Core/Crypto/Expert.jet | 338:1 | "crypto expert: the caller takes custody of the X25519 private key's raw bytes and wipes them" |
-| Core | Core/Crypto/ExpertCt.jet | 13:5 | "Core fixed-limb workspace reserves its complete operation-owned word capacity before filling" |
-| Core | Core/Crypto/ExpertCt.jet | 39:5 | "Core fixed-limb extraction reserves its exact public output width before filling" |
-| Core | Core/Crypto/ExpertCt.jet | 325:5 | "Core Ed25519 hashing reserves the exact combined public part lengths before filling" |
 | Core | Core/Crypto/Jetc.jet | 98:5 | "Core JETC2 applies the fixed XChaCha20-Poly1305 suite and protocol-owned nonce/AAD domains" |
 | Core | Core/Crypto/Jetc.jet | 106:5 | "Core JETC2 authenticates a bounded record before releasing its plaintext" |
 | Core | Core/Crypto/Jetc.jet | 114:5 | "Core JETC2 borrows shared material through expert, wiping its copy before propagating HKDF success or failure" |
@@ -11960,17 +10547,15 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Core | Core/Encoding/Stream.jet | 584:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
 | Core | Core/Encoding/Stream.jet | 776:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
 | Core | Core/Encoding/Stream.jet | 787:9 | "the private numeric event is projected only into the matching typed tree carrier" |
-| Core | Core/Encoding/Stream.jet | 1174:5 | "the byte position was checked against this String's storage length" |
-| Core | Core/Encoding/Stream.jet | 1738:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
-| Core | Core/Encoding/Stream.jet | 1753:13 | "every byte before the closing quote is printable ASCII, so it is whole UTF-8" |
-| Core | Core/Encoding/Stream.jet | 1911:13 | "retain a validated number lexeme in the private event carrier" |
-| Core | Core/Encoding/Stream.jet | 1916:13 | "project the native compiler-private Bytes carrier into its event" |
-| Core | Core/Encoding/Stream.jet | 1982:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
-| Core | Core/Encoding/Stream.jet | 2126:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
-| Core | Core/Encoding/Stream.jet | 2162:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
-| Core | Core/Encoding/XmlEngine.jet | 139:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
-| Core | Core/Encoding/XmlEngine.jet | 177:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
-| Core | Core/Encoding/XmlEngine.jet | 2678:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
+| Core | Core/Encoding/Stream.jet | 1734:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
+| Core | Core/Encoding/Stream.jet | 1749:13 | "every byte before the closing quote is printable ASCII, so it is whole UTF-8" |
+| Core | Core/Encoding/Stream.jet | 1907:13 | "retain a validated number lexeme in the private event carrier" |
+| Core | Core/Encoding/Stream.jet | 1912:13 | "project the native compiler-private Bytes carrier into its event" |
+| Core | Core/Encoding/Stream.jet | 1978:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
+| Core | Core/Encoding/Stream.jet | 2122:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
+| Core | Core/Encoding/Stream.jet | 2158:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
+| Core | Core/Encoding/XmlEngine.jet | 175:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
+| Core | Core/Encoding/XmlEngine.jet | 2676:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/Yaml.jet | 457:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
 | Core | Core/Files/Files.jet | 684:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | Core | Core/Files/Files.jet | 752:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
@@ -12063,8 +10648,7 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Core | Core/Sys/Sys.jet | 1876:1 | "posix kill: the caller owns or is entitled to signal the target process" |
 | Core | Core/Sys/Sys.jet | 1883:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
 | Core | Core/Sys/Sys.jet | 1887:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
-| Core | Core/Testing/Testing.jet | 1389:5 | "the caller bounded this byte position by the String storage length" |
-| Core | Core/Testing/Testing.jet | 1410:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
+| Core | Core/Testing/Testing.jet | 1408:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Core | Core/Tui/Tui.jet | 109:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 25:5 | "call the audited register-only assembly contract" |
