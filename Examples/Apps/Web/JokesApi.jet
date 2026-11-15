@@ -1,0 +1,67 @@
+// A jokes API: route markers on a struct's methods, added to the app with
+// one `mount` call. `web.openapi` renders both routes from the same table the
+// listener answers, and a path value that is not an `Int` is refused before
+// the handler runs. A path field no handler input takes is a compile error
+// (tests/ui/http_route_missing_parameter).
+package: {
+    name: "jokes_api"
+    authority: { allow: [FS.Read, Net, Time] }
+}
+
+use {
+    core.http.client
+    core.http.server
+    net: core.net
+    web: core.web
+}
+
+#Codable
+NewJoke: struct {
+    text: String
+}
+
+JokeBook: struct {
+    told: [String]
+}
+
+Jokes: struct {
+    book: Shared<JokeBook>
+
+    #Server.Get("/jokes/:id") joke: fn(self, id: Int) -> HTTPResponse HTTPError! {
+        told: self.book.guard_read().value.told
+        if id < 0 || id >= told.len() -> return Ok(server.response(404, "no joke {id}"))
+        Ok(server.response(200, told[id]))
+    }
+
+    #Server.Post("/jokes") add: fn(self, request: HTTPRequest) -> HTTPResponse HTTPError! {
+        input: request.json<NewJoke>()
+        self.book.guard_edit().value.told.push(input.text)
+        Ok(server.response(201, "added {input.text}"))
+    }
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    app: web.app()
+    book: Shared{JokeBook{told: ["Why did the compiler cross the road?"]}}
+    app.mount(Jokes{book: book})
+    schema: web.openapi(app) ?? panic("openapi: {err}")
+    print("openapi GET /jokes/{{id}}: {schema.contains("\"/jokes/{{id}}\"") && schema.contains("\"get\"")}")
+    print("openapi POST /jokes: {schema.contains("\"/jokes\"") && schema.contains("\"post\"") && schema.contains("\"201\"")}")
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+    }
+    first: client.get("http://{addr}/jokes/0")
+    print("GET /jokes/0: {first.status()} {first.body().text(1024) ?? return}")
+    added: client.request("POST", "http://{addr}/jokes").json(NewJoke{text: "A pun walks into a bar."}).send()
+    print("POST /jokes: {added.status()} {added.body().text(1024) ?? return}")
+    second: client.get("http://{addr}/jokes/1")
+    print("GET /jokes/1: {second.status()} {second.body().text(1024) ?? return}")
+    bad: client.get("http://{addr}/jokes/first")
+    print("GET /jokes/first: {bad.status()}")
+    serving.join()
+}
