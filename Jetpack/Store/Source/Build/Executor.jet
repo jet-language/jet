@@ -538,17 +538,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         .Err(_) -> {}
     }
     build_ensure_real_directory(sandbox) ?? return Err(build_io_action(action, err))
-    loop input in inputs {
-        to: build_resolve_under(sandbox, input.snapshot.path) ?? return Err(build_io_action(action, err))
-        parent: files.dirname(to)
-        if parent != "" {
-            files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
-        }
-        files.write_bytes(to, input.bytes) ?? return Err(build_io_action(action, BuildIOError.from(err)))
-        if input.snapshot.executable {
-            files.set_mode(to, 493) ?? return Err(build_io_action(action, BuildIOError.from(err)))
-        }
-    }
+    build_stage_inputs(sandbox, inputs) ?? return Err(build_io_action(action, err))
     loop output in action.outputs {
         path: build_resolve_under(sandbox, output) ?? return Err(build_io_action(action, err))
         parent: files.dirname(path)
@@ -610,6 +600,53 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         return Err(build_native_sandbox_error(action, err))
     }
     Ok(BuildActionStart.Ready{run: BuildActionRun{action: action, key: key, sandbox: sandbox, rebuild_status: rebuild_status, command: command, reuse: reuse, cpu_limit_ms: cpu_limit_ms}})
+}
+
+// Writes each captured input into the work tree `sandbox` at its path,
+// runnable where the input is. The folders are made in order first; then
+// the files, each written on a task of its own, at most one per core at once
+// (build_snapshot_declared_inputs): an action's inputs can be hundreds of
+// megabytes. The error is the one writing them in order meets first.
+build_stage_inputs: fn(sandbox: String, inputs: [ActionInputCapture]) BuildIOError! -[FS, Env]> {
+    // The inputs before the first whose folder can't be made.
+    staged := 0
+    folder_failure := BuildIOError?{None}
+    loop input in inputs {
+        if build_stage_folder(sandbox, input) == .Val(error) {
+            folder_failure = Val(error)
+            break
+        }
+        staged += 1
+    }
+    write_failure := BuildIOError?{None}
+    task.group staging(limit: sys.cpu_count()) {
+        writes: loop index in 0..<staged -> task build_stage_input(sandbox, inputs[index])
+        loop (index, handle) in writes {
+            written: handle.join() ?? (written: false, error: Val(BuildIOError.new(.Other, "writing `{inputs[index].snapshot.path}` stopped")))
+            if write_failure == None && written.error == .Val(error) -> write_failure = Val(error)
+        }
+    }
+    if write_failure == .Val(error) -> return Err(error)
+    if folder_failure == .Val(error) -> return Err(error)
+}
+
+// Makes the folder input `input` lands in under `sandbox`.
+build_stage_folder: fn(sandbox: String, input: ActionInputCapture) -[FS]> BuildIOError? Never! {
+    to: build_resolve_under(sandbox, input.snapshot.path) ?? return Val(err)
+    parent: files.dirname(to)
+    if parent != "" -> files.create_dir_all(parent) ?? return Val(BuildIOError.from(err))
+    None
+}
+
+// Writes input `input` under `sandbox`, runnable where the input is; else
+// why it can't be.
+build_stage_input: fn(sandbox: String, input: ActionInputCapture) -[FS]> (written: Bool, error: BuildIOError?) Never! {
+    to: build_resolve_under(sandbox, input.snapshot.path) ?? return (written: false, error: Val(err))
+    files.write_bytes(to, input.bytes) ?? return (written: false, error: Val(BuildIOError.from(err)))
+    if input.snapshot.executable {
+        files.set_mode(to, 493) ?? return (written: false, error: Val(BuildIOError.from(err)))
+    }
+    (written: true, error: None)
 }
 
 // The digest the action's key holds for its tool at `executable`: a made

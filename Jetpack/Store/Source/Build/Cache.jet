@@ -143,19 +143,54 @@ ActionResultRecord: struct {
 
 // Rust `snapshot_declared_inputs`: every declared input read without
 // following links, bounded, and hashed. The captured bytes are the ones the
-// work tree receives, so they are never published to the CAS.
-build_snapshot_declared_inputs: fn(base: String, action: HermeticBuildAction) -[FS]> [ActionInputCapture] BuildIOError! {
+// work tree receives, so they are never published to the CAS. An action's
+// inputs can be hundreds of megabytes (a made jet and the runtime files it
+// embeds), so each is read and hashed on a task of its own, at most one per
+// core at once; they are taken in declared order, where the per-action limit
+// is checked, so the error is the one a read in that order meets first.
+build_snapshot_declared_inputs: fn(base: String, action: HermeticBuildAction) -[FS, Env]> [ActionInputCapture] BuildIOError! {
     inputs := [ActionInputCapture]{}
+    failure := BuildIOError?{None}
     total := 0
-    loop input in action.inputs {
-        path: build_resolve_under(base, input)
-        bytes: build_secure_read_file(base, path, build_read_budget(total))
-        total += bytes.len()
-        digest: ContentDigest.from_bytes(bytes)
-        executable: build_owner_executable(path) ?? return Err(err)
-        inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest: digest, byte_len: bytes.len(), executable: executable}, bytes: bytes})
+    task.group snapshots(limit: sys.cpu_count()) {
+        reads: loop input in action.inputs -> task build_snapshot_input(base, input)
+        loop (index, handle) in reads {
+            read: handle.join() ?? (capture: None, error: Val(BuildIOError.new(.Other, "reading `{action.inputs[index]}` stopped")))
+            if failure != None -> next
+            if read.capture == {
+                .Val(capture) -> {
+                    if capture.bytes.len() > build_read_budget(total) {
+                        failure = Val(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+                        next
+                    }
+                    total += capture.bytes.len()
+                    inputs.push(capture)
+                }
+                .None -> {
+                    failure = Val(read.error ?? BuildIOError.new(.Other, "reading `{action.inputs[index]}` stopped"))
+                }
+            }
+        }
     }
+    if failure == .Val(error) -> return Err(error)
     Ok(inputs)
+}
+
+// One declared input, read under `base` at the per-file limit, and hashed;
+// else why it can't be.
+build_snapshot_input: fn(base: String, input: String) -[FS]> (capture: ActionInputCapture?, error: BuildIOError?) Never! {
+    if build_capture_input(base, input) == {
+        .Ok(capture) -> (capture: Val(capture), error: None)
+        .Err(error) -> (capture: None, error: Val(error))
+    }
+}
+
+build_capture_input: fn(base: String, input: String) -[FS]> ActionInputCapture BuildIOError! {
+    path: build_resolve_under(base, input)
+    bytes: build_secure_read_file(base, path, BUILD_MAX_ACTION_FILE_BYTES)
+    digest: ContentDigest.from_bytes(bytes)
+    executable: build_owner_executable(path) ?? return Err(err)
+    Ok(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest: digest, byte_len: bytes.len(), executable: executable}, bytes: bytes})
 }
 
 // Whether the file at `path` has its owner's execute bit.
