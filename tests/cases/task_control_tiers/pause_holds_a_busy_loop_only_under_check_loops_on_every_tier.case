@@ -5,9 +5,9 @@
 # the built program. The check is one lowering rule (JetIR Build.jet
 # ir_loop_check): `spin`, a loop with no call, has its turn poll before the
 # passes and keeps it after them at O1 and O2, and a build for the web
-# target selects the same poll and its routine. Without the check the
-# spinner never stops and the run steps time out.
-# Hand-derived expectations, not worker-run.
+# target selects the same poll and its routine. The web build is of web.jet,
+# `spin` alone: the web target refuses a task group (E-WEB-UNSUPPORTED).
+# Without the check the spinner never stops and the run steps time out.
 fixture: pause_holds_a_busy_loop_only_under_check_loops_on_every_tier.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -38,6 +38,6 @@ exit: 0
 step aot: built
 exit: 0
 stdout: = pause_holds_a_busy_loop_only_under_check_loops_on_every_tier.out
-step: jet build --target web main.jet
+step: jet build --target web web.jet
 exit: 0
 file: .jet/build/app.wasm ~ "jet_rt_session_turn" # the web turn poll's routine
