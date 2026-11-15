@@ -2300,24 +2300,154 @@ sema_effect_node_index: fn(node_by_key: NameRows, key: String) -> Int? Never! {
     name_rows_get_text(node_by_key, key)
 }
 
+// A compiler thread is admitted for at least this many key lookups (about a
+// millisecond of them), so a small program looks its keys up on the calling
+// thread.
+SEMA_EFFECT_LOOKUPS_PER_THREAD: 2048
+
+// Each input module's functions' graph nodes (-1 for a function without
+// one), in input and function order: every pass over the functions reads its
+// node here instead of looking its key up again. On up to `threads` compiler
+// threads, each over consecutive input modules; the rows are the same for
+// any thread count.
+sema_effect_function_nodes: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], calls: SemaEffectCallIndex, threads: CompilerThreads) -> [[Int]] Never! {
+    weights := [Int]{}
+    work := 0
+    loop module_row in inputs {
+        weight: modules[module_row.module_index].functions.len() + 1
+        weights.push(weight)
+        work += weight
+    }
+    workers: compiler_threads_admit(threads, inputs.len(), work, SEMA_EFFECT_LOOKUPS_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        return sema_effect_function_nodes_part(modules, inputs, calls, 0, inputs.len())
+    }
+    rows := [[Int]]{}
+    loop part in sema_effect_function_nodes_parts(modules, inputs, calls, compiler_threads_partition(weights, workers), 0) {
+        rows.extend(part)
+    }
+    rows
+}
+
+sema_effect_function_nodes_parts: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], calls: SemaEffectCallIndex, bounds: [Int], at: Int) -> [[[Int]]] Never! {
+    done := [[[Int]]]{}
+    if at + 1 >= bounds.len() -> return done
+    from: bounds[at]
+    to: bounds[at + 1]
+    if at + 2 == bounds.len() {
+        done.push(sema_effect_function_nodes_part(modules, inputs, calls, from, to))
+        return done
+    }
+    task.group sema_effect_function_node_threads {
+        head: task sema_effect_function_nodes_part(modules, inputs, calls, from, to)
+        rest: sema_effect_function_nodes_parts(modules, inputs, calls, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+sema_effect_function_nodes_part: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], calls: SemaEffectCallIndex, from: Int, to: Int) -> [[Int]] Never! {
+    rows := [[Int]]{}
+    loop position in from..<to {
+        rows.push(loop function in modules[inputs[position].module_index].functions -> sema_effect_node_index(calls.node_by_key, function.key) ?? -1)
+    }
+    rows
+}
+
+// One node's call edges, value edges, instance reaches, memory calls and
+// instantiations as node indices (-1 for a key without a node).
+SemaEffectNodeTargets: struct {
+    calls: [Int]
+    values: [Int]
+    reaches: [Int]
+    memory: [Int]
+    instantiations: [Int]
+}
+
 // Each node's call edges, value edges and memory calls as node indices, once
 // the graph's edges are final (after sema_effect_resolve_type_params): the
 // walks over the graph follow these and never look a callee's key up again.
-sema_effect_resolve_edges: fn(nodes: &[SemaEffectNode], node_by_key: NameRows) Never! {
-    loop index in 0..<nodes.len() {
-        nodes[index].call_targets = loop edge in nodes[index].call_edges -> sema_effect_node_index(node_by_key, edge) ?? -1
-        if &nodes[index].rare == .Val(rare) {
-            rare.value_targets = loop edge in rare.value_edges -> sema_effect_node_index(node_by_key, edge) ?? -1
-            loop at in 0..<rare.instance_reaches.len() {
-                rare.instance_reaches[at].target_node = sema_effect_node_index(node_by_key, rare.instance_reaches[at].target) ?? -1
-            }
+// The lookups run on up to `threads` compiler threads, each over consecutive
+// nodes reading the graph in place; the caller then moves each node's indices
+// into it, so the result is the same for any thread count.
+sema_effect_resolve_edges: fn(nodes: &[SemaEffectNode], calls: SemaEffectCallIndex, threads: CompilerThreads) Never! {
+    weights := [Int]{}
+    work := 0
+    loop node in nodes {
+        weight := 1 + node.call_edges.len() + node.memory_calls.len() + node.instantiations.len()
+        if node.rare == .Val(rare) -> weight += rare.value_edges.len() + rare.instance_reaches.len()
+        weights.push(weight)
+        work += weight
+    }
+    workers: compiler_threads_admit(threads, nodes.len(), work, SEMA_EFFECT_LOOKUPS_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        loop index in 0..<nodes.len() {
+            targets: sema_effect_node_targets(nodes[index], calls)
+            sema_effect_place_targets(nodes[index], targets)
         }
-        loop at in 0..<nodes[index].memory_calls.len() {
-            nodes[index].memory_calls[at].target = sema_effect_node_index(node_by_key, nodes[index].memory_calls[at].callee) ?? -1
+        return
+    }
+    parts := sema_effect_resolve_edge_parts(nodes, calls, compiler_threads_partition(weights, workers), 0)
+    // Last part and last node first, so each row moves out of its part.
+    index := nodes.len()
+    loop parts.len() > 0 {
+        part := parts.pop() ?? break
+        loop part.len() > 0 {
+            targets: part.pop() ?? break
+            index -= 1
+            sema_effect_place_targets(nodes[index], targets)
         }
-        loop at in 0..<nodes[index].instantiations.len() {
-            nodes[index].instantiations[at].callee_node = sema_effect_node_index(node_by_key, nodes[index].instantiations[at].callee) ?? -1
+    }
+}
+
+sema_effect_resolve_edge_parts: fn(nodes: [SemaEffectNode], calls: SemaEffectCallIndex, bounds: [Int], at: Int) -> [[SemaEffectNodeTargets]] Never! {
+    done := [[SemaEffectNodeTargets]]{}
+    if at + 1 >= bounds.len() -> return done
+    from: bounds[at]
+    to: bounds[at + 1]
+    if at + 2 == bounds.len() {
+        done.push(sema_effect_resolve_edge_part(nodes, calls, from, to))
+        return done
+    }
+    task.group sema_effect_resolve_edge_threads {
+        head: task sema_effect_resolve_edge_part(nodes, calls, from, to)
+        rest: sema_effect_resolve_edge_parts(nodes, calls, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+sema_effect_resolve_edge_part: fn(nodes: [SemaEffectNode], calls: SemaEffectCallIndex, from: Int, to: Int) -> [SemaEffectNodeTargets] Never! {
+    loop index in from..<to -> sema_effect_node_targets(nodes[index], calls)
+}
+
+sema_effect_node_targets: fn(node: SemaEffectNode, calls: SemaEffectCallIndex) -> SemaEffectNodeTargets Never! {
+    call_targets: loop edge in node.call_edges -> sema_effect_node_index(calls.node_by_key, edge) ?? -1
+    values := [Int]{}
+    reaches := [Int]{}
+    if node.rare == .Val(rare) {
+        values = loop edge in rare.value_edges -> sema_effect_node_index(calls.node_by_key, edge) ?? -1
+        reaches = loop reach in rare.instance_reaches -> sema_effect_node_index(calls.node_by_key, reach.target) ?? -1
+    }
+    memory: loop call in node.memory_calls -> sema_effect_node_index(calls.node_by_key, call.callee) ?? -1
+    instantiations: loop site in node.instantiations -> sema_effect_node_index(calls.node_by_key, site.callee) ?? -1
+    SemaEffectNodeTargets{calls: call_targets, values: values, reaches: reaches, memory: memory, instantiations: instantiations}
+}
+
+// Moves `targets` (sema_effect_node_targets of `node`) into `node`.
+sema_effect_place_targets: fn(node: &SemaEffectNode, targets: &&SemaEffectNodeTargets) Never! {
+    node.call_targets = targets.calls.move()
+    if &node.rare == .Val(rare) {
+        rare.value_targets = targets.values.move()
+        loop at in 0..<rare.instance_reaches.len() {
+            rare.instance_reaches[at].target_node = targets.reaches[at]
         }
+    }
+    loop at in 0..<node.memory_calls.len() -> node.memory_calls[at].target = targets.memory[at]
+    loop at in 0..<node.instantiations.len() {
+        node.instantiations[at].callee_node = targets.instantiations[at]
     }
 }
 
@@ -4939,12 +5069,10 @@ SEMA_EFFECT_STACK_MIN_BYTES_PER_THREAD: 65536
 // compiler threads. A function's row reads only its own body, the frame
 // sizes of the program's types, the graph's nodes and the call index, and
 // writes nothing shared. Threads claim consecutive parts of the functions
-// dynamically, each part into its own rows; the parts join in part order,
-// so the rows are the same for any thread count. The modules, the graph's
-// nodes and the call index move into the threads' shared state and back;
-// the index is returned.
-sema_effect_stack_bodies: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: &[SemaEffectNode], calls: &&SemaEffectCallIndex, threads: CompilerThreads, bodies: &SemaStackBodies, closed: Bool{false}) -> SemaEffectCallIndex {
-    index: calls.move()
+// dynamically, each part into its own rows, reading the modules, the nodes
+// and the call index in place; the parts join in part order, so the rows are
+// the same for any thread count.
+sema_effect_stack_bodies: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, threads: CompilerThreads, bodies: &SemaStackBodies, closed: Bool{false}) {
     defs := [TTypeDef]{}
     loop graph in modules {
         loop definition in graph.declarations.type_defs -> defs.push(definition.copy())
@@ -4955,9 +5083,10 @@ sema_effect_stack_bodies: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEff
     job_node := [Int]{}
     weights := [Int]{}
     work := 0
-    loop module_row in inputs {
+    loop (input_position, module_row) in inputs {
         loop (function_index, function) in modules[module_row.module_index].functions {
-            node_index: sema_effect_node_index(index.node_by_key, function.key) ?? next
+            node_index: function_nodes[input_position][function_index]
+            if node_index < 0 -> next
             job_module.push(module_row.module_index)
             job_function.push(function_index)
             job_node.push(node_index)
@@ -4972,36 +5101,30 @@ sema_effect_stack_bodies: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEff
     if workers <= 1 {
         loop (job, node_index) in job_node {
             sema_effect_stack_own(types, modules[job_module[job]].functions[job_function[job]], bodies)
-            sema_effect_stack_dynamic(modules[job_module[job]].functions[job_function[job]].tree, node_index, nodes, index, closed, bodies.values)
+            sema_effect_stack_dynamic(modules[job_module[job]].functions[job_function[job]].tree, node_index, nodes, calls, closed, bodies.values)
         }
         bodies.node = job_node.move()
-        return index
+        return
     }
     count := workers * SEMA_EFFECT_COLLECT_PARTS_PER_THREAD
     if count > job_node.len() -> count = job_node.len()
     bounds: compiler_threads_partition(weights, count)
-    shared_state: Shared{SemaStackShared{modules: [SemaGraphModuleResult]{}, nodes: [SemaEffectNode]{}, calls: [SemaEffectCallIndex]{}, types: [JetFrameTypes]{types.move()}, job_module: job_module.move(), job_function: job_function.move(), job_node: job_node.move(), closed: closed}}
-    sema_effect_stack_bodies_fill(shared_state, modules, nodes, index)
+    jobs: SemaStackJobs{module_index: job_module.move(), function: job_function.move(), node: job_node.move(), closed: closed}
     queue: Shared{SemaEffectCollectQueue{next: 0}}
     parts := [SemaStackBodies]{}
     loop _ in 0..<count -> parts.push(sema_effect_stack_bodies_empty())
-    sema_effect_stack_bodies_claimers(shared_state, bounds, queue, 0, workers, parts)
+    sema_effect_stack_bodies_claimers(modules, nodes, calls, types, jobs, bounds, queue, 0, workers, parts)
     loop part in 0..<count -> sema_effect_stack_bodies_join(bodies, parts[part])
-    sema_effect_stack_bodies_take(shared_state, modules, nodes, bodies)
+    bodies.node = jobs.node.move()
 }
 
-// What every frame-sizing thread reads: the modules, the graph's nodes, the
-// call index (its one row) and the program's frame types (its one row),
-// moved in and back out; each function's module, its row there and its node;
-// and whether the build is closed.
-SemaStackShared: struct {
-    modules: [SemaGraphModuleResult]
-    nodes: [SemaEffectNode]
-    calls: [SemaEffectCallIndex]
-    types: [JetFrameTypes]
-    job_module: [Int]
-    job_function: [Int]
-    job_node: [Int]
+// What every frame-sizing thread reads beside the modules, the graph's
+// nodes, the call index and the program's frame types: each function's
+// module, its row there and its node; and whether the build is closed.
+SemaStackJobs: struct {
+    module_index: [Int]
+    function: [Int]
+    node: [Int]
     closed: Bool
 }
 
@@ -5009,23 +5132,6 @@ SemaStackShared: struct {
 SemaStackBodiesPart: struct {
     part: Int
     bodies: SemaStackBodies
-}
-
-sema_effect_stack_bodies_fill: fn(shared_state: Shared<SemaStackShared>, modules: &[SemaGraphModuleResult], nodes: &[SemaEffectNode], calls: &&SemaEffectCallIndex) {
-    permit: shared_state.guard_edit()
-    compiler_transfer_rows<SemaGraphModuleResult>(permit.value.modules, modules)
-    compiler_transfer_rows<SemaEffectNode>(permit.value.nodes, nodes)
-    permit.value.calls.push(calls)
-}
-
-// Moves the modules and the nodes back, the functions' nodes into `bodies`,
-// and returns the call index.
-sema_effect_stack_bodies_take: fn(shared_state: Shared<SemaStackShared>, modules: &[SemaGraphModuleResult], nodes: &[SemaEffectNode], bodies: &SemaStackBodies) -> SemaEffectCallIndex {
-    permit: shared_state.guard_edit()
-    compiler_transfer_rows<SemaGraphModuleResult>(modules, permit.value.modules)
-    compiler_transfer_rows<SemaEffectNode>(nodes, permit.value.nodes)
-    compiler_transfer_rows<Int>(bodies.node, permit.value.job_node)
-    permit.value.calls.pop() ?? panic("the effect call index left the threads' shared state")
 }
 
 // Appends a part's rows (all but its nodes) to `bodies`, leaving the part
@@ -5042,13 +5148,13 @@ sema_effect_stack_bodies_join: fn(bodies: &SemaStackBodies, part: &SemaStackBodi
 
 // Runs frame-sizing threads `from..<workers`, one task each, and moves every
 // part a thread returned into `parts`.
-sema_effect_stack_bodies_claimers: fn(shared_state: Shared<SemaStackShared>, bounds: [Int], queue: Shared<SemaEffectCollectQueue>, from: Int, workers: Int, parts: &[SemaStackBodies]) {
+sema_effect_stack_bodies_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>, from: Int, workers: Int, parts: &[SemaStackBodies]) {
     if from >= workers {
         return
     }
     task.group sema_effect_stack_threads {
-        head: task sema_effect_stack_bodies_claimed(shared_state, bounds, queue)
-        sema_effect_stack_bodies_claimers(shared_state, bounds, queue, from + 1, workers, parts)
+        head: task sema_effect_stack_bodies_claimed(modules, nodes, calls, types, jobs, bounds, queue)
+        sema_effect_stack_bodies_claimers(modules, nodes, calls, types, jobs, bounds, queue, from + 1, workers, parts)
         claimed := head.join() ?? panic(compiler_threads_failure_text(err))
         loop claimed.len() > 0 {
             done: claimed.pop() ?? break
@@ -5058,8 +5164,7 @@ sema_effect_stack_bodies_claimers: fn(shared_state: Shared<SemaStackShared>, bou
 }
 
 // One thread: sizes the parts it claims, each into its own rows.
-sema_effect_stack_bodies_claimed: fn(shared_state: Shared<SemaStackShared>, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaStackBodiesPart] {
-    inputs: shared_state.guard_read()
+sema_effect_stack_bodies_claimed: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaStackBodiesPart] {
     claimed := [SemaStackBodiesPart]{}
     ranks: queue.guard_read()
     loop {
@@ -5067,9 +5172,8 @@ sema_effect_stack_bodies_claimed: fn(shared_state: Shared<SemaStackShared>, boun
         if part >= bounds.len() - 1 -> break
         bodies := sema_effect_stack_bodies_empty()
         loop job in bounds[part]..<bounds[part + 1] {
-            // Passed straight through: a local binding of a guarded row would copy it.
-            sema_effect_stack_own(inputs.value.types[0], inputs.value.modules[inputs.value.job_module[job]].functions[inputs.value.job_function[job]], bodies)
-            sema_effect_stack_dynamic(inputs.value.modules[inputs.value.job_module[job]].functions[inputs.value.job_function[job]].tree, inputs.value.job_node[job], inputs.value.nodes, inputs.value.calls[0], inputs.value.closed, bodies.values)
+            sema_effect_stack_own(types, modules[jobs.module_index[job]].functions[jobs.function[job]], bodies)
+            sema_effect_stack_dynamic(modules[jobs.module_index[job]].functions[jobs.function[job]].tree, jobs.node[job], nodes, calls, jobs.closed, bodies.values)
         }
         claimed.push(SemaStackBodiesPart{part: part, bodies: bodies.move()})
     }
@@ -6151,9 +6255,10 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         }
     } ?? false
     any_unsafe: unsafe_node || sema_effect_calls_any_unsafe_foreign(calls.modules)
-    calls = sema_effect_collect_threads(modules, inputs, nodes, calls, any_unsafe, diagnostics, threads)
+    function_nodes: sema_effect_function_nodes(modules, inputs, calls, threads)
+    sema_effect_collect_threads(modules, inputs, function_nodes, nodes, calls, any_unsafe, diagnostics, threads)
     sema_effect_resolve_type_params(nodes, calls)
-    sema_effect_resolve_edges(nodes, calls.node_by_key)
+    sema_effect_resolve_edges(nodes, calls, threads)
     sema_effect_check_expanding_instances(nodes, inputs, diagnostics)
     callers: sema_effect_callers(nodes, table)
     solved: sema_effect_solve(nodes, callers)
@@ -6259,7 +6364,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // Every call path's stack, by the frame model; FnBody keeps each frame
     // bound and each entry's path bound.
     bodies := sema_effect_stack_bodies_empty()
-    calls = sema_effect_stack_bodies(modules, inputs, nodes, calls, threads, bodies, closed: closed)
+    sema_effect_stack_bodies(modules, inputs, function_nodes, nodes, calls, threads, bodies, closed: closed)
     frames: sema_effect_stack_frames(nodes, bodies, closed: closed)
     stack := sema_effect_stack_walk(nodes)
     // Whether a check walks the call graph past a body for what its reach
@@ -6377,10 +6482,11 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     called: sema_effect_called(nodes)
     heaps: sema_effect_heap_bounds(nodes, called)
     stacks: sema_effect_stack_bounds(stack, frames, nodes, called)
-    loop module_row in inputs {
+    loop (input_position, module_row) in inputs {
         target: module_row.module_index
         loop function_index in 0..<modules[target].functions.len() {
-            node_index: sema_effect_node_index(calls.node_by_key, modules[target].functions[function_index].key) ?? next
+            node_index: function_nodes[input_position][function_index]
+            if node_index < 0 -> next
             effects := sema_effect_tfacts(nodes[node_index], solved[node_index])
             memoized: modules[target].functions[function_index].memo_bound != None || modules[target].functions[function_index].memo_unbounded
             if memoized -> sema_effect_context_reach(nodes, node_index, effects)
@@ -6564,10 +6670,12 @@ sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModul
 }
 
 // Collects every function's effect sites of input module `module_index` into
-// its node, and checks its unsafe calls.
-sema_effect_collect_module: fn(functions: [FnBody], module_row: SemaEffectModuleInput, module_index: Int, calls: SemaEffectCallIndex, any_unsafe: Bool, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic]) {
-    loop function in functions {
-        node_index: sema_effect_node_index(calls.node_by_key, function.key) ?? next
+// its node (`function_nodes`, sema_effect_function_nodes), and checks its
+// unsafe calls.
+sema_effect_collect_module: fn(functions: [FnBody], function_nodes: [Int], module_row: SemaEffectModuleInput, module_index: Int, calls: SemaEffectCallIndex, any_unsafe: Bool, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic]) {
+    loop (function_index, function) in functions {
+        node_index: function_nodes[function_index]
+        if node_index < 0 -> next
         function_diagnostics := [Diagnostic]{}
         sema_effect_collect_one(nodes, node_index, function, calls, module_index, any_unsafe, function_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, function_diagnostics)
@@ -6617,13 +6725,12 @@ SEMA_EFFECT_COLLECT_PARTS_PER_THREAD: 8
 // caller, never another node. The functions that name one node form one unit
 // (almost always a single function), collected in module and function order
 // into a copy of that node's row; units are independent. Threads claim
-// consecutive parts of the units dynamically; the caller then moves each
-// unit's row back into the graph's nodes and publishes every function's
-// reports in module and function order, exactly as one thread collecting
-// the modules in order does. The modules, the graph's nodes and the call
-// index move into the threads' shared state and back; the index is returned.
-sema_effect_collect_threads: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: &[SemaEffectNode], calls: &&SemaEffectCallIndex, any_unsafe: Bool, diagnostics: &[Diagnostic], threads: CompilerThreads) -> SemaEffectCallIndex {
-    index := calls.move()
+// consecutive parts of the units dynamically and read the modules, the
+// graph's nodes and the call index in place, so nothing moves in or out for
+// them; the caller then moves each unit's row back into the graph's nodes
+// and publishes every function's reports in module and function order,
+// exactly as one thread collecting the modules in order does.
+sema_effect_collect_threads: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: &[SemaEffectNode], calls: SemaEffectCallIndex, any_unsafe: Bool, diagnostics: &[Diagnostic], threads: CompilerThreads) {
     // One job per function with a node, in module and function order; a
     // unit's jobs chain through `job_next` from `unit_first`.
     job_input := [Int]{}
@@ -6637,7 +6744,8 @@ sema_effect_collect_threads: fn(modules: &[SemaGraphModuleResult], inputs: [Sema
     work := 0
     loop (input_position, module_row) in inputs {
         loop (function_index, function) in modules[module_row.module_index].functions {
-            node_index: sema_effect_node_index(index.node_by_key, function.key) ?? next
+            node_index: function_nodes[input_position][function_index]
+            if node_index < 0 -> next
             job: job_input.len()
             job_input.push(input_position)
             job_function.push(function_index)
@@ -6661,33 +6769,27 @@ sema_effect_collect_threads: fn(modules: &[SemaGraphModuleResult], inputs: [Sema
     workers: compiler_threads_admit(threads, unit_first.len(), work, SEMA_EFFECT_COLLECT_MIN_BYTES_PER_THREAD, 0, unit_first.len() * SEMA_EFFECT_NODE_BYTES)
     if workers <= 1 {
         loop (input_position, module_row) in inputs {
-            sema_effect_collect_module(modules[module_row.module_index].functions, module_row, input_position, index, any_unsafe, nodes, diagnostics)
+            sema_effect_collect_module(modules[module_row.module_index].functions, function_nodes[input_position], module_row, input_position, calls, any_unsafe, nodes, diagnostics)
         }
-        return index
+        return
     }
     count := workers * SEMA_EFFECT_COLLECT_PARTS_PER_THREAD
     if count > unit_first.len() -> count = unit_first.len()
     bounds: compiler_threads_partition(unit_weights, count)
     module_rows := loop module_row in inputs -> module_row.module_index
-    shared_state: Shared{SemaEffectCollectShared{modules: [SemaGraphModuleResult]{}, calls: [SemaEffectCallIndex]{}, nodes: [SemaEffectNode]{}, module_rows: module_rows.move(), job_input: job_input.move(), job_function: job_function.move(), job_next: job_next.move(), unit_first: unit_first.move(), unit_nodes: unit_nodes.move(), any_unsafe: any_unsafe}}
-    sema_effect_collect_fill(shared_state, modules, nodes, index)
+    jobs: SemaEffectCollectJobs{module_rows: module_rows.move(), job_input: job_input.move(), job_function: job_function.move(), job_next: job_next.move(), unit_first: unit_first.move(), unit_nodes: unit_nodes.move(), any_unsafe: any_unsafe}
     queue: Shared{SemaEffectCollectQueue{next: 0}}
     parts := [[SemaEffectCollected]]{}
     loop _ in 0..<count -> parts.push([SemaEffectCollected]{})
-    sema_effect_collect_claimers(shared_state, bounds, queue, 0, workers, parts)
-    sema_effect_collect_place(shared_state, bounds, parts, inputs, diagnostics)
-    sema_effect_collect_take(shared_state, modules, nodes)
+    sema_effect_collect_claimers(modules, nodes, calls, jobs, bounds, queue, 0, workers, parts)
+    sema_effect_collect_place(nodes, jobs, bounds, parts, inputs, diagnostics)
 }
 
-// What every collecting thread reads: the modules, the graph's nodes and the
-// call index (its one row), moved in and back out; each input module's row
-// in `modules`; each job's input module, function and next job of its unit;
-// each unit's first job and node; and whether the graph has an `#Unsafe`
-// function.
-SemaEffectCollectShared: struct {
-    modules: [SemaGraphModuleResult]
-    calls: [SemaEffectCallIndex]
-    nodes: [SemaEffectNode]
+// What every collecting thread reads beside the modules, the graph's nodes
+// and the call index: each input module's row in `modules`; each job's input
+// module, function and next job of its unit; each unit's first job and node;
+// and whether the graph has an `#Unsafe` function.
+SemaEffectCollectJobs: struct {
     module_rows: [Int]
     job_input: [Int]
     job_function: [Int]
@@ -6721,30 +6823,14 @@ SemaEffectCollectedPart: struct {
     collected: [SemaEffectCollected]
 }
 
-sema_effect_collect_fill: fn(shared_state: Shared<SemaEffectCollectShared>, modules: &[SemaGraphModuleResult], nodes: &[SemaEffectNode], calls: &&SemaEffectCallIndex) {
-    permit: shared_state.guard_edit()
-    compiler_transfer_rows<SemaGraphModuleResult>(permit.value.modules, modules)
-    compiler_transfer_rows<SemaEffectNode>(permit.value.nodes, nodes)
-    permit.value.calls.push(calls)
-}
-
-// Moves the modules and the nodes back and returns the call index.
-sema_effect_collect_take: fn(shared_state: Shared<SemaEffectCollectShared>, modules: &[SemaGraphModuleResult], nodes: &[SemaEffectNode]) -> SemaEffectCallIndex {
-    permit: shared_state.guard_edit()
-    compiler_transfer_rows<SemaGraphModuleResult>(modules, permit.value.modules)
-    compiler_transfer_rows<SemaEffectNode>(nodes, permit.value.nodes)
-    permit.value.calls.pop() ?? panic("the effect call index left the threads' shared state")
-}
-
 // Moves each unit's collected node row into the graph's nodes, then
 // publishes every function's reports in job (module and function) order.
-sema_effect_collect_place: fn(shared_state: Shared<SemaEffectCollectShared>, bounds: [Int], parts: &[[SemaEffectCollected]], inputs: [SemaEffectModuleInput], diagnostics: &[Diagnostic]) {
-    permit: shared_state.guard_edit()
+sema_effect_collect_place: fn(nodes: &[SemaEffectNode], jobs: SemaEffectCollectJobs, bounds: [Int], parts: &[[SemaEffectCollected]], inputs: [SemaEffectModuleInput], diagnostics: &[Diagnostic]) {
     reports := [SemaEffectCollectReport]{}
     loop part in 0..<bounds.len() - 1 {
         loop unit in bounds[part]..<bounds[part + 1] {
             collected := parts[part].pop() ?? panic("a collected effect node left its part")
-            permit.value.nodes[permit.value.unit_nodes[unit]] = collected.node.move()
+            nodes[jobs.unit_nodes[unit]] = collected.node.move()
             loop collected.reports.len() > 0 {
                 report := collected.reports.pop() ?? break
                 reports.push(report)
@@ -6753,19 +6839,19 @@ sema_effect_collect_place: fn(shared_state: Shared<SemaEffectCollectShared>, bou
     }
     reports.sort_by(fn(left: SemaEffectCollectReport, right: SemaEffectCollectReport) { left.job <=> right.job })
     loop report in reports.move() {
-        sema_effect_publish_diagnostics(diagnostics, inputs[permit.value.job_input[report.job]].source_segments, report.diagnostics.move())
+        sema_effect_publish_diagnostics(diagnostics, inputs[jobs.job_input[report.job]].source_segments, report.diagnostics.move())
     }
 }
 
 // Runs collecting threads `from..<workers`, one task each, and moves every
 // part a thread returned into `parts`.
-sema_effect_collect_claimers: fn(shared_state: Shared<SemaEffectCollectShared>, bounds: [Int], queue: Shared<SemaEffectCollectQueue>, from: Int, workers: Int, parts: &[[SemaEffectCollected]]) {
+sema_effect_collect_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>, from: Int, workers: Int, parts: &[[SemaEffectCollected]]) {
     if from >= workers {
         return
     }
     task.group sema_effect_threads {
-        head: task sema_effect_collect_claimed(shared_state, bounds, queue)
-        sema_effect_collect_claimers(shared_state, bounds, queue, from + 1, workers, parts)
+        head: task sema_effect_collect_claimed(modules, nodes, calls, jobs, bounds, queue)
+        sema_effect_collect_claimers(modules, nodes, calls, jobs, bounds, queue, from + 1, workers, parts)
         claimed := head.join() ?? panic(compiler_threads_failure_text(err))
         loop claimed.len() > 0 {
             done: claimed.pop() ?? break
@@ -6776,8 +6862,7 @@ sema_effect_collect_claimers: fn(shared_state: Shared<SemaEffectCollectShared>, 
 
 // One thread: collects the parts it claims, in order, each unit into its own
 // copy of the unit's node row.
-sema_effect_collect_claimed: fn(shared_state: Shared<SemaEffectCollectShared>, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaEffectCollectedPart] {
-    inputs: shared_state.guard_read()
+sema_effect_collect_claimed: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaEffectCollectedPart] {
     claimed := [SemaEffectCollectedPart]{}
     ranks: queue.guard_read()
     loop {
@@ -6786,19 +6871,18 @@ sema_effect_collect_claimed: fn(shared_state: Shared<SemaEffectCollectShared>, b
         collected := [SemaEffectCollected]{}
         loop unit in bounds[part]..<bounds[part + 1] {
             // copy: the unit's functions write their own row, while the
-            // graph's row (owner: the shared state) stays in place.
-            own := [SemaEffectNode]{inputs.value.nodes[inputs.value.unit_nodes[unit]].copy()}
+            // graph's row stays in place for every thread to read.
+            own := [SemaEffectNode]{nodes[jobs.unit_nodes[unit]].copy()}
             reports := [SemaEffectCollectReport]{}
-            job := inputs.value.unit_first[unit]
+            job := jobs.unit_first[unit]
             loop job >= 0 {
                 function_diagnostics := [Diagnostic]{}
-                input_position: inputs.value.job_input[job]
-                // Passed straight through: a local binding of a guarded row would copy it.
-                sema_effect_collect_one(own, 0, inputs.value.modules[inputs.value.module_rows[input_position]].functions[inputs.value.job_function[job]], inputs.value.calls[0], input_position, inputs.value.any_unsafe, function_diagnostics)
+                input_position: jobs.job_input[job]
+                sema_effect_collect_one(own, 0, modules[jobs.module_rows[input_position]].functions[jobs.job_function[job]], calls, input_position, jobs.any_unsafe, function_diagnostics)
                 if function_diagnostics.len() > 0 {
                     reports.push(SemaEffectCollectReport{job: job, diagnostics: function_diagnostics.move()})
                 }
-                job = inputs.value.job_next[job]
+                job = jobs.job_next[job]
             }
             node := own.pop() ?? panic("a collected effect node left its unit")
             collected.push(SemaEffectCollected{node: node.move(), reports: reports.move()})

@@ -1,7 +1,10 @@
-// sema.effects sizes every function's stack frame and reads the function
-// values its body calls and makes on compiler threads
-// (sema_effect_stack_bodies), joining the parts in function order: the
-// checked program is the same on one thread and on eight.
+// sema.effects runs its per-function and per-node passes on compiler threads:
+// it finds every function's node (sema_effect_function_nodes), collects
+// each function's effect sites (sema_effect_collect_threads), resolves the
+// graph's edges to nodes (sema_effect_resolve_edges), and sizes every
+// function's stack frame and reads the function values its body calls and
+// makes (sema_effect_stack_bodies), joining the parts in order: the checked
+// program is the same on one thread and on eight.
 use {
     jet_sema.[
         SemaBuildFacts,
@@ -25,23 +28,22 @@ use {
     jet_foundation.[CompilerThreads, Span, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table]
 }
 
-// `count` groups of a padded leaf, a function that calls through a function
-// value, and two callers that pass it the leaf and a lambda. `run` calls the
-// even groups' callers, so the odd ones keep their own stack bounds. The
-// padding puts enough function source in the program for several threads.
+// `count` groups of a leaf, a function that calls through a function value,
+// and two callers that pass it the leaf and a lambda. `run` calls the even
+// groups' callers, so the odd ones keep their own stack bounds. The groups
+// put enough functions, edges and source in the program for several threads
+// in each pass.
 effect_stack_threads_source: fn(count: Int) -> String {
-    pad := ""
-    loop _ in 0..<40 -> pad = "{pad} frame sizing pads this body past a thread's admission"
     parts := [String]{}
-    terms := [String]{}
+    calls := [String]{}
     loop group in 0..<count {
-        parts.push("step{group}: fn(value: Int) -> Int {{\n    //{pad}\n    value + {group}\n}}\n")
+        parts.push("step{group}: fn(value: Int) -> Int {{\n    value + {group}\n}}\n")
         parts.push("apply{group}: fn(values: [Int], f: fn(Int) -> Int) -> Int {{\n    total := 0\n    loop value in values -> total += f(value)\n    total\n}}\n")
         parts.push("named{group}: fn() -> Int {{\n    values: [Int]{{1, 2, {group}}}\n    apply{group}(values, step{group})\n}}\n")
         parts.push("lambda{group}: fn() -> Int {{\n    values: [Int]{{{group}, 3}}\n    apply{group}(values, fn(value: Int) {{ value * {group} }})\n}}\n")
-        if group % 2 == 0 -> terms.push("named{group}() + lambda{group}()")
+        if group % 2 == 0 -> calls.push("    total += named{group}() + lambda{group}()\n")
     }
-    parts.push("run: fn() {{\n    print(\"{{{terms.join(" + ")}}}\")\n}}\n")
+    parts.push("run: fn() {{\n    total := 0\n{calls.join("")}    print(\"{{total}}\")\n}}\n")
     parts.join("")
 }
 
@@ -97,7 +99,7 @@ effect_stack_threads_rows: fn(source: String, threads: CompilerThreads, failures
 
 #Test("effect_stack_threads") {
     failures := [String]{}
-    source: effect_stack_threads_source(120)
+    source: effect_stack_threads_source(1200)
     single: effect_stack_threads_rows(source, compiler_threads_single(), failures)
     eight: effect_stack_threads_rows(source, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}, failures)
     if single.len() != eight.len() {
