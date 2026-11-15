@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6908,
-    "rev": 104138,
+    "nextNum": 6915,
+    "rev": 104150,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -87013,21 +87013,21 @@
         },
         {
           "n": 43,
-          "text": "(was #1709 c1) Canvas edit actions read fallibility, defaults and submodule membership from the shared Core-call record. (was #6386 c53)",
+          "text": "Canvas edit actions read fallibility, defaults and submodule membership from the shared Core-call record (the typed Core action catalog, D-CANVAS-CORECATALOG1=C). Proof: scenario `core_action_catalog_facts`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:24:17.271Z"
+          "at": "2026-11-15T04:03:26.085Z"
         },
         {
           "n": 44,
-          "text": "(was #1709 c2) No private Core member list remains in Compiler/JetDevserver/Source/Canvas. (was #6386 c54)",
+          "text": "No private list of Core members remains in Compiler/JetDevserver/Source/Canvas: every Core name comes from the shared Core-call record. Proof: review of `git grep -n -E '\"(push|len|insert|remove|get)\"' -- Compiler/JetDevserver/Source/Canvas` finds no member table.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:24:19.644Z"
+          "at": "2026-11-15T04:03:26.961Z"
         },
         {
           "n": 45,
@@ -87121,12 +87121,12 @@
         },
         {
           "n": 55,
-          "text": "(was #2243 c1) The Canvas schema API no longer imports individual edit operations or matches Canvas edit operation names; after source selection, it crosses one private edit transaction seam. (was #6386 c70)",
+          "text": "Canvas/SchemaApi.jet imports no individual edit operation and matches no edit-operation name; after source selection it crosses one private edit-transaction function. Proof: `git grep -n -E 'EditActions|op_name' -- Compiler/JetDevserver/Source/Canvas/SchemaApi.jet` prints only the one transaction call.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:24:47.670Z"
+          "at": "2026-11-15T04:03:27.848Z"
         },
         {
           "n": 56,
@@ -87193,21 +87193,21 @@
         },
         {
           "n": 63,
-          "text": "(was #6164) (from #6169 Canvas and the dev server use parser spans, not line scans) The listed scanners are gone. (was #4917 c21)",
+          "text": "Canvas and the dev server find functions and spans from parser nodes, never by scanning source lines. Proof: `git grep -n -E 'split\\(\"\\\\n\"\\)|\\.lines\\(' -- Compiler/JetDevserver/Source/Canvas` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:25:07.411Z"
+          "at": "2026-11-15T04:03:24.362Z"
         },
         {
           "n": 64,
-          "text": "(was #6164) (from #6169 Canvas and the dev server use parser spans, not line scans) A function whose `fn` keyword follows a marker or comment on the same line is found (Canvas test). (was #4917 c22)",
+          "text": "A function whose `fn` keyword follows a marker or comment on the same line appears as a Canvas graph. Proof: scenario `fn_after_marker_on_same_line`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:25:09.679Z"
+          "at": "2026-11-15T04:03:25.219Z"
         },
         {
           "n": 66,
@@ -87263,7 +87263,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:23:54.761Z",
-      "updated": "2026-11-15T03:58:33.274Z",
+      "updated": "2026-11-15T04:03:27.848Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 70
     },
@@ -106845,6 +106845,721 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:58:26.047Z",
       "updated": "2026-11-15T03:58:26.047Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0itl587",
+      "num": 6908,
+      "title": "Canvas opens any project as one workspace: one resident session, a separate app listener, one project tree and last-good state",
+      "body": "Destination: `jet dev <source> --canvas` opens any project, not only a web target, as one workbench. It builds one project graph from package and workspace files, sources and .jet/lock (D-CANVAS-WORKSPACE1=B) and shows it as one semantic project tree (D-CANVAS-WORKSPACE-NAV1=A). Multi-file edits are previewed, checked source transactions (D-CANVAS-WORKSPACE-AUTH1=A). The app server and the Canvas control host have separate listeners but share one resident session (D-CANVAS-SESSION1=A). The control host is Jet-owned, loopback-only, on an OS-chosen port (D-CANVAS-TARGET1=A). Panels receive typed, authorized #DevPanel feeds (D-DX-PLUGIN1=D). A failed rebuild or a disconnect keeps the last good state.\n\nWhy it matters: Canvas is meant to be the IDE for every kind of Jet project, and it must never take over the app's routes.\n\nScenario proof: `jet run --allow=Env,Exec,FS,IO,Net,Time Tools/canvas-test/Run.jet -- scenario --scenario <name> --port <P>`, run against a running `jet dev <fixture> --canvas`, prints PASS.\n\nSource: #6618 c15, c45-c50, c52-c54, c69 (from #352, #2169, #2170, #4265).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Canvas opens a project graph built from package.jet, workspace files, sources and .jet/lock as one tree of packages, targets, modules, symbols and function graphs (D-CANVAS-WORKSPACE1=B, D-CANVAS-WORKSPACE-NAV1=A). A multi-file edit is one previewed, checked source transaction (D-CANVAS-WORKSPACE-AUTH1=A). With no package, single-file mode is the fallback. Proof: scenario `workspace_project_tree_and_multifile_edit`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:18.186Z"
+        },
+        {
+          "n": 2,
+          "text": "Canvas opens command-line, service, web, native UI, game, library and build projects without `--target=web`. Proof: scenario `opens_every_project_kind`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:18.186Z"
+        },
+        {
+          "n": 3,
+          "text": "Canvas opens the full project IDE before any output is chosen, and project and run selection stay in its normal workspace. Proof: scenario `ide_before_output_choice`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:18.186Z"
+        },
+        {
+          "n": 4,
+          "text": "A project with several valid outputs lists them in the IDE's output launcher, never in a terminal or prelaunch chooser. Proof: scenario `multiple_outputs_in_launcher`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:18.186Z"
+        },
+        {
+          "n": 5,
+          "text": "Canvas, code, graph, designer, preview, terminal, debugger, tests and custom servers all report one session identity and the same accepted source revision. Proof: scenario `one_session_identity`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:18.186Z"
+        },
+        {
+          "n": 6,
+          "text": "A custom app server keeps its own host, port, routes, middleware and reload policy on a listener separate from the Canvas transport. Canvas reserves no application route or middleware namespace (D-CANVAS-SESSION1=A). Proof: `jet test Compiler --profile cases --filter web_dev/jet_dev_web_status_does_not_expose_canvas_session_data` and scenario `custom_server_separate_listener`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:18.186Z"
+        },
+        {
+          "n": 7,
+          "text": "A failed rebuild keeps the last good preview, graph, debugger state and runtime while the IDE shows diagnostics for the current source. Proof: scenario `failed_rebuild_keeps_last_good`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:18.186Z"
+        },
+        {
+          "n": 8,
+          "text": "A disconnect and reconnect keep the accepted edits, the selected project, the run configuration, the debugger state and the last good program. Proof: scenario `reconnect_preserves_session`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:18.186Z"
+        },
+        {
+          "n": 9,
+          "text": "`jet dev --canvas` runs one resident session with separate listeners and a Jet-owned loopback control host on an OS-chosen port (`--canvas-port` overrides it), and feeds panels typed, authorized #DevPanel events (D-CANVAS-CMD1=A, D-CANVAS-SESSION1=A, D-CANVAS-TARGET1=A, D-DX-PLUGIN1=D). Proof: `jet test Compiler --profile cases --filter canvas_cli_lifecycle/` and `--filter web_dev/jet_dev_web_exposes_canvas_panel_and_graph`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:18.186Z"
+        },
+        {
+          "n": 10,
+          "text": "The owner's visual review accepts the workbench as one Unreal-like IDE: project, output, preview, graph, code, diagnostics and run state. Proof: the owner's acceptance is logged on this card against screenshots from scenario `workbench_tour`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:18.186Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "canvas",
+        "dev"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:03:18.186Z",
+      "updated": "2026-11-15T04:03:18.186Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0xbfhbt",
+      "num": 6909,
+      "title": "Canvas debugs the running program: breakpoints, live values, paused locals and replay on the tier that is actually running",
+      "body": "Destination: the Canvas debug overlay works through one seam whose backend is whatever is actually executing (D-CANVAS-DEBUG-UX1=D). Compiled runs use the native jet debug session; under jet dev, the O0 session is used (the old JIT and interpreter tiers are gone). Breakpoints and watches are local and anchored by file hash and source span, and stale anchors become invalid (D-CANVAS-DEBUGSTATE1=A). The overlay shows real values on pins and wires, the active node, the traversed wire, the call stack and the paused locals, and it never presents a cached value as live.\n\nWhy it matters: a visual debugger that shows stale or simulated values is worse than none.\n\nScenario proof: as on #6618.\n\nSource: #6618 c2, c5, c8-c11, c68 (from #273, #983, #984, #6573).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The Canvas debug overlay offers a session selector, breakpoints and watches anchored by file hash and source span, values on pins and wires, an active node and wire pulse, step, resume and stop, a call stack and an execution trace. It is driven by the native session for compiled runs and by the O0 session under jet dev (D-CANVAS-DEBUG-UX1=D, D-CANVAS-DEBUGSTATE1=A). Proof: `jet test Compiler --profile cases --filter web_dev/jet_dev_web_live_canvas_debug_session_round_trip` and `--filter debug/canvas_debug_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.063Z"
+        },
+        {
+          "n": 2,
+          "text": "Setting and clearing a breakpoint on a node, continuing and stepping each work through the production protocol, and the test fails if the gesture path is bypassed. Proof: scenario `breakpoint_gestures`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.063Z"
+        },
+        {
+          "n": 3,
+          "text": "At a breakpoint the debugger shows real values, stack frames, the active node and the traversed wire path from the live runtime session. Proof: scenario `debug_values_at_breakpoint`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.063Z"
+        },
+        {
+          "n": 4,
+          "text": "The paused frame's locals render with their types and current values through the production protocol. Proof: scenario `debug_paused_locals`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.063Z"
+        },
+        {
+          "n": 5,
+          "text": "After source edits move code, breakpoint and value anchors report themselves stale instead of pointing at wrong spans. Proof: `jet test Compiler --profile cases --filter debug/canvas_debug_stop_requires_matching_source_revision_and_tier` and scenario `debug_anchors_go_stale`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.063Z"
+        },
+        {
+          "n": 6,
+          "text": "Disconnecting the runtime makes the UI show a disconnected state and present no cached value as live; the test fails if the disconnect path is removed. Proof: scenario `debug_disconnect_not_live`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.063Z"
+        },
+        {
+          "n": 7,
+          "text": "A recorded Canvas debug session (run_session_recorded) replays exactly (run_session_replay) through the native O0 image, and the call sites removed from JetDevserver at #6576 c2 are restored against the real functions. Proof: `jet test Compiler --profile cases --filter debug/canvas_debug_session_replays_one_source_bound_session`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.063Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "canvas",
+        "debug"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:03:19.063Z",
+      "updated": "2026-11-15T04:03:19.063Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0brdtmy",
+      "num": 6910,
+      "title": "Canvas graph edits write ordinary Jet source: wiring, typed pins, conversions, collapse and extract, and exec-wire reorder",
+      "body": "Destination: every Canvas gesture that changes the program writes ordinary Jet source through the one edit-transaction pipeline, with undo, formatter round-trip and reprojection without drift. There is no hidden semantic sidecar or graph asset. Gestures covered: wiring, palette insert, rename, inline edit, promote to binding, control rails, drag-off-pin menus filtered by expected type, visible conversion calls (D-CANVAS-CONVERT1=A), collapse as a view over a source span with extract-to-function (D-CANVAS-COLLAPSE1=A, D-CANVAS-MULTIEXEC1=E), exec-wire reorder and the Details editors.\n\nWhy it matters: Canvas is only trustworthy if every edit is plain Jet that a text user can read and diff.\n\nScenario proof: as on #6618.\n\nSource: #6618 c17, c19, c21, c33, c38-c40 (from #272, #277, #280, #374, #867).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each of these is one source transaction with undo, a formatter round-trip and reprojection without drift: dragging a wire between compatible pins, inserting a node from the palette or search, breaking or moving a link, renaming a binding, editing an inline expression, promoting a pin to a binding, and creating branch, switch, loop and failure rails. Proof: scenario `structural_write_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.936Z"
+        },
+        {
+          "n": 2,
+          "text": "Dragging off a pin opens a menu filtered by the checker's expected type. An incompatible wire is refused with a Jet error. A compatible but different type inserts a visible conversion call into the source (D-CANVAS-CONVERT1=A). Proof: scenario `typed_pin_authoring`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.936Z"
+        },
+        {
+          "n": 3,
+          "text": "Collapsing a selection gives a node that is a view over its source span. Reusable collapse extracts an ordinary helper function whose tunnel pins are its parameters, returns and captures. Inlining runs only where the checker proves it safe and otherwise gives a Jet error. A second exec drop opens the extract preview (D-CANVAS-COLLAPSE1=A, D-CANVAS-MULTIEXEC1=E). Proof: scenario `collapse_extract_inline`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.936Z"
+        },
+        {
+          "n": 4,
+          "text": "Dragging an exec-wire endpoint reorders statements behind a diff preview; undo restores the order, and the formatter output is stable. Proof: scenario `exec_wire_reorder`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.936Z"
+        },
+        {
+          "n": 5,
+          "text": "Collection and nested-value editors validate input before writing: invalid text is refused with a visible reason and changes zero source bytes. Proof: scenario `details_editor_refuses_invalid`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.936Z"
+        },
+        {
+          "n": 6,
+          "text": "Every refusal path (validation error, stale revision, Escape, blur) writes nothing, and undo after a successful apply is exact. Proof: scenario `details_refusal_paths`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.936Z"
+        },
+        {
+          "n": 7,
+          "text": "Every rendered Details control has a live apply operation or is absent, and a structural test fails if a dead control is added. Proof: scenario `details_no_dead_controls`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:19.936Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "canvas",
+        "edit"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:03:19.936Z",
+      "updated": "2026-11-15T04:03:19.936Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0qetodj",
+      "num": 6911,
+      "title": "Canvas and the source never disagree: lossless round trips, atomic refusals, one transaction history and converging clients",
+      "body": "Destination: source text is the single truth. The graph, edits, undo, diagnostics and saved text stay lossless and mutually consistent through repeated visual and text edits, stale revisions, conflicts and disconnects. Every surface shares one source transaction history (D-CANVAS-SCM1=A stale-edit guard), and two clients editing one file converge.\n\nWhy it matters: a projection that silently drifts from the source corrupts programs.\n\nScenario proof: as on #6618.\n\nSource: #6618 c6, c7, c32, c34-c37, c41, c42, c51, c67 (from #373, #489, #867-#878, #872, #983, #984, #1053-#1057, #2170, #4171).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "About 20 core-loop scenarios pass: open, read, insert each category, wire data and exec, edit values, rename, a 20-deep mixed undo, run and output. A random fuzz of 30 operations checks after every step that the projection equals the source. Proof: scenario `core_loop_` and scenario `random_op_fuzz --seed 373`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:20.822Z"
+        },
+        {
+          "n": 2,
+          "text": "Selection, connection compatibility, edits, formatting, undo and redo, and source spans stay stable through repeated visual and text edits. Proof: scenario `mixed_visual_text_edits_stable`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:20.822Z"
+        },
+        {
+          "n": 3,
+          "text": "Ambiguous targets, incompatible wires, stale selections, invalid drops and concurrent source changes are each refused atomically with a recoverable explanation. Proof: scenario `atomic_refusals`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:20.822Z"
+        },
+        {
+          "n": 4,
+          "text": "For every construct, create, inspect, edit, format, undo and reload keep its types, scopes, provenance and canonical Jet spelling. The source, graph, edits, undo, diagnostics and saved text stay lossless and consistent. Proof: scenario `construct_round_trip_` over every projected construct.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:20.822Z"
+        },
+        {
+          "n": 5,
+          "text": "Incomplete, ill-typed, ambiguous or stale edits stay recoverable and never emit plausible but different source. Parse errors, conflicting edits, invalid graph operations and failed saves keep the source and undo history with no hidden shadow model. Proof: scenario `bad_edits_recoverable`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:20.822Z"
+        },
+        {
+          "n": 6,
+          "text": "Files, search results, diffs, diagnostics, breakpoints, values and execution state all refer to the same current source revision. Proof: scenario `one_revision_everywhere`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:20.822Z"
+        },
+        {
+          "n": 7,
+          "text": "Stale indexes, moved code, runtime disconnects, large result sets and failed edits stay bounded, report staleness and keep the user's work. Proof: scenario `bounded_and_stale_disclosed`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:20.822Z"
+        },
+        {
+          "n": 8,
+          "text": "All editor surfaces share one source transaction history, with conflict checks, undo, stale-revision refusal and accepted-revision receipts (D-CANVAS-SCM1=A). Proof: `jet test Compiler --profile cases --filter canvas_cli_lifecycle/jet_dev_canvas_applies_and_refuses_source_transactions` and scenario `one_transaction_history`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:20.822Z"
+        },
+        {
+          "n": 9,
+          "text": "Two clients editing one file at once (text and Canvas) converge to the same source, and node identity survives a rename. Proof: scenario `two_clients_converge`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:20.822Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "canvas",
+        "edit"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:03:20.822Z",
+      "updated": "2026-11-15T04:03:20.822Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c04plfgh",
+      "num": 6912,
+      "title": "Canvas projects every Jet form: a generated parity table that fails closed, rails, events, traits and tasks",
+      "body": "Destination: every Jet language form has a Canvas projection status, generated from the AST forms; a new form without a status fails the test (D-CANVAS-PARITY1=C). Supported forms project to specific nodes with source spans, unsupported ones show a Canvas error with the reason. Rails show control, data, failure, task, effect and unsafe flow; events, traits and tasks project as views over ordinary Jet source. Core calls come from the typed Core action catalog (D-CANVAS-CORECATALOG1=C).\n\nWhy it matters: the Blueprint-class editor goal (owner directive 2026-07-02, #182) needs no 'drop to code' cliff.\n\nThe repo-wide syntax census on #6898 covers fmt, LSP and Canvas together; this card owns the Canvas rows.\n\nSource: #6618 c16, c18, c20, c23, c25, c26, c28, c29 (from #182, #274, #278, #285, #311, #316, #319, #364).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A parity table generated from the AST item, statement, expression and type forms gives every form a projection, edit and support status (D-CANVAS-PARITY1=C). A new form without a status fails the test, and an unsupported form shows a Canvas error with its reason. Proof: `jet test tests/guards --filter canvas_parity_ratchet`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:21.687Z"
+        },
+        {
+          "n": 2,
+          "text": "Every supported construct projects to a specific node with a source span on every node and pin, as deterministic JSON with no opaque fallback: methods, structs and enums, bindings, calls, loops, match, failure flow, tasks, effects, modules, unsafe regions, comments and collapsed regions. Proof: `jet test Compiler --profile cases --filter canvas/projection_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:21.687Z"
+        },
+        {
+          "n": 3,
+          "text": "Rails render control, data, failure, task, effect, unsafe and debug flow for calls, branches, loops, error propagation, tasks, effects, unsafe regions and tests, as projections that add no semantics. Proof: `jet test Compiler --profile cases --filter canvas/rails_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:21.687Z"
+        },
+        {
+          "n": 4,
+          "text": "Event<T> and Hook<T,R> project as emit nodes with payload pins and subscriptions as event-graph entry views. Subscription lifetime is visible, and a delivered/queued/dropped overlay sits on the debug rails; every edit is an ordinary source transaction over core.event (D-CANVAS-EVENT1=D). Proof: `jet test Compiler --profile cases --filter canvas/event_projection`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:21.687Z"
+        },
+        {
+          "n": 5,
+          "text": "A type's graph view shows the traits it implements. Creating an impl writes member stubs. Trait and impl jump to each other. A missing member shows the real Jet error. Trait methods appear in the palette on typed pins. Proof: `jet test Compiler --profile cases --filter canvas/trait_impl_projection`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:21.687Z"
+        },
+        {
+          "n": 6,
+          "text": "Spawn, join, channel create, send and receive, and deadline blocks from core.tasks project as palette actions and nodes, and rails show task boundaries and blocking waits, all over ordinary source with no scheduler nodes. Proof: `jet test Compiler --profile cases --filter canvas/tasks_projection` on a producer/consumer example.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:21.687Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "canvas",
+        "projection"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:03:21.687Z",
+      "updated": "2026-11-15T04:03:21.687Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0jk9aer",
+      "num": 6913,
+      "title": "Canvas workbench UX: navigation, a versioned protocol, search and refactor, extension actions, docs on hover and persistent errors",
+      "body": "Destination: the Canvas workbench feels like Blueprint. It has full keyboard and pointer navigation and a versioned graph and edit protocol. Search and refactor go through the LSP and SemIndex query engine. Packages can add extension actions that only return edits (D-CANVAS-EXT1=B, D-CANVAS-EXT2=B). The code lens is read-only until an explicit Edit Source mode (D-CANVAS-CODELENS1=C). Actions are intent cards with an expert drawer (D-CANVAS-ACTIONAUTH1=C). Doc comments show as tooltips, errors stay visible, and the Code Map view (D-CODEMAP-VIEW1=A) lives here. Browser tests use the dev-shell Chromium and its CDP driver (D-CANVASTEST1=A).\n\nWhy it matters: the visual editor is the product surface beginners meet first.\n\nScenario proof: as on #6618.\n\nSource: #6618 c1, c3, c4, c22, c24, c27, c30, c31, c70 (from #271, #276, #282, #284, #287, #318, #365, #372, #3868).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The workbench supports pan, zoom and zoom-to-fit, a graph picker, breadcrumbs, a minimap, marquee, shift and ctrl selection, dragging nodes and groups, arrow nudge, context menus, a command palette, an inspector, source jump, keyboard focus and accessibility. Desktop and mobile screenshots are nonblank with no layout shift. Proof: scenario `workbench_interactions_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:22.585Z"
+        },
+        {
+          "n": 2,
+          "text": "The graph and edit JSON protocol is versioned and documented. A no-op edit round-trips, a stale edit is refused, and unknown fields are forward compatible, all checked by snapshot tests. Proof: `jet test Compiler --profile cases --filter canvas_cli_lifecycle/jet_dev_canvas_serves_status_page_session_graph_and_source` and `--filter canvas/protocol_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:22.585Z"
+        },
+        {
+          "n": 3,
+          "text": "Find in graph, project search, find references, rename, source-to-graph and graph-to-source jump, and refactor preview all use the LSP and SemIndex query engine, with stale-transaction handling. Proof: scenario `search_refactor_nav`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:22.585Z"
+        },
+        {
+          "n": 4,
+          "text": "A package declares ordinary Jet action functions with `canvas.action` authority (D-CANVAS-EXT1=B, D-CANVAS-EXT2=B). Canvas runs them through the checked compile path, and an action returns a CanvasEdit, source diff or error and cannot write files itself. Proof: `jet test Compiler --profile cases --filter canvas/extension_action_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:22.585Z"
+        },
+        {
+          "n": 5,
+          "text": "The code lens is read-only by default, and an explicit Edit Source mode uses the same transaction pipeline (D-CANVAS-CODELENS1=C). Pin and signature controls, context menus filtered by pin type, built-in and action search, and nested function editing all work. Proof: scenario `blueprint_ux_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:22.585Z"
+        },
+        {
+          "n": 6,
+          "text": "Doc comments from the source render as node and pin tooltips, pin types link to their docs, and a dismissible first-run tour keeps only local state. Proof: scenario `node_doc_hover`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:22.585Z"
+        },
+        {
+          "n": 7,
+          "text": "Run, Check and Build show as intent cards whose expert drawer gives the exact command, grants, touched files and outputs (D-CANVAS-ACTIONAUTH1=C). Proof: scenario `action_intent_cards`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:22.585Z"
+        },
+        {
+          "n": 8,
+          "text": "A failed transaction shows the full Jet error (what, why, fix) in a persistent panel until dismissed. Check runs into a results panel with jump-to-node, and nodes with errors carry hoverable error bubbles. Proof: scenario `error_surfacing_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:22.585Z"
+        },
+        {
+          "n": 9,
+          "text": "The Code Map view in Canvas (D-CODEMAP-VIEW1=A) draws a treemap of the code-map rows with every metric plus Blend, all four border choices, click-to-source and zoom. Rectangles update live in the dev loop, and a saved --json snapshot opens in the same view. First-render and hover latency on Compiler/ are logged. A test proves that sizes, colours and hover values come unchanged from the --json rows. Proof: `jet test Compiler --profile cases --filter canvas/code_map_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:22.585Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "canvas",
+        "ux"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:03:22.585Z",
+      "updated": "2026-11-15T04:03:22.585Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0yljhgc",
+      "num": 6914,
+      "title": "Named previews in Canvas from ordinary core.ui values (D-DX-PREVIEW1=A)",
+      "body": "Destination: a source file registers named preview scenarios through ordinary core.ui values and functions, with no new syntax (D-DX-PREVIEW1=A). Canvas renders each variant's normal UiNode tree, runs shared fixtures once, isolates variants, and keeps the last good preview when one breaks; a playground path runs the same checked source through Canvas and `jet dev`.\n\nWhy it matters: previewing UI states side by side is how UI work gets fast.\n\nSource: #6618 c58-c62 (from #2464).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Named previews register through ordinary core.ui values and functions with no new syntax, and D-DX-PREVIEW1=A's declaration, variant and shared-context rules hold. Proof: `jet test Compiler --profile cases --filter canvas/preview_declaration_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:23.494Z"
+        },
+        {
+          "n": 2,
+          "text": "A source file renders two named variants in Canvas, and switching variants neither restarts the app nor changes another variant's output. Proof: `jet test Compiler --profile cases --filter canvas/preview_two_variants`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:23.494Z"
+        },
+        {
+          "n": 3,
+          "text": "Expensive fixture setup runs once for several variants, and changing one preview leaks no mutable state into another. Proof: `jet test Compiler --profile cases --filter canvas/preview_shared_fixture`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:23.494Z"
+        },
+        {
+          "n": 4,
+          "text": "A malformed preview reports source errors while the last good preview stays visible. Proof: `jet test Compiler --profile cases --filter canvas/preview_malformed_keeps_last_good`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:23.494Z"
+        },
+        {
+          "n": 5,
+          "text": "A playground path runs the same checked source through Canvas and `jet dev`, with output and console errors tied to the source revision. Proof: `jet test Compiler --profile cases --filter canvas/playground_same_source`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:03:23.494Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "canvas",
+        "ui"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:03:23.494Z",
+      "updated": "2026-11-15T04:03:23.494Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -212264,6 +212979,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:03:27.848Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vsnvm",
+      "note": "#55: strip debris; proof; was: (was #2243 c1) The Canvas schema API no longer imports individual edit operations or matches Canvas edit operation names; after source selection, it crosses one private edit transaction seam. (was #63"
+    },
+    {
+      "at": "2026-11-15T04:03:26.961Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vsnvm",
+      "note": "#44: strip debris; proof; was: (was #1709 c2) No private Core member list remains in Compiler/JetDevserver/Source/Canvas. (was #6386 c54)"
+    },
+    {
+      "at": "2026-11-15T04:03:26.085Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vsnvm",
+      "note": "#43: strip debris; proof; was: (was #1709 c1) Canvas edit actions read fallibility, defaults and submodule membership from the shared Core-call record. (was #6386 c53)"
+    },
+    {
+      "at": "2026-11-15T04:03:25.219Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vsnvm",
+      "note": "#64: strip debris; proof; was: (was #6164) (from #6169 Canvas and the dev server use parser spans, not line scans) A function whose `fn` keyword follows a marker or comment on the same line is found (Canvas test). (was #4917 c22)"
+    },
+    {
+      "at": "2026-11-15T04:03:24.362Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vsnvm",
+      "note": "#63: strip debris; proof; was: (was #6164) (from #6169 Canvas and the dev server use parser spans, not line scans) The listed scanners are gone. (was #4917 c21)"
+    },
+    {
+      "at": "2026-11-15T04:03:23.494Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0yljhgc",
+      "note": "Named previews in Canvas from ordinary core.ui values (D-DX-PREVIEW1=A)"
+    },
+    {
+      "at": "2026-11-15T04:03:22.585Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0jk9aer",
+      "note": "Canvas workbench UX: navigation, a versioned protocol, search and refactor, extension actions, docs on hover and persistent errors"
+    },
+    {
+      "at": "2026-11-15T04:03:21.687Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c04plfgh",
+      "note": "Canvas projects every Jet form: a generated parity table that fails closed, rails, events, traits and tasks"
+    },
+    {
+      "at": "2026-11-15T04:03:20.822Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0qetodj",
+      "note": "Canvas and the source never disagree: lossless round trips, atomic refusals, one transaction history and converging clients"
+    },
+    {
+      "at": "2026-11-15T04:03:19.936Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0brdtmy",
+      "note": "Canvas graph edits write ordinary Jet source: wiring, typed pins, conversions, collapse and extract, and exec-wire reorder"
+    },
+    {
+      "at": "2026-11-15T04:03:19.063Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0xbfhbt",
+      "note": "Canvas debugs the running program: breakpoints, live values, paused locals and replay on the tier that is actually running"
+    },
+    {
+      "at": "2026-11-15T04:03:18.187Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0itl587",
+      "note": "Canvas opens any project as one workspace: one resident session, a separate app listener, one project tree and last-good state"
+    },
     {
       "at": "2026-11-15T03:59:25.693Z",
       "by": "TowerKeeper-1",
