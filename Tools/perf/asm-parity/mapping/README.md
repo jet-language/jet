@@ -20,9 +20,11 @@ bytes. Code bytes are counted as `../memcopy/README.md` describes.
 | data | none | none |
 
 Jet's routines are the mapping's own runtime code. The page map's helpers
-that the compiler inlined into them count inside their sizes. The small
-record each region keeps comes from the heap allocator, which the
-`allocfree` cell measures, so it does not count here.
+that the compiler inlined into them count inside their sizes. A region in
+the window keeps its small record in the window's slot for its first unit,
+with no heap block; a region outside the window takes its record from the
+heap allocator, which the `allocfree` cell measures, so it does not count
+here.
 
 The reference's uses are every line of its two calls: the arguments, the
 syscalls, the check and the refusal exit. On Jet's side, the reserve line

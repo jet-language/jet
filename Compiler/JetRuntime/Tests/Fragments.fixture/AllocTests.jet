@@ -480,15 +480,18 @@ alloc_test_rows: fn() {
 }
 
 // A region takes its units from the region window, registered in the page
-// map with no lock. An ended run's pages are dropped, and it is the next run
-// of its class. A region larger than the largest class maps on its own,
-// outside the window.
+// map with no lock, and keeps its record in the window's slot for its first
+// unit, with no heap block. An ended run's pages are dropped, and it is the
+// next run of its class. A region larger than the largest class maps on its
+// own, outside the window, with its record on the heap.
 alloc_test_window: fn() {
     first: jet_rt_mem_region_reserve(I64{65536})
     window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
     end: wrapping(window + ALLOC_WINDOW_BYTES)
     alloc_test_require(first != I64{0} && window != I64{0} && first >= window && first < end)
     alloc_test_require(first.bit_and(wrapping(ALLOC_PAGE_UNIT - I64{1})) == I64{0} && alloc_page_region(first) != I64{0})
+    records: wrapping(window + ALLOC_WINDOW_RECORDS)
+    alloc_test_require(alloc_page_region(first) == wrapping(records + wrapping(alloc_test_unit(window, first) * ALLOC_REGION_RECORD_BYTES)))
     #Unsafe("the region owns its 64 KiB until its release below") {
         os_store_i64(first, I64{7})
         os_store_i64(wrapping(first + I64{65528}), I64{9})
@@ -511,6 +514,8 @@ alloc_test_window: fn() {
     largest: ALLOC_PAGE_UNIT << wrapping(ALLOC_WINDOW_CLASSES - I64{1})
     alone: jet_rt_mem_region_reserve(wrapping(largest + I64{1}))
     alloc_test_require(alone != I64{0} && (alone < window || alone >= end) && alloc_page_region(alone) != I64{0})
+    alone_record: alloc_page_region(alone)
+    alloc_test_require(alone_record < records || alone_record >= wrapping(window + wrapping(ALLOC_WINDOW_LINK_UNITS * ALLOC_PAGE_UNIT)))
     jet_rt_mem_region_release(alone, wrapping(largest + I64{1}))
     alloc_test_require(alloc_page_region(alone) == I64{0})
     back: jet_rt_mem_region_reserve(I64{131072})

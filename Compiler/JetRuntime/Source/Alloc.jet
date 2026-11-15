@@ -325,8 +325,11 @@ alloc_page_write: fn(base: I64, bytes: I64, record: I64) {
 // account), not the hardware's.
 // State word 776 (ALLOC_WINDOW) names the window's base, 0 until the first
 // region. Word 784 (ALLOC_WINDOW_NEXT) counts the units handed out past the
-// window's first ALLOC_WINDOW_LINK_UNITS, which hold one link word per unit
-// and are writable from the start. Class c's stack is word 800 + 8c:
+// window's first ALLOC_WINDOW_LINK_UNITS, which are writable from the start:
+// one link word per unit, then from ALLOC_WINDOW_RECORDS one region record
+// slot per unit, where the region whose run starts at that unit keeps its
+// record (alloc_reservation_record), so a window region takes no heap block.
+// Class c's stack is word 800 + 8c:
 // [tag << 20 | the top run's first unit], where unit 0 (a link unit) means
 // empty, and each run's link word names the run below it. Every push and pop
 // moves the tag, so a compare-exchange never installs a link that a racing
@@ -351,7 +354,9 @@ ALLOC_WINDOW_STACKS: I64{800}
 ALLOC_WINDOW_CLASSES: I64{13}
 ALLOC_WINDOW_UNITS: I64{262144}
 ALLOC_WINDOW_BYTES: I64{17179869184}
-ALLOC_WINDOW_LINK_UNITS: I64{32}
+ALLOC_WINDOW_LINK_UNITS: I64{128}
+ALLOC_WINDOW_RECORDS: I64{2097152}
+ALLOC_REGION_RECORD_BYTES: I64{24}
 ALLOC_WINDOW_INDEX: I64{1048575}
 ALLOC_WINDOW_TAG: I64{1048576}
 ALLOC_WINDOW_ROWS: I64{632}
@@ -363,7 +368,7 @@ alloc_window: fn() -> I64 {
     kept: sync_load(word)
     if (kept != I64{0}) -> return kept
     bytes: wrapping(ALLOC_WINDOW_BYTES + ALLOC_PAGE_UNIT)
-    #Unsafe("a fresh inaccessible NORESERVE mapping aliases nothing; its link units are remapped writable inside it and its span tables mapped before its base is published, and a caller that loses the publication unmaps only its own mapping") {
+    #Unsafe("a fresh inaccessible NORESERVE mapping aliases nothing; its link and record units are remapped writable inside it and its span tables mapped before its base is published, and a caller that loses the publication unmaps only its own mapping") {
         mapping: os_syscall_i64(I64{9}, I64{0}, bytes, I64{0}, I64{16418}, I64{-1}, I64{0})
         if (mapping < I64{0}) -> return I64{0}
         base: alloc_align(mapping, ALLOC_PAGE_UNIT)
@@ -570,7 +575,7 @@ alloc_reservation_unmap: fn(base: I64, bytes: I64) {
 // registered in the page map, or 0 when the size is not positive or the
 // system refuses. The heap never sees these pages.
 #Export(c) jet_rt_mem_region_reserve: fn(bytes: I64) -> I64 {
-    record: alloc_reservation_map(bytes, I64{24})
+    record: alloc_reservation_map(bytes, ALLOC_REGION_RECORD_BYTES)
     if (record == I64{0}) -> I64{0} else -> sync_load(record)
 }
 
@@ -585,7 +590,7 @@ alloc_reservation_map: fn(bytes: I64, record_bytes: I64) -> I64 {
     base := alloc_window_take(units)
     if (base == I64{0}) { base = alloc_reservation_direct(units) }
     if (base == I64{0}) { return I64{0} }
-    record: alloc_try_validated(record_bytes, I64{8})
+    record: alloc_reservation_record(base, record_bytes)
     if (record != I64{0}) {
         sync_store(record, base)
         sync_store(wrapping(record + I64{8}), units)
@@ -595,10 +600,29 @@ alloc_reservation_map: fn(bytes: I64, record_bytes: I64) -> I64 {
             at += I64{8}
         }
         if alloc_page_set(base, units, record) -> return record
-        alloc_free_validated(record, record_bytes, I64{8})
+        alloc_reservation_record_free(record, record_bytes)
     }
     alloc_reservation_unmap(base, units)
     I64{0}
+}
+
+// A record of `record_bytes` for the reservation at `base`: a region whose
+// run is in the window keeps it in the run's record slot, which no other
+// live region shares; any other reservation takes a heap block. 0 when the
+// heap refuses.
+alloc_reservation_record: fn(base: I64, record_bytes: I64) -> I64 {
+    if (record_bytes != ALLOC_REGION_RECORD_BYTES || !alloc_window_holds(base)) -> return alloc_try_validated(record_bytes, I64{8})
+    window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
+    wrapping(wrapping(window + ALLOC_WINDOW_RECORDS) + wrapping((wrapping(base - window) >> I64{16}) * ALLOC_REGION_RECORD_BYTES))
+}
+
+// Gives back `record` of `record_bytes` (alloc_reservation_record): a heap
+// block is freed; a window record slot needs nothing, as the next region of
+// its run overwrites every word.
+alloc_reservation_record_free: fn(record: I64, record_bytes: I64) {
+    window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
+    if (window != I64{0} && record >= wrapping(window + ALLOC_WINDOW_RECORDS) && record < wrapping(window + wrapping(ALLOC_WINDOW_LINK_UNITS * ALLOC_PAGE_UNIT))) -> return
+    alloc_free_validated(record, record_bytes, I64{8})
 }
 
 // The `core.mem.__region_release` route behind Region's close: removes the
@@ -611,7 +635,7 @@ alloc_reservation_map: fn(bytes: I64, record_bytes: I64) -> I64 {
     if (record != I64{0}) {
         _ := alloc_page_set(address, units, I64{0})
         alloc_user_drop(sync_load(wrapping(record + I64{16})))
-        alloc_free_validated(record, I64{24}, I64{8})
+        alloc_reservation_record_free(record, ALLOC_REGION_RECORD_BYTES)
     }
     alloc_reservation_unmap(address, units)
 }
