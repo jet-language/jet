@@ -4,7 +4,9 @@
 words. Each operation steps a typed pointer to one index (`offset`), reads
 the word there through `.*`, adds its step, steps to a second index and
 writes the sum there through `mem.volatile_write`. One draw of a 31-bit
-generator gives the two indexes and the step. The sum adds up every word
+generator gives the two indexes and the step. The indexes are stored as `U32`
+offsets, as the reference's table stores them in 4 bytes each, so both sides
+read the same data. The sum adds up every word
 read. `ref.S` is the machine ceiling. It does the same work from the same
 generator, with the same layout. Each access is one instruction, with the
 index scaled into the address operand. Neither side checks anything on the

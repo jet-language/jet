@@ -13,10 +13,10 @@ Args: struct {
 }
 
 // One read at word `from` and one write at word `to` of the word read plus
-// `step`.
+// `step`. The indexes are U32, as the reference's table holds them.
 Op: struct {
-    from: Int
-    to: Int
+    from: U32
+    to: U32
     step: I64
 }
 
@@ -35,7 +35,7 @@ operations: fn() -> [Op] {
     state := 12345
     loop _ in 0..<OPS {
         state = next(state)
-        ops.push(Op{from: state.bit_and(WORDS - 1), to: (state >> 13).bit_and(WORDS - 1), step: I64{(state >> 26).bit_and(31)}})
+        ops.push(Op{from: U32{state.bit_and(WORDS - 1)}, to: U32{(state >> 13).bit_and(WORDS - 1)}, step: I64{(state >> 26).bit_and(31)}})
     }
     ops
 }
