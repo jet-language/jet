@@ -1340,7 +1340,7 @@ sema_expr_expected_owned: fn(value: &&TExpr, expected: Type?, environment: SemaS
             payload: sema_tree_node(owned.ty, TExprKind.MapLit{entries: entries}, span)
             return Val(sema_tree_node(required, TExprKind.JSONLit{variant: "Object", arg: Val(payload), clone_arg: false}, span))
         }
-        return Val(sema_tree_node(required, TExprKind.HandleMethod{receiver: owned.move(), operation: THandleOp.SerdeEncode, args: [TExpr]{}}, span))
+        return Val(sema_tree_node(required, TExprKind.HandleMethod{receiver: owned.move(), operation: THandleOp.SerdeEncode{stored: false}, args: [TExpr]{}}, span))
     }
     if sema_expr_optional_lift_type(required, offered, environment, program) == .Val(lifted_type) {
         span: owned.span

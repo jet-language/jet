@@ -228,7 +228,7 @@ sema_data_check_encode: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, span)
+    value := sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SerdeEncode{stored: false}, args: [TExpr]{}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
@@ -780,7 +780,7 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                         diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`Dyn.decode<{type_name(target)}>()` can only call the type's Decode contract", "derive `Decode` on `{type_name(target)}`, or write `impl {type_name(target)}.Decode`"))
                     }
                     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-                    value := sema_tree_node(sema_data_result(target, sema_data_decode_error()), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.DynDecode{ty: target}, args: [TExpr]{}}, span)
+                    value := sema_tree_node(sema_data_result(target, sema_data_decode_error()), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.DynDecode{ty: target, stored: false}, args: [TExpr]{}}, span)
                     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
                 }
                 return sema_data_try_accessor(receiver, receiver_value, name, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

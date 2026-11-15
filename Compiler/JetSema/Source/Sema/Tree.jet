@@ -692,7 +692,10 @@ THandleOp: enum {
     DynFloat
     DynToText
     DynEqualUnordered
-    DynDecode(ty: Type)
+    // `stored`: the storage codec of `tree.decode_stored<T>()` /
+    // `value.encode_stored()`, which keeps the `#Secret` fields the wire codec
+    // skips.
+    DynDecode(ty: Type, stored: Bool)
     DynIndexKey(site: String, location: TPanicLoc)
     DynIndexAt(site: String, location: TPanicLoc)
     DynGetKey
@@ -704,7 +707,7 @@ THandleOp: enum {
     DynBinary(op: String, site: String, location: TPanicLoc)
     DynCompare(op: String, site: String, location: TPanicLoc)
     DynSetPath(keys: [Bool], site: String, location: TPanicLoc)
-    SerdeEncode
+    SerdeEncode(stored: Bool)
     JSONField
     JSONAt
     JSONInt

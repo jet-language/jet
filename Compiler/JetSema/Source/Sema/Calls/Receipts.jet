@@ -168,7 +168,7 @@ sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [C
     record: core_call("core.prelude", "__receipt_attach") ?? panic("checked receipt attach row is missing")
     result: Type.Named{name: "Unit"}
     if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    encoded: sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: payload, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, payload_span)
+    encoded: sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: payload, operation: THandleOp.SerdeEncode{stored: false}, args: [TExpr]{}}, payload_span)
     values: [TExpr]{encoded, sema_receipt_text(section ?? "", span), sema_receipt_text(declared.name, span), sema_receipt_text(sema_receipt_schema_digest(declared), span)}
     value: sema_tree_node(result, TExprKind.CoreCall{record: record, args: values, source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false, false, false, false}, fallibility: TFailureCarrier.Infallible}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}

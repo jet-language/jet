@@ -7024,9 +7024,10 @@ body_codec_put_bodyhandleop: fn(out: &BodyCodecOut, value: BodyHandleOp) Never! 
         .DynFloat -> { body_codec_put_tag(out, 194) }
         .DynToText -> { body_codec_put_tag(out, 195) }
         .DynEqualUnordered -> { body_codec_put_tag(out, 196) }
-        .DynDecode(p0) -> {
+        .DynDecode(p0, p1) -> {
             body_codec_put_tag(out, 197)
             body_codec_put_type(out, p0)
+            body_codec_put_bool(out, p1)
         }
         .DynIndexKey(p0, p1) -> {
             body_codec_put_tag(out, 198)
@@ -7066,7 +7067,10 @@ body_codec_put_bodyhandleop: fn(out: &BodyCodecOut, value: BodyHandleOp) Never! 
             body_codec_put_string(out, p1)
             body_codec_put_tpanicloc(out, p2)
         }
-        .SerdeEncode -> { body_codec_put_tag(out, 209) }
+        .SerdeEncode(p0) -> {
+            body_codec_put_tag(out, 209)
+            body_codec_put_bool(out, p0)
+        }
         .JSONField -> { body_codec_put_tag(out, 210) }
         .JSONAt -> { body_codec_put_tag(out, 211) }
         .JSONInt -> { body_codec_put_tag(out, 212) }
@@ -7398,7 +7402,8 @@ body_codec_get_bodyhandleop: fn(bytes: [U8], input: &BodyCodecIn) -> BodyHandleO
         196 -> BodyHandleOp.DynEqualUnordered
         197 -> {
             f0: body_codec_get_type(bytes, input)
-            BodyHandleOp.DynDecode{ty: f0}
+            f1: body_codec_get_bool(bytes, input)
+            BodyHandleOp.DynDecode{ty: f0, stored: f1}
         }
         198 -> {
             f0: body_codec_get_string(bytes, input)
@@ -7438,7 +7443,10 @@ body_codec_get_bodyhandleop: fn(bytes: [U8], input: &BodyCodecIn) -> BodyHandleO
             f2: body_codec_get_tpanicloc(bytes, input)
             BodyHandleOp.DynSetPath{keys: f0, site: f1, location: f2}
         }
-        209 -> BodyHandleOp.SerdeEncode
+        209 -> {
+            f0: body_codec_get_bool(bytes, input)
+            BodyHandleOp.SerdeEncode{stored: f0}
+        }
         210 -> BodyHandleOp.JSONField
         211 -> BodyHandleOp.JSONAt
         212 -> BodyHandleOp.JSONInt
