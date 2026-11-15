@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106465,
+    "rev": 106466,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59983,6 +59983,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "Self-build runtime step (PrecompiledCore-4 trace of p185's jet-bare step, 8.7 s): the Core chain is the critical path at 6.5 s (load+register+comptime 1.0, sema.finalize 2.5, ir.build 1.0, ir.opt 1.4), then a serial tail of Core object 1.1 and pack 0.7. The interface walk (about 505 units, one thread, three whole parses per unit, 2.98 s CPU) has 2.8 s of slack. The main compile cannot supply the step's Core facts (they must be the new compiler's), and the step waits on the jet-bare link. Ordered: ir.opt to x64 pipelining (-0.4 to -0.6 s, every build) now, then the S4 flat AST (about -1 s here plus the main compile). Threading the interface (0 wall, -2 s CPU), the 0.26 s post-check gap and the pack are recorded in the plan for later."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Gate p185 (dev b6b255de57, pinned to CPUs 0-23 with worker tests pinned to 24-31): wall 28.89 s, CPU 117.97 s, parallelism 4.1, peak 4,399 MiB; sema.finalize 4.23 s (p184 8.10 s, noisy), comptime 1.53 s, instructions -1.5%. The runtime step still spans 8.9 s; its per-phase rows dropped out of the speed report after the monotonic trace clock landed. Thread admission (default = CPUs in the affinity mask) is in the next batch."
         },
         {
@@ -60449,7 +60454,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T15:57:07.990Z",
+      "updated": "2026-11-15T16:40:43.770Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -218109,6 +218114,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T16:40:43.770Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T16:38:46.785Z",
       "by": "Main",
