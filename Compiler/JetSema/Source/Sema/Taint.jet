@@ -70,7 +70,6 @@ SemaTaintTagList: struct {
 }
 
 SemaTaintCallableFact: struct {
-    key: String
     module_identity: ModuleID
     owner: String
     name: String
@@ -101,6 +100,8 @@ SemaTaintCatalog: struct {
     tags: [SemaTaintTagFact]
     callables: [SemaTaintCallableFact]
     fields: [SemaTaintFieldFact]
+    // The function paths a tag's `from` may name, gathered only when one
+    // names any (sema_taint_collect_known_sources).
     known_sources: [String]
     // Lookup slots kept beside the rows: the first row of each key wins, as
     // the ordered scans over every callable and field did.
@@ -590,11 +591,6 @@ sema_taint_collect_tag_declarations: fn(catalog: &SemaTaintCatalog, graph: SemaR
     }
 }
 
-sema_taint_callable_key: fn(module_identity: ModuleID, owner: String, name: String) -> String Never! {
-    if owner == "" -> return "{module_identity.id}:{name}"
-    "{module_identity.id}:{owner}::{name}"
-}
-
 sema_taint_add_known_source: fn(catalog: &SemaTaintCatalog, source: String) Never! {
     if sema_taint_slot_add(catalog.known_source_slots, source, catalog.known_sources.len()) -> catalog.known_sources.push(source.copy())
 }
@@ -603,6 +599,41 @@ sema_taint_add_source_path: fn(catalog: &SemaTaintCatalog, module_alias: String,
     local := if owner == "" -> name else -> "{owner}.{name}"
     sema_taint_add_known_source(catalog, local)
     sema_taint_add_known_source(catalog, "{module_alias}.{local}")
+}
+
+// Whether a tag of the graph names a source (`from`): only those read the
+// known source paths (sema_taint_known_source).
+sema_taint_names_sources: fn(graph: SemaRegistrationGraph) -> Bool Never! {
+    loop module_row_index in 0..<graph.modules.len() {
+        loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
+            if graph.modules[module_row_index].program.items[item_index] == .Tag(tag_value) {
+                if tag_value.from.len() > 0 -> return true
+            }
+        }
+    }
+    false
+}
+
+// The source path of every function and method sema_taint_collect_items
+// catalogs, bare and under its module's name, in its order.
+sema_taint_collect_known_sources: fn(catalog: &SemaTaintCatalog, graph: SemaRegistrationGraph) Never! {
+    loop module_row_index in 0..<graph.modules.len() {
+        alias: graph.modules[module_row_index].module_name
+        loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
+            if graph.modules[module_row_index].program.items[item_index] == {
+                .Func(function) -> sema_taint_add_source_path(catalog, alias, "", function.name)
+                .Struct(definition) -> {
+                    loop method in definition.methods -> sema_taint_add_source_path(catalog, alias, definition.name, method.name)
+                    loop trait_impl in definition.trait_impls {
+                        loop method in trait_impl.methods -> sema_taint_add_source_path(catalog, alias, definition.name, method.name)
+                    }
+                }
+                .Enum(definition) -> loop method in definition.methods -> sema_taint_add_source_path(catalog, alias, definition.name, method.name)
+                .Impl(definition) -> loop method in definition.methods -> sema_taint_add_source_path(catalog, alias, definition.type_name, method.name)
+                .ExternRust(_) | .CModule(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            }
+        }
+    }
 }
 
 // The slots of the callable row just pushed.
@@ -623,7 +654,7 @@ sema_taint_core_fact: fn(module_identity: ModuleID) -> Bool Never! {
     module_is_core(module_identity) || module_is_none(module_identity)
 }
 
-sema_taint_add_callable: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, module_alias: String, owner: String, function: Func) Never! {
+sema_taint_add_callable: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, owner: String, function: Func) Never! {
     params := [SemaTaintTagList]{}
     loop parameter_index in 0..<function.params.len() -> params.push(SemaTaintTagList{tags: sema_taint_type_tags(function.params[parameter_index].ty)})
     success: sema_taint_success_type(function.return_type)
@@ -634,10 +665,8 @@ sema_taint_add_callable: fn(catalog: &SemaTaintCatalog, module_identity: ModuleI
     }
     ffi_origin := function.inline_foreign != None
     if ffi_origin -> sema_taint_add(return_tags, SEMA_TAINT_ORIGIN_FFI)
-    key := sema_taint_callable_key(module_identity, owner, function.name)
-    catalog.callables.push(SemaTaintCallableFact{key: key, module_identity: module_identity, owner: owner, name: function.name, parameter_tags: params, return_tags: return_tags, return_type: success, scrub_tag: function.scrub_tag, ffi_origin: ffi_origin, span: function.name_span})
+    catalog.callables.push(SemaTaintCallableFact{module_identity: module_identity, owner: owner, name: function.name, parameter_tags: params, return_tags: return_tags, return_type: success, scrub_tag: function.scrub_tag, ffi_origin: ffi_origin, span: function.name_span})
     sema_taint_index_callable(catalog, module_identity, owner, function.name)
-    sema_taint_add_source_path(catalog, module_alias, owner, function.name)
 }
 
 sema_taint_add_extern_callable: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, function: ExternFn) Never! {
@@ -647,7 +676,7 @@ sema_taint_add_extern_callable: fn(catalog: &SemaTaintCatalog, module_identity: 
     returns := [String]{SEMA_TAINT_ORIGIN_FFI}
     if success == .Val(ty) -> returns = sema_taint_type_tags(ty)
     sema_taint_add(returns, SEMA_TAINT_ORIGIN_FFI)
-    catalog.callables.push(SemaTaintCallableFact{key: sema_taint_callable_key(module_identity, "", function.name), module_identity: module_identity, owner: "", name: function.name, parameter_tags: params, return_tags: returns, return_type: success, scrub_tag: None, ffi_origin: true, span: function.name_span})
+    catalog.callables.push(SemaTaintCallableFact{module_identity: module_identity, owner: "", name: function.name, parameter_tags: params, return_tags: returns, return_type: success, scrub_tag: None, ffi_origin: true, span: function.name_span})
     sema_taint_index_callable(catalog, module_identity, "", function.name)
 }
 
@@ -669,16 +698,16 @@ sema_taint_collect_items: fn(catalog: &SemaTaintCatalog, graph: SemaRegistration
     loop module_row_index in 0..<graph.modules.len() {
         loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
             if graph.modules[module_row_index].program.items[item_index] == {
-                .Func(function) -> sema_taint_add_callable(catalog, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].module_name, "", function)
+                .Func(function) -> sema_taint_add_callable(catalog, graph.modules[module_row_index].module_identity, "", function)
                 .Struct(definition) -> {
                     loop field in definition.fields -> sema_taint_add_field(catalog, graph.modules[module_row_index].module_identity, definition.name, field)
-                    loop method in definition.methods -> sema_taint_add_callable(catalog, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].module_name, definition.name, method)
+                    loop method in definition.methods -> sema_taint_add_callable(catalog, graph.modules[module_row_index].module_identity, definition.name, method)
                     loop trait_impl in definition.trait_impls {
-                        loop method in trait_impl.methods -> sema_taint_add_callable(catalog, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].module_name, definition.name, method)
+                        loop method in trait_impl.methods -> sema_taint_add_callable(catalog, graph.modules[module_row_index].module_identity, definition.name, method)
                     }
                 }
-                .Enum(definition) -> loop method in definition.methods -> sema_taint_add_callable(catalog, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].module_name, definition.name, method)
-                .Impl(definition) -> loop method in definition.methods -> sema_taint_add_callable(catalog, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].module_name, definition.type_name, method)
+                .Enum(definition) -> loop method in definition.methods -> sema_taint_add_callable(catalog, graph.modules[module_row_index].module_identity, definition.name, method)
+                .Impl(definition) -> loop method in definition.methods -> sema_taint_add_callable(catalog, graph.modules[module_row_index].module_identity, definition.type_name, method)
                 .ExternRust(block) -> loop function in block.functions -> sema_taint_add_extern_callable(catalog, graph.modules[module_row_index].module_identity, function)
                 .CModule(block) -> loop function in block.functions -> sema_taint_add_extern_callable(catalog, graph.modules[module_row_index].module_identity, function)
                 .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -3041,6 +3070,7 @@ sema_taint_prepared_empty: fn() -> SemaTaintPrepared Never! {
 sema_taint_prepare: fn(graph: SemaRegistrationGraph) -> SemaTaintPrepared {
     prepared := sema_taint_prepared_empty()
     sema_taint_collect_items(prepared.catalog, graph)
+    if sema_taint_names_sources(graph) -> sema_taint_collect_known_sources(prepared.catalog, graph)
     sema_taint_collect_tag_declarations(prepared.catalog, graph, prepared.reports)
     sema_taint_register_scrubbers(prepared.catalog, graph, prepared.reports)
     loop module_index in 0..<graph.modules.len() {
