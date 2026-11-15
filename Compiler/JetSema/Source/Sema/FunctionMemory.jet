@@ -32,10 +32,14 @@ use jet_foundation.[
     policy_value_display,
 ]
 
-SemaFunctionMemoryModuleInput: struct {
-    module_identity: ModuleID
-    package_identity: String
-    policy_declarations: [PolicyDeclaration]
+// The package-scoped `gc` policies of the packages that declare any:
+// `policies[row]` holds those of the package of graph module `modules[row]`
+// (its first module that declares one), from its modules in row order, each
+// once. Gathered in one pass before a walk, so a module reads its package's
+// ladder from these few rows instead of scanning every module of the graph.
+SemaFunctionMemoryPackages: struct {
+    modules: [Int]
+    policies: [[PolicyDeclaration]]
 }
 
 SemaFunctionMemoryFunction: struct {
@@ -123,17 +127,40 @@ sema_function_memory_append_policy_unique: fn(values: &[PolicyDeclaration], decl
     values.push(declaration.copy())
 }
 
-sema_function_memory_package_policies: fn(modules: [SemaFunctionMemoryModuleInput], package_identity: String) -> [PolicyDeclaration] Never! {
-    declarations := [PolicyDeclaration]{}
-    loop module_input in modules {
-        if module_input.package_identity != package_identity -> next
-        loop declaration in module_input.policy_declarations {
-            if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Package {
-                sema_function_memory_append_policy_unique(declarations, declaration)
-            }
-        }
+// Adds the package-scoped `gc` policies among `declarations` to `values`.
+sema_function_memory_add_package_policies: fn(values: &[PolicyDeclaration], declarations: [PolicyDeclaration]) Never! {
+    loop declaration in declarations {
+        if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Package -> sema_function_memory_append_policy_unique(values, declaration)
     }
-    declarations
+}
+
+sema_function_memory_has_package_policy: fn(declarations: [PolicyDeclaration]) -> Bool Never! {
+    loop declaration in declarations {
+        if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Package -> return true
+    }
+    false
+}
+
+// The row of `packages` that holds package `package_identity`'s policies.
+sema_function_memory_package_row: fn(graph: SemaRegistrationGraph, packages: SemaFunctionMemoryPackages, package_identity: String) -> Int? Never! {
+    loop (row, module_row) in packages.modules {
+        if graph.modules[module_row].package_identity == package_identity -> return Val(row)
+    }
+    None
+}
+
+sema_function_memory_packages_of: fn(graph: SemaRegistrationGraph) -> SemaFunctionMemoryPackages Never! {
+    packages := SemaFunctionMemoryPackages{modules: [Int]{}, policies: [[PolicyDeclaration]]{}}
+    loop (module_row, graph_module) in graph.modules {
+        if !sema_function_memory_has_package_policy(graph_module.program.policy_declarations) -> next
+        if sema_function_memory_package_row(graph, packages, graph_module.package_identity) == None {
+            packages.modules.push(module_row)
+            packages.policies.push([PolicyDeclaration]{})
+        }
+        row: sema_function_memory_package_row(graph, packages, graph_module.package_identity) ?? packages.policies.len() - 1
+        sema_function_memory_add_package_policies(packages.policies[row], graph_module.program.policy_declarations)
+    }
+    packages
 }
 
 sema_function_memory_function_policies: fn(outer: [PolicyDeclaration], declarations: [PolicyDeclaration], function: Func) -> [PolicyDeclaration] Never! {
@@ -240,11 +267,11 @@ sema_function_memory_collect_items: fn(items: [Item], module_identity: ModuleID,
     }
 }
 
-// Visits one module's functions in row order under its package and module
-// scoped-GC policies; returns its top-level item count (the propagation bound
-// sums them).
-sema_function_memory_walk_module: fn(modules: [SemaFunctionMemoryModuleInput], package_identity: String, module_identity: ModuleID, declarations: [PolicyDeclaration], items: [Item], walk: &SemaFunctionMemoryWalk) -> Int Never! {
-    outer := sema_function_memory_package_policies(modules, package_identity)
+// Visits one module's functions in row order under its package's scoped-GC
+// policies (row `package` of `packages`, None when it declares none) and its
+// own; returns its top-level item count (the propagation bound sums them).
+sema_function_memory_walk_module: fn(packages: SemaFunctionMemoryPackages, package: Int?, module_identity: ModuleID, declarations: [PolicyDeclaration], items: [Item], walk: &SemaFunctionMemoryWalk) -> Int Never! {
+    outer := if package == .Val(row) -> packages.policies[row] else -> [PolicyDeclaration]{}
     loop declaration in declarations {
         if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Module -> outer.push(declaration.copy())
     }
@@ -252,27 +279,19 @@ sema_function_memory_walk_module: fn(modules: [SemaFunctionMemoryModuleInput], p
     items.len()
 }
 
-sema_function_memory_module_inputs: fn(graph: SemaRegistrationGraph) -> [SemaFunctionMemoryModuleInput] Never! {
-    modules := [SemaFunctionMemoryModuleInput]{}
-    loop module_row_index in 0..<graph.modules.len() {
-        modules.push(SemaFunctionMemoryModuleInput{module_identity: graph.modules[module_row_index].module_identity, package_identity: graph.modules[module_row_index].package_identity, policy_declarations: graph.modules[module_row_index].program.policy_declarations})
-    }
-    modules
-}
-
 // Walks the graph's modules `from..<to` in row order; returns their
 // top-level item count.
-sema_function_memory_walk_modules: fn(graph: SemaRegistrationGraph, modules: [SemaFunctionMemoryModuleInput], from: Int, to: Int, walk: &SemaFunctionMemoryWalk) -> Int Never! {
+sema_function_memory_walk_modules: fn(graph: SemaRegistrationGraph, packages: SemaFunctionMemoryPackages, from: Int, to: Int, walk: &SemaFunctionMemoryWalk) -> Int Never! {
     limit := 0
     loop module_row_index in from..<to {
-        limit += sema_function_memory_walk_module(modules, graph.modules[module_row_index].package_identity, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program.policy_declarations, graph.modules[module_row_index].program.items, walk)
+        limit += sema_function_memory_walk_module(packages, sema_function_memory_package_row(graph, packages, graph.modules[module_row_index].package_identity), graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program.policy_declarations, graph.modules[module_row_index].program.items, walk)
     }
     limit
 }
 
 sema_function_memory_walk_graph: fn(graph: SemaRegistrationGraph, walk: &SemaFunctionMemoryWalk) -> Int Never! {
-    modules: sema_function_memory_module_inputs(graph)
-    sema_function_memory_walk_modules(graph, modules, 0, graph.modules.len(), walk)
+    packages: sema_function_memory_packages_of(graph)
+    sema_function_memory_walk_modules(graph, packages, 0, graph.modules.len(), walk)
 }
 
 // A memory-walk thread is admitted for at least this much module source, so
@@ -301,8 +320,8 @@ sema_function_memory_collect_graph: fn(graph: SemaRegistrationGraph, threads: Co
     }
     workers: compiler_threads_admit(threads, weights.len(), work, SEMA_FUNCTION_MEMORY_MIN_BYTES_PER_THREAD, 0, 0)
     if workers <= 1 -> return sema_function_memory_walk_graph(graph, walk)
-    modules: sema_function_memory_module_inputs(graph)
-    parts := sema_function_memory_walk_parts(graph, modules, compiler_threads_partition(weights, workers), 0)
+    packages: sema_function_memory_packages_of(graph)
+    parts := sema_function_memory_walk_parts(graph, packages, compiler_threads_partition(weights, workers), 0)
     limit := 0
     loop index in 0..<parts.len() {
         limit += parts[index].limit
@@ -314,33 +333,34 @@ sema_function_memory_collect_graph: fn(graph: SemaRegistrationGraph, threads: Co
 
 // Parts `at` on of the module `bounds`, in part order, each walked on its own
 // thread and the last on this one.
-sema_function_memory_walk_parts: fn(graph: SemaRegistrationGraph, modules: [SemaFunctionMemoryModuleInput], bounds: [Int], at: Int) -> [SemaFunctionMemoryWalked] Never! {
+sema_function_memory_walk_parts: fn(graph: SemaRegistrationGraph, packages: SemaFunctionMemoryPackages, bounds: [Int], at: Int) -> [SemaFunctionMemoryWalked] Never! {
     done := [SemaFunctionMemoryWalked]{}
     if at + 1 >= bounds.len() -> return done
     from: bounds[at]
     to: bounds[at + 1]
     if at + 2 == bounds.len() {
-        done.push(sema_function_memory_walk_part(graph, modules, from, to))
+        done.push(sema_function_memory_walk_part(graph, packages, from, to))
         return done
     }
     task.group sema_function_memory_walk_group {
-        head: task sema_function_memory_walk_part(graph, modules, from, to)
-        rest: sema_function_memory_walk_parts(graph, modules, bounds, at + 1)
+        head: task sema_function_memory_walk_part(graph, packages, from, to)
+        rest: sema_function_memory_walk_parts(graph, packages, bounds, at + 1)
         done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
         loop part in rest.move() -> done.push(part)
     }
     done
 }
 
-sema_function_memory_walk_part: fn(graph: SemaRegistrationGraph, modules: [SemaFunctionMemoryModuleInput], from: Int, to: Int) -> SemaFunctionMemoryWalked Never! {
+sema_function_memory_walk_part: fn(graph: SemaRegistrationGraph, packages: SemaFunctionMemoryPackages, from: Int, to: Int) -> SemaFunctionMemoryWalked Never! {
     walk := sema_function_memory_walk_new()
-    limit: sema_function_memory_walk_modules(graph, modules, from, to, walk)
+    limit: sema_function_memory_walk_modules(graph, packages, from, to, walk)
     SemaFunctionMemoryWalked{sources: walk.sources.move(), limit: limit}
 }
 
-sema_function_memory_walk_program: fn(program: Program, module_identity: ModuleID, package_identity: String, walk: &SemaFunctionMemoryWalk) -> Int Never! {
-    modules: [SemaFunctionMemoryModuleInput]{SemaFunctionMemoryModuleInput{module_identity: module_identity, package_identity: package_identity, policy_declarations: program.policy_declarations}}
-    sema_function_memory_walk_module(modules, package_identity, module_identity, program.policy_declarations, program.items, walk)
+sema_function_memory_walk_program: fn(program: Program, module_identity: ModuleID, walk: &SemaFunctionMemoryWalk) -> Int Never! {
+    packages := SemaFunctionMemoryPackages{modules: [Int]{0}, policies: [[PolicyDeclaration]]{[PolicyDeclaration]{}}}
+    sema_function_memory_add_package_policies(packages.policies[0], program.policy_declarations)
+    sema_function_memory_walk_module(packages, Val(0), module_identity, program.policy_declarations, program.items, walk)
 }
 
 sema_function_memory_plan_new: fn() -> SemaFunctionMemoryPlan Never! {
@@ -505,16 +525,16 @@ sema_function_memory_plan_from_graph: fn(graph: SemaRegistrationGraph, threads: 
     plan
 }
 
-sema_function_memory_plan_for_program: fn(program: Program, module_identity: ModuleID, package_identity: String) -> SemaFunctionMemoryPlan {
+sema_function_memory_plan_for_program: fn(program: Program, module_identity: ModuleID) -> SemaFunctionMemoryPlan {
     walk := sema_function_memory_walk_new()
-    limit: sema_function_memory_walk_program(program, module_identity, package_identity, walk)
+    limit: sema_function_memory_walk_program(program, module_identity, walk)
     plan := sema_function_memory_plan_new()
     planned := sema_function_memory_plan_rows(plan, walk.sources, limit)
     walk.wanted = sema_function_memory_wanted_rows(plan, planned)
     if walk.wanted.len() > 0 {
         walk.fetching = true
         walk.next_row = 0
-        _ := sema_function_memory_walk_program(program, module_identity, package_identity, walk)
+        _ := sema_function_memory_walk_program(program, module_identity, walk)
     }
     sema_function_memory_plan_finish(plan, planned, walk.fetched)
     plan
