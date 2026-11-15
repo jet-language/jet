@@ -2531,8 +2531,13 @@ jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> S
 // `JET_PHASE_COUNTERS` stderr lines with `--phase-counters`, so Tools/perf
 // and Tools/agent read either compiler's trace. `-` or `stderr` streams one
 // readable line per event to stderr instead. The target stays open for the
-// whole compile and every line is flushed as soon as its event happens, so a
-// running compile can be followed. A failed write stops the trace, never the
+// whole compile. Events gather in memory and reach it as one write of a
+// block: once JET_CLI_TRACE_BLOCK_BYTES are waiting, at each top-level
+// span's begin and end, and when the compile ends, however it ends
+// (jet_cli_trace_finish, which also counts the trace's bytes and writes as
+// `trace.bytes` and `trace.flushes`). So a running compile can be followed
+// phase by phase, and an event costs no system call of its own. A failed
+// write stops the trace, never the
 // compile. Timestamps are microseconds of the host's monotonic clock
 // (core.time.instant, a vDSO read, never a file), the clock every process
 // on the machine shares, and stderr is written as
@@ -2559,6 +2564,10 @@ JET_CLI_TRACE_PROCESS_MS: 50
 // A process spliced into the trace (jet_cli_trace_splice) has its lanes
 // numbered from this many times its place, apart from jet's own.
 JET_CLI_TRACE_SPLICE_LANES: 1000000
+
+// Events wait in memory until this many bytes of them are pending, then are
+// written as one block (jet_cli_trace_write).
+JET_CLI_TRACE_BLOCK_BYTES: 262144
 
 // One open span: its kind, the label it shows, when it began (µs), the CPU
 // clocks and fault count when it began, and whether it is one item's
@@ -2605,6 +2614,15 @@ JetCLITraceState: struct {
     process_ms: Int
     // How many other processes' traces were spliced in (jet_cli_trace_splice).
     spliced: Int
+    // The events not written yet, in order, and their bytes.
+    pending: [String]{[String]{}}
+    pending_bytes: Int{0}
+    // Every event's bytes so far and the blocks written
+    // (jet_cli_trace_finish counts them).
+    bytes: Int{0}
+    flushes: Int{0}
+    // After jet_cli_trace_finish every event is written at once.
+    finished: Bool{false}
 }
 
 JetCLITraceSink: struct {
@@ -2664,8 +2682,10 @@ JetCLITraceSink: struct {
             }
             spent: jet_cli_trace_usage_since(closed.start, now)
             line = "{line}{jet_cli_trace_close_line(self, closed, true, items, memory, Val(spent), ts, task, stack.len())}"
+            // A top-level span's close writes every event waiting.
+            top: stack.len() == 0
             permit.value.stacks[task] = stack
-            jet_cli_trace_write(self.target, permit.value, line)
+            jet_cli_trace_write(self.target, permit.value, line, settle: top)
         }
 
         progress: fn(self, name: String, done: Int, total: Int) Never! -[FS, Time]> {
@@ -2867,7 +2887,7 @@ jet_cli_trace_splice: fn(sink: JetCLITraceSink, label: String, text: String) Nev
     permit.value.spliced += 1
     quoted: foundation_json_quote("{label}: ")
     opening: "{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":{process},\"tid\":0,\"args\":{{\"name\":{quoted.slice(0, quoted.len() - 1)}{name.slice(1, name.len())}}}}},\n"
-    jet_cli_trace_write(sink.target, permit.value, "{opening}{events.join("")}")
+    jet_cli_trace_write(sink.target, permit.value, "{opening}{events.join("")}", settle: true)
 }
 
 // The process-name event's args, ahead of its quoted name.
@@ -2941,9 +2961,12 @@ jet_cli_trace_open: fn(sink: JetCLITraceSink, name: String, detail: String, args
         if !permit.value.stacks.has_key(task) -> line = jet_cli_trace_task_name(sink.pid, task)
         line = "{line}{jet_cli_trace_head(label, Val(name), "B", ts, sink.pid, task)}{args}}},\n"
     }
+    // A top-level span's begin writes every event waiting, so a span that
+    // never closes (an early return) still shows where it started.
+    top: stack.len() == 0
     stack.push(JetCLITraceSpan{kind: name, label: label, start_us: ts, start: start, item: item})
     permit.value.stacks[task] = stack
-    jet_cli_trace_write(sink.target, permit.value, line)
+    jet_cli_trace_write(sink.target, permit.value, line, settle: top)
 }
 
 // A span's close. Machine form: its `E` event (with args only for the span
@@ -3065,6 +3088,16 @@ jet_cli_trace_opening_lanes: fn() -> [cli_tasks.TaskID:Int] Never! {
     lanes
 }
 
+// Gives the calling task the opening task's lane: a compile's trace is opened
+// on the main thread (Host.jet jet_cli_compile_on_worker), and the worker
+// that runs the compile, before it traces anything, takes the lane as if it
+// had opened it.
+jet_cli_trace_adopt: fn(trace_sink: JetCLITraceSink?) Never! {
+    sink: trace_sink ?? return
+    permit := sink.state.guard_edit()
+    permit.value.lanes = jet_cli_trace_opening_lanes()
+}
+
 // The calling task's trace lane, numbering a task the first time it traces.
 // The identity is the running task's (its fiber's, kept across the carrier
 // threads that run it; a plain thread's), and the CPU clock the spans read
@@ -3146,12 +3179,55 @@ jet_cli_trace_usage_since: fn(start: JetCLITraceUsage, now: JetCLITraceUsage) ->
     }
 }
 
-// Writes one event's text to the open target and flushes it, so every event
-// is in the file when the call returns; the first failure stops the trace.
-jet_cli_trace_write: fn(target: String, state: &JetCLITraceState, text: String) Never! {
-    problem: jet_cli_trace_put(state.writer, text) ?? return
+// Takes one event's text: it waits with the others until `settle` (a
+// top-level span's begin or end, or a splice), JET_CLI_TRACE_BLOCK_BYTES
+// waiting, or the trace's finish, and they are written as one block
+// (jet_cli_trace_drain).
+jet_cli_trace_write: fn(target: String, state: &JetCLITraceState, text: &&String, settle: Bool{false}) Never! {
+    if !state.writing {
+        return
+    }
+    size: text.count_bytes()
+    state.bytes += size
+    state.pending_bytes += size
+    state.pending.push(text)
+    if settle || state.finished || state.pending_bytes >= JET_CLI_TRACE_BLOCK_BYTES {
+        jet_cli_trace_drain(target, state)
+    }
+}
+
+// Writes and flushes every waiting event as one block; the first failure
+// stops the trace.
+jet_cli_trace_drain: fn(target: String, state: &JetCLITraceState) Never! {
+    if !state.writing || state.pending.len() == 0 {
+        return
+    }
+    block: state.pending.join("")
+    state.pending = [String]{}
+    state.pending_bytes = 0
+    state.flushes += 1
+    problem: jet_cli_trace_put(state.writer, block) ?? return
     state.writing = false
     _: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: the compiler trace stopped: writing `{target}` failed: {problem}\n")
+}
+
+// Ends the buffering of `sink`'s trace once its compile is over, whether it
+// returned, failed or panicked (Host.jet jet_cli_compile_on_worker): the
+// `trace.bytes` counter (every event's bytes before it) and `trace.flushes`
+// (the blocks written, this last one included), then every waiting event.
+// An event after it is written at once.
+jet_cli_trace_finish: fn(sink: JetCLITraceSink) Never! -[FS, Time]> {
+    totals: jet_cli_trace_totals(sink.state)
+    sink.counter("counters.trace.bytes", totals.bytes)
+    sink.counter("counters.trace.flushes", totals.flushes + 1)
+    permit := sink.state.guard_edit()
+    permit.value.finished = true
+    jet_cli_trace_drain(sink.target, permit.value)
+}
+
+jet_cli_trace_totals: fn(state: Shared<JetCLITraceState>) -> (bytes: Int, flushes: Int) Never! {
+    permit: state.guard_read()
+    (bytes: permit.value.bytes, flushes: permit.value.flushes)
 }
 
 jet_cli_trace_put: fn(writer: &cli_files.FileWriter, text: String) -> String? Never! {

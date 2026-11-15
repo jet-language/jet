@@ -884,7 +884,7 @@ builds at a level it was not asked for. The compiled program runs in place of
 program.
 
 `jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
-compiler work: one line per event on stderr as it happens, with the elapsed
+compiler work: one line per event on stderr, with the elapsed
 time, each phase's start and end (with its duration, item count, and resident
 and peak memory), the item being processed (a module or, with
 `--trace-detail=functions`, a function; that detail also writes one
@@ -909,10 +909,15 @@ from the Core library's check in place of their text, `core.bodies` in
 the bodies file's records it read to load them), throttled progress
 counts, and the
 scaling counters. `--trace=FILE` writes the same events to FILE as Chrome
-trace-event lines, flushed per event, in the `JET_TRACE_FILE` trace format
-(`Tools/perf/jetc-trace/summarize.mjs FILE --watch`
-follows a running compile; Perfetto loads the file); timestamps have
-millisecond resolution. Each `%p` in FILE is the jet process's id, so every
+trace-event lines in the `JET_TRACE_FILE` trace format; timestamps have
+millisecond resolution. Either stream gathers events in memory and writes
+them in blocks: once 256 KiB are waiting, at each top-level phase's start
+and end, and when the compile ends, by success, failure or a panic. The
+last block also carries the `trace.bytes` counter (every event's bytes
+before it) and `trace.flushes` (the blocks written, that one included), so
+an event costs no write of its own, and a running compile can still be
+followed phase by phase (`Tools/perf/jetc-trace/summarize.mjs FILE --watch`;
+Perfetto loads the file). Each `%p` in FILE is the jet process's id, so every
 jet that a traced process starts with the same variable writes its own file.
 `--trace=off` traces nothing. `--trace` is a compiler
 control: `JET_TRACE_FILE=FILE` is its environment form for the same five

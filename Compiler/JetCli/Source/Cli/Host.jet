@@ -4254,14 +4254,22 @@ jet_cli_main: fn(args: [String]) {
 // default -O0 `jet run`), more than the default 8 MiB stack every task gets.
 // The compile's own groups and tasks inherit the size; the program `jet run`
 // launches keeps the main thread and every stack default. The trace sink is
-// made on the worker, the thread the compile runs on.
+// opened here and finished here once the compile is over, even when it
+// panicked (Request.jet jet_cli_trace_finish), so its last events reach the
+// file; the worker's task traces as the trace's first lane.
 JET_CLI_COMPILE_STACK_BYTES: 201326592
 
 jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
+    trace_sink: jet_cli_trace_sink()
     steps := [JetCLIRunStep]{}
     task.group compile_stack(stack: JET_CLI_COMPILE_STACK_BYTES) {
-        compiling: task jet_cli_execute_compiling(plan, recording)
-        steps.push(compiling.join() ?? panic(compiler_threads_failure_text(err)))
+        compiling: task jet_cli_execute_compiling(plan, recording, trace_sink)
+        step: compiling.join() ?? {
+            if trace_sink == .Val(sink) -> jet_cli_trace_finish(sink)
+            panic(compiler_threads_failure_text(err))
+        }
+        if trace_sink == .Val(sink) -> jet_cli_trace_finish(sink)
+        steps.push(step)
     }
     step := steps.pop() ?? panic("the compile thread lost its step")
     jet_cli_run_step(step)
@@ -4269,8 +4277,8 @@ jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, recording: JetCLICheckRecordin
 
 // A compiling plan, on its worker (jet_cli_compile_on_worker): `jet run`
 // stops at the step the main thread finishes; every other verb at its output.
-jet_cli_execute_compiling: fn(plan: &&JetCLIPlan, recording: JetCLICheckRecording?) -> JetCLIRunStep {
-    trace_sink: jet_cli_trace_sink()
+jet_cli_execute_compiling: fn(plan: &&JetCLIPlan, recording: JetCLICheckRecording?, trace_sink: JetCLITraceSink?) -> JetCLIRunStep {
+    jet_cli_trace_adopt(trace_sink)
     if plan == .Run(file, source, color, options, verbose, json, threads, program_args, invocation, notice, watch, entry) {
         if !watch {
             jet_cli_write_notice(notice)
