@@ -1,0 +1,18 @@
+# A `#run` constant the batch computes for the entries after it is read by
+# calling its item function (JetDriver Pipeline.jet
+# jet_driver_comptime_type_land). The first read keeps the value in a cell of
+# the loaded batch and every later read borrows it (JetIR BuildSharedSites.jet
+# ir_computed_constant_read), so each such constant runs twice: once as its
+# own item and once for the first read, whatever its value's layout (a word,
+# a List, a struct). Before the cell every read ran it again: BASE and ROWS
+# five times each, PAIR three times.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "Pair: struct {\n    a: Int\n    b: String\n}\n\nbase: fn() -> Int {\n    debug(\"BASE computed\")\n    20\n}\n\nrows: fn() -> [Int] {\n    debug(\"ROWS computed\")\n    [1, 2, 3]\n}\n\npair: fn() -> Pair {\n    debug(\"PAIR computed\")\n    Pair{a: 7, b: \"seven\"}\n}\n\nBASE: #run base()\nDOUBLE: #run (BASE * 2)\nSUM: #run (BASE + BASE + DOUBLE)\nROWS: #run rows()\nTOTAL: #run (ROWS[0] + ROWS[1] + ROWS[2])\nCOUNT: #run ROWS.len()\nPAIR: #run pair()\nLABEL: #run \"{PAIR.b}{PAIR.a}\"\n\nrun: fn() {\n    print(\"{BASE} {DOUBLE} {SUM} {TOTAL} {COUNT} {LABEL} {ROWS.len()} {PAIR.a}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "20 40 80 6 3 seven7 3 7\n"
+stderr: ~ "comptime.build BASE, DOUBLE, SUM, ROWS, TOTAL, COUNT, PAIR, LABEL (main.jet)" # one program for the three chains
+stderr: count "[debug] main.jet:7 \"BASE computed\"" = 2 # its own item, then the first read; every later read borrows the cell
+stderr: count "[debug] main.jet:12 \"ROWS computed\"" = 2 # a List value the same
+stderr: count "[debug] main.jet:17 \"PAIR computed\"" = 2 # a struct value the same

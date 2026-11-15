@@ -8638,15 +8638,15 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
 // value holding a compiler value, the compiler answers (ir_host_constant).
 // A read of module storage loads its cell, and a read of a module `Shared`
 // holder shares its process cell (ir_shared_holder_read). A constant the
-// same compile-time program computes (TConstantDef.item_function) is a call
-// of its item function.
+// same compile-time program computes (TConstantDef.item_function) is read
+// from the cell its first reader computed (ir_computed_constant_read).
 ir_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
     if ir_function_row(p, key) != None -> return ir_function_value(m, p, b, ty, key, span)
     at: p.constants.get(key) ?? return ir_fail_slot(b, span, "constant {key} without a declaration")
     definition: p.constant_defs[at]
     if definition.item_function != "" {
         item: ir_function_row(p, definition.item_function) ?? return ir_fail_slot(b, span, "constant {key} computed by no item function of the program")
-        return ir_call_row_values(m, p, b, item, [Int]{}, span)
+        return ir_computed_constant_read(m, p, b, definition.item_function, item, span)
     }
     if definition.shared_holder -> return ir_shared_holder_read(m, p, b, definition, span)
     if definition.is_storage {

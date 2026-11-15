@@ -86,6 +86,46 @@ ir_shared_holder_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition:
     ir_clone(m, b, owner, shared_row)
 }
 
+// A read of a constant its compile-time program computes by calling item
+// function `item` (keyed `item_key`, TConstantDef.item_function): a Process
+// site keyed by that function holds the cell of the value its first reader
+// computed, and every read borrows that value in place. A batch's items run
+// one after another in one child, so each constant the batch computes runs
+// once for every read of it in the batch, not once per read. The published
+// cell is never edited and lives as long as the loaded batch, so its value
+// is read without a permit. A value no cell keeps (Unit, a value with no
+// clone glue, a pointer Option, or one holding a compiler value, which the
+// call's host holds only for that call) is computed by each read.
+ir_computed_constant_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, item_key: String, item: Int, span: Span) -> Int Never! {
+    inner: p.functions[item].ret ?? return ir_call_row_values(m, p, b, item, [Int]{}, span)
+    if ir_unit_type(inner) || ir_never_type(inner) || ir_host_value_held(p, inner) || !ir_lazy_type_can_clone(m, p, inner) {
+        return ir_call_row_values(m, p, b, item, [Int]{}, span)
+    }
+    row: ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)
+    if m.types[row].kind == .Unit || m.types[row].option_null -> return ir_call_row_values(m, p, b, item, [Int]{}, span)
+    site: ir_shared_site_word(m, b, "computed:{item_key}")
+    word_row: ir_word_row(m)
+    pointer_row: ir_pointer_row(m)
+    zero: ir_word_const(m, b, 0)
+    current: ir_load_at(m, b, site, 0, word_row)
+    empty: ir_bool_op(m, b, IROp.Eq, current, zero)
+    ir_open_if(b.f, empty, b.line)
+    held: ir_runtime(m, b, "jet_rt_move_enter", [Int]{zero}, word_row)
+    value: ir_call_row_values(m, p, b, item, [Int]{}, span)
+    if ir_failed(b) -> return -1
+    candidate: ir_shared_new(m, p, b, [Int]{value}, Type.Shared{inner: inner}, span)
+    if ir_failed(b) -> return -1
+    _: ir_runtime(m, b, "jet_rt_move_leave", [Int]{held}, -1)
+    process: ir_word_const(m, b, 0)
+    _: ir_runtime(m, b, "jet_rt_shared_site_publish", [Int]{site, candidate, process}, word_row)
+    b.fresh[candidate] = false
+    ir_end(b.f, b.line)
+    owner: ir_load_at(m, b, site, 0, pointer_row)
+    payload: ir_runtime(m, b, "jet_rt_native_shared_guard_payload", [Int]{owner}, pointer_row)
+    b.fresh[payload] = false
+    ir_load_at(m, b, payload, 0, row)
+}
+
 // The slot holding the address of the site word of the initializer keyed
 // `key`.
 ir_shared_site_word: fn(m: &IRModule, b: &IRBuilder, key: String) -> Int Never! {
