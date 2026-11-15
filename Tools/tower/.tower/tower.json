@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 106575,
+    "rev": 106595,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59724,7 +59724,7 @@
     {
       "id": "c0nr5mre",
       "num": 5457,
-      "title": "Exact advisory matching: query whether a system or package is affected using its full dependency graph",
+      "title": "Supply-chain security: exact advisory matching, targeted grafts, capability diff on update, verified reproducibility and a declarative audit trail",
       "body": "Jetpack and JetOS know every input a system is built from (lock and closure). Match security advisories against that exact graph, down to the version and build options, so \"am I affected?\" is an exact query instead of a guess, and the security lane knows exactly what to update. Covers both packages and whole JetOS generations.",
       "kind": "idea",
       "track": "sidequest",
@@ -59738,7 +59738,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Board cleanup: one stream; #5458, #5459, #5460 and #5462 merged here, every criterion tagged (was #N cK)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -59748,6 +59754,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T05:12:02.992Z"
+        },
+        {
+          "n": 2,
+          "text": "Whether grafts are allowed is on Main's ballot list (2026-11-15); if they are, a graft is recorded in the declaration, applied without rebuilding dependents, and reconciled by the next full build. Proof: `tower decision show <id>` ratified, then `jet test Compiler --profile packages --filter graft/recorded_applied_reconciled`. (was #5458 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:45:56.803Z"
+        },
+        {
+          "n": 3,
+          "text": "Updating a dependency whose new version adds an effect (for example Net.Connect) or a `#Unsafe` block reports each widened effect with the dependency function that needs it, at update time and on the next run (D-AUTH-DEFAULT1=A); `--locked` refuses the update with a registered error, and a written authority row is a ceiling. Proof: `jet test Compiler --profile packages --filter capability_diff/widened_effect_on_update` against a fixture registry. (was #5459 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:46:01.593Z"
+        },
+        {
+          "n": 4,
+          "text": "Two independent builds of each published package from the same inputs are bit-identical, checked by the release gate, and each build attestation is appended to a transparency log anchored at the trust root, so a silently re-published package is detected. Proof: `jet test Compiler --profile packages --filter reproducibility/republish_detected`. (was #5460 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:46:06.540Z"
+        },
+        {
+          "n": 5,
+          "text": "An imperative change to a package writes back into its declaration, and drift from the last good state is reported (system-root and boot attestation wait while JetOS is frozen). Proof: `jet test Compiler --profile packages --filter audit_trail/imperative_change_written_back`. (was #5462 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:46:11.643Z"
         }
       ],
       "refs": [],
@@ -59755,12 +59797,12 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:33.234Z",
-      "updated": "2026-11-15T05:12:02.992Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T22:47:14.519Z",
+      "updatedBy": "Main",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 1
+      "criteriaLastN": 5
     },
     {
       "id": "c0gpih2e",
@@ -59771,7 +59813,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -59780,6 +59822,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #5457: its 1 open criteria now live there, each tagged (was #5458 cN). Board cleanup, one card per stream."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
@@ -59795,11 +59842,12 @@
         {
           "n": 1,
           "text": "Whether grafts are allowed is on Main's ballot list (2026-11-15); if they are, a graft is recorded in the declaration, applied without rebuilding dependents, and reconciled by the next full build. Proof: `tower decision show <id>` ratified, then `jet test Compiler --profile packages --filter graft/recorded_applied_reconciled`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:33:35.043Z"
+          "evidence": "Merged into #5457 c2 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:58.322Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -59807,12 +59855,13 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:34.985Z",
-      "updated": "2026-11-15T11:35:47.474Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-15T22:46:00.329Z",
+      "updatedBy": "Main",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:46:00.329Z"
     },
     {
       "id": "c07yeb2k",
@@ -59823,7 +59872,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -59834,6 +59883,11 @@
       "log": [
         {
           "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #5457: its 1 open criteria now live there, each tagged (was #5459 cN). Board cleanup, one card per stream."
+        },
+        {
+          "at": "2026-11-15",
           "by": "TowerKeeper-2",
           "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): body reworded; the text waited on an owner answer that ratified decisions already give, or on a choice within ratified scope; it is recorded as decided (Main's operational authority) and nothing waits."
         }
@@ -59842,11 +59896,12 @@
         {
           "n": 1,
           "text": "Updating a dependency whose new version adds an effect (for example Net.Connect) or a `#Unsafe` block reports each widened effect with the dependency function that needs it, at update time and on the next run (D-AUTH-DEFAULT1=A); `--locked` refuses the update with a registered error, and a written authority row is a ceiling. Proof: `jet test Compiler --profile packages --filter capability_diff/widened_effect_on_update` against a fixture registry.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:05.110Z"
+          "evidence": "Merged into #5457 c3 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:46:03.047Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -59854,11 +59909,12 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:36.632Z",
-      "updated": "2026-11-15T11:36:33.135Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-15T22:46:05.256Z",
+      "updatedBy": "Main",
       "goals": [
         "G7"
-      ]
+      ],
+      "completedAt": "2026-11-15T22:46:05.256Z"
     },
     {
       "id": "c0yozzfl",
@@ -59869,7 +59925,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -59877,16 +59933,23 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #5457: its 1 open criteria now live there, each tagged (was #5460 cN). Board cleanup, one card per stream."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Two independent builds of each published package from the same inputs are bit-identical, checked by the release gate, and each build attestation is appended to a transparency log anchored at the trust root, so a silently re-published package is detected. Proof: `jet test Compiler --profile packages --filter reproducibility/republish_detected`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:06.056Z"
+          "evidence": "Merged into #5457 c4 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:46:08.001Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -59894,12 +59957,13 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:38.249Z",
-      "updated": "2026-11-15T05:12:06.056Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T22:46:10.280Z",
+      "updatedBy": "Main",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:46:10.280Z"
     },
     {
       "id": "c0pqgjqc",
@@ -59951,7 +60015,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -59959,16 +60023,23 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #5457: its 1 open criteria now live there, each tagged (was #5462 cN). Board cleanup, one card per stream."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "An imperative change to a package writes back into its declaration, and drift from the last good state is reported (system-root and boot attestation wait while JetOS is frozen). Proof: `jet test Compiler --profile packages --filter audit_trail/imperative_change_written_back`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:07.088Z"
+          "evidence": "Merged into #5457 c5 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:46:13.097Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -59976,12 +60047,13 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:41.556Z",
-      "updated": "2026-11-15T05:12:07.088Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T22:46:15.121Z",
+      "updatedBy": "Main",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:46:15.121Z"
     },
     {
       "id": "c031o59x",
@@ -82534,7 +82606,7 @@
     {
       "id": "c0mwaylu",
       "num": 6504,
-      "title": "FFI v3 gallery: async and threads (a blocking call, curl multi, a main-thread GUI)",
+      "title": "FFI v3 gallery: async and threads, C libraries, callbacks, C++, exports to C/Python/JS, isolation, Python, Rust crates and JavaScript on the web",
       "body": "Three complete programs where foreign code blocks, completes later, or must stay on one thread (D-FFI-CONCUR1).\nA `#Blocking` row runs on the runtime's blocking pool, so other tasks keep running. A foreign completion (C\ncallback, Rust future, Python coroutine, JS Promise) is a wait point through `ffi.completion<T>`. Thread facts are\nchecked statically when the foreign compiler proves them and by a one-compare guard when a pack states them.\nOutputs are design targets.\n\n## Simple: a blocking C call that does not stall other tasks\n\n```jet\npackage: {\n    name: \"lookup\"\n    deps: { resolv: c@system }\n}\n\nuse netdb: c.netdb                                 // getaddrinfo: #Blocking in the libc pack\n\nrun: fn() {\n    hosts: [\"jet-lang.dev\", \"example.com\", \"localhost\"]\n    tasks: hosts.map((h) -> task netdb.getaddrinfo(h, \"443\"))     // each runs on the blocking pool\n    ticker: task {\n        loop i in 0..<3 {\n            print(\"still responsive {i}\")\n            sleep(20ms)\n        }\n    }\n    loop t in tasks -> print(t.join().first()?.address ?? \"no address\")\n    ticker.join()\n}\n```\n\n```text\nstill responsive 0\n127.0.0.1\nstill responsive 1\n93.184.215.14\n185.199.108.153\nstill responsive 2\n```\n\nA row with no blocking fact runs inline; if it runs longer than 50 ms, debug builds print W3244 naming the row and\nthe fact that would move it to the pool.\n\n## Medium: curl multi as wait points\n\n```jet\npackage: {\n    name: \"fetcher\"\n    deps: { curl: c@nixpkgs:curl }\n}\n\nuse curl: c.curl\n\nfetch_all: fn(urls: [String]) -> [curl.Response] !curl.CurlError {\n    multi: curl.Multi.new()                            // curl_multi_init / cleanup as Close\n    pending: urls.map((u) -> multi.add(curl.Easy.get(u)))   // each add returns a completion\n    // The pack maps curl_multi_socket_action + CURLMOPT_SOCKETFUNCTION onto the runtime's poller,\n    // so waiting on a completion parks this task and the runtime drives curl's sockets.\n    pending.map((p) -> p.wait())\n}\n\nrun: fn() {\n    responses: fetch_all([\"https://jet-lang.dev\", \"https://example.com\", \"https://httpbin.org/delay/1\"])\n    loop r in responses -> print(\"{r.status} {r.url} {r.body.len()} bytes\")\n}\n```\n\n```text\n200 https://jet-lang.dev 18342 bytes\n200 https://example.com 1256 bytes\n200 https://httpbin.org/delay/1 312 bytes\n```\n\nThe binder's part, from the `curl` pack (`jet inspect bind curl --row Multi.add --expand`):\n\n```jet\nadd: fn(self, easy: &&Easy) -> ffi.Completion<Response> {\n    done: ffi.completion<Response>()\n    ffi.extern<fn(ffi.Handle<CURLM>, ffi.Handle<CURL>) -> I32>(\"curl_multi_add_handle\", PACK)\n        .call(self.h, easy.h)\n    self.waiting.insert(easy.h, done.sender())          // fired from CURLMSG_DONE in the socket callback\n    done\n}\n```\n\n## Complex: a main-thread GUI with workers\n\nWhat it shows: raylib must run on the main thread (pack fact, guarded); work runs on tasks; results come back\nthrough a channel; a misplaced call is a compile error, and a lying pack fact is a named stop.\n\n```jet\npackage: {\n    name: \"mandel\"\n    deps: { rl: c@nixpkgs:raylib }\n}\n\nuse rl: c.raylib\n\nTile: struct {\n    x: Int\n    y: Int\n    pixels: [U8]\n}\n\nmandel_byte: fn(px: Int, py: Int) -> U8 {\n    cr: Float.from_int(px) / 170.0 - 2.0\n    ci: Float.from_int(py) / 256.0 - 1.0\n    zr := 0.0\n    zi := 0.0\n    n := 0\n    loop {\n        if n == 255 || zr * zr + zi * zi > 4.0 -> break\n        next_r: zr * zr - zi * zi + cr\n        zi = 2.0 * zr * zi + ci\n        zr = next_r\n        n += 1\n    }\n    U8.from_int(n)\n}\n\nrender_tile: fn(x: Int, y: Int, size: Int) -> Tile {\n    pixels: loop i in 0..<size * size -> mandel_byte(x + i % size, y + i / size)\n    Tile{x: x, y: y, pixels: pixels}\n}\n\nrun: fn() {\n    rl.init_window(512, 512, \"mandelbrot\")              // thread .Main (pack c-raylib-pack@5.5.0)\n    canvas: rl.Image.gen_color(512, 512, rl.BLACK)\n    texture := rl.Texture.from_image(canvas)            // Close: rl.unload_texture\n    { sender: tx, receiver: rx }: channel<Tile>(capacity: 64)\n    workers: loop row in 0..<8 {\n        out: tx.copy()\n        task &&out {\n            loop col in 0..<8 -> out.send(render_tile(col * 64, row * 64, 64))\n        }\n    }\n    done := 0\n    loop {\n        if rl.window_should_close() -> break\n        if done < 64 {                                  // one tile per frame keeps the frame short\n            t: rx.receive() ?? break\n            texture.update_rect(t.x, t.y, 64, 64, t.pixels)\n            done += 1\n        }\n        rl.begin_drawing()\n        rl.draw_texture(texture, 0, 0, rl.WHITE)\n        rl.end_drawing()\n    }\n    loop w in workers -> w.join()\n}\n\nwrong_thread: fn(texture: rl.Texture) {\n    t: task { rl.draw_texture(texture, 0, 0, rl.WHITE) }\n    // Error [E3231]: `raylib.draw_texture` must run on the main thread (pack c-raylib-pack@5.5.0, row draw_texture).\n    //  Fix: Send the data to the main task with a channel, and draw in run().\n    t.join()\n}\n```\n\nThe window fills in tile by tile while the frame loop stays at 60 frames per second.\n\n### Best competitor equivalent\n\n```swift\n// Swift: @MainActor checks main-thread use, but C libraries need hand annotations; blocking C calls hold a thread.\n@MainActor func draw(_ texture: Texture2D) { DrawTexture(texture, 0, 0, WHITE) }\nTask.detached { let tile = renderTile(x, y); await MainActor.run { UpdateTextureRec(texture, rect, tile.pixels) } }\n// Kotlin/Native and C# leave thread affinity of C libraries to documentation.\n```\n",
       "kind": "task",
       "track": "epoch",
@@ -82549,6 +82621,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Board cleanup: the gallery is one stream; #6505-#6512 merged here, every criterion tagged (was #N cK)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
@@ -82664,6 +82741,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T22:45:46.853Z"
+        },
+        {
+          "n": 12,
+          "text": "The three web programs (date-fns, chart.js, a web component) build for wasm32-web through `use js.<package>` and produce the card's outputs in the browser test host, as cases. Proof: `jet test Compiler --profile cases --filter ffi/js_gallery` in the browser test host. (was #6512 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:45:51.917Z"
         }
       ],
       "refs": [],
@@ -82678,9 +82764,9 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:23.352Z",
-      "updated": "2026-11-15T22:45:46.853Z",
+      "updated": "2026-11-15T22:47:09.752Z",
       "updatedBy": "Main",
-      "criteriaLastN": 11
+      "criteriaLastN": 12
     },
     {
       "id": "c0x2wq8a",
@@ -83063,7 +83149,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -83072,6 +83158,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6511 cN). Board cleanup, one card per stream."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -83082,11 +83173,12 @@
         {
           "n": 1,
           "text": "The three Rust-crate programs (regex, serde_json, a crate with its own threads) run through `use rust.<crate>` and print the card's outputs. Proof: `jet test Compiler --profile cases --filter ffi_rust/gallery_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:38.354Z"
+          "evidence": "Merged into #6504 c11 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:48.605Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -83101,9 +83193,10 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:39.421Z",
-      "updated": "2026-11-15T05:12:38.354Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 1
+      "updated": "2026-11-15T22:45:50.630Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:50.630Z"
     },
     {
       "id": "c015lbud",
@@ -83114,7 +83207,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -83125,6 +83218,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6512 cN). Board cleanup, one card per stream."
+        },
         {
           "at": "2026-11-09",
           "by": "Main",
@@ -83140,11 +83238,12 @@
         {
           "n": 1,
           "text": "The three web programs (date-fns, chart.js, a web component) build for wasm32-web through `use js.<package>` and produce the card's outputs in the browser test host, as cases. Proof: `jet test Compiler --profile cases --filter ffi/js_gallery` in the browser test host.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:46:44.352Z"
+          "evidence": "Merged into #6504 c12 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:53.376Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -83159,9 +83258,10 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:41.628Z",
-      "updated": "2026-11-15T05:46:44.352Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 1
+      "updated": "2026-11-15T22:45:55.490Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:55.490Z"
     },
     {
       "id": "c0fymc7l",
@@ -94763,7 +94863,7 @@
     {
       "id": "c0j3st66",
       "num": 6727,
-      "title": "I1: boxed trait values are never dropped, so every trait value leaks its payload",
+      "title": "I1: values leak: boxed trait values are never dropped, and branch lowerings carry a move from one path onto the other",
       "body": "ReplMem (2026-11-09): a trait-value row (Compiler/JetIR BuildTypes.jet:286) is a Pointer row with no drop and no clone, so a boxed trait value has no drop glue and its payload leaks. A strong_count probe leaks one per binding. In the compiler, Pipeline.jet's compiler_queries (a JetEvalCompilerQueryHost trait value) holds a Shared context whose eval_config.native keeps the whole JetEvalNativeSession (about 3.25 MB image plus the child) alive on every compile: the REPL residual of about 12 MB per turn. The fix gives trait values drop glue that dispatches on the payload's implementer, keeping today's observable copy and alias semantics as the spec states them, and handles move-receiver dynamic calls.",
       "kind": "bug",
       "track": "epoch",
@@ -94778,6 +94878,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Board cleanup: #6724 (the same leak class) merged here; its open census criterion is c5."
+        },
         {
           "at": "2026-11-14",
           "by": "Main",
@@ -94835,7 +94940,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:54:36.252Z",
-      "updated": "2026-11-15T22:44:34.543Z",
+      "updated": "2026-11-15T22:47:19.576Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -218888,6 +218993,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T22:47:19.577Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0j3st66",
+      "note": "title,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:47:14.519Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nr5mre",
+      "note": "title,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:47:09.752Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mwaylu",
+      "note": "title,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:46:15.121Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0he880u",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:46:13.097Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0he880u",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T22:46:11.643Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nr5mre",
+      "note": "#5 An imperative change to a package writes back into its decla"
+    },
+    {
+      "at": "2026-11-15T22:46:10.280Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yozzfl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:46:08.002Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0yozzfl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T22:46:06.540Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nr5mre",
+      "note": "#4 Two independent builds of each published package from the sa"
+    },
+    {
+      "at": "2026-11-15T22:46:05.257Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07yeb2k",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:46:03.047Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07yeb2k",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T22:46:01.593Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nr5mre",
+      "note": "#3 Updating a dependency whose new version adds an effect (for "
+    },
+    {
+      "at": "2026-11-15T22:46:00.330Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gpih2e",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:45:58.323Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gpih2e",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T22:45:56.803Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nr5mre",
+      "note": "#2 Whether grafts are allowed is on Main's ballot list (2026-11"
+    },
+    {
+      "at": "2026-11-15T22:45:55.491Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c015lbud",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:45:53.376Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c015lbud",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T22:45:51.917Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mwaylu",
+      "note": "#12 The three web programs (date-fns, chart.js, a web component)"
+    },
+    {
+      "at": "2026-11-15T22:45:50.630Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00n89mp",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:45:48.605Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00n89mp",
+      "note": "#1"
+    },
     {
       "at": "2026-11-15T22:45:46.854Z",
       "by": "Main",
