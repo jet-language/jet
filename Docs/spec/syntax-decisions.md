@@ -1125,6 +1125,18 @@ optional entries and permits extra keys with `..`.
 Executable examples: `Examples/Types/Patterns/RecordListPatterns.jet`
 and `Examples/Types/Patterns/MapPatterns.jet`.
 
+**Typed selection.** Selecting one case out of a list of enum values is a case
+pattern (`loop shape in shapes { if shape == .Circle(r) -> … }`) or
+`filter_map` with a lambda that returns the payload for that case and `None`
+otherwise. A payload bound from a borrowed list is a loan of that list's
+element; a view of it may leave the function only under a `from` clause that
+names the list, and naming another owner is E2305. Moving the payload out
+takes the list (`&&[Shape]` or a consuming loop). A checked downcast of a
+foreign value is not Jet syntax: foreign values arrive through typed binders
+(`#Import module`, `extern rust`) whose declarations give them Jet types, and
+a value whose shape varies is declared as an enum and selected as above.
+Executable example: `Examples/Types/Patterns/TypedSelection.jet`.
+
 **D-FLOWTYPE1=A — Optional narrowing after presence checks** *(ratified
 2026-07-24, card #746)*: for a direct immutable local or parameter of type
 `?T`, `x != None` refines `x` to `T` in the true branch; `x == None` refines

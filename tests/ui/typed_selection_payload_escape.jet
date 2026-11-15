@@ -1,0 +1,19 @@
+// E2305: a payload selected from a borrowed list stays a loan of that list,
+// so a view of it cannot leave under a `from` clause that names another owner.
+Reading: enum {
+    Samples([Int])
+    Missing
+}
+
+first_samples: fn(readings: [Reading], spare: [Int]) -> View<Int> from spare {
+    loop reading in readings {
+        if reading == .Samples(values) -> return values[0..1]
+    }
+    spare[0..0]
+}
+
+run: fn() {
+    readings: [Reading]{Reading.Missing, Reading.Samples([Int]{4, 5})}
+    spare: [Int]{0}
+    print(first_samples(readings, spare))
+}

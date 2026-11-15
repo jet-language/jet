@@ -125,6 +125,11 @@ SemaScopeBinding: struct {
     // does not own. It owns nothing to give away: an exact `.move()` of it is
     // E0201 (sema_ownership_mark_move_as), as on a borrowed parameter.
     place_alias: Bool{false}
+    // A loop name over a collection a read or write parameter owns keeps the
+    // places of the element it reads: a payload matched from the name borrows
+    // that element (sema_ownership_record_pattern_views), as one matched from
+    // `items[i]` does.
+    element_places: [SemaOwnershipPlace]{[SemaOwnershipPlace]{}}
     // A `:` name bound to a new `Shared` cell or a lambda keeps its
     // initializer, so a write into another cell can see the stored value is
     // built in place (SharedCycles.jet).
@@ -2617,6 +2622,14 @@ sema_scope_mark_loop_item: fn(table: &SemaScopeTable, name: String) Never! {
     index: sema_scope_resolve_index(table, name) ?? return
     sema_scope_note_binding_edit(table, index)
     table.bindings[index].loop_item = true
+}
+
+// Keeps the element places a loop name over a parameter-owned collection
+// reads (see SemaScopeBinding.element_places).
+sema_scope_mark_element_places: fn(table: &SemaScopeTable, name: String, places: &&[SemaOwnershipPlace]) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(table, index)
+    table.bindings[index].element_places = places.move()
 }
 
 // Marks the `:` binding `name` just declared as a window over one map value
