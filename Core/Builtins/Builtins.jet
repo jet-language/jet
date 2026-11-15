@@ -19,6 +19,29 @@
 // typed signature in the compiler's host signature table are the whole
 // operation. This file declares the records those operations return.
 
+// The roles a Core function fills for the compiler: `abs` on an F32
+// (AbsF32) and on an I64 (AbsI64), `pow` on a Float (PowFloat) and on an F32
+// (PowF32). Lowering runs the one Core function that fills an operation's
+// role and never names it, so the function can be private and keep any
+// name. Each role is filled exactly once (E1014 for a second filler; E1015
+// when `jet check Core` finds one unfilled). The tests/ui/core_role_* cases
+// put a probe role in after the `RoleKind: enum {` line.
+RoleKind: enum {
+    AbsF32
+    AbsI64
+    PowFloat
+    PowF32
+}
+
+// `#Builtin.Role(.X)` on a Core function makes it the one that fills role X.
+Role: struct {
+    kind: RoleKind
+
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
 // The test harness's evidence and temporary-directory operations
 // (`core.testing`'s snap, golden, fixture and temp_dir): plain records of
 // physical facts, not raw-codec tuples.

@@ -173,7 +173,16 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         call.hangar_tamper = row.name == "jetpack_hangar_digest_mismatch"
         call.fetch_first = row.name == "fetched_build_locked"
         call.check_core = row.name == "check_core"
-        if call.check_core -> call.core_top = argument
+        if call.check_core {
+            // FILE, or FILE after "LINE": the anchor keeps its quotes, which
+            // staging checks (kit_ui_core_insert).
+            call.core_top = argument
+            after: kit_steps_byte_index(argument, " after ") ?? -1
+            if after >= 0 {
+                call.core_top = kit_steps_byte_slice(argument, 0, after).trim()
+                call.core_after = kit_steps_byte_slice(argument, after + 7, argument.count_bytes()).trim()
+            }
+        }
         if row.name == "repl_deny" {
             loop line in source.split("\n") {
                 trimmed: line.trim().copy()
@@ -526,7 +535,9 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     }
     cwd := if call.parent -> work else -> source
     if call.check_core {
-        cwd = kit_ui_stage_core(ctx, text, work, call.core_top)
+        cwd = kit_ui_stage_core(ctx, text, work, call.core_top, call.core_after) ?? {
+            return [KitOutcome{verdict: kit_expect_verdict("ERROR", "{err}"), run: kit_exec_failed("{err}"), tier: "-"}]
+        }
         // The staged tree is the toolchain the check finds around `Core`.
         overlay.push(KitEnvVar{name: ENV_JET_TOOLCHAIN_ROOT, value: None})
     }
@@ -542,10 +553,11 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
 
 // `@check_core [FILE]`'s toolchain, under the entry's scratch: the
 // repository's Core and compiler prelude, the entry project's own `Core/`
-// files over them, and the entry's `text` on top of `Core/FILE` when `top`
-// names one, so the reported lines stay put however the file below grows.
-// Returns the toolchain's directory.
-kit_ui_stage_core: fn(ctx: KitCtx, text: String, work: String, top: String) -> String {
+// files over them, and the entry's `text` in `Core/FILE` when `top` names
+// one: after its line `after` names (kit_ui_core_insert), else on top, so the
+// reported lines stay put however the file below grows. Returns the
+// toolchain's directory.
+kit_ui_stage_core: fn(ctx: KitCtx, text: String, work: String, top: String, after: String) -> String Err! {
     toolchain: files.join(ctx.scratch, "check-core")
     core: files.join(toolchain, "Core")
     kit_exec_copy_tree(files.join(ctx.root, "Core"), core, false, false)
@@ -554,10 +566,39 @@ kit_ui_stage_core: fn(ctx: KitCtx, text: String, work: String, top: String) -> S
     if files.is_dir(own) -> kit_exec_copy_tree(own, core, false, false)
     if top != "" {
         target: files.join(core, top)
-        below: files.read(target) ?? panic("read {target}: {err}")
-        kit_exec_write(target, "{text}{below}")
+        below: files.read(target) ?? return Err("@check_core {top}: read {target}: {err}")
+        staged: if after == "" -> "{text}{below}" else -> kit_ui_core_insert(text, below, top, after) ?? return Err("{err}")
+        kit_exec_write(target, staged)
     }
-    toolchain
+    Ok(toolchain)
+}
+
+// `text` in `below`, the text of `Core/{top}`, right after the one line that
+// reads the quoted `after`. An unquoted anchor, or one no line or two lines
+// read, is an error, never a prepend: a change to the file that moves the
+// anchor fails the case instead of checking something else.
+kit_ui_core_insert: fn(text: String, below: String, top: String, after: String) -> String Err! {
+    if after.count_bytes() < 2 || !after.starts_with("\"") || !after.ends_with("\"") {
+        return Err("@check_core {top} after {after}: the anchor must be one line of Core/{top} in double quotes")
+    }
+    anchor: kit_steps_byte_slice(after, 1, after.count_bytes() - 1)
+    found := -1
+    end := 0
+    offset := 0
+    loop (index, line) in below.split("\n").to_list() {
+        offset += line.count_bytes() + 1
+        if line != anchor -> next
+        if found >= 0 {
+            return Err("@check_core {top} after {after}: Core/{top} has the anchor line twice (lines {found + 1} and {index + 1})")
+        }
+        found = index
+        end = offset
+    }
+    if found < 0 {
+        return Err("@check_core {top} after {after}: no line of Core/{top} reads the anchor")
+    }
+    if end > below.count_bytes() -> return Ok("{below}\n{text}")
+    Ok("{kit_steps_byte_slice(below, 0, end)}{text}{kit_steps_byte_slice(below, end, below.count_bytes())}")
 }
 
 // Ingests a one-file tree into the case's Hangar root with the real `jetpack

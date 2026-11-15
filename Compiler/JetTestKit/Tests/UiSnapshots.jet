@@ -123,12 +123,39 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     kit_exec_write(files.join(root, "Compiler/Prelude/Core.rows"), "rows\n")
     work: files.join(root, "tests/ui/layers")
     kit_exec_write(files.join(work, "Core/package.jet"), "layers: {{}}\n")
-    toolchain: kit_ui_stage_core(kit_ui_test_context(root, "case"), "use probe: core.files\n", work, "Collections/Set.jet")
+    toolchain: kit_ui_stage_core(kit_ui_test_context(root, "case"), "use probe: core.files\n", work, "Collections/Set.jet", "") ?? panic("stage check_core: {err}")
     assert_eq(files.read(files.join(toolchain, "Core/package.jet")) ?? "", "layers: {{}}\n")
     assert_eq(files.read(files.join(toolchain, "Core/Collections/Set.jet")) ?? "", "use probe: core.files\nset: fn() {{}}\n")
     assert_eq(files.read(files.join(toolchain, "Compiler/Prelude/Core.rows")) ?? "", "rows\n")
     assert_eq(files.read(files.join(root, "Core/Collections/Set.jet")) ?? "", "set: fn() {{}}\n")
     files.remove_all(root) ?? panic("remove check_core scratch: {err}")
+}
+
+#Test("UI check_core puts the entry's text after its one anchor line and fails on a missing or doubled anchor") {
+    call: kit_ui_invocation("// @check_core Builtins/Builtins.jet after \"Kind: enum {{\"\n    Probe\n", "tests/ui/roles/main.jet", false)
+    assert_eq(call.core_top, "Builtins/Builtins.jet")
+    assert_eq(call.core_after, "\"Kind: enum {{\"")
+    assert_eq(kit_ui_invocation("// @check_core Builtins/Builtins.jet\n", "tests/ui/roles/main.jet", false).core_after, "")
+    below: "// kinds\nKind: enum {{\n    First\n}}\n"
+    assert_eq(kit_ui_core_insert("    Probe\n", below, "Builtins/Builtins.jet", "\"Kind: enum {{\"") ?? "", "// kinds\nKind: enum {{\n    Probe\n    First\n}}\n")
+    assert_eq(kit_ui_core_insert("    Probe\n", "Kind: enum {{", "B.jet", "\"Kind: enum {{\"") ?? "", "Kind: enum {{\n    Probe\n")
+    // An error comes back as its text, never as a prepended file.
+    missing: kit_ui_core_insert("    Probe\n", below, "Builtins/Builtins.jet", "\"Mode: enum {{\"") ?? "{err}"
+    assert_eq(missing, "@check_core Builtins/Builtins.jet after \"Mode: enum {{\": no line of Core/Builtins/Builtins.jet reads the anchor")
+    doubled: kit_ui_core_insert("    Probe\n", "{below}{below}", "Builtins/Builtins.jet", "\"Kind: enum {{\"") ?? "{err}"
+    assert_eq(doubled, "@check_core Builtins/Builtins.jet after \"Kind: enum {{\": Core/Builtins/Builtins.jet has the anchor line twice (lines 2 and 6)")
+    unquoted: kit_ui_core_insert("    Probe\n", below, "Builtins/Builtins.jet", "Kind: enum {{") ?? "{err}"
+    assert_eq(unquoted, "@check_core Builtins/Builtins.jet after Kind: enum {{: the anchor must be one line of Core/Builtins/Builtins.jet in double quotes")
+    // Staging reports the error instead of writing the file.
+    root: kit_ui_test_scratch("check-core-anchor")
+    kit_exec_write(files.join(root, "Core/Builtins/Builtins.jet"), below)
+    kit_exec_write(files.join(root, "Compiler/Prelude/Core.rows"), "rows\n")
+    work: files.join(root, "tests/ui/roles")
+    ctx: kit_ui_test_context(root, "case")
+    staged: kit_ui_stage_core(ctx, "    Probe\n", work, "Builtins/Builtins.jet", "\"Mode: enum {{\"") ?? "{err}"
+    assert_eq(staged, missing)
+    assert_eq(files.read(files.join(ctx.scratch, "check-core/Core/Builtins/Builtins.jet")) ?? "", below)
+    files.remove_all(root) ?? panic("remove check_core anchor scratch: {err}")
 }
 
 #Test("UI discovery walks groups but stops at project entries and excludes fixed companions") {

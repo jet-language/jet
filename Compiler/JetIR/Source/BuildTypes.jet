@@ -2397,8 +2397,8 @@ ir_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
                 return ir_call_row_values(m, p, b, power_row, [Int]{left, right}, span)
             }
             // F32 `pow` widens both operands to Float exactly and narrows the
-            // Float __pow_f32 returns, which rounds to the correctly rounded
-            // binary32 power.
+            // Float that the PowF32 role's Core function returns, which rounds
+            // to the correctly rounded binary32 power.
             narrow_row: b.f.slot_type[left]
             wide_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "F32 power without a Float row")
             wide_left: ir_numeric_cast(m, p, b, left, wide_row, span)

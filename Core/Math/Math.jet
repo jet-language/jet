@@ -11,6 +11,7 @@ package: {
 
 use {
     core: core
+    builtin: jet_builtins
     ambient_random: core.math.random
     core.prelude.[min, max, clamp]
 }
@@ -12726,7 +12727,7 @@ pow_r: fn(base: Float, exponent: Float) -> Float Never! {
 /// NaN y too), the IEEE 754 zeros and infinities for a zero or infinite x or
 /// y, a negative x to a whole y signed by y's parity, and NaN for a negative
 /// x to a fractional y.
-__pow_float: fn(x: Float, y: Float) -> Float Never! {
+#Builtin.Role(.PowFloat) priv pow_float: fn(x: Float, y: Float) -> Float Never! {
     if is_nan(x) {
         if y == 0.0 && to_bits(x).bit_and(0x8_0000_0000_0000) != 0 -> return Float{1.0}
         return x + x
@@ -13046,10 +13047,10 @@ __pow_r_f32: fn(x: Float, y: Float) -> Float Never! {
     f32_step(r, pow_side(a.m, a.e, yn, b.e, 1, r))
 }
 
-// The F32 form of pow (both operands F32, widened exactly): __pow_float's
+// The F32 form of pow (both operands F32, widened exactly): pow_float's
 // zeros, infinities, NaN and signs, a midpoint settled as __pow_r_f32 does.
-__pow_f32: fn(x: Float, y: Float) -> Float Never! {
-    r: __pow_float(x, y)
+#Builtin.Role(.PowF32) priv pow_f32: fn(x: Float, y: Float) -> Float Never! {
+    r: pow_float(x, y)
     if !f32_midpoint(r) -> return r
     a: float_parts(x)
     b: float_parts(y)
@@ -37525,7 +37526,7 @@ fabs: fn(n: Float) -> Float Never! { core.math.fabs(n) }
 // `math.abs` on F32 and I64 (MathBuiltin `abs`): F32 negates exactly when the
 // sign bit is set, so -0.0 and a negative NaN lose their sign; I64 negation
 // stops at I64.MIN like any fixed-width overflow.
-__abs_f32: fn(n: F32) -> F32 Never! {
+#Builtin.Role(.AbsF32) priv abs_f32: fn(n: F32) -> F32 Never! {
     if to_bits(Float.from_f32(n)) < 0 -> return -n
     n
 }
@@ -37541,7 +37542,7 @@ priv copysign_f32: fn(value: F32, sign_value: F32) -> F32 Never! {
 // abs_float is fabs, at F32 width too.
 priv abs_float_f32: fn(n: F32) -> F32 Never! { fabs_f32(n) }
 
-__abs_i64: fn(n: I64) -> I64 Never! {
+#Builtin.Role(.AbsI64) priv abs_i64: fn(n: I64) -> I64 Never! {
     zero: I64{0}
     if n < zero -> return -n
     n
@@ -38982,20 +38983,20 @@ priv payload_bits_f32: fn(payload: F32) -> Int? Never! {
 }
 
 #Test("Float.pow is the correctly rounded C23 pow") {
-    assert_eq(__pow_float(2.0, 0.5), 1.4142135623730951)
-    assert_eq(__pow_float(-2.0, 3.0), -8.0)
-    assert_eq(__pow_float(-2.0, -2.0), 0.25)
-    assert_eq(__pow_float(NAN, 0.0), 1.0)
-    assert_eq(__pow_float(1.0, NAN), 1.0)
-    assert_eq(__pow_float(-1.0, INFINITY), 1.0)
-    assert_eq(__pow_float(-0.0, -1.0), -INFINITY)
-    assert_eq(to_bits(__pow_float(-0.0, 3.0)), to_bits(-0.0))
-    assert_eq(__pow_float(0.0, -INFINITY), INFINITY)
-    assert_eq(to_bits(__pow_float(-INFINITY, -3.0)), to_bits(-0.0))
-    assert_eq(__pow_float(0.5, -INFINITY), INFINITY)
-    assert(is_nan(__pow_float(-8.0, 0.3333333333333333)))
-    assert(is_nan(__pow_float(NAN, 1.0)))
-    assert_eq(to_bits(__pow_float(from_bits(4835813121993211188), 0.3125)), 4678529498034705970)
+    assert_eq(pow_float(2.0, 0.5), 1.4142135623730951)
+    assert_eq(pow_float(-2.0, 3.0), -8.0)
+    assert_eq(pow_float(-2.0, -2.0), 0.25)
+    assert_eq(pow_float(NAN, 0.0), 1.0)
+    assert_eq(pow_float(1.0, NAN), 1.0)
+    assert_eq(pow_float(-1.0, INFINITY), 1.0)
+    assert_eq(pow_float(-0.0, -1.0), -INFINITY)
+    assert_eq(to_bits(pow_float(-0.0, 3.0)), to_bits(-0.0))
+    assert_eq(pow_float(0.0, -INFINITY), INFINITY)
+    assert_eq(to_bits(pow_float(-INFINITY, -3.0)), to_bits(-0.0))
+    assert_eq(pow_float(0.5, -INFINITY), INFINITY)
+    assert(is_nan(pow_float(-8.0, 0.3333333333333333)))
+    assert(is_nan(pow_float(NAN, 1.0)))
+    assert_eq(to_bits(pow_float(from_bits(4835813121993211188), 0.3125)), 4678529498034705970)
 }
 
 #Test("math root_n and compound_n are correctly rounded") {
@@ -39067,7 +39068,7 @@ priv payload_bits_f32: fn(payload: F32) -> Int? Never! {
     assert_eq(Float.from_f32(F32{gamma_f32(6.1763376700649675e-15)}), 161908237795328.0)
     assert_eq(Float.from_f32(F32{lgamma_f32(-1.5639554096225083e-9)}), 20.27604866027832)
     assert_eq(Float.from_f32(F32{hypot_f32(1.7750831842422485, 0.0004600069660227746)}), 1.7750831842422485)
-    assert_eq(Float.from_f32(F32{__pow_f32(1.6949651046854058e-13, 1.00834059715271)}), 1.3263079057333066e-13)
+    assert_eq(Float.from_f32(F32{pow_f32(1.6949651046854058e-13, 1.00834059715271)}), 1.3263079057333066e-13)
     assert_eq(Float.from_f32(F32{__atan2_f32(1.0, 1.0)}), 0.7853981852531433)
     assert_eq(__atan2_f32(-0.0, -2.0), -3.141592653589793)
     assert(is_nan(__pow_r_f32(-2.0, 0.5)))
