@@ -318,14 +318,9 @@ build_relative_components: fn(base: String, path: String, escape: String) -> [St
 build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] BuildIOError! {
     parts: build_relative_components(base, path, "cache path escapes root")
     if parts.len() == 0 -> return Err(BuildIOError.new(.InvalidInput, "cache path has no file name"))
-    directory := files.open_directory(base) ?? return Err(BuildIOError.from(err))
-    loop index in 0..<parts.len() - 1 {
-        directory = directory.open_directory(parts[index]) ?? return Err(BuildIOError.from(err))
-    }
+    directory: build_held_parent(base, parts) ?? return Err(err)
     name: parts[parts.len() - 1]
-    entry: directory.entry_stat(name) ?? return Err(BuildIOError.from(err))
-    if entry.is_symlink || !entry.is_file -> return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
-    if entry.size > limit -> return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+    entry: build_regular_entry(directory, name, limit) ?? return Err(err)
     reader := files.jet_std_files_open_reader_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
     info: reader.stat() ?? return Err(BuildIOError.from(err))
     if !info.is_file -> return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
@@ -342,13 +337,66 @@ build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] B
     Ok(bytes)
 }
 
-// Rust `atomic_restore_file`: walk (creating 0755) every parent without
-// following links, write a fresh `.jet-restore-<nonce>` exclusively (0600,
-// or 0755 when `executable`), fsync it, then rename it over the final name
-// inside the held directory.
-build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, executable: Bool) BuildIOError! -[FS, Rand]> {
-    parts: build_relative_components(base, path, "build output escapes root")
-    if parts.len() == 0 -> return Err(BuildIOError.new(.InvalidInput, "build output has no file name"))
+// The held real directory holding the last of `parts` below `base`: `base`
+// and every parent component opened without following a link.
+build_held_parent: fn(base: String, parts: [String]) -[FS]> files.Directory BuildIOError! {
+    directory := files.open_directory(base) ?? return Err(BuildIOError.from(err))
+    loop index in 0..<parts.len() - 1 {
+        directory = directory.open_directory(parts[index]) ?? return Err(BuildIOError.from(err))
+    }
+    Ok(directory)
+}
+
+// The entry `name` of `directory`, inspected without following a link: a
+// regular file of at most `limit` bytes.
+build_regular_entry: fn(directory: files.Directory, name: String, limit: Int) -[FS]> files.Stat BuildIOError! {
+    entry: directory.entry_stat(name) ?? return Err(BuildIOError.from(err))
+    if entry.is_symlink || !entry.is_file -> return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
+    if entry.size > limit -> return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+    Ok(entry)
+}
+
+// The size of the work-tree output at `path` under `base`, checked as
+// build_secure_read_file checks a file before reading it (no link on the
+// way, a regular file, at most `limit` bytes) without reading a byte:
+// build_move_output publishes it by renaming it.
+build_work_output_size: fn(base: String, path: String, limit: Int) -[FS]> Int BuildIOError! {
+    parts: build_relative_components(base, path, "cache path escapes root")
+    if parts.len() == 0 -> return Err(BuildIOError.new(.InvalidInput, "cache path has no file name"))
+    directory: build_held_parent(base, parts) ?? return Err(err)
+    entry: build_regular_entry(directory, parts[parts.len() - 1], limit) ?? return Err(err)
+    Ok(entry.size)
+}
+
+// Publish the work-tree output `from` (under `work`, which the build owns
+// and removes after) at `path` under `base` without copying it: its mode is
+// the one build_atomic_restore_file gives a restored file (0755 when its
+// owner may run it, else 0600), its bytes are made durable, then it is
+// renamed from its held directory into the held destination directory over
+// the final name. A file another name also links, or one the rename can't
+// move (another file system), is read and restored instead.
+build_move_output: fn(work: String, from: String, base: String, path: String) BuildIOError! -[FS, Rand]> {
+    source_parts: build_relative_components(work, from, "cache path escapes root")
+    if source_parts.len() == 0 -> return Err(BuildIOError.new(.InvalidInput, "cache path has no file name"))
+    source: build_held_parent(work, source_parts) ?? return Err(err)
+    name: source_parts[source_parts.len() - 1]
+    entry: build_regular_entry(source, name, BUILD_MAX_ACTION_FILE_BYTES) ?? return Err(err)
+    executable: (entry.mode /% 64) % 2 == 1
+    if entry.links == 1 {
+        files.set_mode(from, if executable -> 0o755 else -> 0o600) ?? return Err(BuildIOError.from(err))
+        files.fsync(from) ?? return Err(BuildIOError.from(err))
+        parts: build_relative_components(base, path, "build output escapes root")
+        if parts.len() == 0 -> return Err(BuildIOError.new(.InvalidInput, "build output has no file name"))
+        directory: build_output_parent(base, parts) ?? return Err(err)
+        if source.rename(name, parts[parts.len() - 1], into: Val(directory)) == .Ok(_) -> return
+    }
+    bytes: build_secure_read_file(work, from, BUILD_MAX_ACTION_FILE_BYTES) ?? return Err(err)
+    build_atomic_restore_file(base, path, bytes, executable: executable) ?? return Err(err)
+}
+
+// The held real directory holding the last of `parts` below `base`, every
+// parent walked without following a link and created (0755) when missing.
+build_output_parent: fn(base: String, parts: [String]) -[FS]> files.Directory BuildIOError! {
     directory := files.open_directory(base) ?? return Err(BuildIOError.from(err))
     loop index in 0..<parts.len() - 1 {
         part: parts[index]
@@ -364,6 +412,17 @@ build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, execut
             }
         }
     }
+    Ok(directory)
+}
+
+// Rust `atomic_restore_file`: walk (creating 0755) every parent without
+// following links, write a fresh `.jet-restore-<nonce>` exclusively (0600,
+// or 0755 when `executable`), fsync it, then rename it over the final name
+// inside the held directory.
+build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, executable: Bool) BuildIOError! -[FS, Rand]> {
+    parts: build_relative_components(base, path, "build output escapes root")
+    if parts.len() == 0 -> return Err(BuildIOError.new(.InvalidInput, "build output has no file name"))
+    directory: build_output_parent(base, parts) ?? return Err(err)
     final_name: parts[parts.len() - 1]
     loop {
         random_bytes: random.bytes(16) ?? return Err(BuildIOError.new(.Other, "{err}"))

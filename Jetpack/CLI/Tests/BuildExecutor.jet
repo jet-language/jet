@@ -346,12 +346,13 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     plan.actions[handle.id]
 }
 
-#Test("sandbox outputs: regular outputs publish, a FIFO output is refused at once and nothing is published") {
+#Test("sandbox outputs: regular outputs move into place, a FIFO output is refused at once and nothing is published") {
     root: build_test_root("fifo-output")
     sandbox: build_test_root("fifo-output-sandbox")
     action: build_test_output_action([String]{"a.o", "b.o"})
     files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output")
     files.write(files.join(sandbox, "b.o"), "second") ?? panic("second output")
+    made_id: (files.stat(files.join(sandbox, "b.o")) ?? panic("made output")).id
     published: if build_publish_sandbox_outputs(sandbox, root, action) == {
         .Ok(edited) -> edited
         .Err(error) -> panic("regular outputs publish: {error.message}")
@@ -359,10 +360,13 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert_eq(published, String?{None})
     assert_eq(files.read(files.join(root, "b.o")) ?? panic("published output"), "second")
     assert(!(build_owner_executable(files.join(root, "b.o")) ?? panic("published mode")))
+    // The made file itself is published: renamed, not copied.
+    assert((files.stat(files.join(root, "b.o")) ?? panic("published stat")).id == made_id)
+    assert(!files.exists(files.join(sandbox, "b.o")))
     files.remove(files.join(root, "a.o")) ?? panic("reset first output")
     files.remove(files.join(root, "b.o")) ?? panic("reset second output")
+    files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output again")
     // A FIFO with no writer would block a plain open forever.
-    files.remove(files.join(sandbox, "b.o")) ?? panic("drop second output")
     made: process.cmd([String]{"mkfifo", files.join(sandbox, "b.o")}).run() ?? panic("run host mkfifo")
     assert(made.success)
     started: time.instant()
@@ -420,8 +424,13 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     }
     assert_eq(first, String?{None})
     assert_eq(files.read(table) ?? panic("written kept output"), "new")
+    // The kept output was read and stays in the work tree; the other one was
+    // moved out of it, so each publication below makes it again.
+    assert(files.exists(files.join(sandbox, "table.txt")))
+    assert(!files.exists(files.join(sandbox, "a.o")))
     // Already holding the made bytes: the same file stays.
     before: (files.stat(table) ?? panic("kept stat")).id
+    files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output again")
     unchanged: if build_publish_sandbox_outputs(sandbox, root, action) == {
         .Ok(edited) -> edited
         .Err(error) -> panic("an unchanged kept output publishes: {error.message}")
@@ -430,6 +439,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert((files.stat(table) ?? panic("kept stat")).id == before)
     // Holding the last build's bytes: rewritten.
     files.write(table, "old") ?? panic("last build's bytes")
+    files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output again")
     rewritten: if build_publish_sandbox_outputs(sandbox, root, action) == {
         .Ok(edited) -> edited
         .Err(error) -> panic("the last build's bytes are rewritten: {error.message}")
@@ -440,6 +450,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     // tree or from a cache record.
     files.write(table, "edited") ?? panic("hand edit")
     files.remove(files.join(root, "a.o")) ?? panic("reset first output")
+    files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output again")
     refused: if build_publish_sandbox_outputs(sandbox, root, action) == {
         .Ok(edited) -> edited
         .Err(error) -> panic("a hand edit is reported: {error.message}")
@@ -479,6 +490,30 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert_eq(published, String?{None})
     assert(build_owner_executable(files.join(root, "tool")) ?? panic("runnable mode"))
     assert(!(build_owner_executable(files.join(root, "data")) ?? panic("plain mode")))
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(sandbox).drop("test cleanup")
+}
+
+#Test("sandbox outputs: a nested output moves under fresh parents, one another name links is copied") {
+    root: build_test_root("moved-output")
+    sandbox: build_test_root("moved-output-sandbox")
+    action: build_test_output_action([String]{"bin/tool", "shared.o"})
+    files.create_dir_all(files.join(sandbox, "bin")) ?? panic("work-tree folder")
+    files.write(files.join(sandbox, "bin/tool"), "image") ?? panic("nested output")
+    files.set_mode(files.join(sandbox, "bin/tool"), 493) ?? panic("make the output runnable")
+    files.write(files.join(sandbox, "shared.o"), "shared") ?? panic("linked output")
+    files.hard_link(files.join(sandbox, "shared.o"), files.join(sandbox, "other.o")) ?? panic("second link")
+    published: if build_publish_sandbox_outputs(sandbox, root, action) == {
+        .Ok(edited) -> edited
+        .Err(error) -> panic("outputs publish: {error.message}")
+    }
+    assert_eq(published, String?{None})
+    assert_eq(files.read(files.join(root, "bin/tool")) ?? panic("moved output"), "image")
+    assert(build_owner_executable(files.join(root, "bin/tool")) ?? panic("runnable mode"))
+    assert(!files.exists(files.join(sandbox, "bin/tool")))
+    assert_eq(files.read(files.join(root, "shared.o")) ?? panic("copied output"), "shared")
+    assert((files.stat(files.join(root, "shared.o")) ?? panic("copied stat")).links == 1)
+    assert_eq(files.read(files.join(sandbox, "other.o")) ?? panic("other link"), "shared")
     files.remove_all(root).drop("test cleanup")
     files.remove_all(sandbox).drop("test cleanup")
 }
