@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6923,
-    "rev": 104375,
+    "rev": 104391,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60582,6 +60582,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: proofs added. c5 met (no #Import in JetDevserver at dev 9a82866572). The c7 owner visual acceptance is a gate row. Note: the ratified D-DEVSERVER1=A (delete) contradicts the owner's 2026-11-09 ruling (finish the port); the body says so."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "Decision (Main): JetDevserver clears its registration errors for c6. The swap paths that use the #6625-gated HotSwapDecision and StateRetentionFact types (NativeSwap, NativeSwap02, WebModuleSwap) keep their modules but drop those uses and return the same explicit not-available refusal as the remaining 501 routes until #6625 lands; then they are restored against the real types. Root of the 854 dependency errors in a keep-going check of JetDevserver: under JET_KEEP_GOING a registration error leaves graph.complete false, and sema_copy_nominal_has_impl (JetSema Ownership/Copy.jet) then answers known: false for every nominal program-wide, so dependency packages that check clean alone report UseAfterMove and comptime closure errors. A checker fix (graph-wide facts stay known for modules without registration errors) is assigned to G5DevX-2."
@@ -60625,93 +60630,93 @@
       "criteria": [
         {
           "n": 3,
-          "text": "(was #2235 c1) jet dev <file> always serves the app preview at the stable default port with a printed line; collision picks next free port and prints it [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "`jet dev <file>` serves the app preview at the stable default port and prints the URL. When that port is taken, it uses the next free port and prints that instead. Proof: `jet test Compiler --profile cases --filter web_dev/dev_preview_port_and_collision`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:50:01.986Z"
+          "at": "2026-11-15T04:15:21.057Z"
         },
         {
           "n": 4,
-          "text": "(was #2493 c1) Implementation-only closure: the Browser host serves the canonical workbench and in-app devtools surface, consumes typed panel envelopes, and carries real source/build/session identities [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "The browser host serves the workbench and the in-app devtools, reads typed panel envelopes, and carries real source, build and session identities. Proof: `jet test Compiler --profile cases --filter devtools/browser_host_serves_workbench_and_panels`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:50:03.232Z"
+          "at": "2026-11-15T04:15:22.033Z"
         },
         {
           "n": 5,
-          "text": "Once it builds, jet dev's file watching and web host run with no C import, and their cases pass (moved from #6692 c2).",
-          "status": "open",
-          "metBy": null,
+          "text": "jet dev's file watching and web host use no C import. Proof: `git grep -n '#Import' -- Compiler/JetDevserver/Source` prints nothing.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T16:31:19.335Z"
+          "evidence": "dev 9a82866572: `git grep -n '#Import' -- Compiler/JetDevserver/Source` prints nothing, so JetDevserver has no C import",
+          "at": "2026-11-15T04:15:33.935Z"
         },
         {
           "n": 6,
-          "text": "Compiler/JetDevserver is built as part of the jet build, and jet dev --canvas, run --app and run --share work end to end (their cases pass).",
+          "text": "Compiler/JetDevserver is built into `jet`, and `jet dev --canvas`, `jet run --app` and `jet run --share` work end to end. Proof: `jet test Compiler --profile cases --filter canvas` and `--filter web_dev/run_app_and_share`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:23:05.844Z"
+          "at": "2026-11-15T04:15:24.007Z"
         },
         {
           "n": 7,
-          "text": "[#3414] Default dev output shows only application output and target/state/last-action status. The full dashboard opens only on explicit Ctrl+] focus in the same terminal and restores scrollback. Escape collapses it. Ordinary keys are never stolen. No event steals focus. Reload and restart stay distinct. TTY, narrow, no-TTY, NO_COLOR, JSON and app-owned TUI modes are exercised. The owner accepts the terminal appearance. (was #2756 c3)",
+          "text": "Default dev output shows only the application's output and a target, state and last-action status line (D-DEV-FOCUS2=A). The full dashboard opens only on Ctrl+] in the same terminal, restores scrollback, and collapses on Escape. Ordinary keys and focus are never stolen, and reload and restart stay distinct. TTY, narrow, no-TTY, NO_COLOR, JSON and app-owned TUI modes each have a case. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/dev_dashboard_focus_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:22:37.341Z"
+          "at": "2026-11-15T04:15:25.222Z"
         },
         {
           "n": 9,
-          "text": "Every jet dev case row (tests/cases/web_dev and tests/cases/devserver*) passes on the default tier with no known-failing row added; the jet dev golden examples pass on O0, O1 and O2. (was #6582 c2)",
+          "text": "Every jet dev case row (tests/cases/web_dev and tests/cases/devserver*) passes on the default tier with no known-failing row added, and the jet dev golden examples pass on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter web_dev/` and `--filter devserver`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:23:01.197Z"
+          "at": "2026-11-15T04:15:26.620Z"
         },
         {
           "n": 10,
-          "text": "(was #3196) [#3091] An invalid edit is never labeled checked-ready. Watch, build and test consume the same endpoint/codec facts. A stale generated client or schema is rejected or refreshed only by explicit generation. (was #4275 c72)",
+          "text": "An invalid edit is never labeled checked-ready. Watch, build and test read the same endpoint and codec facts, and a stale generated client or schema is rejected, or refreshed only by explicit generation. Proof: `jet test Compiler --profile cases --filter web_dev/invalid_edit_never_ready` and `--filter web_dev/stale_generated_client_rejected`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:34:22.626Z"
+          "at": "2026-11-15T04:15:27.785Z"
         },
         {
           "n": 11,
-          "text": "(was #4272) {\"decisionId\": \"D-DX-APPFROMSCRIPT1\", \"text\": \"Add an app selection to the existing development host; Gains: One live source session.; Reload and reconnect stay shared.; Local-only remains the default.. Losses: Serving keeps a local process alive..\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_dx_appfromscript1_contract\", \"suite\": \"tests/ratified/P08.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P08/d_dx_appfromscript1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"edit pure ancestor reruns only pure descendants; effectful cells require confirmation; delete binding scrubs it; stale output labeled; bounded retained kernel state\", \"one resident game source/runtime session with identical headless/rendered events and authoritative Canvas routes\", \"typed local SQL interactive and CI command with plans/limits; optional browser projection; remote engine requires explicit provider authority\", \"local app selection shares reload/reconnect and serves real requests; local-only default; close shuts down resident process\"]}} (was #4275 c76)",
+          "text": "D-DX-APPFROMSCRIPT1=A: `jet dev` serves the app through an app selection in the existing development host. One live source session, shared reload and reconnect, and local-only by default. Proof: `jet test Compiler --profile cases --filter web_dev/dev_serves_app_selection`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:34:34.432Z"
+          "at": "2026-11-15T04:15:28.996Z"
         },
         {
           "n": 12,
-          "text": "JetDevserver's browser host (WebHost/BrowserWebAdapter/WebModuleSwap/NativeSwap/overlay: jet dev serving a web build with hot swap) is rewritten on this target, deferred from #6221 P2 because native jet had no web target; a jet dev --target=web example reloads a changed function in the page (test). (was #5201 c4)",
+          "text": "JetDevserver's browser host (WebHost, BrowserWebAdapter, WebModuleSwap, NativeSwap and the overlay) serves a web build with hot swap: a `jet dev --target=web` example reloads a changed function in the page. Proof: `jet test Compiler --profile cases --filter web_dev/dev_target_web_reloads_changed_function`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:16:21.850Z"
+          "at": "2026-11-15T04:15:30.081Z"
         },
         {
           "n": 13,
-          "text": "Compiler/JetDevserver passes jet check with 0 problems, is fmt-clean, and is removed from the repo-wide fmt guard's single named exclusion (added by the #6005 c23 cutover on 2026-11-11 because the unbuilt port had 390 parse errors across 15 files).",
+          "text": "Compiler/JetDevserver passes `jet check` with 0 problems and is fmt-clean, and it leaves the repo-wide fmt guard's single named exclusion (added by the #6005 c23 cutover on 2026-11-11). Proof: `jet check Compiler/JetDevserver` exits 0, `jet fmt --check Compiler/JetDevserver` exits 0, and `git grep -n JetDevserver -- tests/guards` names no fmt exclusion.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T19:42:37.747Z"
+          "at": "2026-11-15T04:15:31.069Z"
         },
         {
           "n": 14,
@@ -60748,7 +60753,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-24T19:25:14.992Z",
-      "updated": "2026-11-15T04:15:06.400Z",
+      "updated": "2026-11-15T04:15:37.241Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -87815,8 +87820,8 @@
     {
       "id": "c066t33h",
       "num": 6625,
-      "title": "Live hot-reload that keeps state (#Persist)",
-      "body": "jet dev/live hot swap with #Persist retention, migrations and live inspection. Moved out of #5454 by owner ruling 2026-11-06.",
+      "title": "Live hot reload keeps state: #Persist values survive edits and restarts, migrate by rule, and every reset names its reason",
+      "body": "Destination: under `jet dev`, editing a running program swaps the code and keeps every #Persist value whose type is unchanged. Type changes follow D-HOTSTATE1=A and D-LIVE-PERSIST1=A: defaults, drops, `migration` blocks, or an announced restart that names the blocking field. Restarts keep #Persist values through the session pipe (D-DEV-STATE1=A). Game state and controls live in the same session (D-DX-GAMELOOP1=A).\n\nUntil this card lands, JetDevserver's swap paths (NativeSwap, NativeSwap02, WebModuleSwap) refuse with not-available (#5931, Main's log 2026-11-13). Diagnostic E2210 is registered again with its emitter when this card builds the behavior.\n\nMoved out of #5454 by owner ruling 2026-11-06.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
@@ -87830,6 +87835,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: proofs added to every criterion. c4 merged into c10 (D-LIVE-PERSIST1) and c13 (the renamed-binding reset), and c7 into c8."
+        },
         {
           "at": "2026-11-13",
           "by": "Main",
@@ -87872,11 +87882,12 @@
         {
           "n": 4,
           "text": "(was #2504 c2) Published Persist migrations use one shared canonical Shape migration plan; restart and renamed-binding reset policies are implemented (moved from #5454 c69)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T23:25:27.424Z"
+          "evidence": "Merged into #6625 c10: a published #Persist migration through the one Shape migration plan is D-LIVE-PERSIST1=A's step function; the renamed-binding reset is now in c13",
+          "at": "2026-11-15T04:15:32.035Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
@@ -87899,11 +87910,12 @@
         {
           "n": 7,
           "text": "(was #2504 c5) All named live/dev/parity/inspection/diagnostic proof and O0/O2 smoke pass as tests/cases rows on O0 and O2 (#2919, which held them, is gone) (moved from #5454 c72)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:20:04.284Z"
+          "evidence": "Merged into #6625 c8: the ported live and dev proofs on O0 and O2 are c8's cases",
+          "at": "2026-11-15T04:15:32.983Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
@@ -87968,7 +87980,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:24.209Z",
-      "updated": "2026-11-15T04:15:19.885Z",
+      "updated": "2026-11-15T04:15:36.355Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 14
     },
@@ -213847,6 +213859,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:15:37.241Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0c209zc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:15:36.355Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c066t33h",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:15:35.469Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c066t33h",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T04:15:33.935Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0c209zc",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T04:15:32.984Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c066t33h",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T04:15:32.035Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c066t33h",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T04:15:31.069Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c209zc",
+      "note": "#13: proof; was: Compiler/JetDevserver passes jet check with 0 problems, is fmt-clean, and is removed from the repo-wide fmt guard's single named exclusion (added by the #6005 c23 cutover on 2026-11-11 because the unb"
+    },
+    {
+      "at": "2026-11-15T04:15:30.081Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c209zc",
+      "note": "#12: strip debris; proof; was: JetDevserver's browser host (WebHost/BrowserWebAdapter/WebModuleSwap/NativeSwap/overlay: jet dev serving a web build with hot swap) is rewritten on this target, deferred from #6221 P2 because native j"
+    },
+    {
+      "at": "2026-11-15T04:15:28.996Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c209zc",
+      "note": "#11: replace the decision proof stub with the outcome and a proof; was: (was #4272) {\"decisionId\": \"D-DX-APPFROMSCRIPT1\", \"text\": \"Add an app selection to the existing development host; Gains: One live source session.; Reload and reconnect stay shared.; Local-only remains"
+    },
+    {
+      "at": "2026-11-15T04:15:27.785Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c209zc",
+      "note": "#10: strip debris; proof; was: (was #3196) [#3091] An invalid edit is never labeled checked-ready. Watch, build and test consume the same endpoint/codec facts. A stale generated client or schema is rejected or refreshed only by exp"
+    },
+    {
+      "at": "2026-11-15T04:15:26.620Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c209zc",
+      "note": "#9: strip debris; proof; was: Every jet dev case row (tests/cases/web_dev and tests/cases/devserver*) passes on the default tier with no known-failing row added; the jet dev golden examples pass on O0, O1 and O2. (was #6582 c2)"
+    },
+    {
+      "at": "2026-11-15T04:15:25.222Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c209zc",
+      "note": "#7: strip debris; proof; owner acceptance of the look is a gate row; was: [#3414] Default dev output shows only application output and target/state/last-action status. The full dashboard opens only on explicit Ctrl+] focus in the same terminal and restores scrollback. Escap"
+    },
+    {
+      "at": "2026-11-15T04:15:24.007Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c209zc",
+      "note": "#6: proof; was: Compiler/JetDevserver is built as part of the jet build, and jet dev --canvas, run --app and run --share work end to end (their cases pass)."
+    },
+    {
+      "at": "2026-11-15T04:15:23.044Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c209zc",
+      "note": "#5: the cases half is c9; was: Once it builds, jet dev's file watching and web host run with no C import, and their cases pass (moved from #6692 c2)."
+    },
+    {
+      "at": "2026-11-15T04:15:22.033Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c209zc",
+      "note": "#4: strip debris; proof; was: (was #2493 c1) Implementation-only closure: the Browser host serves the canonical workbench and in-app devtools surface, consumes typed panel envelopes, and carries real source/build/session identitie"
+    },
+    {
+      "at": "2026-11-15T04:15:21.057Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c209zc",
+      "note": "#3: strip debris; proof; was: (was #2235 c1) jet dev <file> always serves the app preview at the stable default port with a printed line; collision picks next free port and prints it [precut audit: no dev test, golden, case or sna"
+    },
     {
       "at": "2026-11-15T04:15:19.885Z",
       "by": "TowerKeeper-1",
