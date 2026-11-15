@@ -274,6 +274,9 @@ KernelPackage: struct {
     // The paths `policy.memory` names, relative to the package; empty when it
     // names none.
     paths: [String]
+    // The package sits under a Tests/ directory: its kernel files are test
+    // witnesses that never ship.
+    test_only: Bool
 }
 
 usage: fn() -> String {
@@ -906,6 +909,30 @@ in_kernel: fn(path: String, kernel: [String]) -> Bool {
     false
 }
 
+// The root- or package-relative `path` has a `Tests` directory segment.
+tests_tree: fn(path: String) -> Bool {
+    path == "Tests" || path.starts_with("Tests/") || path.contains("/Tests/") || path.ends_with("/Tests")
+}
+
+// Why each kernel entry of `packages` claims the wrong scope: a test-only
+// package's entry must be a `*Tests.jet` test file, and a shipped package's
+// entry must not point into a Tests/ tree.
+kernel_scope_problems: fn(packages: [KernelPackage]) -> [String] {
+    problems := [String]{}
+    loop package in packages {
+        name: if package.directory == "" -> "(root)" else -> package.directory.copy()
+        loop path in package.paths {
+            if package.test_only && !path.ends_with("Tests.jet") {
+                problems.push("{name}: the test-only kernel entry `{path}` is not a *Tests.jet test file; a package under Tests/ holds only test witnesses in its kernel")
+            }
+            if !package.test_only && tests_tree(path) {
+                problems.push("{name}: the kernel entry `{path}` points into a Tests/ tree; a shipped package's kernel holds no test files, so move the witness to a package under Tests/")
+            }
+        }
+    }
+    problems
+}
+
 // Set each row's kernel flag from its package's `policy.memory`; the
 // packages that hold rows, sorted by directory.
 mark_kernels: fn(root: String, rows: &[MemoryRow]) -[FS]> [KernelPackage] RatchetError! {
@@ -925,7 +952,7 @@ mark_kernels: fn(root: String, rows: &[MemoryRow]) -[FS]> [KernelPackage] Ratche
                     if known < 0 {
                         manifest: if directory == "" -> files.join(root, "package.jet") else -> files.join(root, "{directory}/package.jet")
                         text: read_text(manifest) ?? return Err(err)
-                        packages.push(KernelPackage{directory: directory.copy(), paths: kernel_paths(text)})
+                        packages.push(KernelPackage{directory: directory.copy(), paths: kernel_paths(text), test_only: tests_tree(directory)})
                         known = packages.len() - 1
                     }
                     relative: if directory == "" -> file.copy() else -> byte_tail(file, byte_len(directory) + 1)
@@ -1006,13 +1033,14 @@ render_memory_inventory: fn(rows: [MemoryRow], packages: [KernelPackage]) -> Str
     }
     lines.push(memory_count_line("total", totals))
     lines.push("")
-    lines.push("| package | policy.memory |")
-    lines.push("| --- | --- |")
-    if packages.len() == 0 -> lines.push("| (none) | (none) |")
+    lines.push("| package | policy.memory | test-only |")
+    lines.push("| --- | --- | --- |")
+    if packages.len() == 0 -> lines.push("| (none) | (none) | - |")
     loop package in packages {
         name: if package.directory == "" -> "(root)" else -> package.directory.copy()
         declared: if package.paths.len() == 0 -> "(none)" else -> package.paths.join(", ")
-        lines.push("| {markdown_cell(name)} | {markdown_cell(declared)} |")
+        test_only: if package.test_only -> "yes" else -> "no"
+        lines.push("| {markdown_cell(name)} | {markdown_cell(declared)} | {test_only} |")
     }
     lines.push("")
     lines.push("| file | line | actions | kernel |")
@@ -1031,7 +1059,7 @@ memory_inventory_json: fn(rows: [MemoryRow], packages: [KernelPackage]) -> Dyn {
     loop package in packages {
         paths := [Dyn]{}
         loop path in package.paths -> paths.push(Dyn.Text(path.copy()))
-        kernels.push(Dyn.Object([String: Dyn]{"package": Dyn.Text(package.directory.copy()), "kernel": Dyn.Array(paths)}))
+        kernels.push(Dyn.Object([String: Dyn]{"package": Dyn.Text(package.directory.copy()), "kernel": Dyn.Array(paths), "test_only": Dyn.Bool(package.test_only)}))
     }
     regions := [Dyn]{}
     loop row in rows {
@@ -1076,7 +1104,10 @@ with_memory_baseline: fn(text: String, count: Int) -> String {
 // False when the check failed.
 memory_ratchet: fn(options: Options, rows: &[MemoryRow]) -[FS, IO]> Bool RatchetError! {
     if rows.len() == 0 -> return Ok(true)
-    _ := mark_kernels(options.root, rows) ?? return Err(err)
+    packages: mark_kernels(options.root, rows) ?? return Err(err)
+    problems: kernel_scope_problems(packages)
+    loop problem in problems -> term.eprint("memory kernel: {problem}")
+    if problems.len() > 0 -> return Ok(false)
     count: memory_outside_count(rows)
     summary: "memory kernel: {count} regions outside kernel files perform a raw memory action"
     text: if files.exists(options.baseline) -> read_text(options.baseline) ?? return Err(err) else -> ""
@@ -2025,15 +2056,16 @@ inventoried: fn(text: String, file: String) -> [MemoryRow] {
     assert_eq(memory_area("Compiler/JetBackend/Source/OS/Linux.jet"), 1)
     assert_eq(memory_area("Tools/agent/A.jet"), -1)
     loop index in 0..<rows.len() -> rows[index].kernel = false
-    packages: [KernelPackage]{KernelPackage{directory: "Core", paths: [String]{}}}
+    packages: [KernelPackage]{KernelPackage{directory: "Core", paths: [String]{}, test_only: false}}
     text: render_memory_inventory(rows, packages)
     assert(text.starts_with("Regions outside kernel files that perform a raw memory action: 3\n"))
     assert(text.contains("\n| Core | 4 | 3 | 1 | 0 | 0 | 2 | 0 | 0 | 0 | 0 | 1 | 1 |\n"))
-    assert(text.contains("\n| Core | (none) |\n"))
+    assert(text.contains("\n| Core | (none) | no |\n"))
     assert(text.contains("\n| Core/A.jet | 2 | allocate, raw read/write | no |\n"))
     encoded: json.to_string(memory_inventory_json(rows, packages)) ?? panic("json: {err}")
     assert(encoded.starts_with("{{\"outside_kernel\":3,"))
     assert(encoded.contains("{{\"file\":\"Core/A.jet\",\"line\":2,\"area\":\"Core\",\"actions\":[\"allocate\",\"raw read/write\"],\"kernel\":false}}"))
+    assert(encoded.contains("\"test_only\":false"))
 }
 
 #Test("kernel files come from policy.memory, and the outside-kernel count has a one-line baseline") {
@@ -2052,6 +2084,20 @@ inventoried: fn(text: String, file: String) -> [MemoryRow] {
         .Ok(_) -> panic("--json without --inventory was accepted")
         .Err(error) -> assert(error.message.starts_with("--json prints the inventory"))
     }
+}
+
+#Test("a kernel under Tests/ is test-only and holds only test files; a shipped kernel holds none") {
+    witnesses: KernelPackage{directory: "Lib/Tests/Witness.fixture", paths: [String]{"AllocTests.jet", "helpers"}, test_only: tests_tree("Lib/Tests/Witness.fixture")}
+    shipped: KernelPackage{directory: "Lib", paths: [String]{"Source/Alloc.jet", "Tests/AllocTests.jet"}, test_only: tests_tree("Lib")}
+    assert(witnesses.test_only && !shipped.test_only)
+    assert(!tests_tree("Lib/Testsuite") && !tests_tree("tests/ui/case") && tests_tree("Tests"))
+    problems: kernel_scope_problems([KernelPackage]{witnesses.copy(), shipped.copy()})
+    assert_eq(problems.len(), 2)
+    assert(problems[0].starts_with("Lib/Tests/Witness.fixture: the test-only kernel entry `helpers` is not a *Tests.jet test file"))
+    assert(problems[1].starts_with("Lib: the kernel entry `Tests/AllocTests.jet` points into a Tests/ tree"))
+    text: render_memory_inventory([MemoryRow]{}, [KernelPackage]{witnesses, shipped})
+    assert(text.contains("\n| Lib/Tests/Witness.fixture | AllocTests.jet, helpers | yes |\n"))
+    assert(text.contains("\n| Lib | Source/Alloc.jet, Tests/AllocTests.jet | no |\n"))
 }
 
 #Test("--check compares without writing and excludes --update") {

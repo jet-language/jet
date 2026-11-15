@@ -227,7 +227,10 @@ perform a raw memory action outside their package's kernel files (the files
 A rise fails. A fall fails `--check` and lowers the line on a plain run. The
 memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 --inventory` lists each region with its actions and kernel, and
-`--inventory --json` prints the same for tools.
+`--inventory --json` prints the same for tools. A package under a `Tests/`
+directory is test-only, and the inventory marks it so: its kernel may name
+only `*Tests.jet` test files, and a shipped package's kernel may not name a
+file in a `Tests/` tree. The ratchet refuses either.
 
 <!-- memory-kernel:outside 294 -->
 <!-- unsafe-ratchet:begin -->
