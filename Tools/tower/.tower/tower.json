@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6861,
-    "rev": 102950,
+    "rev": 102975,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24374,6 +24374,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T01:52:55.222Z"
+        },
+        {
+          "n": 10,
+          "text": "`jet explain checks FILE[:LINE]` lists every kept run-time check, copy and allocation from sema proof facts and IR rows (D-INSPECT1=A). Proof: `jet test Compiler --profile cases --filter explain_checks_lists_kept`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:48.315Z"
+        },
+        {
+          "n": 11,
+          "text": "`#Policy(checks: .Forbid)` makes each kept run-time check a registered error with what/why/fix (D-INSPECT1=A). Proof: `jet test Compiler --profile ui --filter policy_checks_forbid`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:49.186Z"
         }
       ],
       "refs": [
@@ -24402,12 +24420,12 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-09-10T21:29:09.298Z",
-      "updated": "2026-11-13T01:55:39.410Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:29:49.186Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 9
+      "criteriaLastN": 11
     },
     {
       "id": "c00f7ono",
@@ -31974,6 +31992,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:45:15.427Z"
+        },
+        {
+          "n": 22,
+          "text": "A typed collection head takes a loop and builds that collection through FromIterator: `Set<String>{loop …}` and `[String: Int]{loop … -> k: v}`; a bare loop literal stays a list (D-COMPREHEND1=A). Proof: `jet test Compiler --profile golden --filter Collections/TypedLoopHeads` passes on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:45.663Z"
+        },
+        {
+          "n": 23,
+          "text": "Items and a loop never mix in one collection literal: the mix is a registered error with what/why/fix (D-COMPREHEND1=A). Proof: `jet test Compiler --profile ui --filter collection_literal_mixes_items_and_loop`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:46.544Z"
         }
       ],
       "refs": [
@@ -32002,13 +32038,13 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:29.180Z",
-      "updated": "2026-11-13T01:56:48.559Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:29:46.544Z",
+      "updatedBy": "TowerKeeper-1",
       "workOrder": 48,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 21
+      "criteriaLastN": 23
     },
     {
       "id": "c0svneex",
@@ -47901,6 +47937,24 @@
           "verifiedBy": null,
           "evidence": "dev f62117242d (G9Web-4620-pin-replace-ui), on top of D-PIN1 already built on dev. Lander directland with seed-b14: ui pin_blocks_replace PASS 1, ui pin_blocks_move PASS 1, golden Examples/Memory/Pin PASS o0/o1/o2 (covers a Pin<T> field and a library fn returning Pin<T>). Outs $JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G9Web-4620-pin-replace-ui/1-3.out",
           "at": "2026-11-13T05:04:16.632Z"
+        },
+        {
+          "n": 16,
+          "text": "The guide teaches state holders in the D-STATE-HOLDERS1=A order: a plain value, Shared across tasks, and a Pool with IDs for graphs; Examples/Memory/Expert holds the expert forms (Cell, Atomic, guards, Weak). No API changes. Proof: `jet test Compiler --profile golden --filter Memory/Expert` passes on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:50.073Z"
+        },
+        {
+          "n": 17,
+          "text": "Every diagnostic's first fix names only a plain value, Shared or Pool as a state holder (D-STATE-HOLDERS1=A). Proof: `jet test tests/guards --filter state_holder_fixes`, a registry check over Compiler/Prelude/Diagnostics.jet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:50.945Z"
         }
       ],
       "refs": [
@@ -47919,12 +47973,12 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-13T06:31:28.694Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:29:50.945Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 15
+      "criteriaLastN": 17
     },
     {
       "id": "c0441rvj",
@@ -65301,6 +65355,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:30:43.687Z"
+        },
+        {
+          "n": 3,
+          "text": "`strictness: .Script | .App | .Library | .Hardened` in package.jet is one table over the existing policy keys; `jet new` writes no strictness, and the cli and web templates write `.App` (D-STRICT-DIAL1=A). Proof: `jet test Compiler --profile cases --filter strictness_levels` (one case per level and one per template).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:51.830Z"
         }
       ],
       "refs": [],
@@ -65311,11 +65374,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:01.776Z",
-      "updated": "2026-11-09T19:30:43.687Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:29:51.830Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
-      ]
+      ],
+      "criteriaLastN": 3
     },
     {
       "id": "c0mhdm27",
@@ -65919,12 +65983,12 @@
         },
         {
           "n": 3,
-          "text": "`jet fix --from <version>` applies only the rewrites added since that version and prints one line per rewrite kind with a count (UI snapshot).",
+          "text": "`jet fix` applies every rewrite added since the toolchain in the lock, or since `--since <version>`, and prints one line per rewrite kind with a count (D-LANG-MIGRATE1=A). Proof: `jet test Compiler --profile cases --filter jet_fix_since_lock` and the UI snapshot `jet test Compiler --profile ui --filter jet_fix_since_summary`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:41.283Z"
+          "at": "2026-11-15T02:29:55.554Z"
         },
         {
           "n": 4,
@@ -65952,6 +66016,24 @@
           "verifiedBy": null,
           "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/cli_runtime/jet_fix_apply_writes_replay_log_and_undo_restores_source.case PASS. This row is the proof the precut audit named for this criterion.",
           "at": "2026-11-07T06:27:07.308Z"
+        },
+        {
+          "n": 11,
+          "text": "Every breaking language change lands with one codemod plan in Compiler/Migrations, named by toolchain version, with an old-spelling fixture the suite replays (D-LANG-MIGRATE1=A). Proof: `jet test Compiler --profile cases --filter migration_plan_replay`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:52.756Z"
+        },
+        {
+          "n": 12,
+          "text": "When a check fails in a project whose lock names an older toolchain, it adds one line naming that toolchain and the count of pending rewrites, never a spelling; the old spelling keeps the generic error (D-LANG-MIGRATE1=A). Proof: `jet test Compiler --profile ui --filter check_pending_rewrites_notice`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:53.683Z"
         }
       ],
       "refs": [
@@ -65969,12 +66051,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T21:05:41.283Z",
-      "updated": "2026-11-09T19:38:11.265Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:29:55.554Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 12
     },
     {
       "id": "c0lyckm2",
@@ -68534,10 +68616,10 @@
           "n": 8,
           "text": "(from #6224 Checked-text row: TextBuilder companion trait; Core heads be) A DateTime literal with a hole is refused at compile time.",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11 run3 p/dthole6202b.jet (use core.time.[DateTime]; day :: 5; DateTime{\"2024-01-0{day}T00:00:00Z\"}) -> \"Error [E0155]: A `DateTime` literal cannot contain interpolation\" (\"checked as complete RFC3339 literals before the program runs\") exit 1 on o0/o1/o2; the same literal without a hole (p/dtok6202b.jet) prints \"2024-01-05 00:00:00 UTC\" exit 0",
-          "at": "2026-10-31T19:09:10.924Z"
+          "evidence": "Holds on dev 72a8142651: tests/ui/typed_literal_datetime_hole (landed with 549b47e704, which made DateTime a CheckedText impl) refuses `DateTime{\"2026-08-07T{hour}:00:00Z\"}` at compile time with jet.CheckedTextRejected; `jet test Compiler --profile ui --filter typed_literal_datetime_hole` PASS 1 with the gate-p136 jet, 2026-11-14.",
+          "at": "2026-11-15T02:29:56.674Z"
         },
         {
           "n": 9,
@@ -68796,7 +68878,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T18:57:04.836Z",
-      "updated": "2026-11-15T02:26:23.721Z",
+      "updated": "2026-11-15T02:29:56.674Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 35
     },
@@ -69066,11 +69148,12 @@
         {
           "n": 12,
           "text": "D-RECORD-BRACE1=A: every record uses braces ({x: 1} is an unnamed struct) and paren tuples retire; every in-repo tuple is migrated, goldens pass on o0/o1/o2, and the paren tuple is not Jet syntax (no teaching diagnostic)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T16:37:44.265Z"
+          "evidence": "Moved to #6857 c3: D-RECORD-BRACE1 split into the parser rule (SYNX c3) and the corpus migration (SYNX c4)",
+          "at": "2026-11-15T02:30:00.400Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
@@ -69084,11 +69167,12 @@
         {
           "n": 15,
           "text": "D-BRACE-LAYOUT1=A: commas separate data members, and method declarations with bodies (including trait and impl bodies) take none; parser, formatter and every in-repo file follow it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T17:18:18.432Z"
+          "evidence": "Moved to #6857 c5: D-BRACE-LAYOUT1 split into parser and formatter (SYNX c5) and the corpus (SYNX c6)",
+          "at": "2026-11-15T02:30:01.385Z",
+          "closure": "obsolete"
         },
         {
           "n": 16,
@@ -69108,8 +69192,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T20:27:37.698Z",
-      "updated": "2026-11-14T04:02:05.340Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:30:01.385Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 16
     },
     {
@@ -69732,11 +69816,12 @@
         {
           "n": 29,
           "text": "(was #6334) prep T: Type parameters, prep fn type recipes, parameterized traits and trait static methods returning Self compile and run as D-GENERIC-TYPEFN1 A specifies, each with an example and golden output on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:22:48.663Z"
+          "evidence": "Moved to #6847 c11: compile-time type functions join the compile-time evaluation card; the old `prep` spelling is retired (D-META-SPELL1); owner check recorded",
+          "at": "2026-11-15T02:30:05.100Z",
+          "closure": "obsolete"
         },
         {
           "n": 30,
@@ -70317,11 +70402,12 @@
         {
           "n": 127,
           "text": "Owner ruling 2026-11-09 (language review): a callable's signature always puts its arrow before the result: parameters, then `->` or the effect row `-[…]>`, then the result type, then the error contract. The error-first order (`fn(path: Path) IOError! -[FS.Write]>`, 455 signatures in Core on dev 6a06b917cb) is not valid Jet: a unit result is simply omitted after the arrow (`fn(path: Path) -[FS.Write]> IOError!`). The parser refuses the old order with a registered diagnostic and a UI snapshot, jet fmt or jet fix rewrites it, and every signature in Core, Compiler, Jetpack, Tools, Examples and tests is migrated in the same cutover.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:32:46.351Z"
+          "evidence": "Moved to #6857 c1: D-SIG-ARROW1 cutover split into the jet fix rewrite (SYNX c1) and the corpus migration plus parser refusal (SYNX c2); no teaching per AGENTS.md Greenfield cutover",
+          "at": "2026-11-15T02:29:57.568Z",
+          "closure": "obsolete"
         },
         {
           "n": 128,
@@ -70335,11 +70421,12 @@
         {
           "n": 129,
           "text": "Owner ruling 2026-11-09 (language review): Jet has no warnings. A style point that jet fmt can rewrite is rewritten by jet fmt and never reported (the final-return and positional-Bool lints that print thousands of lines when Jet's own runtime compiles are of this kind). Everything else that matters is an error. To stay friendly to someone in the middle of building, tidiness errors (an unused binding, an unused import, unreachable code) never stop jet run or jet dev: the program runs and they are not printed; jet check and jet build list every one and exit non-zero, so the list works as a todo list. The L-code class is retired or re-registered under these three rules, each with its UI snapshot, and the whole repository is clean under jet check.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:37:56.387Z"
+          "evidence": "Moved to #6858 c1: D-NO-WARNINGS1 is its own stream; split into four outcomes (NOWARN c1-c4)",
+          "at": "2026-11-15T02:30:02.290Z",
+          "closure": "obsolete"
         },
         {
           "n": 130,
@@ -70526,11 +70613,12 @@
         {
           "n": 150,
           "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (the owner language-review rulings built on this card (D-MODULE-VAR1, D-CLI-EVAL1, D-COMPREHEND1, D-LANG-MIGRATE1)). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:09:31.516Z"
+          "evidence": "Moved to #6857 c7: syntax rows and grammars travel with the syntax cutovers",
+          "at": "2026-11-15T02:29:58.503Z",
+          "closure": "obsolete"
         },
         {
           "n": 154,
@@ -70571,11 +70659,12 @@
         {
           "n": 158,
           "text": "D-MODULE-VAR1=A is built. A function type carries its touch set (the module variables it reads or writes) as a deny-only fact. A task spawn requires an empty touch set. Functions may write module variables, so the E0111 function-write ban is removed. Borrow exclusivity holds across calls that touch the same variable. Each refusal is a registered error with a UI snapshot, and an executable example runs the same at O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T14:49:28.471Z"
+          "evidence": "Moved to #6859 c1: D-MODULE-VAR1 is its own stream; split into four outcomes (MODVAR c1-c4)",
+          "at": "2026-11-15T02:30:03.225Z",
+          "closure": "obsolete"
         },
         {
           "n": 159,
@@ -70589,29 +70678,32 @@
         {
           "n": 161,
           "text": "D-COMPREHEND1=A is built. `Set<T>{loop …}` and `[K:V]{loop … -> k: v}` build their collection through FromIterator. A bare loop literal stays a list. Items and a loop never mix in one literal, which is a registered error with a UI snapshot. An executable example passes at O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T14:49:31.787Z"
+          "evidence": "Moved to #3329 c22: collection construction belongs on the collection destination card (G3); split into CMP1 and CMP2",
+          "at": "2026-11-15T02:30:06.050Z",
+          "closure": "obsolete"
         },
         {
           "n": 163,
           "text": "D-DATA-EVOLVE1=A is built. Once #Table and the generation handoff exist, #Table steps and the D-SERVICE-UPGRADE1 migrate function derive from the one migration block. An executable example proves a stored table upgrades across one schema change. Blocked until #Table is built.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T14:49:33.856Z"
+          "evidence": "Moved to #6822 c2: table migration belongs on the typed tables card (G9)",
+          "at": "2026-11-15T02:30:07.007Z",
+          "closure": "obsolete"
         },
         {
           "n": 164,
           "text": "D-INSPECT1=A is built. `jet explain checks FILE[:LINE]` lists every kept runtime check, copy and allocation from sema proof facts and IR rows. `#Policy(checks: .Forbid)` makes each kept check a registered error with a UI snapshot. CLI tests and an example cover both.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T14:49:34.899Z"
+          "evidence": "Moved to #3016 c10: inspect views belong on the inspect card (G5); split into INS1 and INS2",
+          "at": "2026-11-15T02:30:07.922Z",
+          "closure": "obsolete"
         },
         {
           "n": 165,
@@ -70742,20 +70834,22 @@
         {
           "n": 179,
           "text": "D-API-SURFACE1=A is built (owner ratified 2026-11-11): `jet check` compares a package's public promises (signatures and effects) against its recorded package.api sheet and reports a changed promise with a registered diagnostic (what, why and fix, plus UI snapshot) that tells the author to accept it. `jet check --accept-api` rewrites package.api. `jet registry publish` computes the minimum semantic version from the promise diff (a new required effect on a released function is a major bump), and the author may raise it but never lower it. Goldens or CLI #Tests cover an unchanged API, an added function (minor), a function newly needing Time (major) and an author raise.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T11:07:24.739Z"
+          "evidence": "Moved to #6860 c1: D-API-SURFACE1 is its own stream; split into three outcomes (APIS c1-c3)",
+          "at": "2026-11-15T02:30:04.170Z",
+          "closure": "obsolete"
         },
         {
           "n": 180,
           "text": "Owner order 2026-11-11: a program is EITHER script style OR a single run entry, never mixed, with no workaround at any scope. If a `run: fn` exists anywhere in the program's load graph, its package or its project (any module, nested module, re-export, import rename such as `use { run: other.main }`, or code a marker or template generates), then top-level executable statements anywhere in that scope are refused, and the reverse also holds. A script-style program has exactly one file with top-level statements, its entry, and no `run: fn` anywhere. Today E0621 covers only both in one file and E0620 covers only an imported script body, so an entry script whose imported module or package declares `run: fn` is not refused. One registered diagnostic (what, why and fix, plus a UI snapshot) names both sites. UI cases cover the same file, an imported module, another module of the same package, a renamed import, a re-export and generated code. Before landing, sweep every Jet source in the repository (Core, Compiler, Jetpack, Tools, Examples, tests and fixtures) and migrate every hit in the same batch.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T11:55:01.988Z"
+          "evidence": "Moved to #6857 c8: program-entry rule joins the language-review cutovers",
+          "at": "2026-11-15T02:29:59.443Z",
+          "closure": "obsolete"
         },
         {
           "n": 181,
@@ -70865,8 +70959,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-14T23:04:16.597Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:30:07.922Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 191
     },
     {
@@ -72558,6 +72652,15 @@
           "evidence": "D-MACHINE1=A (ratified) replaces the #State/#Transition markers with one state { } block in structs and enums and folds in D-STATE-PARAM1, so the #State(A -> B) arrow and Order.State.Draft marker surfaces of D-STATE-ARROW1/D-STATE-NS1 are superseded. #6326 c3 builds D-MACHINE1. The arrow surface itself already holds on dev 98469bf0cf (tests/cases/marker_cutover/state_arrow_marks_transitions_and_transition_retires.case; tests/ui/typestate/qualified_state_markers_seed_leaf_states.jet; no #Transition in Docs/spec/reference/syntax-surface.jet), found by G3Core-2.",
           "at": "2026-11-13T03:07:29.535Z",
           "closure": "obsolete"
+        },
+        {
+          "n": 6,
+          "text": "A parameter or result carries its typestate, and calling another state's method through it is refused (probe t06 of the typestate-holes study, $JET_SCRATCH_ROOT/lanes/Main/prep/). Waits on the state-machine design and an owner choice (no ballot yet). Proof: `jet test Compiler --profile ui --filter typestate_parameter_carries_state`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:54.587Z"
         }
       ],
       "refs": [],
@@ -72568,8 +72671,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-14T15:04:02.955Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T02:29:54.587Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 6
     },
     {
       "id": "c08r6ogl",
@@ -96959,6 +97063,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T08:47:49.682Z"
+        },
+        {
+          "n": 2,
+          "text": "D-DATA-EVOLVE1=A: a typed table's #Table steps and the D-SERVICE-UPGRADE1 migrate function derive from the type's one migration block, and a stored table upgrades across one schema change. Waits on #Table and the generation handoff. Proof: `jet test Compiler --profile golden --filter Data/TableMigration` passes on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:47.445Z"
         }
       ],
       "refs": [],
@@ -96969,9 +97082,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:36.307Z",
-      "updated": "2026-11-15T02:11:11.487Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1
+      "updated": "2026-11-15T02:29:47.445Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 2
     },
     {
       "id": "c0aqtwkf",
@@ -205633,6 +205746,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:30:07.922Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#164"
+    },
+    {
+      "at": "2026-11-15T02:30:07.007Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#163"
+    },
+    {
+      "at": "2026-11-15T02:30:06.050Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#161"
+    },
+    {
+      "at": "2026-11-15T02:30:05.100Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-15T02:30:04.170Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#179"
+    },
+    {
+      "at": "2026-11-15T02:30:03.225Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#158"
+    },
+    {
+      "at": "2026-11-15T02:30:02.290Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#129"
+    },
+    {
+      "at": "2026-11-15T02:30:01.385Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0rqt0kq",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-15T02:30:00.400Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0rqt0kq",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T02:29:59.443Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#180"
+    },
+    {
+      "at": "2026-11-15T02:29:58.503Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#150"
+    },
+    {
+      "at": "2026-11-15T02:29:57.568Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#127"
+    },
+    {
+      "at": "2026-11-15T02:29:56.674Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T02:29:55.554Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0810bga",
+      "note": "#3: D-LANG-MIGRATE1=A (ratified 2026-11-10) spells the flag --since and applies rewrites since the lock's toolchain; merged with #6281 c172.; was: `jet fix --from <version>` applies only the rewrites added since that version and prints one line per rewrite kind with a count (UI snapshot)."
+    },
+    {
+      "at": "2026-11-15T02:29:54.587Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c06he0ee",
+      "note": "#6 A parameter or result carries its typestate, and calling ano"
+    },
+    {
+      "at": "2026-11-15T02:29:53.683Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0810bga",
+      "note": "#12 When a check fails in a project whose lock names an older to"
+    },
+    {
+      "at": "2026-11-15T02:29:52.756Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0810bga",
+      "note": "#11 Every breaking language change lands with one codemod plan i"
+    },
+    {
+      "at": "2026-11-15T02:29:51.830Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0qz3x03",
+      "note": "#3 `strictness: .Script | .App | .Library | .Hardened` in packa"
+    },
+    {
+      "at": "2026-11-15T02:29:50.945Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#17 Every diagnostic's first fix names only a plain value, Share"
+    },
+    {
+      "at": "2026-11-15T02:29:50.073Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#16 The guide teaches state holders in the D-STATE-HOLDERS1=A or"
+    },
+    {
+      "at": "2026-11-15T02:29:49.186Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0qecom2",
+      "note": "#11 `#Policy(checks: .Forbid)` makes each kept run-time check a "
+    },
+    {
+      "at": "2026-11-15T02:29:48.316Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0qecom2",
+      "note": "#10 `jet explain checks FILE[:LINE]` lists every kept run-time c"
+    },
+    {
+      "at": "2026-11-15T02:29:47.445Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0429qak",
+      "note": "#2 D-DATA-EVOLVE1=A: a typed table's #Table steps and the D-SER"
+    },
+    {
+      "at": "2026-11-15T02:29:46.544Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c02vmcbl",
+      "note": "#23 Items and a loop never mix in one collection literal: the mi"
+    },
+    {
+      "at": "2026-11-15T02:29:45.663Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c02vmcbl",
+      "note": "#22 A typed collection head takes a loop and builds that collect"
+    },
     {
       "at": "2026-11-15T02:29:44.610Z",
       "by": "TowerKeeper-1",
