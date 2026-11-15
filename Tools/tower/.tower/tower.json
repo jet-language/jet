@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6894,
-    "rev": 103925,
+    "rev": 103947,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31564,6 +31564,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: debris stripped, proofs added; c11 merged into c13; c16 moved to #6882."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -31655,11 +31660,12 @@
         {
           "n": 11,
           "text": "[retarget] JetSema, JetCodegen and generated user-facing docs consume the same rows without adding another runtime registry.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:52:32.537Z"
+          "evidence": "Merged into #3325 c13: the one row set read by JetSema, JetCodegen and docs is c13's outcome",
+          "at": "2026-11-15T03:46:32.434Z",
+          "closure": "obsolete"
         },
         {
           "n": 13,
@@ -31691,11 +31697,12 @@
         {
           "n": 16,
           "text": "[#3319]  • The prefix witness prints only `visit=1` and `[1]`. • The demanded-tail witness propagates the callback error on every applicable tier and never prints `[1, 7]` with exit 0. • Nested option/outcome items are typed in JetSema before emission. • Infallible callbacks and error-as-data stay distinct from propagating callbacks. • The invalid probe stays labelled invalid. • JP: `collections/lazy_map_callback_failure`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:26:38.483Z"
+          "evidence": "Moved to #6882 c11: lazy callback failure is the lazy adapters card's mechanism (#6882)",
+          "at": "2026-11-15T03:46:33.353Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
@@ -31759,7 +31766,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:23.748Z",
-      "updated": "2026-11-15T03:46:18.126Z",
+      "updated": "2026-11-15T03:46:39.761Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 44,
       "goals": [
@@ -47144,7 +47151,7 @@
     {
       "id": "c0jd9jl3",
       "num": 4472,
-      "title": "One checked binary pack and unpack contract (D-BINARY-CANONICAL1)",
+      "title": "Binary encoding: bounded sign_extend and exact max_bytes accounting (D-BINARY-CANONICAL1)",
       "body": "Implement the single checked pack and unpack contract in core.encoding.binary, as ratified in D-BINARY-CANONICAL1. Errors use the source BinaryError form. Acceptance: pack then unpack is the identity on every fixed-width type, and invalid widths are rejected.\n\nEarlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired):\n\nFound 2026-10-03 by the runtime port (RtW11-BINARY-CRC, probe ~/.cache/jet-test-scratch/RtW11-BINARY-CRC/RUNTIME-BINARY-CRC-1/probe/unit.jet). Today the Jet source Core and the native (frozen Rust EncodingBase.rs:239-520) tiers give different meanings for the same program (I9 split):\n- pack_u8(300): source returns Err(BinaryError.Range); native wraps to [44].\n- pack with \"@H\": source Err(Format); native treats @/= as little-endian, giving [1,0].\n- fixed pack: native infallible; source signatures are BinaryError! (E2402 at callers).\n- generic errors: native String mapped to canonical Err.message; source typed BinaryError.\n- unpack: native accepts trailing bytes; source does not. u64 to I64: native preserves bits.\nOptions (same programs distinguish them: overflow 300, \"@H\", trailing bytes, sign bits):\nA. Adopt the frozen native policy as canonical: fixed I64 wrapping, infallible fixed packs, generic APIs Err!, trailing bytes accepted; migrate public source callers/errors; settle whether exact-Int arguments narrow.\nB. Keep the checked source behavior (typed BinaryError, range and format errors, no trailing bytes) as canonical and repair the native/JIT consumers to match.\nRecommendation: B (checked by default per philosophy; wrapping hides data loss). Until ruled, the port keeps its kernel private and changes no public behavior.",
       "kind": "task",
       "track": "sidequest",
@@ -47159,6 +47166,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: format criteria (CBOR, XML, HTML) moved to #6883; title narrowed to the two binary criteria left."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -47193,11 +47205,12 @@
         {
           "n": 2,
           "text": "[#4363] Typed CBOR records for cbor.to_bytes and cbor.decode<[U8]>, plus enum drop metadata. [U8] round-trips with located errors and no ICE.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:44:01.343Z"
+          "evidence": "Moved to #6883 c10: CBOR is a data format; formats live on #6883",
+          "at": "2026-11-15T03:46:34.228Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
@@ -47211,20 +47224,22 @@
         {
           "n": 4,
           "text": "[#4424] D-ENCXML1: XML names, tagged tree, namespace resolution, DOCTYPE law and real C14N, with conformance seeds.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:44:02.949Z"
+          "evidence": "Merged into #6883 c8: D-ENCXML1 names, namespaces and C14N are #6883 c8",
+          "at": "2026-11-15T03:46:35.157Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
           "text": "[#4342] Deep XML nesting does not hit the typed-drop recursion limit (compose with #4318 region release). Numeric entities such as &#x1F600; decode fully.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:44:04.442Z"
+          "evidence": "Moved to #6883 c11: XML parsing limits live on the formats card #6883",
+          "at": "2026-11-15T03:46:36.103Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
@@ -47247,11 +47262,12 @@
         {
           "n": 8,
           "text": "[#4425] D-HTML-PARSE1=B: pinned WHATWG HTML parsing in Core, plus parse_with, elements and text_content.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:44:07.038Z"
+          "evidence": "Moved to #6883 c12: HTML parsing is a data format; formats live on #6883",
+          "at": "2026-11-15T03:46:37.094Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
@@ -47292,7 +47308,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-03T11:17:39.038Z",
-      "updated": "2026-11-15T03:46:19.990Z",
+      "updated": "2026-11-15T03:46:40.816Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -47623,6 +47639,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: added the D-SQL-CLASS1=A criterion the card is named for; c1-c5 restated with proofs."
+        },
+        {
           "at": "2026-10-04",
           "by": "Pip",
           "text": "Burn-down consolidation 2026-10-04: absorbed #4519, #4521, #4522, #4523, #4516; their criteria are carried here as [#n] rows."
@@ -47631,48 +47652,48 @@
       "criteria": [
         {
           "n": 1,
-          "text": "[#4519] D-SQL-AUTHORITY1=A: DB.Schema is inferred and enforced at migration and table-change routes.",
+          "text": "D-SQL-AUTHORITY1=A is built: DB.Schema is inferred and enforced on migration and table-change routes. Proof: `jet test Compiler --profile cases --filter sql/schema_authority_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:44:27.277Z"
+          "at": "2026-11-15T03:46:22.805Z"
         },
         {
           "n": 2,
-          "text": "[#4521] D-SQL-GUARD1=A: a missing-WHERE reminder, marked purge intent, and transport of exact omission grants.",
+          "text": "D-SQL-GUARD1=A is built: a statement missing WHERE gets the reminder, purge intent is marked, and exact omission grants survive transport. Proof: `jet test Compiler --profile cases --filter sql/guard_` and `jet test Compiler --profile ui --filter sql_missing_where`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:44:27.956Z"
+          "at": "2026-11-15T03:46:23.694Z"
         },
         {
           "n": 3,
-          "text": "[#4522] D-SQL-RAW1=A: one reason-carrying audited SQL.raw gate whose facts survive transport (needs #4524).",
+          "text": "D-SQL-RAW1=A is built: SQL.raw is the one audited gate, it takes a reason, and its facts survive transport. Proof: `jet test Compiler --profile cases --filter sql/raw_gate_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:44:28.604Z"
+          "at": "2026-11-15T03:46:24.958Z"
         },
         {
           "n": 4,
-          "text": "[#4523] D-SQL-SAFETY=A: a schema map with per-table ownership, offline jet db pull/diff/migrate, and jet-db.lock.",
+          "text": "D-SQL-SAFETY=A is built: a schema map with per-table ownership, offline `jet db pull`, `diff` and `migrate`, and jet-db.lock. Proof: `jet test Compiler --profile cases --filter db/schema_map_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:44:29.269Z"
+          "at": "2026-11-15T03:46:25.848Z"
         },
         {
           "n": 5,
-          "text": "[#4516] D-LANG-IN-LIBS=A: admitted Target and SQL-rules libraries via authority.trust.compiler, with direct-dependency hash admission, data-only providers, duplicate refusal and offline execution.",
+          "text": "D-LANG-IN-LIBS=A is built: Target and SQL-rules libraries are admitted through authority.trust.compiler with direct-dependency hash admission, data-only providers, duplicate refusal and offline execution. Proof: `jet test Compiler --profile cases --filter authority/lang_in_libs_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:44:29.982Z"
+          "at": "2026-11-15T03:46:26.783Z"
         },
         {
           "n": 6,
@@ -47691,7 +47712,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-04T14:14:21.092Z",
-      "updated": "2026-11-15T03:46:10.418Z",
+      "updated": "2026-11-15T03:46:41.705Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -50850,39 +50871,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`q: 1 + 2i + 3j + 4k` is a Quaternion and q * q prints the Hamilton product on every tier",
+          "text": "`q: 1 + 2i + 3j + 4k` is a core.math Quaternion and `q * q` prints the Hamilton product on every tier. Proof: `jet test Compiler --profile golden --filter Math/Quaternion` on O0, O1, O2 and web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-07T13:09:23.321Z"
+          "at": "2026-11-15T03:46:27.672Z"
         },
         {
           "n": 2,
-          "text": "Quaternion.from_axis_angle and rotate(Vec3) match a reference rotation within 1e-12",
+          "text": "Quaternion.from_axis_angle and rotate(Vec3) match a reference rotation within 1e-12. Proof: `jet test Compiler --profile cases --filter math/quaternion_rotate`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-07T13:09:23.321Z"
+          "at": "2026-11-15T03:46:28.556Z"
         },
         {
           "n": 3,
-          "text": "F16{1.5} constructs and prints 1.5; 2.0 + 3.0i prints a Complex",
+          "text": "`F16{1.5}` constructs and prints 1.5 (D-LOWFLOAT1), not E0108 or E0112. Proof: `jet test Compiler --profile cases --filter math/f16_literal_print`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-07T13:09:23.321Z"
+          "at": "2026-11-15T03:46:29.500Z"
         },
         {
           "n": 4,
-          "text": "D-ENDIAN-TYPES1=A: byte-order number types U16be/U16le, U32be/U32le, U64be/U64le, the matching I types, and F32be/F32le/F64be/F64le store a fixed byte order and read and compute as ordinary numbers. A golden writes them to bytes and reads them back with the expected byte layout on every tier, and a struct with an endian field has the declared layout.",
+          "text": "D-ENDIAN-TYPES1=A is built: U16be/U16le, U32be/U32le, U64be/U64le, the matching I types and F32be/F32le/F64be/F64le store a fixed byte order and compute as ordinary numbers, and a struct with an endian field has the declared layout. Proof: `jet test Compiler --profile golden --filter Math/EndianTypes` on every tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-29T11:13:37.285Z"
+          "at": "2026-11-15T03:46:30.441Z"
         },
         {
           "n": 5,
@@ -50909,7 +50930,7 @@
       "parentId": "c0spgl2u",
       "needsAcceptance": false,
       "created": "2026-10-07T13:09:23.321Z",
-      "updated": "2026-11-15T03:46:11.288Z",
+      "updated": "2026-11-15T03:46:30.441Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -72858,12 +72879,12 @@
         },
         {
           "n": 8,
-          "text": "D-ALLOC-FAIL1=C is built. A refused allocation is recoverable by default, through one name and one stable error route, core.mem.AllocError, carried on the ordinary failure rail. The same code works whatever handlers surround it, and `?? panic(\"…\")` is the explicit stop. The ballot program (load: fn() -> Int mem.AllocError! pushing three rows) prints 3, and prints 0 under a test allocator that refuses, on O0, O1 and O2. List, Map and String growth and reserve report AllocError through the same route, with no second error type. An unhandled AllocError has a UI snapshot, and the spec describes the route.",
+          "text": "D-ALLOC-FAIL1=C is built: a refused allocation is recoverable by default through core.mem.AllocError on the ordinary failure rail, and `?? panic(\"…\")` is the explicit stop; the ballot program (load: fn() -> Int mem.AllocError! pushing three rows) prints 3, and 0 under a refusing test allocator; List, Map and String growth and reserve report AllocError with no second error type; the spec describes the route. Proof: `jet test Compiler --profile golden --filter Memory/AllocFailRecoverable` on O0, O1 and O2 and `jet test Compiler --profile ui --filter alloc_error_unhandled`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T03:26:48.223Z"
+          "at": "2026-11-15T03:46:21.920Z"
         },
         {
           "n": 9,
@@ -72910,7 +72931,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-15T03:46:20.880Z",
+      "updated": "2026-11-15T03:46:21.920Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 12
     },
@@ -91501,6 +91522,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: c5 split into the binary64 MPFR corpus, the C23 name census and the musl divergence list."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "c5 progress: dev ea1caf0d11 (G3Core-6700-c5-musllist). Every corpus row where musl 1.2.5 differs lists musl's result word: 36,676 binary64 rows and 13,854 binary32 rows. Both core_math_correctly_rounded cases PASS 1 on seed-b14."
@@ -91551,12 +91577,12 @@
         },
         {
           "n": 5,
-          "text": "Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma, rsqrt, exp10m1, exp2m1, log2p1, log10p1, the pi-trig family, pown, powr, rootn, compoundn and the rest) exists in Jet and is correctly rounded, matching MPFR bits on a committed corpus that includes the CORE-MATH hard cases, the musl libc-test vectors and special values. Inputs where musl 1.2.5 differs are listed, with documented musl bugs (such as acosh of large negative inputs returning a number instead of NaN) named. All on O0, O1, O2 and web, with no host libm and no fused operations.",
+          "text": "Every binary64 core.math function is correctly rounded, matching MPFR bits on a committed corpus with the CORE-MATH hard cases, the musl libc-test vectors and special values, on O0, O1, O2 and web, with no host libm and no fused operations. Proof: `jet test Compiler --profile cases --filter math/f64_mpfr_corpus`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T16:03:48.060Z"
+          "at": "2026-11-15T03:46:31.490Z"
         },
         {
           "n": 8,
@@ -91617,7 +91643,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-15T03:46:13.243Z",
+      "updated": "2026-11-15T03:46:42.613Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 12
     },
@@ -210692,6 +210718,160 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T03:46:42.613Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c028lxdd",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:46:41.705Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0p6h37r",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:46:40.816Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0jd9jl3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:46:39.761Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0l0ygs4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:46:38.734Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0jd9jl3",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T03:46:37.094Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0jd9jl3",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T03:46:36.104Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0jd9jl3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T03:46:35.157Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0jd9jl3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T03:46:34.228Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0jd9jl3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T03:46:33.353Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0l0ygs4",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T03:46:32.435Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0l0ygs4",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T03:46:31.490Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c028lxdd",
+      "note": "#5: split: name census and musl list to their own criteria; was: Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma, rsqrt, exp10m1, exp2m1, log2p1, log10p1, the pi-trig family, pown, powr, r"
+    },
+    {
+      "at": "2026-11-15T03:46:30.441Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0x9xmde",
+      "note": "#4: proof; was: D-ENDIAN-TYPES1=A: byte-order number types U16be/U16le, U32be/U32le, U64be/U64le, the matching I types, and F32be/F32le/F64be/F64le store a fixed byte order and read and compute as ordinary numbers. A"
+    },
+    {
+      "at": "2026-11-15T03:46:29.500Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0x9xmde",
+      "note": "#3: split: decimal-with-complex to its own criterion; was: F16{1.5} constructs and prints 1.5; 2.0 + 3.0i prints a Complex"
+    },
+    {
+      "at": "2026-11-15T03:46:28.556Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0x9xmde",
+      "note": "#2: proof; was: Quaternion.from_axis_angle and rotate(Vec3) match a reference rotation within 1e-12"
+    },
+    {
+      "at": "2026-11-15T03:46:27.672Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0x9xmde",
+      "note": "#1: proof; was: `q: 1 + 2i + 3j + 4k` is a Quaternion and q * q prints the Hamilton product on every tier"
+    },
+    {
+      "at": "2026-11-15T03:46:26.783Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0p6h37r",
+      "note": "#5: strip debris; proof; was: [#4516] D-LANG-IN-LIBS=A: admitted Target and SQL-rules libraries via authority.trust.compiler, with direct-dependency hash admission, data-only providers, duplicate refusal and offline execution."
+    },
+    {
+      "at": "2026-11-15T03:46:25.848Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0p6h37r",
+      "note": "#4: strip debris; proof; was: [#4523] D-SQL-SAFETY=A: a schema map with per-table ownership, offline jet db pull/diff/migrate, and jet-db.lock."
+    },
+    {
+      "at": "2026-11-15T03:46:24.958Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0p6h37r",
+      "note": "#3: strip debris; proof; was: [#4522] D-SQL-RAW1=A: one reason-carrying audited SQL.raw gate whose facts survive transport (needs #4524)."
+    },
+    {
+      "at": "2026-11-15T03:46:23.694Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0p6h37r",
+      "note": "#2: strip debris; proof; was: [#4521] D-SQL-GUARD1=A: a missing-WHERE reminder, marked purge intent, and transport of exact omission grants."
+    },
+    {
+      "at": "2026-11-15T03:46:22.805Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0p6h37r",
+      "note": "#1: strip debris; proof; was: [#4519] D-SQL-AUTHORITY1=A: DB.Schema is inferred and enforced at migration and table-change routes."
+    },
+    {
+      "at": "2026-11-15T03:46:21.920Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ct4a0i",
+      "note": "#8: proof; was: D-ALLOC-FAIL1=C is built. A refused allocation is recoverable by default, through one name and one stable error route, core.mem.AllocError, carried on the ordinary failure rail. The same code works wh"
+    },
+    {
       "at": "2026-11-15T03:46:20.880Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-edit",
@@ -214169,713 +214349,6 @@
       "action": "card.criteria-meet",
       "ref": "c03ai7mm",
       "note": "#41"
-    },
-    {
-      "at": "2026-11-15T03:14:30.876Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#40"
-    },
-    {
-      "at": "2026-11-15T03:14:30.004Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#38"
-    },
-    {
-      "at": "2026-11-15T03:14:29.099Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#37"
-    },
-    {
-      "at": "2026-11-15T03:14:27.950Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-15T03:14:26.986Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-15T03:14:25.581Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-15T03:14:24.623Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-15T03:14:23.718Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T03:14:22.836Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T03:14:21.950Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T03:14:21.068Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03ai7mm",
-      "note": "#52: strip debris; add proof; was: (was #3230) A hello program with five unused Core imports (including core.archive) and the plain hello both build and run on AOT from one identified source, and the imported variant's checked program "
-    },
-    {
-      "at": "2026-11-15T03:14:20.179Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03ai7mm",
-      "note": "#11: strip debris; no warnings (D-NO-WARNINGS1=A); was: [#3553] Core Unit validators no longer bind to `_`. Equivalent multi-way branches use ordered arm tables (no side-effect reorder). After #3521, Core constants use plain names. Each migrated module pas"
-    },
-    {
-      "at": "2026-11-15T03:14:19.299Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03ai7mm",
-      "note": "#10: strip debris; add proof; was: [#3515] Core/units owns constructor semantics. No core.units.from host row remains (CoreHostSignatures.jet:267). Projections are regenerated. units/from conformance matches on every level."
-    },
-    {
-      "at": "2026-11-15T03:14:18.353Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03ai7mm",
-      "note": "#8: file moved to Core.rows; tool is now Jet; absorbs c2; was: After each foundation module cutover, `Compiler/Prelude/Core.jet` has no `dispatcher_row` for any member that module's `source_module` line owns. Proof: `node Tools/agent/check-core-surface-ledger.mjs"
-    },
-    {
-      "at": "2026-11-15T03:14:17.437Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03ai7mm",
-      "note": "#3: one observable outcome with a proof; was: Foundation APIs pass hostile-case proof on O0, O1 and O2 through their Core/<module> Jet bodies (Core #Tests under `jet test Compiler --profile core`)."
-    },
-    {
-      "at": "2026-11-15T03:14:16.522Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03ai7mm",
-      "note": "#1: one observable outcome with a proof; was: Every foundational declaration has a real Jet body or typed provider leaf."
-    },
-    {
-      "at": "2026-11-15T03:14:15.651Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0jxsy7l",
-      "note": "#15 One copy meaning: `.copy()` forks every component whose type"
-    },
-    {
-      "at": "2026-11-15T03:14:14.772Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0blttm0",
-      "note": "#5 UTC leap-second parsing, formatting and ordering live in Cor"
-    },
-    {
-      "at": "2026-11-15T03:14:13.872Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0ov7lce",
-      "note": "#12 Each surveyed candidate is mapped to: already in Core (with "
-    },
-    {
-      "at": "2026-11-15T03:14:13.011Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0ov7lce",
-      "note": "#11 A survey under Docs/research covers the most-used libraries "
-    },
-    {
-      "at": "2026-11-15T03:14:12.135Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c08rdp62",
-      "note": "#13 Every core.mem item is classified against that rule in one t"
-    },
-    {
-      "at": "2026-11-15T03:14:11.260Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c08rdp62",
-      "note": "#12 One stated rule decides the tier of every core.mem item (own"
-    },
-    {
-      "at": "2026-11-15T03:14:10.381Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0fi6uj5",
-      "note": "#19 Each core.os fact is computed once, in Core, not inside the "
-    },
-    {
-      "at": "2026-11-15T03:14:09.486Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0zutf08",
-      "note": "#7 Typed JSON decode allocates no DataTree, and its failure val"
-    },
-    {
-      "at": "2026-11-15T03:14:08.560Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0ct4a0i",
-      "note": "#11 The caller-backed `Fixed.over` example shows typed allocatio"
-    },
-    {
-      "at": "2026-11-15T03:14:07.479Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0zii3oj",
-      "note": "Core I/O failures and producers: one IOError, typed failure paths, line, accept and resolve contracts"
-    },
-    {
-      "at": "2026-11-15T03:14:06.513Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0jjbpij",
-      "note": "Core names, modules and prelude follow the ratified contracts: one name, one owner, one prelude"
-    },
-    {
-      "at": "2026-11-15T03:11:29.222Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c08s0ppt",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T03:11:25.854Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c08s0ppt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:11:24.729Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0m4deiq",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:11:22.984Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#45"
-    },
-    {
-      "at": "2026-11-15T03:11:21.986Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-15T03:11:21.020Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#43"
-    },
-    {
-      "at": "2026-11-15T03:11:20.062Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-15T03:11:19.037Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-15T03:11:18.070Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-15T03:11:17.016Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-15T03:11:15.967Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-15T03:11:14.970Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-15T03:11:14.003Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-15T03:11:13.011Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-15T03:11:12.060Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-15T03:11:11.134Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-15T03:11:10.162Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-15T03:11:09.221Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-15T03:11:08.287Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T03:11:07.293Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T03:11:06.315Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T03:11:05.396Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T03:11:04.482Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T03:11:03.558Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:11:02.623Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T03:11:01.657Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T03:11:00.558Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T03:10:59.603Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T03:10:58.620Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0uyfbge",
-      "note": "#33 `s.chars()` lowers as a stream without building a list only "
-    },
-    {
-      "at": "2026-11-15T03:10:57.709Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0m4deiq",
-      "note": "#6 The last two Jetpack workarounds for port-found defects go: "
-    },
-    {
-      "at": "2026-11-15T03:08:39.769Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xb6zik",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T03:08:30.635Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:05:45.170Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0iuv3zr",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T03:05:42.580Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#32"
-    },
-    {
-      "at": "2026-11-15T03:05:41.479Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-reopen",
-      "ref": "c0iuv3zr",
-      "note": "#32: legacy evidence names no commit; re-proving on dev"
-    },
-    {
-      "at": "2026-11-15T03:05:18.384Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0fi6uj5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:05:17.226Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0iuv3zr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:05:15.982Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-15T03:05:14.926Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-15T03:05:13.956Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#115"
-    },
-    {
-      "at": "2026-11-15T03:05:13.004Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#113"
-    },
-    {
-      "at": "2026-11-15T03:05:12.106Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#112"
-    },
-    {
-      "at": "2026-11-15T03:05:11.163Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#110"
-    },
-    {
-      "at": "2026-11-15T03:05:10.272Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#107"
-    },
-    {
-      "at": "2026-11-15T03:05:09.299Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#106"
-    },
-    {
-      "at": "2026-11-15T03:05:08.358Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#105"
-    },
-    {
-      "at": "2026-11-15T03:05:07.384Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#104"
-    },
-    {
-      "at": "2026-11-15T03:05:06.445Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#103"
-    },
-    {
-      "at": "2026-11-15T03:05:05.492Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#102"
-    },
-    {
-      "at": "2026-11-15T03:05:04.417Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#101"
-    },
-    {
-      "at": "2026-11-15T03:05:03.435Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#100"
-    },
-    {
-      "at": "2026-11-15T03:05:02.179Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#99"
-    },
-    {
-      "at": "2026-11-15T03:05:01.236Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#98"
-    },
-    {
-      "at": "2026-11-15T03:05:00.322Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#97"
-    },
-    {
-      "at": "2026-11-15T03:04:59.414Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#96"
-    },
-    {
-      "at": "2026-11-15T03:04:58.494Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#95"
-    },
-    {
-      "at": "2026-11-15T03:04:57.565Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#94"
-    },
-    {
-      "at": "2026-11-15T03:04:56.666Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#93"
-    },
-    {
-      "at": "2026-11-15T03:04:55.737Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#91"
-    },
-    {
-      "at": "2026-11-15T03:04:54.832Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#88"
-    },
-    {
-      "at": "2026-11-15T03:04:53.921Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#87"
-    },
-    {
-      "at": "2026-11-15T03:04:53.018Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#86"
-    },
-    {
-      "at": "2026-11-15T03:04:52.111Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#85"
-    },
-    {
-      "at": "2026-11-15T03:04:51.206Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#84"
-    },
-    {
-      "at": "2026-11-15T03:04:50.221Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#83"
-    },
-    {
-      "at": "2026-11-15T03:04:49.325Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#82"
-    },
-    {
-      "at": "2026-11-15T03:04:48.384Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#81"
-    },
-    {
-      "at": "2026-11-15T03:04:47.373Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#80"
-    },
-    {
-      "at": "2026-11-15T03:04:46.432Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#76"
-    },
-    {
-      "at": "2026-11-15T03:04:45.493Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#75"
-    },
-    {
-      "at": "2026-11-15T03:04:44.556Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#72"
-    },
-    {
-      "at": "2026-11-15T03:04:43.635Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#70"
-    },
-    {
-      "at": "2026-11-15T03:04:42.726Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#69"
-    },
-    {
-      "at": "2026-11-15T03:04:41.848Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#68"
     }
   ],
   "nextNum": 368,
