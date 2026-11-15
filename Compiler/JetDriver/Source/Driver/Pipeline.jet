@@ -2817,6 +2817,24 @@ jet_driver_merged_names: fn(graph: &SemaGraphResult, registration: &&SemaRegistr
     returned
 }
 
+// Puts the comptime items of Core and of the compiler's canonical Prelude
+// ahead of the program's, each group in its own order (the sort is
+// stable). The program reads Core's constants and Core never reads the
+// program's, so a program item's closure finds the Core constants it
+// reaches already landed: otherwise every function of the closure that
+// reads one (as the Regex functions read Regex's) waits, and the closure is
+// checked again next pass.
+jet_driver_comptime_core_first: fn(sources: &[SemaComptimeItemSource]) {
+    prelude: "{JET_CANONICAL_EFFECT_PACKAGE_IDENTITY}/"
+    sources.sort_by(fn(left: SemaComptimeItemSource, right: SemaComptimeItemSource) { jet_driver_comptime_item_rank(left, prelude) <=> jet_driver_comptime_item_rank(right, prelude) })
+}
+
+// 0 for an item of Core or the canonical Prelude (whose files start with
+// `prelude`), 1 for one of the program.
+jet_driver_comptime_item_rank: fn(source: SemaComptimeItemSource, prelude: String) -> Int Never! {
+    if module_is_core(source.module_identity) || source.source_file.starts_with(prelude) -> 0 else -> 1
+}
+
 // `staged` is the graph the run's program tables own (moved in, never
 // copied): the declaration pass's graph (SemaComptimeDeclarationStage.graph)
 // or the caller's own copy. Every edit the run makes to it is recorded on the
@@ -5170,6 +5188,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     comptime_stage.modules = [SemaGraphModuleResult]{}
     declared_facts := comptime_stage.graph_facts.move()
     comptime_stage.graph_facts = None
+    jet_driver_comptime_core_first(comptime_stage.sources)
     comptime_run := jet_driver_run_comptime(
         run_staged,
         declared_modules,
