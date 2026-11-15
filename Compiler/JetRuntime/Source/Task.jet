@@ -416,6 +416,21 @@ task_panic_reason: fn(child: I64) -> I64 {
     result
 }
 
+// The joiner's control takes the failed child's site with its reason
+// (Scheduler.jet scheduler_joined_store), so a stop that re-raises the
+// failure can name where the child stopped.
+task_panic_site_hand: fn(child: I64, reason: I64) {
+    record: sync_load(wrapping(sync_load(wrapping(child + I64{8})) + I64{40}))
+    site: sync_swap(wrapping(record + I64{56}), I64{0})
+    if (site == I64{0}) -> return
+    control: scheduler_control_current()
+    if (control == I64{0} || reason == I64{0}) {
+        jet_rt_string_drop(site)
+        return
+    }
+    scheduler_joined_store(control, jet_rt_string_clone(reason), site)
+}
+
 // A literal mirror of the Rust original, including its transported-header
 // fallback and the compiler-shaped location suffix. Never strips arbitrary
 // parenthesized text: the suffix must end ')' and contain a location colon.
@@ -503,7 +518,9 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
     } else if (status == I64{2}) {
         sync_store(out, task_failure_new(I64{1}, I64{0}))
     } else if (status == I64{5}) {
-        sync_store(out, task_failure_new(I64{2}, task_panic_reason(child)))
+        reason: task_panic_reason(child)
+        task_panic_site_hand(child, reason)
+        sync_store(out, task_failure_new(I64{2}, reason))
     } else {
         sync_store(out, task_failure_new(I64{0}, I64{0}))
     }

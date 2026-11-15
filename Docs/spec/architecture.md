@@ -1328,7 +1328,12 @@ explicit or fatal exit neither cancels nor waits. A direct named task call uses
 that function name plus the spawn site for identity; an arbitrary task
 expression uses the bounded `task@<site>` fallback. A child panic reaches
 `TaskFailure.Panicked(reason)` with the same identity prefix and the original
-child text.
+child text. The child's report context (its `-->` site and source line) goes
+with the failure, outside the reason: a stop whose message is the reason of a
+failure its code just joined re-raises that failure. At the root, its report
+shows that site after its own context, under `= the failed task stopped at:`.
+In a task, it publishes the site ahead of its own, so a failure re-raised
+through several joins names the line that failed first.
 
 Code inside an `#Unsafe("reason")` region, a foreign implementation, or a
 vetted runtime internal must also uphold its boundary contract.

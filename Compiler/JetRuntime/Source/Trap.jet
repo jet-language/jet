@@ -370,13 +370,68 @@ trap_simple: fn(code: I64, file: I64, file_len: I64, line: I64, message: I64, me
 trap_simple_report: fn(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
     // jet_runtime_stop_unwind carries the raw message into the task runner, not
     // this process report (jet_scheduler_panic_message).
+    if trap_task_site_begin() {
+        trap_context(file, file_len, trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
+        trap_task_site_end(message, message_len)
+    }
     if rt_task_panic_publish(message, message_len, code) -> return
     production_receipt_write(code, file, file_len, trap_line(line), I64{0}, I64{0})
     trap_header(code)
     trap_write(message, message_len)
     trap_msg_message_end()
     trap_context(file, file_len, trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
+    trap_joined_site(message, message_len)
     trap_footer(code)
+}
+
+// A task stop's site travels with its failure (Scheduler.jet
+// scheduler_site_store): while this returns true, the stop's report context
+// is written into its control's capture, which trap_task_site_end takes. Only
+// a stop published to a task builds one, and `backtrace: off` keeps none.
+trap_task_site_begin: fn() -> Bool {
+    if (jet_rt_stop_domain() != I64{2}) || fault_frames_off() -> return false
+    if (scheduler_root_capture_pointer(scheduler_control_current()) != I64{0}) -> return false
+    scheduler_root_capture_begin()
+    true
+}
+
+// The site a task stop publishes: when the stop re-raises a failed task it
+// joined (its message is that failure's reason), the joined task's site, then
+// its own.
+trap_task_site_end: fn(message: I64, length: I64) {
+    control: scheduler_control_current()
+    own: scheduler_root_capture_take(control)
+    joined: scheduler_joined_site_take(control, message, length)
+    if (joined == I64{0}) {
+        if (own != I64{0} && rt_text_len(own) == I64{0}) {
+            jet_rt_string_drop(own)
+            scheduler_site_store(control, I64{0})
+            return
+        }
+        scheduler_site_store(control, own)
+        return
+    }
+    if (own == I64{0}) {
+        scheduler_site_store(control, joined)
+        return
+    }
+    site: scheduler_text_concat(joined, own)
+    jet_rt_string_drop(joined)
+    jet_rt_string_drop(own)
+    scheduler_site_store(control, site)
+}
+
+// A root stop that re-raises a failed task it joined shows where that task
+// stopped, under its own context.
+trap_joined_site: fn(message: I64, length: I64) {
+    if fault_frames_off() -> return
+    site: scheduler_joined_site_take(scheduler_report_control_current(), message, length)
+    if (site == I64{0}) -> return
+    if (rt_text_len(site) != I64{0}) {
+        trap_write_static(rt_static_text("  = the failed task stopped at:\n"))
+        trap_write_handle(site)
+    }
+    jet_rt_string_drop(site)
 }
 
 // trap_simple's report without a file, for the whole process: no task stop
@@ -507,10 +562,12 @@ trap_native_index_range_root: fn() {
 
 #Export(c) jet_rt_panic_message: fn(message: I64, message_len: I64) {
     trap_stop(I64{1}, message, message_len, I64{0}, I64{0})
+    if trap_task_site_begin() -> trap_task_site_end(message, message_len)
     if rt_task_panic_publish(message, message_len, I64{0}) -> return
     trap_header(I64{0})
     trap_write(message, message_len)
     trap_msg_prelude_end()
+    trap_joined_site(message, message_len)
     trap_footer(I64{0})
 }
 
@@ -586,16 +643,20 @@ trap_build_msg_list_noun: fn(builder: I64, len: I64) {
 #Export(c) jet_rt_list_bounds_stop: fn(len: I64, index: I64, site: I64, first: I64, second: I64, third: I64) {
     trap_stop(I64{3}, len, index, I64{0}, I64{0})
     message: trap_list_bounds_reason(len, index)
-    // A task carries the raw reason, not the rendered report.
-    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) {
-        jet_rt_string_drop(message)
-        return
-    }
     file_len: trap_u32(wrapping(site + I64{4}))
     context_len: trap_u32(wrapping(site + I64{8}))
     labels_len: trap_u32(wrapping(site + I64{12}))
     file: wrapping(site + I64{20})
     context: wrapping(file + file_len)
+    if trap_task_site_begin() {
+        trap_write(context, context_len)
+        trap_task_site_end(rt_text_data(message), rt_text_len(message))
+    }
+    // A task carries the raw reason, not the rendered report.
+    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) {
+        jet_rt_string_drop(message)
+        return
+    }
     production_receipt_write(I64{1}, file, file_len, trap_line(trap_u32(site)), I64{0}, I64{0})
     trap_header(I64{1})
     trap_write(rt_text_data(message), rt_text_len(message))
@@ -765,8 +826,13 @@ rt_record_variant_panic: fn() {
 
 trap_rich: fn(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {
     // Task bodies receive the original message, never the rendered report
-    // (architecture.md TaskFailure.Panicked.
+    // (architecture.md TaskFailure.Panicked); the report context goes with
+    // it as the stop's site.
     trap_stop(I64{1}, trap_word(message), trap_word(wrapping(message + I64{8})), I64{0}, I64{0})
+    if trap_task_site_begin() {
+        trap_context(trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), trap_word(function), trap_word(wrapping(function + I64{8})), trap_word(source), trap_word(wrapping(source + I64{8})), trap_line(column), trap_line(caret))
+        trap_task_site_end(trap_word(message), trap_word(wrapping(message + I64{8})))
+    }
     if rt_task_panic_publish(trap_word(message), trap_word(wrapping(message + I64{8})), I64{0}) -> return
     production_receipt_write(I64{0}, trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), trap_word(function), trap_word(wrapping(function + I64{8})))
     trap_header(I64{0})
@@ -774,6 +840,7 @@ trap_rich: fn(file: I64, line: I64, function: I64, source: I64, column: I64, car
     trap_msg_message_end()
     trap_context(trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), trap_word(function), trap_word(wrapping(function + I64{8})), trap_word(source), trap_word(wrapping(source + I64{8})), trap_line(column), trap_line(caret))
     trap_locals(locals)
+    trap_joined_site(trap_word(message), trap_word(wrapping(message + I64{8})))
     trap_footer(I64{0})
 }
 

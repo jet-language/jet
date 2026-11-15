@@ -1,13 +1,17 @@
 // L8a scheduler: an OS worker runs each task to completion. A wait returns a
 // delivered stop word; no Jet frame unwinds. Linux synchronization is Sync.jet.
-// Control136: refs0 paused8 cancelled16 attention24 status32 stop40 pending48
+// Control160: refs0 paused8 cancelled16 attention24 status32 stop40 pending48
 // observe56 park64 mutex72 waiters80 callbacks88 inline96 scopeFlags104
-// requestedRootCode112 capture120 openGroups128. StopCleanup's opaque token
+// requestedRootCode112 capture120 openGroups128 joinedReason136
+// joinedSite144 site152. StopCleanup's opaque token
 // owns old flags. openGroups heads the task groups the task has open
 // (TaskGroup.jet task_group_open), linked through each group and read under
-// mutex72.
-// Stop56: kind0 jct8 owner16 start24 end32 owned E4 message40 form48 (0 raw,
-// 1 rendered diagnostic); -1 denotes absent optional comptime metadata.
+// mutex72. joinedReason and joinedSite are the reason and site of the last
+// failed task this control joined; site is the one its next task stop
+// publishes (scheduler_site_store).
+// Stop64: kind0 jct8 owner16 start24 end32 owned E4 message40 form48 (0 raw,
+// 1 rendered diagnostic) site56 (a task stop's report context, or 0); -1
+// denotes absent optional comptime metadata.
 
 // #4890: role facts belong to the real current control, never Rust TLS.
 SCHEDULER_SCOPE_ROOT: I64{1}
@@ -174,8 +178,8 @@ scheduler_control_new: fn() -> I64 {
             trap_root_rail_code = rt_trap_root_address()
         }
     }
-    control: jet_rt_alloc(I64{136}, I64{8})
-    thread_zero(control, I64{136})
+    control: jet_rt_alloc(I64{160}, I64{8})
+    thread_zero(control, I64{160})
     sync_store(control, I64{1})
     sync_store(wrapping(control + I64{64}), sync_park_new())
     control
@@ -221,7 +225,8 @@ scheduler_control_retain: fn(control: I64) {
 scheduler_stop_drop: fn(record: I64) {
     if (record == I64{0}) -> return
     jet_rt_string_drop(sync_load(wrapping(record + I64{40})))
-    jet_rt_free(record, I64{56}, I64{8})
+    jet_rt_string_drop(sync_load(wrapping(record + I64{56})))
+    jet_rt_free(record, I64{64}, I64{8})
 }
 
 scheduler_stop_take_message: fn(record: I64) -> I64 {
@@ -237,7 +242,42 @@ scheduler_control_drop: fn(control: I64) {
     // Scoped waiter/callback guards retain the control and unregister first;
     // an open group retains its opener until it closes.
     if (sync_load(wrapping(control + I64{80})) != I64{0} || sync_load(wrapping(control + I64{88})) != I64{0} || sync_load(wrapping(control + I64{128})) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-    jet_rt_free(control, I64{136}, I64{8})
+    jet_rt_string_drop(sync_load(wrapping(control + I64{136})))
+    jet_rt_string_drop(sync_load(wrapping(control + I64{144})))
+    jet_rt_string_drop(sync_load(wrapping(control + I64{152})))
+    jet_rt_free(control, I64{160}, I64{8})
+}
+
+// A task stop's site travels with its failure. The stop writes its report
+// context and stores it here (Trap.jet trap_task_site_end); its publication
+// moves it onto the stop record (rt_task_panic_publish_owned); the join that
+// takes the failure hands the site and the failure's reason to the joiner's
+// control (Task.jet task_panic_site_hand). A stop whose message is that
+// reason re-raises the failure: at the root it shows the site under its own
+// context, in a task it publishes the site ahead of its own.
+scheduler_site_store: fn(control: I64, site: I64) {
+    jet_rt_string_drop(sync_swap(wrapping(control + I64{152}), site))
+}
+
+scheduler_joined_store: fn(control: I64, reason: I64, site: I64) {
+    jet_rt_string_drop(sync_swap(wrapping(control + I64{136}), reason))
+    jet_rt_string_drop(sync_swap(wrapping(control + I64{144}), site))
+}
+
+// The joined failure's site, taken, when `message` (of `length` bytes) is
+// that failure's reason; 0 otherwise, and the joined pair stays.
+scheduler_joined_site_take: fn(control: I64, message: I64, length: I64) -> I64 {
+    if (control == I64{0}) -> return I64{0}
+    reason: sync_load(wrapping(control + I64{136}))
+    if (reason == I64{0} || rt_text_len(reason) != length) -> return I64{0}
+    data: rt_text_data(reason)
+    at := I64{0}
+    loop at < length {
+        if (trap_byte(wrapping(data + at)) != trap_byte(wrapping(message + at))) -> return I64{0}
+        at += I64{1}
+    }
+    jet_rt_string_drop(sync_swap(wrapping(control + I64{136}), I64{0}))
+    sync_swap(wrapping(control + I64{144}), I64{0})
 }
 
 scheduler_control_current: fn() -> I64 { sync_load(wrapping(thread_base() + I64{16})) }
@@ -476,7 +516,7 @@ scheduler_control_discard_stop: fn(control: I64) { scheduler_stop_drop(scheduler
 // test_stop_assertion_settle): only a rendered report (kind 5) keeps it.
 scheduler_stop_new: fn(kind: I64, message: I64) -> I64 {
     test_stop_assertion_settle(kind == I64{5})
-    record: jet_rt_alloc(I64{56}, I64{8})
+    record: jet_rt_alloc(I64{64}, I64{8})
     sync_store(record, kind)
     sync_store(wrapping(record + I64{8}), I64{-1})
     sync_store(wrapping(record + I64{16}), I64{-1})
@@ -484,6 +524,7 @@ scheduler_stop_new: fn(kind: I64, message: I64) -> I64 {
     sync_store(wrapping(record + I64{32}), I64{-1})
     sync_store(wrapping(record + I64{40}), message)
     sync_store(wrapping(record + I64{48}), I64{0})
+    sync_store(wrapping(record + I64{56}), I64{0})
     record
 }
 
@@ -2094,6 +2135,8 @@ rt_task_panic_publish_address: fn() -> I64 {
 // rail as rt_task_panic_publish, without a second allocation/copy.
 rt_task_panic_publish_owned: fn(message: I64, form: I64) {
     record: scheduler_stop_new(I64{5}, message)
+    control: scheduler_control_current()
+    if (control != I64{0}) -> sync_store(wrapping(record + I64{56}), sync_swap(wrapping(control + I64{152}), I64{0}))
     sync_store(wrapping(record + I64{48}), form)
     _ := scheduler_panic_publish_record(record)
 }
