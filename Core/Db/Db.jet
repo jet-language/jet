@@ -721,6 +721,19 @@ priv DBState: struct {
     written: [String]
     open: Int{0}
     began: Int{0}
+
+    // A write that changed `table` marks every live binding that reads it for
+    // a re-run once the write is committed: at once outside a transaction,
+    // and at the commit or rollback inside one. A binding re-run on another
+    // connection before the commit reads the old rows, so a mark made before
+    // the commit would leave that old result stored as current.
+    priv wrote: fn(&self, table: String) Never! {
+        if self.open != 0 {
+            if !self.written.contains(table) -> self.written.push(table.copy())
+        } else {
+            app.__live_invalidate_all(live_source(table))
+        }
+    }
 }
 
 Store: struct {
@@ -816,7 +829,8 @@ TABLE_KEY_COLUMN: "key"
 // key column (a key that is not a record is the one column `key`) and those
 // columns are the primary key; the column `jet_row` holds the encoded row.
 // The first write creates the table, and until then it reads as empty. Reads
-// carry DB.Read and writes DB.Write.
+// carry DB.Read and join a running live binding's read set; writes carry
+// DB.Write and re-run the bindings that read the table (DBState.wrote).
 Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     priv state: Shared<DBState>
     priv name: String
@@ -842,7 +856,8 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         guard := self.state.guard_edit()
         if driver_closed(guard.value.driver) -> return Err(db_closed())
         if !table_exists(guard.value.driver, self.name) -> return Ok()
-        _: __driver_execute(guard.value.driver, "DELETE FROM \"{self.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
+        changed: __driver_execute(guard.value.driver, "DELETE FROM \"{self.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
+        if changed > 0 -> guard.value.wrote(self.name)
         Ok()
     }
     // Every row, in key order, as a data query.
@@ -885,6 +900,7 @@ priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
     loop _ in 0..<values.len() -> marks.push("?")
     verb: if replace -> "INSERT OR REPLACE" else -> "INSERT"
     _: __driver_execute(guard.value.driver, "{verb} INTO \"{table.name}\" ({names}, {TABLE_ROW_COLUMN}) VALUES ({marks.join(", ")})", values) ?? return Err(err)
+    guard.value.wrote(table.name)
     Ok(row)
 }
 
@@ -939,7 +955,11 @@ priv table_exists: fn(driver: &__Driver, name: String) -> Bool Never! {
 }
 
 // A read of a typed table: a table no write has created yet holds no rows.
+// Made while a live binding's source runs, it joins that binding's read set
+// first (app.live_reads), even before the table exists, so the write that
+// creates it re-runs the binding.
 priv table_read: fn(driver: &__Driver, name: String, sql: String, values: [DBValue]) -> [[String: DBValue]] DBError! {
+    if app.live_reads.running() -> app.live_reads.record(live_source(name))
     if !table_exists(driver, name) -> return Ok([[String: DBValue]]{})
     __driver_query(driver, sql, values)
 }
@@ -1010,24 +1030,14 @@ priv db_shutdown: fn(state: Shared<DBState>) -> Bool Never! {
     __driver_shutdown(guard.value.driver)
 }
 
-// A write marks every live binding over its table for a re-run once the
-// write is committed: at once outside a transaction, and at the commit or
-// rollback inside one. A binding re-run on another connection before the
-// commit reads the old rows, so a mark made before the commit would leave
-// that old result stored as current. A write that changed no row leaves its
-// table's bindings current; a schema statement always marks them.
+// A write that changed no row leaves its table's live bindings current; one
+// that changed a row, or a schema statement, marks them (DBState.wrote).
 priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError! {
     scoped: policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
     guard := scope.state.guard_edit()
     if driver_closed(guard.value.driver) -> return Err(db_closed())
     changed: __driver_execute(guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
-    if sql_table(scoped) == .Val(table) && (changed > 0 || sql_schema(scoped)) {
-        if guard.value.open != 0 {
-            if !guard.value.written.contains(table) -> guard.value.written.push(table.copy())
-        } else {
-            app.__live_invalidate_all(live_source(table))
-        }
-    }
+    if sql_table(scoped) == .Val(table) && (changed > 0 || sql_schema(scoped)) -> guard.value.wrote(table)
     Ok(changed)
 }
 

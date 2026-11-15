@@ -1,0 +1,127 @@
+use {
+    app
+    db: core.db
+    core.reactive.loadable.[Loadable]
+}
+
+#Error
+BoardError: enum {
+    Unopened
+    Read
+}
+
+#Codable
+Task: struct {
+    id: Int
+    board: String
+    title: String
+}
+
+#Codable
+Note: struct {
+    id: Int
+    body: String
+}
+
+// The store the query functions read through, and how many times each ran.
+Boards: struct {
+    store: db.Store?
+    task_runs: Int
+    note_runs: Int
+}
+
+BOARDS: Shared{Boards{store: None, task_runs: 0, note_runs: 0}}
+
+tasks_of: fn(store: db.Store) -> db.Table<Int, Task> { store.table("tasks", key: fn(task: Task) { task.id }) }
+
+notes_of: fn(store: db.Store) -> db.Table<Int, Note> { store.table("notes", key: fn(note: Note) { note.id }) }
+
+// A board's task titles in key order, a query function an app binds with
+// app.live. Its `query` reads the tasks table and nothing else.
+board_titles: fn(board: String) -[DB.Read]> [String] BoardError! {
+    boards := BOARDS.guard_edit()
+    boards.value.task_runs += 1
+    store: boards.value.store ?? return Err(BoardError.Unopened)
+    rows: (tasks_of(store).query() ?? return Err(BoardError.Read)).collect() ?? return Err(BoardError.Read)
+    titles := [String]{}
+    loop task in rows {
+        if task.board == board -> titles.push(task.title)
+    }
+    titles
+}
+
+// The first note's body; its `get` reads only the notes table, which no
+// write has created yet when it is bound.
+first_note: fn() -[DB.Read]> String BoardError! {
+    boards := BOARDS.guard_edit()
+    boards.value.note_runs += 1
+    store: boards.value.store ?? return Err(BoardError.Unopened)
+    if notes_of(store).get(1) == {
+        .Val(found) -> found.body
+        .None -> "none"
+        .Err(_) -> return Err(BoardError.Read)
+    }
+}
+
+titles: fn(state: Loadable<[String], BoardError>) -> String {
+    if state == {
+        .Loaded(list) -> "[{list.join(",")}]"
+        .Failed(_) -> "failed"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+noted: fn(state: Loadable<String, BoardError>) -> String {
+    if state == {
+        .Loaded(body) -> body
+        .Failed(_) -> "failed"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+runs: fn() -> String {
+    boards: BOARDS.guard_read()
+    "task runs={boards.value.task_runs} note runs={boards.value.note_runs}"
+}
+
+keep: fn(store: db.Store) {
+    boards := BOARDS.guard_edit()
+    boards.value.store = Val(store.copy())
+}
+
+run: fn() {
+    store: db.open_memory()
+    keep(store)
+    tasks: tasks_of(store)
+    notes: notes_of(store)
+    _: tasks.add(Task{id: 1, board: "jet", title: "one"}) ?? panic("add one")
+
+    // Reading a binding runs its query once; reading it again does not.
+    board: app.live(board_titles, "jet")
+    note: app.live(first_note)
+    print("bound {titles(app.state(board))} note={noted(app.state(note))}, {runs()}")
+    print("read again {titles(app.state(board))} note={noted(app.state(note))}, {runs()}")
+
+    // A put to the tasks table re-runs the binding whose query read it, and only it.
+    _: tasks.put(Task{id: 2, board: "jet", title: "two"}) ?? panic("put two")
+    print("after a task put {titles(app.state(board))} note={noted(app.state(note))}, {runs()}")
+
+    // The add that creates the notes table re-runs the binding that read it
+    // while it did not exist.
+    _: notes.add(Note{id: 1, body: "hello"}) ?? panic("add a note")
+    print("after a note add {titles(app.state(board))} note={noted(app.state(note))}, {runs()}")
+
+    // A delete that removes no row re-runs nothing; one that removes a row does.
+    tasks.delete(9) ?? panic("delete 9")
+    print("after a delete of no row {titles(app.state(board))}, {runs()}")
+    tasks.delete(1) ?? panic("delete 1")
+    print("after a delete {titles(app.state(board))}, {runs()}")
+
+    // A put inside a transaction reaches the binding at its commit.
+    policy: db.policy("tasks", "true") ?? panic("policy")
+    tx: store.with_policy(policy, "alice").begin() ?? panic("begin")
+    _: tasks.put(Task{id: 3, board: "jet", title: "three"}) ?? panic("put three")
+    print("inside the transaction {titles(app.state(board))}, {runs()}")
+    tx.commit() ?? panic("commit")
+    print("after the commit {titles(app.state(board))}, {runs()}")
+}

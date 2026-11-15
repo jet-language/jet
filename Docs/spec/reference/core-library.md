@@ -6386,7 +6386,12 @@ which together form the primary key, and a `jet_row` column holding the row's
 JSON encoding. The first write creates the table; reading a table that was
 never written finds no rows. `get` and `query` carry `DB.Read` and `add`,
 `put` and `delete` carry `DB.Write`, so a function that writes a table must
-allow `DB.Write` (E0740 otherwise).
+allow `DB.Write` (E0740 otherwise). A `get` or `query` made while an
+`app.live` binding's query function runs adds the table to that binding's
+read set, even before the table exists. An `add` or `put`, or a `delete`
+that removes a row, re-runs every binding that reads the table once the write
+is committed: immediately outside a transaction, and at the commit (or
+rollback) inside one, as for a scope's `execute`.
 
 `DBScope.live` (D-LIVEQUERY1, #1158) refuses any statement other than one
 `SELECT` and applies the scope's policy before binding, so a refused query
