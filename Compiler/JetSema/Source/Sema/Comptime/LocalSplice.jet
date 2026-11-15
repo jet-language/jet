@@ -650,7 +650,8 @@ sema_local_value_splice: fn(
     pass_complete: sema_comptime_function_diagnostics(comptime_functions, pass_diagnostics)
     if earlier_complete != pass_complete || sema_local_splice_kept_diagnostics(earlier_diagnostics) != sema_local_splice_kept_diagnostics(pass_diagnostics) -> return sema_local_splice_none(graph)
     if sema_local_splice_demands_core(graph, comptime_functions) || sema_local_splice_holds_host_value(values, landed_keys) || sema_local_splice_binding_failed(landed, values) -> return sema_local_splice_none(graph)
-    splice := sema_local_splice_owners(graph, trail, finalized.modules, landed_keys, SemaLocalSpliceInto.Finalized, earlier_values, earlier_functions, values, comptime_functions, host_hooks, threads, trace_sink)
+    facts := [SemaPassFacts]{}
+    splice := sema_local_splice_owners(graph, trail, finalized.modules, landed_keys, SemaLocalSpliceInto.Finalized, earlier_values, earlier_functions, values, comptime_functions, host_hooks, threads, trace_sink, facts)
     if splice.spliced {
         aside := sema_local_splice_aside()
         sema_local_splice_unlanded(finalized.comptime_body_sources, splice.valued, aside.sources)
@@ -687,8 +688,12 @@ sema_local_values_blocked: fn(diagnostics: [Diagnostic]) -> Bool Never! {
 // and their demand must hold, against the unstamped bodies. The comptime
 // functions the pass adds get the next round of the Core demand
 // (`demand_round`), so they may name any Core body that waits for demand.
-// The graph moves in and comes back with its edits on `trail`; `landed` are
-// the pass's sites.
+// `carried` holds the finalization's pass facts (sema_finalize_pass_close),
+// its one row. The comptime run that made the pass changes only constant
+// types in the graph, and no pass fact reads those, so the facts still
+// describe the graph and both owner checks take them; when `carried` is
+// empty, the first check computes them. The graph moves in and comes back
+// with its edits on `trail`; `landed` are the pass's sites.
 sema_local_value_land: fn(
     resolved: &&SemaRegistrationGraph,
     trail: &SemaGraphTrail,
@@ -702,6 +707,7 @@ sema_local_value_land: fn(
     host_hooks: Shared<SemaRegistrationHostHooks>,
     threads: CompilerThreads,
     trace_sink: CompilerTraceSink?,
+    carried: &[SemaPassFacts],
 ) -> SemaLocalValueSplice {
     graph := resolved.move()
     if landed.len() == 0 -> return sema_local_splice_none(graph)
@@ -714,14 +720,16 @@ sema_local_value_land: fn(
         sema_local_splice_refused(trace_sink, "binding_failed", landed_keys.len())
         return sema_local_splice_none(graph)
     }
-    sema_local_splice_owners(graph, trail, modules, landed_keys, into, earlier_values, earlier_functions, values, comptime_functions, host_hooks, threads, trace_sink)
+    sema_local_splice_owners(graph, trail, modules, landed_keys, into, earlier_values, earlier_functions, values, comptime_functions, host_hooks, threads, trace_sink, carried)
 }
 
 // Checks the owner functions of the landed sites (`landed`, by
 // `module\nkey`) in `modules` twice, with the earlier values and with the
 // pass's, and splices the second check's bodies into `modules` when
-// sema_local_splice_holds lets them stand there (`into`). The graph moves in
-// and comes back with its edits on `trail`.
+// sema_local_splice_holds lets them stand there (`into`). Both checks take
+// the pass facts of `facts`, its one row, and leave them there; an empty
+// `facts` gets the ones the first check computes. The graph moves in and
+// comes back with its edits on `trail`.
 sema_local_splice_owners: fn(
     resolved: &&SemaRegistrationGraph,
     trail: &SemaGraphTrail,
@@ -735,6 +743,7 @@ sema_local_splice_owners: fn(
     host_hooks: Shared<SemaRegistrationHostHooks>,
     threads: CompilerThreads,
     trace_sink: CompilerTraceSink?,
+    facts: &[SemaPassFacts],
 ) -> SemaLocalValueSplice {
     graph := resolved.move()
     owners := [String:Bool]{}
@@ -810,8 +819,7 @@ sema_local_splice_owners: fn(
     earlier_start := sema_local_splice_demand_empty()
     finalized_demand := sema_local_splice_demand_swap(graph, earlier_start)
     // Both checks run over the same graph rows, so the pass facts the first
-    // one computes (sema_finalize_pass_open) carry to the second.
-    facts := [SemaPassFacts]{}
+    // one takes (sema_finalize_pass_open) carry to the second.
     earlier_graph := sema_finalize_check_modules(graph, earlier_values, earlier_functions, checked_types, owner_modules, true, hook_access, threads, "sema.local_values", trace_sink, facts, modules)
     graph = earlier_graph.move()
     before := [SemaModuleBodyRows]{}
