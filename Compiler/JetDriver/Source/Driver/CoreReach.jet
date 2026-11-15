@@ -29,16 +29,17 @@
 //
 // Spellings are read from the unit's code tokens, a string's interpolations
 // included (its text is data), so reach is a superset of what the code
-// names. When the load is done, the imports never followed, the unreached
-// constants and every unreached declaration of a routed module leave their
-// modules, and so does every unreached declaration that spells one of those
-// aliases as a path head or spells a declaration that left; what stays names
-// only what stays, so every tier checks the same closed program, and
-// comptime evaluates only constants the program can name.
+// names. When the load is done, the imports never followed and every
+// unreached lazy declaration (a constant, a top-level function, a lazy
+// implementation, a routed module's type or method) leave their modules,
+// and so does every unreached declaration that spells one of those aliases
+// as a path head or spells a declaration that left; what stays names only
+// what stays, so every tier checks the same closed program, and comptime
+// evaluates only constants the program can name.
 //
-// A lazy Core unit parses only what the load may keep: the declarations the
-// load drops when the program never reaches them (constants, and a routed
-// module's functions) parse once the load is done, and only the reached ones
+// A lazy Core unit parses only what the load may keep: the constants and
+// top-level functions the load drops when the program never reaches them
+// parse once the load is done, and only the reached ones
 // (jet_driver_reach_hold), so load time and memory follow reach, not the
 // size of the library.
 use {
@@ -47,6 +48,7 @@ use {
     jet_lexer.[
         Lexed,
         STRING_PART_INTERPOLATION,
+        TOKEN_AT,
         TOKEN_BLOCK_COMMENT,
         TOKEN_CHAR,
         TOKEN_COLON,
@@ -54,6 +56,7 @@ use {
         TOKEN_FENCE_CLOSE,
         TOKEN_FENCE_OPEN,
         TOKEN_FLOAT,
+        TOKEN_HASH,
         TOKEN_IDENT,
         TOKEN_INT,
         TOKEN_KW_FN,
@@ -90,9 +93,8 @@ use {
 // spellings per lazy declaration, then a last row for the rest of the
 // source. A spelling is `word * 4 + kind`: bit 0 of the kind is set when a
 // `.` comes right before the word, bit 1 when one comes right after it.
-// `routed` marks a routed module (JET_DRIVER_ROUTED_MODULES), and `held`
-// lists the declarations the unit's parse held (jet_driver_reach_hold), by
-// position.
+// `held` lists the declarations the unit's parse held
+// (jet_driver_reach_hold), by position.
 JetDriverUnitWords: struct {
     words: [String]
     items: [Int]
@@ -102,13 +104,12 @@ JetDriverUnitWords: struct {
     cascades: [Bool]
     traits: [String]
     spells: [[Int]]
-    routed: Bool
     held: [JetDriverReachDeclaration]
 }
 
 // The words of a unit that spells nothing.
 jet_driver_unit_no_words: fn() -> JetDriverUnitWords Never! {
-    JetDriverUnitWords{words: [String]{}, items: [Int]{}, members: [String]{}, owners: [Int]{}, names: [String]{}, cascades: [Bool]{}, traits: [String]{}, spells: [[Int]]{}, routed: false, held: [JetDriverReachDeclaration]{}}
+    JetDriverUnitWords{words: [String]{}, items: [Int]{}, members: [String]{}, owners: [Int]{}, names: [String]{}, cascades: [Bool]{}, traits: [String]{}, spells: [[Int]]{}, held: [JetDriverReachDeclaration]{}}
 }
 
 // One implementation of a trait for a Core type: the modules and names of
@@ -156,20 +157,21 @@ JetDriverReachDeclaration: struct {
 }
 
 // A lazy Core unit holds back the parse of each top-level declaration that
-// the load drops while the program never reaches it: a constant, and in a
-// routed module a function. jet_driver_reach_hold finds them in the unit's
-// tokens and leaves the stub `name: fn() {}` in each one's place; the reach
-// rows give the stub's position the declaration's name, span and
-// spellings, so reach sees what the parsed declaration would show it. When
-// the load is done, each held declaration reached code names (every one,
-// without reach) parses and takes its stub's place
-// (jet_driver_reach_parse_held), and the other stubs leave with their rows
-// (jet_driver_reach_strip). A function the Core cutover drops leaves the
-// tokens outright. A declaration is held only when its own tokens decide
-// its parse: it carries no marker and no visibility word, a function no
-// type parameters and no variant head and a `{ … }` body, and a constant a
-// list, number, string, character or negated value (never a module
-// instance's path); and a unit with a fence, an authored `;` or a file rule
+// the load drops while the program never reaches it: a constant, and a
+// function other than a compiler route (jet_driver_core_route).
+// jet_driver_reach_hold finds them in the unit's tokens and leaves the stub
+// `name: fn() {}` in each one's place; the reach rows give the stub's
+// position the declaration's name, span and spellings, so reach sees what
+// the parsed declaration would show it. When the load is done, each held
+// declaration reached code names (every one, without reach) parses and
+// takes its stub's place (jet_driver_reach_parse_held), and the other stubs
+// leave with their rows (jet_driver_reach_strip). A function the Core
+// cutover drops leaves the tokens outright. A declaration is held only when
+// its own tokens decide its parse: it carries no marker, on its own line or
+// on a line of its own above it, and no visibility word, a function no type
+// parameters and no variant head and a `{ … }` body, and a constant a list,
+// number, string, character or negated value (never a module instance's
+// path); and a unit with a fence, an authored `;` or a file rule
 // (`#NoPrelude`, `#HTML`, `#Target`, `#Policy`) holds nothing.
 
 // What jet_driver_reach_hold left out of a unit's tokens: the held
@@ -256,12 +258,17 @@ jet_driver_reach_hold: fn(lexed: &Lexed, cutover_module: String, owned_members: 
     if depth != 0 -> return held
     out := [Token]{}
     cursor := 0
+    // Whether the last statement with code was a marker line (`#Overflow(…)`
+    // ahead of the declaration it marks, a line of its own).
+    marked := false
     loop at in 0..<starts.len() {
         from: starts[at]
         to: ends[at]
         code := from
         loop code < to && jet_driver_reach_trivia(lexed.tokens[code].kind) -> code += 1
-        if code + 3 >= to || lexed.tokens[code].kind != TOKEN_IDENT || lexed.tokens[code + 1].kind != TOKEN_COLON -> next
+        follows_marker: marked
+        if code < to && lexed.tokens[code].kind != TOKEN_SEMI -> marked = lexed.tokens[code].kind == TOKEN_HASH || lexed.tokens[code].kind == TOKEN_AT
+        if follows_marker || code + 3 >= to || lexed.tokens[code].kind != TOKEN_IDENT || lexed.tokens[code + 1].kind != TOKEN_COLON -> next
         last := to - 1
         loop last > code && (lexed.tokens[last].kind == TOKEN_SEMI || jet_driver_reach_trivia(lexed.tokens[last].kind)) -> last -= 1
         name: name_text(lexed.tables.names, lexed.tokens[code].decoded)
@@ -271,7 +278,7 @@ jet_driver_reach_hold: fn(lexed: &Lexed, cutover_module: String, owned_members: 
         dropped: function && core_module_has_member(cutover_module, name) && !owned_members.contains(name)
         holds: if {
             dropped || part_members.contains(name) -> false
-            function -> routes.routed && !(jet_driver_core_route(routes, name) && jet_driver_core_family_owner(routes, name) == None)
+            function -> !(jet_driver_core_route(routes, name) && jet_driver_core_family_owner(routes, name) == None)
             constant -> !jet_driver_core_route(routes, name)
             else -> false
         }
@@ -340,6 +347,20 @@ JET_DRIVER_MEMBER_ROUTES: [String]{
     "from_array", "inverse", "is_zero", "lane", "length", "ln", "matmul", "max", "min", "new", "normalize", "numerator",
     "point", "point_at_depth", "pow", "product", "ray", "reduce", "sin", "sinh", "splat", "sqrt", "sum", "tan", "tanh",
     "then", "to_array", "to_float", "to_string", "transform", "transpose",
+}
+
+// The top-level functions of Core modules that aren't routed, other than
+// their registry members, which the compiler calls by a name it spells as a
+// string literal right after the module's name, each as `module.name`:
+// `sema_call_core_source("core.ui", "button", …)` for `ui.button(display)`
+// through a UI handle. Such a call needs no spelling in the program, so each
+// is a route (jet_driver_core_routes). The CoreReach tests hold this list to
+// exactly the names the compiler's sources spell that way.
+JET_DRIVER_SOURCE_ROUTES: [String]{
+    "core.build.graph", "core.mem.alloc_raw", "core.mem.copy", "core.mem.fill", "core.mem.free_raw", "core.mem.list_append",
+    "core.mem.list_copy", "core.mem.mapped", "core.mem.stream_store", "core.mem.unmapping", "core.mem.volatile_read",
+    "core.mem.volatile_write", "core.prelude.option_or_err", "core.reactive.signal", "core.term.eprint", "core.term.print",
+    "core.testing.snap", "core.ui.button", "core.ui.text_input",
 }
 
 // The span of a type a routed module's program may leave
@@ -514,16 +535,22 @@ jet_driver_reach_rows: fn(items: [Item], held: [JetDriverReachDeclaration], part
 // jet_driver_core_route reads from the compiler's route tables. Any other
 // module's `__` names stay routes as a group (`__unix_connect_entry`,
 // `__measurement_sqrt`). The CoreReach tests hold each `"__…"` literal the
-// compiler spells right after one of these module names to a route.
+// compiler spells right after one of these module names to a route. Only a
+// routed module's types and methods are lazy, and only its F32-width
+// sources and precise families are reached by another name.
 JET_DRIVER_ROUTED_MODULES: [String]{"core.math"}
 
 // What the compiler calls in one Core module without the program spelling it.
-// For a routed module, `names` holds its CORE_CALLS `__` members and the
-// source targets a row names in place of its member, its BUILTIN_METHOD_ROWS
-// CoreSource helpers and its IR_CORE_INTRINSICS rows; jet_driver_core_route
-// adds the functions lowering keeps by name. A row's own public member is
-// called by its spelling, and so is its F32-width source
-// (jet_driver_core_f32_member).
+// `names` holds its CORE_CALLS members (only the `__` ones in a routed
+// module, whose public members are called by their spelling): the compiler
+// may call a registry member by a name the program never spells
+// (`form.validate` runs `typed_validate_field`). It holds too the source
+// targets a row names in place of its member, its BUILTIN_METHOD_ROWS
+// CoreSource helpers, its IR_CORE_INTRINSICS rows and its
+// JET_DRIVER_SOURCE_ROUTES; jet_driver_core_route adds the functions
+// lowering keeps by name, and in a module that isn't routed every `__`
+// name. A routed module's F32-width source is called by its member's
+// spelling (jet_driver_core_f32_member).
 JetDriverCoreRoutes: struct {
     module_name: String
     routed: Bool
@@ -533,13 +560,16 @@ JetDriverCoreRoutes: struct {
 
 jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
     routes := JetDriverCoreRoutes{module_name: module_name, routed: JET_DRIVER_ROUTED_MODULES.contains(module_name), path: "", names: [String:Bool]{}}
-    if !routes.routed -> return routes
+    // A user unit has no routes.
+    if module_name == "" -> return routes
     loop row in CORE_SOURCE_OWNED_ROWS {
         if row.module_name == module_name -> routes.path = row.path
     }
     loop row in CORE_CALLS {
-        if row.module_name == module_name && row.member.starts_with("__") -> routes.names[row.member] = true
+        if row.module_name == module_name && (!routes.routed || row.member.starts_with("__")) -> routes.names[row.member] = true
         target: core_call_source_member(row) ?? next
+        // Most targets name another module: skip them before splitting.
+        if row.module_name != module_name && !target.starts_with(module_name) -> next
         parts := target.split(".").to_list()
         member: parts.pop() ?? next
         owner: if parts.len() > 0 -> parts.join(".") else -> row.module_name
@@ -553,15 +583,21 @@ jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
     loop row in IR_CORE_INTRINSICS {
         if row.module_name == module_name -> routes.names[row.name] = true
     }
+    prefix: "{module_name}."
+    loop route in JET_DRIVER_SOURCE_ROUTES {
+        if !route.starts_with(prefix) -> next
+        member: route.slice(prefix.len(), route.len())
+        if !member.contains(".") -> routes.names[member] = true
+    }
     routes
 }
 
 // Whether the compiler calls `name` of the routes' module by a name no
-// program need spell: in a routed module a route row or a function lowering
-// keeps by name (ir_core_lowered_by_name: `x.abs()` on a Float runs `fabs`);
-// in any other module every `__` name.
+// program need spell: a route row or a function lowering keeps by name
+// (ir_core_lowered_by_name: `x.abs()` on a Float runs `fabs`, a Fmt.jet
+// selector helper), and in a module that isn't routed every `__` name.
 jet_driver_core_route: fn(routes: JetDriverCoreRoutes, name: String) -> Bool Never! {
-    if !routes.routed -> return name.starts_with("__")
+    if !routes.routed && name.starts_with("__") -> return true
     routes.names.get(name) != None || ir_core_lowered_by_name(true, routes.path, name)
 }
 
@@ -771,7 +807,7 @@ jet_driver_unit_words: fn(input: &&JetDriverSpellings, items: [Item], held: [Jet
         if rows.items[row - 1] == rows.items[row] && rows.members[row - 1] == rows.members[row] && rows.traits[row - 1] == rows.traits[row] -> spells[row - 1] = spells[row].copy()
     }
     spells.push(rest)
-    JetDriverUnitWords{words: spellings.table.texts.move(), items: rows.items.move(), members: rows.members.move(), owners: rows.owners.move(), names: rows.names.move(), cascades: rows.cascades.move(), traits: rows.traits.move(), spells: spells, routed: routes.routed, held: held}
+    JetDriverUnitWords{words: spellings.table.texts.move(), items: rows.items.move(), members: rows.members.move(), owners: rows.owners.move(), names: rows.names.move(), cascades: rows.cascades.move(), traits: rows.traits.move(), spells: spells, held: held}
 }
 
 // One lazy declaration of a reached module: its module (`unit`), position in
@@ -817,13 +853,11 @@ JetDriverReachImpl: struct {
 // bare, `dotted` those it spells after a `.`, `heads` those it spells as a
 // path head, each by name id: a module spells a few of the load's names, so
 // a set per module, not a flag for every name, which grew each module's
-// rows to the whole name table. A `routed` module leaves every unreached
-// lazy declaration.
+// rows to the whole name table.
 JetDriverReachUnit: struct {
     loaded: Int
     module_name: String
     open: Bool
-    routed: Bool
     local: [Int:Bool]
     dotted: [Int:Bool]
     heads: [Int:Bool]
@@ -854,16 +888,14 @@ JetDriverReachDemand: struct {
 }
 
 // The load's reach: one name table for every spelling, the names reached
-// after a `.` (or anywhere in open source), the names any Core module that
-// keeps its unreached code spells after a `.` (`members`, which reach a
-// routed module's methods), and the lazy declarations by name. `spelled`
-// holds every name reached code spells, `impls` the lazy implementations,
-// and `reached` the reach in the keys of jet_driver_core_impl_reached.
+// after a `.` (or anywhere in open source), and the lazy declarations by
+// name. `spelled` holds every name reached code spells, `impls` the lazy
+// implementations, and `reached` the reach in the keys of
+// jet_driver_core_impl_reached.
 JetDriverReach: struct {
     enabled: Bool
     names: NameTable
     global: [Bool]
-    members: [Bool]
     spelled: [Bool]
     units: [JetDriverReachUnit]
     items: [JetDriverReachItem]
@@ -877,7 +909,7 @@ JetDriverReach: struct {
 }
 
 jet_driver_reach: fn(enabled: Bool) -> JetDriverReach Never! {
-    JetDriverReach{enabled: enabled, names: name_table(), global: [Bool]{}, members: [Bool]{}, spelled: [Bool]{}, units: [JetDriverReachUnit]{}, items: [JetDriverReachItem]{}, by_name: [[Int]]{}, impls: [JetDriverReachImpl]{}, reached: name_rows(), edges: [JetDriverReachEdge]{}, demands: [JetDriverReachDemand]{}, open_names: [String]{}, stack: [Int]{}}
+    JetDriverReach{enabled: enabled, names: name_table(), global: [Bool]{}, spelled: [Bool]{}, units: [JetDriverReachUnit]{}, items: [JetDriverReachItem]{}, by_name: [[Int]]{}, impls: [JetDriverReachImpl]{}, reached: name_rows(), edges: [JetDriverReachEdge]{}, demands: [JetDriverReachDemand]{}, open_names: [String]{}, stack: [Int]{}}
 }
 
 jet_driver_reach_has: fn(flags: [Bool], id: Int) -> Bool Never! {
@@ -907,14 +939,12 @@ jet_driver_reach_deferrable: fn(scoped: JetDriverScopedImport, scoped_imports: [
 
 // Adds the module at `loaded` with what its source spells and returns its
 // unit. The names a member list selects are reached wherever it names them.
-// A Core module that keeps its unreached code may call a routed module's
-// method from it, so each name it spells after a `.` reaches such methods.
 // The module's declarations count as reached for implementations
 // (jet_driver_core_impl_reached), and each waiting implementation of a trait
 // it declares tries again.
 jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: String, words: JetDriverUnitWords, imports: [ImportDecl], open: Bool) -> Int {
     unit: reach.units.len()
-    reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), routed: words.routed, local: [Int:Bool]{}, dotted: [Int:Bool]{}, heads: [Int:Bool]{}})
+    reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), local: [Int:Bool]{}, dotted: [Int:Bool]{}, heads: [Int:Bool]{}})
     name_rows_set(reach.reached, module_name, 1)
     loop at in 0..<reach.impls.len() {
         index: reach.impls[at].item
@@ -958,14 +988,7 @@ jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: Str
         }
         loop reach.by_name.len() <= name -> reach.by_name.push([Int]{})
         reach.by_name[name].push(index)
-        if reach.units[unit].open || jet_driver_reach_has(reach.global, name) || (owner >= 0 && jet_driver_reach_has(reach.members, name)) -> reach.stack.push(index)
-    }
-    if !words.routed && !reach.units[unit].open {
-        loop row in words.spells {
-            loop spell in row {
-                if spell.bit_and(1) == 1 -> jet_driver_reach_member(reach, ids[spell >> 2])
-            }
-        }
+        if reach.units[unit].open || jet_driver_reach_has(reach.global, name) -> reach.stack.push(index)
     }
     if words.spells.len() > 0 {
         last: words.spells.len() - 1
@@ -1001,18 +1024,6 @@ jet_driver_reach_impl: fn(reach: &JetDriverReach, module_name: String, type_name
     }
     reach.impls.push(JetDriverReachImpl{item: reach.items.len(), row: JetDriverCoreImplRow{type_module: module_name.copy(), type_name: type_name.copy(), trait_module: trait_module, trait_name: trait_name}, written: written.copy(), triggers: triggers})
     reach.impls.len() - 1
-}
-
-// Reaches each method named `id`.
-jet_driver_reach_member: fn(reach: &JetDriverReach, id: Int) {
-    loop reach.members.len() <= id -> reach.members.push(false)
-    if reach.members[id] -> return
-    reach.members[id] = true
-    if id >= reach.by_name.len() -> return
-    loop at in 0..<reach.by_name[id].len() {
-        index: reach.by_name[id][at]
-        if reach.items[index].owner >= 0 -> reach.stack.push(index)
-    }
 }
 
 // The compiler demands `module_name` (an interpolation selector's formatter,
@@ -1106,6 +1117,42 @@ jet_driver_reach_items_reached: fn(reach: JetDriverReach) -> Int Never! {
     count := 0
     loop item in reach.items {
         if item.live -> count += 1
+    }
+    count
+}
+
+// How many function bodies the load's Core modules hold: top-level
+// functions, methods, trait-block and implementation methods, and trait
+// default bodies. A held stub's body is empty, so it counts once parsed.
+jet_driver_reach_core_bodies: fn(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit]) -> Int Never! {
+    count := 0
+    loop module_row in modules {
+        if !jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
+        loop item in module_row.program.items {
+            if item == .Func(value) {
+                if value.body.len() > 0 -> count += 1
+            } else if item == .Struct(value) {
+                count += jet_driver_reach_bodies(value.methods)
+                loop block in value.trait_impls -> count += jet_driver_reach_bodies(block.methods)
+            } else if item == .Enum(value) {
+                count += jet_driver_reach_bodies(value.methods)
+                loop block in value.trait_impls -> count += jet_driver_reach_bodies(block.methods)
+            } else if item == .Impl(value) {
+                count += jet_driver_reach_bodies(value.methods)
+            } else if item == .Trait(value) {
+                loop method in value.methods {
+                    if method.default_body == .Val(body) && body.len() > 0 -> count += 1
+                }
+            }
+        }
+    }
+    count
+}
+
+jet_driver_reach_bodies: fn(functions: [Func]) -> Int Never! {
+    count := 0
+    loop function in functions {
+        if function.body.len() > 0 -> count += 1
     }
     count
 }
@@ -1329,16 +1376,16 @@ jet_driver_reach_parse_part: fn(sources: [[U8]]) -> [ParseResult] {
     parsed
 }
 
-// The load is done: drop each never-followed import from its module, each
-// unreached constant (so comptime evaluates only constants the program can
-// name), each unreached lazy implementation and each unreached lazy
-// declaration of a routed module, then every unreached declaration that
-// spells a dropped import's alias as a path head, spells the word of a
-// demand never followed (its module may not have loaded), or spells a
-// dropped declaration (bare in the same module, after a `.` anywhere), until
-// no remaining declaration names a dropped one. A dropped method or trait
-// block leaves its type; a method's name stays, since other types may share
-// it.
+// The load is done: drop each never-followed import from its module and
+// each unreached lazy declaration (a constant, so comptime evaluates only
+// constants the program can name, a top-level function, a lazy
+// implementation, a routed module's type or method), then every unreached
+// declaration that spells a dropped import's alias as a path head, spells
+// the word of a demand never followed (its module may not have loaded), or
+// spells a dropped declaration (bare in the same module, after a `.`
+// anywhere), until no remaining declaration names a dropped one. A dropped
+// method or trait block leaves its type; a method's name stays, since other
+// types may share it.
 jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModule]) {
     dead := [[Bool]]{}
     dead_imports := [[Span]]{}
@@ -1378,12 +1425,9 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
     local_gone := [[Bool]]{}
     loop _ in reach.units -> local_gone.push([Bool]{})
     loop index in 0..<reach.items.len() {
-        unit: reach.items[index].unit
         if reach.items[index].live -> next
-        if reach.units[unit].routed || reach.items[index].held || reach.items[index].lazy_impl >= 0 || modules[reach.units[unit].loaded].program.items[reach.items[index].item] == .Const(_) {
-            any = true
-            jet_driver_reach_gone(reach, index, gone, global_gone, local_gone)
-        }
+        any = true
+        jet_driver_reach_gone(reach, index, gone, global_gone, local_gone)
     }
     if !any -> return
     grew := true

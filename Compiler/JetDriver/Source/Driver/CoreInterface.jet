@@ -231,7 +231,6 @@ jet_driver_core_interface_put_words: fn(out: &[U8], words: JetDriverUnitWords) N
     jet_driver_core_interface_put_strings(out, words.traits)
     jet_driver_core_interface_put(out, words.spells.len())
     loop row in words.spells -> jet_driver_core_interface_put_ints(out, row)
-    jet_driver_core_interface_put_flag(out, words.routed)
     jet_driver_core_interface_put(out, words.held.len())
     loop declaration in words.held {
         jet_driver_core_interface_put(out, declaration.position)
@@ -422,7 +421,6 @@ jet_driver_core_interface_read_words: fn(bytes: [U8], cursor: &JetDriverCoreInte
     traits: jet_driver_core_interface_strings(bytes, cursor)
     spells := [[Int]]{}
     loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 4) -> spells.push(jet_driver_core_interface_ints(bytes, cursor))
-    routed: jet_driver_core_interface_flag(bytes, cursor)
     held := [JetDriverReachDeclaration]{}
     loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 24) {
         position: jet_driver_core_interface_int(bytes, cursor)
@@ -433,7 +431,7 @@ jet_driver_core_interface_read_words: fn(bytes: [U8], cursor: &JetDriverCoreInte
         constant: jet_driver_core_interface_flag(bytes, cursor)
         held.push(JetDriverReachDeclaration{position: position, name: name, name_start: name_start, span: Span{start: start, end: end}, constant: constant})
     }
-    JetDriverUnitWords{words: words, items: items, members: members, owners: owners, names: names, cascades: cascades, traits: traits, spells: spells, routed: routed, held: held}
+    JetDriverUnitWords{words: words, items: items, members: members, owners: owners, names: names, cascades: cascades, traits: traits, spells: spells, held: held}
 }
 
 // The unit of the interface file `bytes` whose directory entry is `entry`;

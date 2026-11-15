@@ -5913,6 +5913,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         loop held in held_modules -> held_total += held.declarations.len()
         sink.progress("counters.load.core_held", held_total, -1)
         sink.progress("counters.load.core_held_parsed", held_parsed, -1)
+        sink.progress("counters.load.core_bodies_parsed", jet_driver_reach_core_bodies(modules, source_units), -1)
     }
     if reach.enabled {
         jet_driver_reach_strip(reach, modules)
@@ -5931,6 +5932,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             }
             sink.progress("counters.load.core_impls", reach.impls.len(), -1)
             sink.progress("counters.load.core_impls_reached", impls_reached, -1)
+            sink.progress("counters.load.core_bodies", jet_driver_reach_core_bodies(modules, source_units), -1)
         }
     }
     // Each package's denied edges (E0619) and unused rules (L0619).
