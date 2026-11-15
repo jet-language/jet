@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6932,
-    "rev": 104872,
+    "rev": 104875,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93004,21 +93004,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A case proves that a safe borrowed view of a mapped file cannot observe a byte change made by another process after the borrow (or the safe API no longer hands out such a view), on every applicable tier.",
+          "text": "A safe borrowed view of a mapped file never observes a byte change made by another process after the borrow, on every applicable tier. Proof: `jet test Compiler --profile cases --filter files/map_view_stable_against_external_write`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T21:18:50.483Z"
+          "at": "2026-11-15T04:46:07.588Z"
         },
         {
           "n": 2,
-          "text": "A case truncates and rewrites a mapped file from another process during safe access. The program keeps reading the bytes it mapped (including past the new end) with no SIGBUS or other fault and no change visible through the map, on every applicable tier, as D-MMAP-STABLE1=A requires.",
+          "text": "Another process truncates and rewrites a mapped file during safe access, and the program keeps reading the bytes it mapped (including past the new end) with no SIGBUS or other fault and no change visible through the map, on every applicable tier (D-MMAP-STABLE1=A). Proof: `jet test Compiler --profile cases --filter files/map_survives_external_truncate`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T13:25:26.949Z"
+          "at": "2026-11-15T04:46:09.092Z"
         },
         {
           "n": 4,
@@ -93047,8 +93047,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T21:18:50.483Z",
-      "updated": "2026-11-13T13:25:27.857Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:46:09.092Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 5
     },
     {
@@ -94028,12 +94028,12 @@
         },
         {
           "n": 4,
-          "text": "The REPL peak grows by less than 1 MB per turn over 30 turns.",
+          "text": "`jet repl` peak memory grows by less than 1 MiB per turn over 30 one-line turns (gate-p64 measured about 2.3 MiB per turn). Proof: `jet test Compiler --profile cases --filter repl/peak_growth_per_turn`, which measures VmHWM after 1 and 31 turns.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T14:54:54.140Z"
+          "at": "2026-11-15T04:46:10.489Z"
         }
       ],
       "refs": [],
@@ -94044,8 +94044,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:54:36.252Z",
-      "updated": "2026-11-14T14:07:28.423Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:46:10.489Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 4
     },
     {
@@ -215129,6 +215129,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:46:10.489Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0j3st66",
+      "note": "#4: proof; absorbs #6724 c2; was: The REPL peak grows by less than 1 MB per turn over 30 turns."
+    },
+    {
+      "at": "2026-11-15T04:46:09.092Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vwlomv",
+      "note": "#2: proof; was: A case truncates and rewrites a mapped file from another process during safe access. The program keeps reading the bytes it mapped (including past the new end) with no SIGBUS or other fault and no cha"
+    },
+    {
+      "at": "2026-11-15T04:46:07.588Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vwlomv",
+      "note": "#1: proof; was: A case proves that a safe borrowed view of a mapped file cannot observe a byte change made by another process after the borrow (or the safe API no longer hands out such a view), on every applicable ti"
+    },
     {
       "at": "2026-11-15T04:45:23.344Z",
       "by": "TowerKeeper-1",
