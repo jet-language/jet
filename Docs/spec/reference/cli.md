@@ -896,10 +896,12 @@ level, such as `O2`), `ir.x64`, `ir.object`,
 bytes, which its own thread realizes and reads while the object builds; for
 a closure only checked foreign declarations name, also the link's live
 symbol collection and the realization of the providers it reaches),
-`native.link`; one `native.build` around
-them for a test harness). A package build (`jet build` of a `build: fn`)
-also traces `build.plan`, the check of its build entry and the plan's query,
-and one `build.step` per batch of its steps, named by the steps. A step's
+`native.link`, and `native.write` as `jet build` writes the image; one
+`native.build` around them for a test harness). A package build (`jet build`
+of a `build: fn`) also traces `build.plan`, the check of its build entry and
+the plan's query, and one `build.step` per batch of its steps, named by the
+steps; a target's compile result drops on a detached task once its image is
+written, while the next node runs. A step's
 own processes are not jet's, so the span's `proc_cpu_ns` is jet's alone;
 with `--trace=FILE` each step runs with `JET_TRACE_FILE` naming `%p.json`
 in its sandbox, and when its batch ends the trace of every jet process it
