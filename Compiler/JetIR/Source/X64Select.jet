@@ -682,8 +682,10 @@ ir_x64_tail_jump: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
     // rsi, rdx and rcx only), rsi and rdi (a leaf's open slots,
     // X64Alloc.jet ir_x64_leaf_open), frame homes and immediates. A source
     // in the argument register of an argument before it moves to r10 or
-    // r11 first, which no slot holds, so the registers fill in order.
+    // r11 first, which no slot holds, so the registers fill in order; one
+    // source passed twice moves once.
     staged := [Int]{}
+    sources := [Int]{}
     filled := 0
     loop position in f.b[at]..<(f.b[at] + f.c[at]) {
         source: f.args[position]
@@ -694,14 +696,20 @@ ir_x64_tail_jump: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
             if held >= 0 && row < IR_X64_ARGUMENT_REGISTERS.len() && IR_X64_ARGUMENT_REGISTERS[row] == held -> taken = true
         }
         if word -> filled += 1
-        if !taken {
-            staged.push(-1)
+        aside := -1
+        loop (earlier, moved) in staged {
+            if taken && moved >= 0 && sources[earlier] == held -> aside = moved
+        }
+        if !taken || aside >= 0 {
+            staged.push(aside)
+            sources.push(held)
             next
         }
         if staged.contains(X64_R11) -> return ir_x64_fail(e, f, at, "tail call with three sources in argument registers")
         spot: if staged.contains(X64_R10) -> X64_R11 else -> X64_R10
         x64_mov_rr(e.code, spot, held)
         staged.push(spot)
+        sources.push(held)
     }
     loop position in f.b[at]..<(f.b[at] + f.c[at]) {
         slot: f.args[position]
@@ -5753,6 +5761,50 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     } else {
         assert(at_aside < 0)
     }
+}
+
+// twice(y) tail-calls slow(a, b, b, a) with a and b in rsi and rdi: its
+// wrapping Add writes rax, rcx, r10 and r11 at most, its Mul rdx too, and
+// its tail call rdx, rcx, r10 and r11, none of them rsi or rdi. A source
+// passed twice moves aside once, so the two moves serve the three arguments
+// read from registers that the loads before them fill.
+#Test("A tail call moves a source passed twice aside once") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    slow := ir_function_new("slow", "test:twice.jet::slow", "", "twice.jet", 1)
+    loop name in ([String]{"first", "second", "third", "fourth"}) {
+        _ := ir_slot(slow, word, IRSlotKind.Param, ir_intern_name(m, name), 1)
+    }
+    _ := ir_emit(slow, IROp.Return, -1, -1, -1, -1, 1)
+    m.functions.push(slow)
+    f := ir_function_new("twice", "test:twice.jet::twice", "", "twice.jet", 2)
+    y: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "y"), 2)
+    a: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    b: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    at_add: ir_emit(f, IROp.Add, a, y, y, IR_OVERFLOW_WRAP, 3)
+    at_mul: ir_emit(f, IROp.Mul, b, a, y, IR_OVERFLOW_WRAP, 3)
+    handed: ir_args(f, [Int]{a, b, b, a})
+    at_tail: ir_emit(f, IROp.Call, -1, 0, handed, 4, 4)
+    _ := ir_emit(f, IROp.Return, -1, -1, IR_TAIL_JUMP, -1, 4)
+    m.functions.push(f)
+    twice: m.functions[1]
+    no_consts := [Bool]{}
+    no_values := [Int]{}
+    loop _ in 0..<twice.slot_type.len() {
+        no_consts.push(false)
+        no_values.push(0)
+    }
+    assert_eq(ir_x64_scratch(m, twice, no_consts, no_values, at_add), IR_X64_QUIET_SCRATCH)
+    assert_eq(ir_x64_scratch(m, twice, no_consts, no_values, at_mul), IR_X64_QUIET_SCRATCH + 0x4)
+    assert_eq(ir_x64_scratch(m, twice, no_consts, no_values, at_tail), IR_X64_TAIL_SCRATCH)
+    assert_eq(IR_X64_TAIL_SCRATCH.bit_and(IR_X64_LEAF_OPEN_MASK), 0)
+    al: ir_x64_allocate(m, twice)
+    assert_eq(al.saved.len(), 0)
+    assert(al.regs[a] == X64_RSI || al.regs[a] == X64_RDI)
+    assert(al.regs[b] == X64_RSI || al.regs[b] == X64_RDI)
+    assert(al.regs[a] != al.regs[b])
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 1)
+    assert(compiled.errors.is_empty())
 }
 
 // spread(n) sums n + 1 .. n + 7, all seven live at once, by exact Int Adds

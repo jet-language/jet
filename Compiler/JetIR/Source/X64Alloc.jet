@@ -412,20 +412,70 @@ ir_x64_leaf_open: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], 
     loop slot in 0..<starts.len() -> general[slot] && slot >= f.param_count && starts[slot] >= 0 && writers[ends[slot] + 1] == writers[starts[slot]]
 }
 
-// Whether selecting instruction `at` of a leaf leaves rsi and rdi alone:
-// structure, a constant, a memory access, an Offset, a quiet value
-// (ir_x64_quiet: rax, rcx, rdx, r10 and r11 at most), an If whose arms
-// become a select (rax, rcx and rdx: X64Select.jet ir_x64_select_safe), a
-// call of the stop poll, which keeps every register but rax, or a tail call,
-// whose sources in rsi or rdi X64Select.jet ir_x64_tail_jump moves aside
-// before it fills the argument registers. A frame address, a byte copy, an
-// inline-range test and an `#FFI(asm)` template may use them.
+// Whether selecting instruction `at` of a leaf leaves rsi and rdi alone
+// (ir_x64_scratch), so a value held in them lives across it.
 ir_x64_leaf_keeps: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: Int) -> Bool Never! {
-    if f.op[at] == {
-        .Nop | .Const | .Load | .Store | .Offset | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable -> true
-        .Call -> ir_x64_tail_silent(m, f, at) || ir_x64_poll_silent(m, f, at)
-        .StackAddress | .CopyBytes | .IntBig | .StreamStore -> false
-        .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Sqrt -> ir_x64_quiet(m, f, consts, values, at)
+    ir_x64_scratch(m, f, consts, values, at).bit_and(IR_X64_LEAF_OPEN_MASK) == 0
+}
+
+// Register masks: bit r for general register r (X64_RAX 0 ... X64_R11 11).
+// rsi and rdi, the registers a leaf's open slots add (ir_x64_leaf_open).
+IR_X64_LEAF_OPEN_MASK: 0xc0
+// Every register C lets a call clobber: rax, rcx, rdx, rsi, rdi, r8-r11.
+IR_X64_CALL_SCRATCH: 0xfc7
+// A quiet value's (ir_x64_quiet): rax, rcx, r10 and r11; a Mul's rdx too.
+IR_X64_QUIET_SCRATCH: 0xc03
+// A memory access's (X64Select.jet ir_x64_memory): rax for the value, r10
+// for the address and r11 for a folded index.
+IR_X64_MEMORY_SCRATCH: 0xc01
+// A select's End (X64Select.jet ir_x64_pick): its test re-selected there,
+// rax, rcx and rdx, and r10, which holds the then arm's value; r11 with
+// the quiet values.
+IR_X64_PICK_SCRATCH: 0xc07
+// A tail call's (X64Select.jet ir_x64_tail_jump, ir_x64_tail_silent): rdx
+// and rcx, the third and fourth argument registers, and r10 and r11, where
+// it moves sources aside. A source in rdi or rsi moves aside before they
+// fill, and no value of the frame is read after the jump.
+IR_X64_TAIL_SCRATCH: 0xc06
+// A quiet `#FFI(asm)` template's (ir_x64_asm_silent): every caller-saved
+// register but r8 and r9.
+IR_X64_ASM_SCRATCH: 0xcc7
+
+// The general registers selecting instruction `at` may write besides its
+// result's own, as a mask (IR_X64_CALL_SCRATCH and the rest), whatever the
+// allocation: each template's scratch registers in X64Select.jet, for an
+// operand or a result it may find in its frame home, an address, an index
+// or a count. A value in a caller-saved register lives across `at` only
+// outside its mask. Structure writes none: a Block, Loop, Br (a rotated
+// back edge repeats the Loop's head, whose own masks cover every value
+// live there) or Unreachable, and a Return, which leaves. A constant, a
+// frame address, an If's or BrIf's test (ir_x64_truth) and a stop poll
+// (X64Select.jet ir_x64_stop_poll) write rax; an Offset rax and rcx (an
+// offset past an imm32); an inline-range test rax and rdx (ir_x64_int_big);
+// a byte copy rax, rdx and r11, and rsi, rdi and rcx past 64 bytes
+// (ir_x64_copy_bytes); an Else r10 (a select's then arm). A call that is no
+// tail call, stop poll or quiet template writes them all.
+ir_x64_scratch: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: Int) -> Int Never! {
+    op: f.op[at]
+    if op == {
+        .Nop | .Block | .Loop | .Br | .Unreachable | .Return -> 0
+        .Const | .StackAddress | .If | .BrIf -> 0x1
+        .Offset -> 0x3
+        .IntBig -> 0x5
+        .Else -> 0x400
+        .End -> IR_X64_PICK_SCRATCH
+        .Load | .Store | .StreamStore -> IR_X64_MEMORY_SCRATCH
+        .CopyBytes -> if f.c[at] > 64 -> 0x8c7 else -> 0x805
+        .Call -> {
+            if ir_x64_tail_silent(m, f, at) -> return IR_X64_TAIL_SCRATCH
+            if ir_x64_poll_silent(m, f, at) -> return 0x1
+            if ir_x64_asm_silent(m, f, at) -> return IR_X64_ASM_SCRATCH
+            IR_X64_CALL_SCRATCH
+        }
+        .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Sqrt -> {
+            if !ir_x64_quiet(m, f, consts, values, at) -> return IR_X64_CALL_SCRATCH
+            if op == .Mul -> IR_X64_QUIET_SCRATCH + 0x4 else -> IR_X64_QUIET_SCRATCH
+        }
     }
 }
 
