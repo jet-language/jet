@@ -809,15 +809,16 @@ sema_local_splice_owners: fn(
     // the pass's result replaces demanded as a body).
     earlier_start := sema_local_splice_demand_empty()
     finalized_demand := sema_local_splice_demand_swap(graph, earlier_start)
-    earlier_facts := [SemaPassFacts]{}
-    earlier_graph := sema_finalize_check_modules(graph, earlier_values, earlier_functions, checked_types, owner_modules, true, hook_access, threads, "sema.local_values", trace_sink, earlier_facts, modules)
+    // Both checks run over the same graph rows, so the pass facts the first
+    // one computes (sema_finalize_pass_open) carry to the second.
+    facts := [SemaPassFacts]{}
+    earlier_graph := sema_finalize_check_modules(graph, earlier_values, earlier_functions, checked_types, owner_modules, true, hook_access, threads, "sema.local_values", trace_sink, facts, modules)
     graph = earlier_graph.move()
     before := [SemaModuleBodyRows]{}
     loop module_index in owner_modules -> before.push(sema_module_body_rows_take(modules, module_index))
     pass_start := sema_local_splice_demand_empty()
     earlier_demand: sema_local_splice_demand_swap(graph, pass_start)
-    pass_facts := [SemaPassFacts]{}
-    pass_graph := sema_finalize_check_modules(graph, values, comptime_functions, checked_types, owner_modules, true, hook_access, threads, "sema.local_values", trace_sink, pass_facts, modules)
+    pass_graph := sema_finalize_check_modules(graph, values, comptime_functions, checked_types, owner_modules, true, hook_access, threads, "sema.local_values", trace_sink, facts, modules)
     graph = pass_graph.move()
     pass_demand: sema_local_splice_demand_swap(graph, finalized_demand)
     after := [SemaModuleBodyRows]{}
