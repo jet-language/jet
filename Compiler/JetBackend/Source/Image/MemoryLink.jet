@@ -529,6 +529,22 @@ x64_bind_runtime_image_at: fn(name: String, program: &&[U8], image: &&[U8], prog
     link_bind_image(name, program, image, gap_at, gap, Val(program_base), false)
 }
 
+// Whether the runtime image defines each name `names[rows[k]]`, looked up
+// as a bind looks up a program's import (link_image_defines). The image is
+// the one row of `images`, read without its bytes [gap_at, gap_at + gap);
+// it moves into a context for the reads and back. Nothing is defined when
+// the image is absent or can't be read.
+x64_runtime_image_defines: fn(images: &[[U8]], gap_at: Int, gap: Int, names: [String], rows: [Int]) -> [Bool] Never! {
+    found := [Bool]{}
+    if images.len() == 0 -> return found
+    image: images.remove(0, .Slot) ?? return found
+    c := link_context([[U8]]{[U8]{}, image.move()}, LINK_RUN_BASE)
+    view: link_image_view(c, 1, gap_at, gap)
+    loop row in rows -> found.push(c.errors.len() == 0 && link_image_defines(c, view, names[row]))
+    images.push(c.bufs.remove(1, .Slot) ?? [U8]{})
+    found
+}
+
 link_bind_bytes: fn(bound: &&X64BindResult) -> X64ExecutableResult Never! {
     if bound.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: bound.errors.move()}
     X64ExecutableResult{bytes: x64_executable_bytes(bound.executable.move()), errors: [String]{}}

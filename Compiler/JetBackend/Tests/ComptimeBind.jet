@@ -5,7 +5,10 @@
 // byte. With the image taken back out, as a batch's bind does
 // (JetEval Native.jet jet_eval_native_bind), the bound batch's program part
 // alone gives the code and symbols (Image/SessionHost.jet x64_comptime_code,
-// x64_comptime_symbols) that the whole file it stands for gives.
+// x64_comptime_symbols) that the whole file it stands for gives. The names
+// a batch calls are asked of that image as its bind looks them up
+// (MemoryLink.jet x64_runtime_image_defines), and the image goes back
+// unchanged.
 use {
     jet_backend.[
         LinkContext,
@@ -28,6 +31,7 @@ use {
         x64_executable_segments,
         x64_image_file_read,
         x64_image_segments,
+        x64_runtime_image_defines,
     ]
     bind_files: core.files
     bind_process: core.process
@@ -150,4 +154,19 @@ comptime_bind_unchanged: fn(image: [U8], reference: LinkContext) -> Bool Never! 
         found: x64_comptime_symbol_address(part, name) ?? panic("the entry program's part names no `{name}`")
         assert((x64_comptime_symbol_address(all, name) ?? -1) == found, "`{name}` has the whole file's address")
     }
+}
+
+#Test("the runtime image read without its loaded segments answers which names it defines and goes back unchanged") {
+    path: comptime_bind_image_path()
+    read: x64_image_file_read(path)
+    assert(read.failure == "" && read.gap > 0, "the image file is read without its loaded segments: {read.failure}")
+    again: x64_image_file_read(path)
+    reference := link_context([[U8]]{[U8]{}, again.bytes.move()}, LINK_RUN_BASE)
+    images := [[U8]]{read.bytes.move()}
+    names: [String]{"jet_rt_alloc", "no_such_runtime_symbol"}
+    defined: x64_runtime_image_defines(images, read.gap_at, read.gap, names, [Int]{1, 0, 1})
+    assert(defined.len() == 3 && !defined[0] && defined[1] && !defined[2], "the image defines its runtime's `jet_rt_alloc` and no unknown name")
+    assert(images.len() == 1 && comptime_bind_unchanged(images[0], reference), "the image goes back unchanged")
+    absent := [[U8]]{}
+    assert(x64_runtime_image_defines(absent, 0, 0, names, [Int]{0}).len() == 0, "an absent image defines nothing")
 }
