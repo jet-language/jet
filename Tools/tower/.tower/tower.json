@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6932,
-    "rev": 104875,
+    "nextNum": 6933,
+    "rev": 104900,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -71000,7 +71000,7 @@
     {
       "id": "c02p6yln",
       "num": 6277,
-      "title": "Declared checks that are not enforced: DB effects, package denies, SQL row policy, checked SQL/HTML fields, lint deny and marker signatures",
+      "title": "Declared checks are enforced: DB effect rows, module-level #FX, comptime effects, lint deny, and SQL row-policy scope",
       "body": "Found by Ballots-4 on dev 050dfbb4cd (probes $JET_SCRATCH_ROOT/lanes/Main/q/b4/sq/probe/s4, s5, s6). A function written `-[!DB.Write]>` that executes a write, and a package whose authority denies DB.Write, both check clean. DB effects of connection calls are not counted against written rows, so a written denial is a false promise (I1: the effect promise must be sound). The http_handler_captures example also checks clean under the handler ceiling -[Net, FS.Read]> while reaching the database.",
       "kind": "bug",
       "track": "epoch",
@@ -71015,6 +71015,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15 by TowerKeeper-1: the checked-text criteria (c8-c11, from #6402) moved to #6932; every remaining criterion names its proof; c12 waits on D-SQL-SCRIPT1, which has no ballot (owner-gates.tsv)."
+        },
         {
           "at": "2026-10-31",
           "by": "Main",
@@ -71044,30 +71049,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "s4 and s5 report the registered effect diagnostic at the write; s6 is refused under the handler ceiling or the example's row is corrected; ui snapshots added",
+          "text": "A function written `-[!DB.Write]>` that executes a write (probe s4) and a package whose authority denies DB.Write (s5) each report the registered effect error at the write, and the http_handler_captures example (s6) is refused under its `-[Net, FS.Read]>` ceiling or its row is corrected. Proof: `jet test Compiler --profile ui --filter db_write_denied_` and `jet test Compiler --profile golden --filter http_handler_captures`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-29T23:32:11.652Z"
+          "at": "2026-11-15T04:47:09.845Z"
         },
         {
           "n": 2,
-          "text": "A census of in-repo callers whose written rows omit DB is fixed in the same patch.",
+          "text": "Every in-repo caller whose written effect row omits DB is fixed in the same patch as c1. Proof: `jet test Compiler --profile golden` and `--profile cases` pass with the DB rows counted, and the census list is in the commit message.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:20:54.314Z"
+          "at": "2026-11-15T04:47:10.722Z"
         },
         {
           "n": 3,
-          "text": "#FX(...) above a module line is enforced: q/bd/probe modcap_breach.jet (a file read under #FX(!Net, !FS)) is refused with a registered effect diagnostic, not checked clean; #FX above fn no longer ICEs (fn_marker.jet)",
+          "text": "`#FX(...)` above a module line is enforced: modcap_breach.jet (a file read under `#FX(!Net, !FS)`) is refused with a registered effect error instead of checking clean, and `#FX` above a fn no longer crashes the compiler (fn_marker.jet). Proof: `jet test Compiler --profile ui --filter fx_module_line_breach` and `jet test Compiler --profile cases --filter effects/fx_above_fn_checks`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T00:15:08.822Z"
+          "at": "2026-11-15T04:47:11.600Z"
         },
         {
           "n": 4,
@@ -71080,12 +71085,12 @@
         },
         {
           "n": 6,
-          "text": "(was #6409) A lint set to deny in policy.lints.deny reports E1293 as an error with exit code 1 (the diagnostic_gate denied case passes and a UI snapshot shows it). This includes the #6358 tail-blocked lint on m06_tail_blocked_lint.jet.",
+          "text": "A lint set to deny in `policy.lints.deny` reports E1293 as an error with exit code 1, including the tail-blocked lint on m06_tail_blocked_lint.jet. Proof: `jet test Compiler --profile cases --filter diagnostic_gate/denied` and `jet test Compiler --profile ui --filter E1293`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:25:07.930Z"
+          "at": "2026-11-15T04:47:12.480Z"
         },
         {
           "n": 7,
@@ -71099,47 +71104,51 @@
         {
           "n": 8,
           "text": "(was #6402) Outside the module that defines it, `SQL{text: s, values: v}` with a runtime `s` is a compile error whose Fix names the checked literal `SQL{\"...{value}\"}` and `SQL.raw(...)`. r01f_sql_inject_db.jet fails `jet check` with that error. UI snapshot registered.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:25:17.866Z"
+          "evidence": "Moved to #6932 c1: checked text card",
+          "at": "2026-11-15T04:47:14.267Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
           "text": "(was #6402) The same holds for `HTML{markup: s}` (r10_html_fields.jet) and for every other checked text head whose value carries trusted text (Sh, URL, Path, DateTime), each with a negative fixture. Reading the text back goes through accessors (`template()`, `params()`, `display`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:25:18.930Z"
+          "evidence": "Moved to #6932 c2: checked text card",
+          "at": "2026-11-15T04:47:15.233Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
           "text": "(was #6402) `SQL.raw` and `HTML.raw` are the only ways to build these values from runtime text. A lint, or the audit listing of D-TYPEDTEXT1, lists every `.raw` call in a package; a golden shows the listing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:25:19.950Z"
+          "evidence": "Moved to #6932 c3: checked text card",
+          "at": "2026-11-15T04:47:16.127Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
           "text": "(was #6402) Checked literals keep working unchanged: the db_policy, typed_sql and checked_sql_query fixtures pass on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:25:20.997Z"
+          "evidence": "Moved to #6932 c4: checked text card",
+          "at": "2026-11-15T04:47:17.018Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
-          "text": "(was #6070) If D-SQL-SCRIPT1 = A: `db.open(\"notes.db\").query(SQL{\"select …\"})` works with no row policy and may join tables or touch none; `query` needs DB.Read and `execute` needs DB.Write, so the #5949 prompt shows read-only versus writing; a row policy stays available through `with_policy` (tests). Today `c.query(...)` on a DBConnection is E0102 and a script needs `db.policy`, `with_policy` and `migrate` before its first query (probe work/p/b/sqlmin.jet; Core/Db/Db.jet:697-727); a scope also refuses any query outside its one table, even `select 1` (\"policy scope targets table `n`\", probe work/p/b/sqlb2.jet). Python's `sqlite3` needs 3 lines for the same query; the Jet version needs no more.",
+          "text": "A script can run `db.open(\"notes.db\").query(SQL{\"select …\"})` with no row policy, joining tables or touching none, with `query` needing DB.Read and `execute` DB.Write so the #5949 prompt shows read-only versus writing, while a row policy stays available through `with_policy`; and a policy scope no longer refuses a query outside its one table such as `select 1`. Today `c.query(...)` is E0102 and a script needs `db.policy`, `with_policy` and `migrate` first (Core/Db/Db.jet:697-727). The default without a policy waits on the owner (D-SQL-SCRIPT1 has no ballot; owner-gates.tsv). Proof: `jet test Compiler --profile cases --filter db/script_query_without_policy` and `--filter db/policy_scope_select_1`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:25:26.238Z"
+          "at": "2026-11-15T04:47:13.372Z"
         }
       ],
       "refs": [],
@@ -71150,8 +71159,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T23:32:11.653Z",
-      "updated": "2026-11-13T02:08:25.027Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:47:19.423Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 12
     },
     {
@@ -93892,20 +93901,21 @@
         {
           "n": 2,
           "text": "The jet_eval_native_load residual is found and fixed: the REPL peak grows by less than 1 MB per turn over 30 turns, measured.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T14:13:56.958Z"
+          "evidence": "Merged into #6727 c4: the same REPL per-turn growth bound; #6727 owns the residual's cause (trait values have no drop glue)",
+          "at": "2026-11-15T04:46:21.849Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
-          "text": "A census confirms that no other lowering in Compiler/JetIR lowers user code inside a branch without saving and joining ownership.",
+          "text": "A census confirms that no other lowering in Compiler/JetIR lowers user code inside a branch without saving and joining binding ownership. Proof: `jet test tests/guards --filter ir_branch_ownership_join`, which fails on a branch lowering that skips the shared save/restore and ir_meet_paths join.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T14:13:58.001Z"
+          "at": "2026-11-15T04:46:12.142Z"
         },
         {
           "n": 4,
@@ -93925,8 +93935,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:13:43.430Z",
-      "updated": "2026-11-13T02:02:02.348Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:46:21.849Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 4
     },
     {
@@ -95002,30 +95012,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Moving a task &&name capture inside the body (a call taking &&, a let binding, a := rebinding) checks clean, with a cases row per form that fails on a0_042 and runs at O0, O1 and O2 with the value dropped exactly once (a lock or strong_count proof).",
+          "text": "Moving a task `&&name` capture inside the body (a call taking `&&`, a let binding, a `:=` rebinding) checks clean and runs on O0, O1 and O2 with the value dropped exactly once. Proof: `jet test Compiler --profile cases --filter concurrency/task_capture_move_in_body_`, one case per form, each failing on a0_042.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T16:59:02.072Z"
+          "at": "2026-11-15T04:46:13.464Z"
         },
         {
           "n": 2,
-          "text": "A real use of the captured name after the body's move still reports E0121 at the later use, with its UI snapshot unchanged or updated.",
+          "text": "A real use of the captured name after the body's move still reports E0121 at the later use. Proof: `jet test Compiler --profile ui --filter E0121_task_capture_later_use`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T16:59:02.889Z"
+          "at": "2026-11-15T04:46:14.613Z"
         },
         {
           "n": 3,
-          "text": "A value taken by a task &&name capture runs its Close exactly once when the task drops it: plain and grouped tasks, at O0, O1 and O2, the same as a local or a call-taken value. On seed-b14 it never runs (G6Meta-4 repro: $JET_SCRATCH_ROOT/lanes/G6Meta/p6749/plain.jet prints no \"close group\"), which is an I1 leak. Proof: a cases row per form, printing the close line, fails on a0_042 and passes on every tier.",
+          "text": "A value taken by a task `&&name` capture runs its Close exactly once when the task drops it, for plain and grouped tasks on O0, O1 and O2, the same as a local or call-taken value (on seed-b14 it never runs: an I1 leak). Proof: `jet test Compiler --profile cases --filter concurrency/task_capture_close_once_`, one case per form printing the close line.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T05:08:48.024Z"
+          "at": "2026-11-15T04:46:15.970Z"
         }
       ],
       "refs": [],
@@ -95036,8 +95046,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:58:53.917Z",
-      "updated": "2026-11-13T05:08:48.024Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:46:15.970Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
     {
@@ -96420,12 +96430,12 @@
         },
         {
           "n": 6,
-          "text": "Build-time evaluation costs no more than running the same code: building the D-COMPTIME-SIZE1 Collatz table at compile time takes at most the time and peak memory of the same code run at run time plus the compiler's own floor. Measured by the ballot review on seed-b13, 2026-11-12: 12 s and 4.1 GB at compile time against 1.24-1.29 s and 596 MB at run time ($JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-COMPTIME-SIZE1/review/runtime.txt).",
+          "text": "Build-time evaluation costs no more than running the same code: building the D-COMPTIME-SIZE1 Collatz table at compile time takes at most the time and peak memory of running it plus the compiler's own floor (seed-b13: 12 s and 4.1 GB against 1.24-1.29 s and 596 MB). Proof: a committed receipt measuring `jet build` and `jet run` of the ballot program on one machine.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T22:19:09.158Z"
+          "at": "2026-11-15T04:46:17.470Z"
         },
         {
           "n": 7,
@@ -96454,8 +96464,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:07.441Z",
-      "updated": "2026-11-13T11:42:26.945Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:46:17.470Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 8
     },
     {
@@ -96998,21 +97008,21 @@
         },
         {
           "n": 2,
-          "text": "If a one-shot callback needs to move a capture, a ballot offers a call-at-most-once parameter mark with same-program alternatives. The refusal in c1 lands first and does not wait for the ballot.",
+          "text": "A one-shot callback may move a capture only through the owner's ruling on a call-at-most-once parameter mark (no ballot exists; owner-gates.tsv); c1's refusal lands first and does not wait. Proof: after the ruling, `jet test Compiler --profile cases --filter closures/one_shot_callback_move`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T09:48:15.365Z"
+          "at": "2026-11-15T04:46:18.952Z"
         },
         {
           "n": 3,
-          "text": "Found by the D-BOUND-METHOD1 review (R1, 2026-11-14): a stored closure that calls a &self method on a captured copy of a := local silently loses the write (GoalsA-1 probe p1 and GoalsB-2's twin3 on gate-p64 print 10). The write either reaches the original or is refused with a registered diagnostic, with a UI snapshot, on O0, O1 and O2. Proof: a tests/ui snapshot plus a tests/cases row for the probe.",
+          "text": "A stored closure (in a struct field or a list) that writes a captured `:=` local, by `k += 1` or a `&self` method call, either writes the original or is refused with a registered error; it never silently loses the write (gate-p64 prints 10; CardCloser-3 found the field and list forms on gate-p131). Proof: `jet test Compiler --profile ui --filter stored_closure_capture_write` and `jet test Compiler --profile cases --filter closures/stored_closure_capture_write_` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T13:55:03.394Z"
+          "at": "2026-11-15T04:46:20.371Z"
         }
       ],
       "refs": [],
@@ -97023,8 +97033,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T09:48:08.492Z",
-      "updated": "2026-11-14T23:16:01.992Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:46:20.371Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
     {
@@ -101181,12 +101191,12 @@
         },
         {
           "n": 3,
-          "text": "One memory kernel module holds the only implementations of those memory actions, as a small set of typed primitives, each with stated preconditions and typed capabilities that callers cannot forge, so that most preconditions are type-enforced. Sema refuses a raw memory action anywhere outside the kernel with a registered diagnostic (what, why and fix text plus a UI snapshot). User #Unsafe code reaches raw memory only by calling kernel primitives.",
+          "text": "One memory kernel module holds the only implementations of those memory actions, as a small set of typed primitives, each with stated preconditions and typed capabilities that callers cannot forge, so that most preconditions are type-enforced. Sema refuses a raw memory action anywhere outside the kernel with a registered error (what, why and fix text plus a UI snapshot). User #Unsafe code reaches raw memory only by calling kernel primitives. Proof: `jet test Compiler --profile ui --filter raw_memory_outside_kernel` and `jet test tests/guards --filter memory_kernel_single_home`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T22:51:33.989Z"
+          "at": "2026-11-15T04:47:36.818Z"
         },
         {
           "n": 4,
@@ -101199,30 +101209,30 @@
         },
         {
           "n": 5,
-          "text": "Codegen emits raw memory instructions for checked code only through the kernel's lowering rows. Accesses that sema already proves safe (checked indexing, owned fields) stay ordinary loads and stores and need no kernel call.",
+          "text": "Codegen emits raw memory instructions for checked code only through the kernel's lowering rows. Accesses that sema already proves safe (checked indexing, owned fields) stay ordinary loads and stores and need no kernel call. Proof: `jet test tests/guards --filter raw_memory_lowering_rows`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T22:51:36.154Z"
+          "at": "2026-11-15T04:47:37.691Z"
         },
         {
           "n": 6,
-          "text": "Zero cost: kernel primitives inline at O1/O2. A paired two-program cell (kernel primitives against the direct spelling) and the cold self-compile show no wall or peak-memory regression on the reference machine; any loss is fixed before ratification.",
+          "text": "Zero cost: kernel primitives inline at O1/O2. A paired two-program cell (kernel primitives against the direct spelling) and the cold self-compile show no wall or peak-memory regression on the reference machine; any loss is fixed before ratification. Proof: a committed receipt of the paired cell and the cold self-compile on the reference machine.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T22:51:37.142Z"
+          "at": "2026-11-15T04:47:38.569Z"
         },
         {
           "n": 7,
-          "text": "Each primitive has a test per stated precondition, plus a fuzz run over allocate, resize and free sequences, and O0, O1, O2 and web agree on every kernel test (I9).",
+          "text": "Each primitive has a test per stated precondition, plus a fuzz run over allocate, resize and free sequences, and O0, O1, O2 and web agree on every kernel test (I9). Proof: `jet test Compiler --profile cases --filter memory_kernel/` on O0, O1, O2 and web, including `memory_kernel/alloc_resize_free_fuzz`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T22:51:38.154Z"
+          "at": "2026-11-15T04:47:39.454Z"
         },
         {
           "n": 8,
@@ -101253,12 +101263,12 @@
         },
         {
           "n": 11,
-          "text": "Owner order 2026-11-14: the kernel is safe and at the theoretical maximum performance for machine code, so the ceiling stage is open for it now. Each kernel primitive (allocate, free, resize, raw read and write, pointer offset, byte copy, move, fill and compare, atomics, mapping) has an asm-parity ceiling cell in Tools/perf/asm-parity. Each cell uses the best known technique for its workload: SIMD copy, fill and compare chosen by size class and CPU features, branch-light fast paths for allocation and free, no redundant checks on paths sema has proved. Jet/ceiling is at most 1.00 in both cycles and code bytes at O2, measured live. Any safety check the kernel keeps appears in the reference at its smallest hand-written cost, and no check is removed to meet the ceiling. Any loss is fixed in the general lowering, not per cell.",
+          "text": "Owner order 2026-11-14: the kernel is safe and at the theoretical maximum performance for machine code, so the ceiling stage is open for it now. Each kernel primitive (allocate, free, resize, raw read and write, pointer offset, byte copy, move, fill and compare, atomics, mapping) has an asm-parity ceiling cell in Tools/perf/asm-parity. Each cell uses the best known technique for its workload: SIMD copy, fill and compare chosen by size class and CPU features, branch-light fast paths for allocation and free, no redundant checks on paths sema has proved. Jet/ceiling is at most 1.00 in both cycles and code bytes at O2, measured live. Any safety check the kernel keeps appears in the reference at its smallest hand-written cost, and no check is removed to meet the ceiling. Any loss is fixed in the general lowering, not per cell. Proof: asm-parity `--gate` reports ok for every kernel primitive cell (as logged for rawword on p146).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T00:36:37.416Z"
+          "at": "2026-11-15T04:47:40.346Z"
         },
         {
           "n": 12,
@@ -101296,8 +101306,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T04:36:47.215Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:47:40.346Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 14
     },
     {
@@ -109710,6 +109720,77 @@
       "needsAcceptance": false,
       "created": "2026-11-15T04:40:53.816Z",
       "updated": "2026-11-15T04:40:53.816Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c02z1dax",
+      "num": 6932,
+      "title": "Checked text values (SQL, HTML, Sh, URL, Path, DateTime) are built only from checked literals or an audited `.raw`, never from a runtime string in a public field",
+      "body": "Destination: outside its defining module, a checked text value cannot be built by filling its public fields with runtime text (`SQL{text: s, values: v}`, `HTML{markup: s}` and the other checked heads); the checked literal or `.raw` (D-SQL-RAW1=A, the one audited gate) is the only way in, the text is read back through accessors, every `.raw` call in a package is listed, and checked literals keep working.\n\nWhy: a public field that accepts runtime text makes injection possible and the checked literal a false promise (I1).\n\nSource: #6277 c8-c11 (carried from #6402). D-SQL-RAW1's gate itself is #4520 c3.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Outside its defining module, `SQL{text: s, values: v}` with a runtime `s` is a compile error whose fix names the checked literal `SQL{\"...{value}\"}` and `SQL.raw(...)`, and r01f_sql_inject_db.jet fails `jet check` with it. Proof: `jet test Compiler --profile ui --filter sql_runtime_text_field_refused`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:47:08.958Z"
+        },
+        {
+          "n": 2,
+          "text": "The same holds for `HTML{markup: s}` (r10_html_fields.jet) and every other checked text head that carries trusted text (Sh, URL, Path, DateTime), and reading the text back goes through accessors (`template()`, `params()`, `display`). Proof: `jet test Compiler --profile ui --filter checked_text_runtime_field_refused_`, one negative fixture per head.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:47:08.958Z"
+        },
+        {
+          "n": 3,
+          "text": "`SQL.raw` and `HTML.raw` are the only ways to build these values from runtime text, and the audit listing lists every `.raw` call in a package. Proof: `jet test Compiler --profile golden --filter audit/raw_text_calls_listing`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:47:08.958Z"
+        },
+        {
+          "n": 4,
+          "text": "Checked literals keep working unchanged: the db_policy, typed_sql and checked_sql_query fixtures pass on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter db_policy` (and typed_sql, checked_sql_query).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:47:08.958Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "authority",
+        "sql",
+        "injection"
+      ],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:47:08.958Z",
+      "updated": "2026-11-15T04:47:08.958Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -215129,6 +215210,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:47:40.347Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0oo8eeq",
+      "note": "#11: proof (live plan card: in-place edit); was: Owner order 2026-11-14: the kernel is safe and at the theoretical maximum performance for machine code, so the ceiling stage is open for it now. Each kernel primitive (allocate, free, resize, raw read"
+    },
+    {
+      "at": "2026-11-15T04:47:39.454Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0oo8eeq",
+      "note": "#7: proof (live plan card: in-place edit); was: Each primitive has a test per stated precondition, plus a fuzz run over allocate, resize and free sequences, and O0, O1, O2 and web agree on every kernel test (I9)."
+    },
+    {
+      "at": "2026-11-15T04:47:38.569Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0oo8eeq",
+      "note": "#6: proof (live plan card: in-place edit); was: Zero cost: kernel primitives inline at O1/O2. A paired two-program cell (kernel primitives against the direct spelling) and the cold self-compile show no wall or peak-memory regression on the referenc"
+    },
+    {
+      "at": "2026-11-15T04:47:37.691Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0oo8eeq",
+      "note": "#5: proof (live plan card: in-place edit); was: Codegen emits raw memory instructions for checked code only through the kernel's lowering rows. Accesses that sema already proves safe (checked indexing, owned fields) stay ordinary loads and stores a"
+    },
+    {
+      "at": "2026-11-15T04:47:36.818Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0oo8eeq",
+      "note": "#3: proof (live plan card: in-place edit); was: One memory kernel module holds the only implementations of those memory actions, as a small set of typed primitives, each with stated preconditions and typed capabilities that callers cannot forge, so"
+    },
+    {
+      "at": "2026-11-15T04:47:19.423Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02p6yln",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:47:18.530Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02p6yln",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T04:47:17.018Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02p6yln",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T04:47:16.127Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02p6yln",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T04:47:15.233Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02p6yln",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T04:47:14.267Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02p6yln",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T04:47:13.372Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02p6yln",
+      "note": "#12: strip debris; D-SQL-SCRIPT1 does not exist: gate row; proof; was: (was #6070) If D-SQL-SCRIPT1 = A: `db.open(\"notes.db\").query(SQL{\"select …\"})` works with no row policy and may join tables or touch none; `query` needs DB.Read and `execute` needs DB.Write, so the #5"
+    },
+    {
+      "at": "2026-11-15T04:47:12.480Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02p6yln",
+      "note": "#6: strip debris; proof; was: (was #6409) A lint set to deny in policy.lints.deny reports E1293 as an error with exit code 1 (the diagnostic_gate denied case passes and a UI snapshot shows it). This includes the #6358 tail-blocked"
+    },
+    {
+      "at": "2026-11-15T04:47:11.600Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02p6yln",
+      "note": "#3: proof; was: #FX(...) above a module line is enforced: q/bd/probe modcap_breach.jet (a file read under #FX(!Net, !FS)) is refused with a registered effect diagnostic, not checked clean; #FX above fn no longer ICEs"
+    },
+    {
+      "at": "2026-11-15T04:47:10.722Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02p6yln",
+      "note": "#2: proof; was: A census of in-repo callers whose written rows omit DB is fixed in the same patch."
+    },
+    {
+      "at": "2026-11-15T04:47:09.846Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02p6yln",
+      "note": "#1: proof; was: s4 and s5 report the registered effect diagnostic at the write; s6 is refused under the handler ceiling or the example's row is corrected; ui snapshots added"
+    },
+    {
+      "at": "2026-11-15T04:47:08.958Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c02z1dax",
+      "note": "Checked text values (SQL, HTML, Sh, URL, Path, DateTime) are built only from checked literals or an audited `.raw`, never from a runtime string in a public field"
+    },
+    {
+      "at": "2026-11-15T04:46:21.849Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0pxauid",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T04:46:20.371Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08zzpo5",
+      "note": "#3: fold in Main's 2026-11-14 widening; proof; was: Found by the D-BOUND-METHOD1 review (R1, 2026-11-14): a stored closure that calls a &self method on a captured copy of a := local silently loses the write (GoalsA-1 probe p1 and GoalsB-2's twin3 on ga"
+    },
+    {
+      "at": "2026-11-15T04:46:18.952Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08zzpo5",
+      "note": "#2: no ballot: gate row; proof; was: If a one-shot callback needs to move a capture, a ballot offers a call-at-most-once parameter mark with same-program alternatives. The refusal in c1 lands first and does not wait for the ballot."
+    },
+    {
+      "at": "2026-11-15T04:46:17.470Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xphd0i",
+      "note": "#6: proof; was: Build-time evaluation costs no more than running the same code: building the D-COMPTIME-SIZE1 Collatz table at compile time takes at most the time and peak memory of the same code run at run time plus"
+    },
+    {
+      "at": "2026-11-15T04:46:15.971Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0j93bm1",
+      "note": "#3: proof; was: A value taken by a task &&name capture runs its Close exactly once when the task drops it: plain and grouped tasks, at O0, O1 and O2, the same as a local or a call-taken value. On seed-b14 it never ru"
+    },
+    {
+      "at": "2026-11-15T04:46:14.613Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0j93bm1",
+      "note": "#2: proof; was: A real use of the captured name after the body's move still reports E0121 at the later use, with its UI snapshot unchanged or updated."
+    },
+    {
+      "at": "2026-11-15T04:46:13.464Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0j93bm1",
+      "note": "#1: proof; was: Moving a task &&name capture inside the body (a call taking &&, a let binding, a := rebinding) checks clean, with a cases row per form that fails on a0_042 and runs at O0, O1 and O2 with the value dro"
+    },
+    {
+      "at": "2026-11-15T04:46:12.142Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0pxauid",
+      "note": "#3: proof; was: A census confirms that no other lowering in Compiler/JetIR lowers user code inside a branch without saving and joining ownership."
+    },
     {
       "at": "2026-11-15T04:46:10.489Z",
       "by": "TowerKeeper-1",
