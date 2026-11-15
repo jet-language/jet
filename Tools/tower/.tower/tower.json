@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6893,
-    "rev": 103811,
+    "nextNum": 6894,
+    "rev": 103825,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30872,6 +30872,15 @@
           "evidence": "D-BOUND-HEAD1=A (ratified 2026-08-07) says a Path hole is one encoded component, including . and .., so the percent-encoding Main flagged is the ratified behavior. Core/Files/Files.jet:48-73 __path_literal and path_component_encode implement it. Main added this criterion in error and withdraws it.",
           "at": "2026-11-10T02:25:27.218Z",
           "closure": "decision"
+        },
+        {
+          "n": 59,
+          "text": "json.parse and json.decode take an optional `limits:` label defaulting to `EncodingLimits.safe()`, and a bare call behaves as today; the sibling `parse_with_limits` (Core/Encoding/Json.jet) is deleted and its callers move (D-CORE-JSONLIMIT1=A, D-API-COMPOSE1=A). Proof: `git grep -n parse_with_limits -- Core Jetpack Examples` prints nothing and `jet test Compiler --profile golden --filter Data/JSON/JSONParseLimits` passes on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:40:24.293Z"
         }
       ],
       "refs": [
@@ -30894,13 +30903,13 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-09-12T14:31:10.267Z",
-      "updated": "2026-11-15T03:20:37.505Z",
+      "updated": "2026-11-15T03:40:24.293Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 79,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 58
+      "criteriaLastN": 59
     },
     {
       "id": "c0k9g7u2",
@@ -39280,6 +39289,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:03:18.639Z"
+        },
+        {
+          "n": 21,
+          "text": "FileReader gains chunks, seek and stat, FileWriter gains fsync, set_mode and stat, and both gain the byte methods read, write and write_all (D-CORE-FILEOPEN1=A). Proof: `jet test Compiler --profile golden --filter Systems/Files/FileHandles` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:40:31.426Z"
+        },
+        {
+          "n": 22,
+          "text": "The Jetpack files cut from the build for missing Core file APIs are restored on the APIs this card adds (or rewritten to the D-FSOPS1=A surface) and the Jetpack package checks with 0 errors. Proof: `jet test Compiler --profile packages --filter Store`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:40:33.071Z"
         }
       ],
       "refs": [
@@ -39296,12 +39323,12 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:24.292Z",
-      "updated": "2026-11-15T03:37:55.555Z",
+      "updated": "2026-11-15T03:40:33.071Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 20
+      "criteriaLastN": 22
     },
     {
       "id": "c0ufrhm0",
@@ -64501,11 +64528,11 @@
         {
           "n": 4,
           "text": "Unit conversions check right: a fixed-length measure keeps its `[Int#5]` shape through `join` (today E0113), and a rounded conversion refuses float precision loss and bounds huge digits without a false overflow (today E0127). Proof: `jet test Compiler --profile cases --filter measure_rules_cover_fixed_lengths_and_matrix_shapes` and `--filter rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits` pass, and their rows leave tests/known-failing.tsv.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:46:36.666Z"
+          "evidence": "dev e8fff00023 (GoalsA-1-3 unit-family-rounded-r3). p142 batch compiler (built from dev 0487a6552b), 2026-11-14 22:40: jet test Compiler --profile cases --filter unit_family -> PASS 56 FAIL 0 KF 1 (only #6843's codec row). measure_rules_cover_fixed_lengths_and_matrix_shapes and rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits pass, and their rows left tests/known-failing.tsv; the neigh step keeps every 2001-digit unit.",
+          "at": "2026-11-15T03:40:30.609Z"
         },
         {
           "n": 5,
@@ -64562,7 +64589,7 @@
       "parentId": "c0max8v8",
       "needsAcceptance": false,
       "created": "2026-10-28T11:42:14.354Z",
-      "updated": "2026-11-15T02:57:32.051Z",
+      "updated": "2026-11-15T03:40:30.609Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -88625,6 +88652,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:37:49.805Z"
+        },
+        {
+          "n": 105,
+          "text": "Opening a fresh store is idempotent under concurrent runs: N jet processes started on an empty store all succeed with one consistent store. Proof: `jet test Compiler --profile packages --filter Store` (concurrent open case).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:40:34.749Z"
         }
       ],
       "refs": [],
@@ -88635,9 +88671,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:16:33.944Z",
-      "updated": "2026-11-13T02:22:39.336Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 104
+      "updated": "2026-11-15T03:40:34.750Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 105
     },
     {
       "id": "c0gztprh",
@@ -98339,11 +98375,11 @@
         {
           "n": 8,
           "text": "The Data/Syntax registry rows name only the D-CODABLE-OPTIONS1=A forms. Proof: `jet test tests/guards` passes and `git grep -n -E '#(CodableAsBase|PublishedSchema|DenyUnknownFields|Discriminant|Untagged)' -- Compiler/JetFoundation/Data/Syntax` prints nothing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:34:06.374Z"
+          "evidence": "dev 04e397982f. git grep for the retired wire markers (#CodableAsBase #PublishedSchema #Encode #Decode #!Encode #!Decode #DenyUnknownFields #Discriminant #Untagged #Skip #Flatten, bundle_family) in Compiler/JetFoundation/Data/Syntax at 0487a6552b prints nothing; p142 batch compiler (built from dev 0487a6552b), 2026-11-14 22:40: jet test tests/guards -> 171 passed 0 failed.",
+          "at": "2026-11-15T03:40:33.941Z"
         },
         {
           "n": 9,
@@ -98357,11 +98393,11 @@
         {
           "n": 10,
           "text": "The editor grammars match the registry. Proof: `jet self devtools grammars --check` exits 0.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:34:07.319Z"
+          "evidence": "dev 04e397982f (GoalsB-5-6). p142 batch compiler (built from dev 0487a6552b), 2026-11-14 22:40: jet self devtools grammars --check -> rc=0.",
+          "at": "2026-11-15T03:40:32.272Z"
         },
         {
           "n": 11,
@@ -98390,8 +98426,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:27.015Z",
-      "updated": "2026-11-15T03:34:10.862Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T03:40:33.941Z",
+      "updatedBy": "Main",
       "criteriaLastN": 12
     },
     {
@@ -100079,11 +100115,11 @@
         {
           "n": 4,
           "text": "Cutover: every Compiler, runtime, Core and Jetpack caller is migrated in one change. The count of #Unsafe regions outside the kernel performing a raw memory action is 0, and Docs/spec/safety.md and the unsafe ratchet read the kernel as the one audited place.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T22:51:35.161Z"
+          "evidence": "dev 3297ea019a (sema-kernel-intrinsics-r3) + 168e1e9e92 (baseline). p142 batch compiler (built from dev 0487a6552b), 2026-11-14 22:40: jet Tools/agent/UnsafeRatchet.jet --check -> 1385 regions, baseline unchanged; Docs/spec/safety.md records memory-kernel:outside 0 (was 294); ui E3113 PASS 3 (raw memory outside kernel, package without kernel files, runtime unit source outside kernel), E3114 PASS 1; the census self-check of the compiler with the enforcement is clean (848854fbad). The runtime address API (E3114 scoped to the runtime identities) is c12.",
+          "at": "2026-11-15T03:40:28.914Z"
         },
         {
           "n": 5,
@@ -100166,7 +100202,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T02:40:14.066Z",
+      "updated": "2026-11-15T03:40:28.914Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -104069,6 +104105,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:37:34.538Z"
+        },
+        {
+          "n": 9,
+          "text": "`net.inherited_listeners()` returns every listening socket the service manager handed over as InheritedListener values (.Unix{name, listener} or .TCP{name, listener}); Core checks each is a listening stream socket, marks it close-on-exec, and clears the handover variables (D-CORE-NETINHERIT1=A). Proof: `jet test Compiler --profile cases --filter net/inherited_listeners`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:40:27.777Z"
+        },
+        {
+          "n": 10,
+          "text": "`net.unix_peer(stream)` returns UnixPeer{user, group} as the kernel recorded at connect, with no process id (D-CORE-NETPEER1=A; the runtime already reads SO_PEERCRED in Compiler/JetRuntime/Source/NetUnix.jet). Proof: `jet test Compiler --profile cases --filter net/unix_peer`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:40:29.733Z"
         }
       ],
       "refs": [],
@@ -104082,9 +104136,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:22:53.996Z",
-      "updated": "2026-11-15T03:37:34.538Z",
+      "updated": "2026-11-15T03:40:29.733Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 8
+      "criteriaLastN": 10
     },
     {
       "id": "c0r8ohhq",
@@ -104498,6 +104552,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:30:11.324Z"
+        },
+        {
+          "n": 7,
+          "text": "gzip.reader, zstd.reader (max_window default 128 MiB) and archive.tar_reader and tar_writer stream entry by entry with kind, mode and link target (D-CORE-CODECSTREAM1=A, D-CORE-TARSTREAM1=A): .tar.gz and .tar.zst fixtures with symlink, hardlink and PAX long-name entries stream on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter Systems/Files/ArchiveStream`. (Frozen #3596 holds the original.)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:40:25.180Z"
+        },
+        {
+          "n": 8,
+          "text": "The zstd decoder is a full RFC 8878 decoder written in Jet with no new dependency (D-CORE-ZSTDSOURCE1=A): RFC 8878 test frames and reference-tool .zst fixtures at levels 1, 3, 19 and 22 decode, and window-cap, dictionary and gzip multi-member CRC and ISIZE errors are typed. Proof: `jet test Compiler --profile cases --filter compress/zstd_rfc8878_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:40:26.053Z"
+        },
+        {
+          "n": 9,
+          "text": "A zstd frame whose declared output exceeds the bound reports the error kind the archive_hostile golden expects (Unsupported, not Malformed). Proof: `jet test Compiler --profile golden --filter Systems/Files/ArchiveHostile` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:40:26.924Z"
         }
       ],
       "refs": [],
@@ -104512,8 +104593,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:30:11.324Z",
-      "updated": "2026-11-15T03:30:11.324Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:40:26.924Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 9
     },
     {
       "id": "c0ujz0kr",
@@ -104895,6 +104977,59 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:36:11.188Z",
       "updated": "2026-11-15T03:36:11.188Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0yuouhx",
+      "num": 6893,
+      "title": "core.plugin loads a sandbox component chosen at run time, checked against a Jet trait, under fuel, memory and time limits",
+      "body": "Destination: `plugin.load<BuildStep>(path, policy)` accepts a path computed at run time and checks at load that the component exports every trait method with the same component type (D-CORE-PLUGINPATH1=A); an optional `limits:` label takes a plugin.Limits value whose fuel and timer reset before each call and whose memory and table caps hold for the component's life (D-CORE-PLUGINLIMITS1=A). The literal form and a bare load behave as today.\n\nWhy it matters: Jetpack's compiler-extension and build-plugin hosts load plugins chosen at run time (wasmtime in the Rust engine); without this the port cannot drop wasmtime.\n\nSource: #5089 c4 (frozen #3598 item 4 holds the original).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`plugin.load<T>(path, policy)` loads a component whose path is computed at run time and refuses at load a component missing a trait method or exporting one with a different component type; `plugin.load(\"x.wasm\", policy)` is unchanged (D-CORE-PLUGINPATH1=A). Proof: `jet test Compiler --profile cases --filter plugin/load_runtime_path_checks_trait` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:40:23.429Z"
+        },
+        {
+          "n": 2,
+          "text": "`plugin.load(..., limits: plugin.Limits{...})` caps fuel and time per call (refilled before each call) and memory and tables for the component's life, each field defaulting to today's number; exhausting each limit gives its typed failure (D-CORE-PLUGINLIMITS1=A, D-PLUGIN-FAILURE1=A). Proof: `jet test Compiler --profile cases --filter plugin/limits_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:40:23.429Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "plugin",
+        "sandbox"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:40:23.429Z",
+      "updated": "2026-11-15T03:40:23.429Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -210314,6 +210449,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:40:34.750Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00tcdfc",
+      "note": "#105 Opening a fresh store is idempotent under concurrent runs: N"
+    },
+    {
+      "at": "2026-11-15T03:40:33.941Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ue0hua",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T03:40:33.071Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0iiv9ft",
+      "note": "#22 The Jetpack files cut from the build for missing Core file A"
+    },
+    {
+      "at": "2026-11-15T03:40:32.272Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ue0hua",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T03:40:31.426Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0iiv9ft",
+      "note": "#21 FileReader gains chunks, seek and stat, FileWriter gains fsy"
+    },
+    {
+      "at": "2026-11-15T03:40:30.609Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j8ez91",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T03:40:29.733Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0v54mn1",
+      "note": "#10 `net.unix_peer(stream)` returns UnixPeer{user, group} as the"
+    },
+    {
+      "at": "2026-11-15T03:40:28.914Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oo8eeq",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T03:40:27.777Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0v54mn1",
+      "note": "#9 `net.inherited_listeners()` returns every listening socket t"
+    },
+    {
+      "at": "2026-11-15T03:40:26.924Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0rqtmrp",
+      "note": "#9 A zstd frame whose declared output exceeds the bound reports"
+    },
+    {
+      "at": "2026-11-15T03:40:26.053Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0rqtmrp",
+      "note": "#8 The zstd decoder is a full RFC 8878 decoder written in Jet w"
+    },
+    {
+      "at": "2026-11-15T03:40:25.180Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0rqtmrp",
+      "note": "#7 gzip.reader, zstd.reader (max_window default 128 MiB) and ar"
+    },
+    {
+      "at": "2026-11-15T03:40:24.293Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0t54oz7",
+      "note": "#59 json.parse and json.decode take an optional `limits:` label "
+    },
+    {
+      "at": "2026-11-15T03:40:23.429Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0yuouhx",
+      "note": "core.plugin loads a sandbox component chosen at run time, checked against a Jet trait, under fuel, memory and time limits"
+    },
     {
       "at": "2026-11-15T03:37:55.555Z",
       "by": "TowerKeeper-1",
