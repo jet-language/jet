@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6844,
-    "rev": 102589,
+    "rev": 102591,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98907,6 +98907,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Main 2026-11-14: c6's zero-cost bar against the direct spelling stays, now proved by exact codegen-catalog equality with a zero_cost_pairs timed pair beside it; the new ceiling criterion adds the machine-code maximum on top. Owners: CardCloser-3 (kernel policy, sema, View, c8 and c10); GoalsA-1-3 (c2 inventory, the kernel public-fn rule, the c4 cutover); PrecompiledCore-4 (c6, c7 and the ceiling cells, with the primitives' lowering)."
+        },
+        {
           "at": "2026-11-14",
           "by": "Main",
           "text": "Main, 2026-11-14: c1 met; ballot D-MEM-CHOKEPOINT1 is open (recommended A: kernel files hand out close owners plus owner-tied views, checked by the existing E0212/E2305/E0211). c3-c7 wait on the ballot. The review found I1 holes that hold in today's code regardless of the ballot, so they are fixed now under this card: (1) .copy() of a #SingleUse handle compiles, and so does copying a struct that holds one; releasing both frees twice and release builds exit 0 with no #Unsafe in user code; Core mem.Block copies the same way. (2) a mem.Window handed out by a handle reads after the handle is released. (3) a view stored in a field of a returned record escapes its owner. (4) values bound by a pattern skip close duties (owners are not closed; handles skip the drop error E0140). Probes are in the review's tests (inbox MemKernel-2-review/tests/adv)."
@@ -99007,6 +99012,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T23:42:33.047Z"
+        },
+        {
+          "n": 11,
+          "text": "Owner order 2026-11-14: the kernel is safe and at the theoretical maximum performance for machine code, so the ceiling stage is open for it now. Each kernel primitive (allocate, free, resize, raw read and write, pointer offset, byte copy, move, fill and compare, atomics, mapping) has an asm-parity ceiling cell in Tools/perf/asm-parity. Each cell uses the best known technique for its workload: SIMD copy, fill and compare chosen by size class and CPU features, branch-light fast paths for allocation and free, no redundant checks on paths sema has proved. Jet/ceiling is at most 1.00 in both cycles and code bytes at O2, measured live. Any safety check the kernel keeps appears in the reference at its smallest hand-written cost, and no check is removed to meet the ceiling. Any loss is fixed in the general lowering, not per cell.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T00:36:37.416Z"
         }
       ],
       "refs": [],
@@ -99017,9 +99031,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T00:22:57.406Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 10
+      "updated": "2026-11-15T00:36:38.347Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 11
     },
     {
       "id": "c0in2dft",
@@ -205624,6 +205638,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T00:36:38.347Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T00:36:37.416Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#11 Owner order 2026-11-14: the kernel is safe and at the theore"
+    },
     {
       "at": "2026-11-15T00:25:31.886Z",
       "by": "Main",
