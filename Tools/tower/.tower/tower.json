@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6964,
-    "rev": 105562,
+    "nextNum": 6966,
+    "rev": 105575,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -44406,21 +44406,21 @@
         },
         {
           "n": 2,
-          "text": "One binary picks the AVX2 body on an AVX2 machine and the baseline body elsewhere, with identical output, proven on O0, O1 and O2.",
+          "text": "One binary picks the AVX2 body on an AVX2 machine and the baseline body elsewhere, with identical output, on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter multiversion/avx2_or_baseline`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-02T01:15:08.474Z"
+          "at": "2026-11-15T05:29:21.045Z"
         },
         {
           "n": 3,
-          "text": "[#3042] The complete `#FFI(asm)` contract lowers through one sema-owned descriptor: named placeholders, operand classes, clobber_abi, the option table, target and CPU rows. #3017 short form is unchanged. The lowlevel/inline_asm_wide_mul golden returns `Product128{low: 21, high: 0}` on every level, and wrong targets or missing features reject. tests/ui/asm_ snapshots. Syntax registry and grammars are updated. Only the native tiers O0, O1 and O2 are in scope (D-EXEC1, D-EXEC2=A).",
+          "text": "The complete `#FFI(asm)` contract lowers through one sema-owned descriptor: named placeholders, operand classes, clobber_abi, the option table, target and CPU rows, with the #3017 short form unchanged; wrong targets or missing features are rejected; the syntax registry and grammars are updated; native tiers only (D-EXEC1, D-EXEC2=A). Proof: `jet test Compiler --profile golden --filter lowlevel/inline_asm_wide_mul` returns `Product128{low: 21, high: 0}` on O0, O1 and O2, and `jet test Compiler --profile ui --filter asm_` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:02:00.360Z"
+          "at": "2026-11-15T05:29:22.038Z"
         },
         {
           "n": 4,
@@ -44466,8 +44466,8 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-10-02T01:15:08.474Z",
-      "updated": "2026-11-11T12:44:54.613Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:29:22.038Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G11"
       ]
@@ -73520,6 +73520,15 @@
           "evidence": "Merged into #6311 c7: the suite run is c7's proof",
           "at": "2026-11-15T02:55:47.600Z",
           "closure": "obsolete"
+        },
+        {
+          "n": 55,
+          "text": "The Jet Tower port is the standing scale canary (D-MEGAPROJ1=A): it runs as a read-only shadow against board snapshots, never writing the live store, and its cold build time and peak memory are recorded for each landing. Proof: the canary row in `node Tools/gauntlet/harness/run.mjs --entry tower-canary` output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:20.043Z"
         }
       ],
       "refs": [],
@@ -73530,9 +73539,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:20:40.809Z",
-      "updated": "2026-11-15T02:55:47.600Z",
+      "updated": "2026-11-15T05:29:20.043Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 54
+      "criteriaLastN": 55
     },
     {
       "id": "c0x9nq8j",
@@ -87110,6 +87119,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:51:34.195Z"
+        },
+        {
+          "n": 14,
+          "text": "Owner 2026-11-04: tests take seconds, a minute at most for a few thousand, and never run out of memory unless something leaks. The full ui, golden and cases suites finish in at most about 60 s of wall time on the dev machine, and no test job is killed for memory (today suite.sh gives each job 3 GiB, allows a 6800 s timeout, and cases runs were OOM-killed on 2026-11-04, while hello costs about 180 ms CPU and 15-19 MB). Proof: a testkit report with a per-test wall-time and peak-RSS table for every suite, and a timed full run that meets the budget, committed with the commit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:16.012Z"
+        },
+        {
+          "n": 15,
+          "text": "Running one test costs about that test's own time: the testkit's fixed startup is listed phase by phase (kit build or load, harness compile, corpus scan, Core load, worker start), and a run filtered to one golden entry at --jobs 1 finishes within 0.5 s of that entry's own compile-and-run time (today about 35 s of fixed overhead). Proof: `jet test Compiler --profile golden --filter <one entry> --jobs 1` timed against that entry's own `jet run`, in a committed receipt.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:17.023Z"
+        },
+        {
+          "n": 16,
+          "text": "Jet's test runner is the fastest of any language: a peer-matched cell runs the same corpus (a few thousand small unit tests plus whole-program goldens) in Jet, Rust (cargo test and nextest), Go, Zig, TypeScript (Bun test and Vitest) and Python (pytest), measuring cold full run, warm full run and edit-one-test-and-rerun in wall time and peak memory, with Jet/peer below 1.00 for every peer and metric. Proof: `node Tools/gauntlet/harness/run.mjs --entry test-runner` shows no in-group loss.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:18.049Z"
         }
       ],
       "refs": [],
@@ -87124,9 +87160,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:02:30.892Z",
-      "updated": "2026-11-09T19:51:34.195Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 13
+      "updated": "2026-11-15T05:29:18.049Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 16
     },
     {
       "id": "c0pcddhe",
@@ -90798,6 +90834,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:34:14.912Z"
+        },
+        {
+          "n": 21,
+          "text": "Compiler/JetDriver/Tests checks and its tests run in lane-check (on dev 8219108260 CLISeams.jet, RustForeign.jet and SchemaIngress.jet did not compile), so a driver test cannot rot unseen. Proof: `jet test Compiler/JetDriver` passes and lane-check lists it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:19.077Z"
         }
       ],
       "refs": [],
@@ -90808,9 +90853,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:41:10.182Z",
-      "updated": "2026-11-15T02:44:38.894Z",
+      "updated": "2026-11-15T05:29:19.077Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 20
+      "criteriaLastN": 21
     },
     {
       "id": "c0g6fxb9",
@@ -98765,6 +98810,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T15:03:19.012Z"
+        },
+        {
+          "n": 5,
+          "text": "Lexer classification on the self-host unit runs at or below 1 ns per byte, using the public vector tools (#Multiversion, Lanes and a core.arch block classifier; SPEED-500K M5). Proof: the per-byte figure in `JET_TRACE_FILE` phase output for `jet check` of the self-host unit, in a committed receipt.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:10.629Z"
         }
       ],
       "refs": [],
@@ -98775,9 +98829,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:55.197Z",
-      "updated": "2026-11-13T15:03:19.012Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 4
+      "updated": "2026-11-15T05:29:10.629Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 5
     },
     {
       "id": "c0b3gyq2",
@@ -102656,6 +102710,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:29:44.610Z"
+        },
+        {
+          "n": 12,
+          "text": "D2 census (D-COMPTIME-PROBE1=A, the run's view is the meaning): for the self-host unit and the comptime corpus, every comptime item whose probe references differ from its run references is listed, each is fixed so the run defines the meaning, and the probe is then deleted. Proof: `git grep -n -i 'comptime_probe' -- Compiler` prints nothing and `jet test Compiler --profile cases --filter comptime/` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:12.250Z"
+        },
+        {
+          "n": 13,
+          "text": "Comptime on native O0 supports Shared values, tasks, select, native calls and fixed backing (the operations the retired JetEval host adapter lacked). Proof: `jet test Compiler --profile cases --filter comptime/native_o0_shared_tasks_select`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:13.774Z"
+        },
+        {
+          "n": 14,
+          "text": "Comptime on native O0 supports every CoreClosureCall kind (Spawn, Realtime, Serve, OnInterrupt, OnCommit, Rollback, Reactive, UI and the rest), the typed-text kernels (SQL, HTML, Sh, URL, Path, DateTime), and DMAStart and DMAWait. Proof: `jet test Compiler --profile cases --filter comptime/native_o0_closure_kinds`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:14.959Z"
         }
       ],
       "refs": [],
@@ -102670,9 +102751,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:42.975Z",
-      "updated": "2026-11-15T02:29:44.610Z",
+      "updated": "2026-11-15T05:29:14.959Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 11
+      "criteriaLastN": 14
     },
     {
       "id": "c0n7zpy3",
@@ -113463,6 +113544,111 @@
       "needsAcceptance": false,
       "created": "2026-11-15T05:23:49.254Z",
       "updated": "2026-11-15T05:23:49.254Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0ywczn1",
+      "num": 6964,
+      "title": "Nested joins never hang: a join on a child that has not started runs it, whatever the task count",
+      "body": "Destination: with more running tasks than about (cores+8)/2, nested joins finish instead of hanging. A join on a child that has not started yet runs that child on the joining thread, or an equivalent that never deadlocks.\n\nWhy: today every thread waits in futex_wait on a task that never gets a worker, because the scheduler adds at most 8 workers to cover blocked waits (Compiler/JetRuntime/Source/Scheduler.jet). It was found by TestSpeedLead on 2026-11-05: a testkit pool whose entries each join a child and its resident watcher task hangs on the AOT and run tiers, and JET_SCHEDULER_THREADS=256 is the workaround.\n\nDecisions: I9 (one meaning on every tier).\n\nSource: split from #5910 c59 on 2026-11-15.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A cases fixture nests joins inside a task group whose limit is at least the core count and finishes on O0, O1 and O2, with a join on a not-yet-started child running that child on the joining thread. Proof: `jet test Compiler --profile cases --filter runtime/nested_join_more_tasks_than_workers`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:07.249Z"
+        },
+        {
+          "n": 2,
+          "text": "The testkit's default pool no longer sets JET_SCHEDULER_THREADS as a deadlock workaround. Proof: `git grep -n JET_SCHEDULER_THREADS -- Compiler/JetTestKit Tools/testkit` prints nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:07.249Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "runtime",
+        "concurrency",
+        "bug"
+      ],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T05:29:07.249Z",
+      "updated": "2026-11-15T05:29:07.249Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0oymlrt",
+      "num": 6965,
+      "title": "Measurement helpers are proven: `keep(x)` holds benchmarked work on every tier and `compare` records replayable differences",
+      "body": "Destination: `keep(x)` (D-BENCH-KEEP1=A, an always-available Prelude identity sink) stops the optimizer from deleting measured work on O0, O1 and O2, and Core Testing's `compare(cases, reference, candidate, relation)` (D-TEST-COMPARE1=A) returns a comparison record whose differences replay. Both exist on dev (Compiler/Prelude/Core.rows keep row; Core/Testing/Testing.jet compare) but no test proves either behavior.\n\nWhy: every performance cell relies on the work it times not being optimized away, and A-against-B claims rely on a comparison that can be replayed.\n\nDecisions: D-BENCH-KEEP1=A, D-TEST-COMPARE1=A, D-CLAIM-BENCH1=A (shipped in #2082; its retired-spelling teaching rows go with #6637 c11).\n\nSource: split from #5910 c40 on 2026-11-15; D-MEGAPROJ1 went to #6311.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A measured loop whose result passes only through `keep(x)` is kept at O2: the loop body is present in the release binary and its timing scales with N, on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter testing/keep_sink_survives_o2`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:08.825Z"
+        },
+        {
+          "n": 2,
+          "text": "`compare(cases, reference, candidate, relation)` on two implementations that differ on one case returns a comparison naming that case, and replaying the recorded difference reproduces it; equal implementations pass `assert_equal`. Proof: `jet test Compiler --profile cases --filter testing/compare_replays_difference`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:29:08.825Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "testing",
+        "performance"
+      ],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T05:29:08.825Z",
+      "updated": "2026-11-15T05:29:08.825Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -217480,6 +217666,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:29:22.038Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l389gj",
+      "note": "#3: strip debris; proof; was: [#3042] The complete `#FFI(asm)` contract lowers through one sema-owned descriptor: named placeholders, operand classes, clobber_abi, the option table, target and CPU rows. #3017 short form is unchang"
+    },
+    {
+      "at": "2026-11-15T05:29:21.046Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l389gj",
+      "note": "#2: proof; was: One binary picks the AVX2 body on an AVX2 machine and the baseline body elsewhere, with identical output, proven on O0, O1 and O2."
+    },
+    {
+      "at": "2026-11-15T05:29:20.043Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c059ge5n",
+      "note": "#55 The Jet Tower port is the standing scale canary (D-MEGAPROJ1"
+    },
+    {
+      "at": "2026-11-15T05:29:19.077Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c073cvg9",
+      "note": "#21 Compiler/JetDriver/Tests checks and its tests run in lane-ch"
+    },
+    {
+      "at": "2026-11-15T05:29:18.049Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00ctwqw",
+      "note": "#16 Jet's test runner is the fastest of any language: a peer-mat"
+    },
+    {
+      "at": "2026-11-15T05:29:17.023Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00ctwqw",
+      "note": "#15 Running one test costs about that test's own time: the testk"
+    },
+    {
+      "at": "2026-11-15T05:29:16.012Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00ctwqw",
+      "note": "#14 Owner 2026-11-04: tests take seconds, a minute at most for a"
+    },
+    {
+      "at": "2026-11-15T05:29:14.959Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c07ywjvi",
+      "note": "#14 Comptime on native O0 supports every CoreClosureCall kind (S"
+    },
+    {
+      "at": "2026-11-15T05:29:13.774Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c07ywjvi",
+      "note": "#13 Comptime on native O0 supports Shared values, tasks, select,"
+    },
+    {
+      "at": "2026-11-15T05:29:12.250Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c07ywjvi",
+      "note": "#12 D2 census (D-COMPTIME-PROBE1=A, the run's view is the meanin"
+    },
+    {
+      "at": "2026-11-15T05:29:10.629Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0okfgjw",
+      "note": "#5 Lexer classification on the self-host unit runs at or below "
+    },
+    {
+      "at": "2026-11-15T05:29:08.825Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0oymlrt",
+      "note": "Measurement helpers are proven: `keep(x)` holds benchmarked work on every tier and `compare` records replayable differences"
+    },
+    {
+      "at": "2026-11-15T05:29:07.249Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0ywczn1",
+      "note": "Nested joins never hang: a join on a child that has not started runs it, whatever the task count"
+    },
     {
       "at": "2026-11-15T05:25:12.262Z",
       "by": "TowerKeeper-1",
