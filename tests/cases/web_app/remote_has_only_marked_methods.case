@@ -1,7 +1,8 @@
 # A client reaches a service only through app.Remote<S>, which offers the
-# methods `#App.SignedIn` or `#App.Public` marks. The probe calls the signing
-# key and the job of Crew through app.Remote<Crew>: each call is E2812, which
-# names the method and suggests a marker. The client calls the marked methods
+# methods `#App.SignedIn` or `#App.Public` marks. The probe calls the
+# `#App.Webhook` method, its `#App.SigningKey`, the job and an unmarked
+# helper of Crew through app.Remote<Crew>: each call is E2812, which names
+# the method and suggests a marker. The client calls the marked methods
 # through the server's own Remote, which runs them on its Crew. The wire
 # program mounts a Crew at /api and calls it through `app.remote_at`: each
 # call is a POST whose reply is the method's value or its error, and the
@@ -11,10 +12,15 @@ env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 step: jet check probes/cl1_server_only.jet
 exit: nonzero
+stderr: ~ "`app.Remote<Crew>` has no endpoint `on_event`: the method is server-only." # the webhook
+stderr: ~ "cl1_server_only.jet:10:13" # at the webhook's call
 stderr: ~ "`app.Remote<Crew>` has no endpoint `webhook_secret`: the method is server-only." # the signing key
-stderr: ~ "cl1_server_only.jet:9:13" # at the signing key's call
+stderr: ~ "cl1_server_only.jet:11:13" # at the signing key's call
 stderr: ~ "`app.Remote<Crew>` has no endpoint `tell_assignee`: the method is server-only." # the job
-stderr: ~ "cl1_server_only.jet:10:13" # at the job's call
+stderr: ~ "cl1_server_only.jet:12:13" # at the job's call
+stderr: ~ "`app.Remote<Crew>` has no endpoint `next_id`: the method is server-only." # the unmarked helper
+stderr: ~ "cl1_server_only.jet:13:13" # at the helper's call
+stderr: ~ "4 problems found" # one per server-only call
 stderr: ~ "Mark `webhook_secret` `#App.SignedIn`" # the fix suggests a marker
 step: jet run client/main.jet
 exit: 0

@@ -1,10 +1,6 @@
-// The Crew service. Its three marked methods are endpoints; the signing key
-// and the job are unmarked, so they stay on the server.
+// The Crew service. Its three marked methods are endpoints. The webhook, its
+// signing key, the job and the unmarked helper stay on the server.
 use app
-
-ProjectID: struct {
-    value: Int
-}
 
 TaskID: struct {
     value: Int
@@ -57,12 +53,22 @@ Crew: struct {
     // Any caller reads the service's status.
     #App.Public status: fn(self) -> String { "{self.name} is up" }
 
-    // The webhook signing key.
-    webhook_secret: fn(self, project: ProjectID) -> String? { Val("secret-{project.value}") }
+    // The webhook a tracker posts a project's events to, checked under the
+    // project's signing key.
+    #App.Webhook(path: "/hooks/:project", signature: app.Signature.Stripe, key: "webhook_secret") on_event: fn(self, project: String, event: String) -> Int {
+        project.len() + event.len()
+    }
 
-    // The job that tells a task's assignee.
+    // The webhook signing key.
+    #App.SigningKey webhook_secret: fn(self, project: String) -> String? { Val("secret-{project}") }
+
+    // The job that tells a task's assignee; only the server runs it, so
+    // nothing marks it.
     tell_assignee: fn(self, id: TaskID) TaskError! {
         if id.value < 0 -> return Err(TaskError.NotFound)
         Ok()
     }
+
+    // A helper of the service's own methods; nothing marks it.
+    next_id: fn(self, id: TaskID) -> TaskID { TaskID{value: id.value + 1} }
 }
