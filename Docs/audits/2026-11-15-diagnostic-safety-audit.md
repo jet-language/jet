@@ -94,8 +94,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0302 | UnknownField | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:609 | no opt-in reaches a field the type does not declare |
 | E0303 | InvalidConstructionField | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:668 | a value is built from exactly its declared fields |
 | E0304 | UnknownEnumCase | Compiler/JetSema/Source/Sema/Calls/Data.jet:1033 | an enum holds only its declared variants |
-| E0305 | PatternTypeMismatch | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:217 | an explicit conversion reaches the program; nothing reinterprets the value |
-| E0306 | PatternBindingCountMismatch | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:221 | the pattern binds exactly the parts the value has |
+| E0305 | PatternTypeMismatch | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:218 | an explicit conversion reaches the program; nothing reinterprets the value |
+| E0306 | PatternBindingCountMismatch | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:222 | the pattern binds exactly the parts the value has |
 | E0307 | NonExhaustiveDispatch | Compiler/JetSema/Source/Sema/Coverage.jet:452 | an `else` arm covers the remaining values explicitly |
 | E0308 | UntypedNone | Compiler/JetSema/Source/Sema/Calls/Dev.jet:44 | a type context gives `None` its type |
 | E0310 | OptionalWhereValueExpected | Compiler/JetSema/Source/Sema/Diagnostics.jet:455 | `??`, `?` or a branch handles the None case |
@@ -286,7 +286,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0946 | DispatchHoleCount | Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:749 | a hole table header holds one hole |
 | E0947 | DispatchHoleOutsideTable | Compiler/JetSema/Source/Sema/Diagnostics.jet:369 | `_` is a value only in a hole table header |
 | E0948 | DispatchHoleCandidatePattern | Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:755 | patterns and ranges match against the subject of `subject == _` |
-| E0949 | EnumValuesUnavailable | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:1589 | list the values you need yourself |
+| E0949 | EnumValuesUnavailable | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:1590 | list the values you need yourself |
 | E0950 | FieldMethodClash | Compiler/JetSema/Source/Sema/Expressions/Places.jet:1297 | write the closure that names the one you mean |
 | E0952 | ComptimeFuelExhausted | Compiler/JetEval/Source/EvalValues.jet:148 | the comptime work is reduced or split to fit the budget |
 | E0953 | ComptimePanic | Compiler/JetEval/Source/EvalValues.jet:150 | the condition that raises the authored error is changed |
@@ -362,7 +362,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1133 | SetNotBits | Compiler/JetSema/Source/Sema/Calls/Collections.jet:482 | the call takes a Set of an enum with 1 to 64 plain cases |
 | E1134 | MarkerLookupNotMarker | Compiler/JetSema/Source/Sema/Calls/Build.jet:1140 | `marker(T)` names a marker |
 | E1135 | RewriteIncompatible | Compiler/JetSema/Source/Sema/Calls/Build.jet:808 | the replacement takes and returns what the callee does |
-| E1136 | MarkerUsesOutsidePackage | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:1332 | the marker's own package reads its uses |
+| E1136 | MarkerUsesOutsidePackage | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:1333 | the marker's own package reads its uses |
 | E1201 | PackageVersionConflict | Jetpack/PackageModel/Source/Lock/Verify.jet:340 | the dependencies agree on one version |
 | E1203 | MissingGit | Jetpack/PackageModel/Source/Lock/Verify.jet:376 | install `git` |
 | E1204 | StoreEntryTampered | Compiler/JetCli/Source/Cli/InspectProvenance.jet:510 | the entry is fetched again from its source |
