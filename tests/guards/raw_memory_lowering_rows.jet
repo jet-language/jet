@@ -1,0 +1,187 @@
+// The memory kernel's lowering rows. Generated code reaches raw memory (a heap
+// allocation or release, a bulk move or fill, a region's pages) only through
+// the runtime's raw memory routines, and the IR builder calls those routines
+// only from the named rows below: the builder functions that lower a checked
+// operation's storage (a List's buffer, a map's slots, a boxed value, a Core
+// memory primitive's IR_CORE_INTRINSICS row). The list is closed: a new raw
+// call outside it fails here, and a row whose calls are gone fails until it
+// shrinks or goes. A checked index or field access stays an ordinary load or
+// store, so its lowering is never a row.
+use rmlr_files: core.files
+
+RMLR_SOURCE: "Compiler/JetIR/Source/"
+
+// The runtime's raw memory routines (Compiler/JetRuntime, its memory kernel).
+RMLR_ROUTINES: [String]{"jet_rt_alloc", "jet_rt_alloc_try", "jet_rt_alloc_8", "jet_rt_alloc_value", "jet_rt_alloc_value_grow", "jet_rt_alloc_value_grow_try", "jet_rt_free", "jet_rt_free_8", "jet_rt_mem_move", "jet_rt_mem_fill", "jet_rt_mem_fill_bytes", "jet_rt_mem_region_reserve", "jet_rt_mem_region_release"}
+
+// The lowerings of a checked index or field access: plain loads and stores.
+RMLR_PLAIN_ACCESS: [String]{"ir_list_index", "ir_list_index_assign", "ir_field_destructure", "ir_index_order"}
+
+RmlrRow: struct {
+    // The builder file, under RMLR_SOURCE.
+    path: String
+    function: String
+    // Its raw routine calls.
+    count: Int
+}
+
+RMLR_ROWS: [RmlrRow]{
+    RmlrRow{path: "Build.jet", function: "ir_box_replica_sized", count: 1},
+    RmlrRow{path: "Build.jet", function: "ir_list_buffer_sized", count: 1},
+    RmlrRow{path: "Build.jet", function: "ir_wrapper_alloc", count: 2},
+    RmlrRow{path: "BuildEnv.jet", function: "ir_environment_byte_payload", count: 3},
+    RmlrRow{path: "BuildExpr.jet", function: "ir_comptime_bytes", count: 1},
+    RmlrRow{path: "BuildExpr.jet", function: "ir_default_err_new", count: 1},
+    RmlrRow{path: "BuildForeign.jet", function: "ir_foreign_call", count: 2},
+    RmlrRow{path: "BuildForeign.jet", function: "ir_foreign_list_result", count: 2},
+    RmlrRow{path: "BuildForeign.jet", function: "ir_foreign_restride", count: 1},
+    RmlrRow{path: "BuildLazy.jet", function: "ir_lazy_cycle_list", count: 1},
+    RmlrRow{path: "BuildMaps.jet", function: "ir_list_reserve", count: 2},
+    RmlrRow{path: "BuildMaps.jet", function: "ir_map_merge_body", count: 2},
+    RmlrRow{path: "BuildMaps.jet", function: "ir_map_order_body", count: 1},
+    RmlrRow{path: "BuildMaps.jet", function: "ir_map_place_new", count: 1},
+    RmlrRow{path: "BuildMaps.jet", function: "ir_map_rebuild_body", count: 2},
+    RmlrRow{path: "BuildMaps.jet", function: "ir_map_take_body", count: 1},
+    RmlrRow{path: "BuildMaps.jet", function: "ir_map_top_n", count: 1},
+    RmlrRow{path: "BuildMemo.jet", function: "ir_memo_enter", count: 1},
+    RmlrRow{path: "BuildMemo.jet", function: "ir_memo_file", count: 1},
+    RmlrRow{path: "BuildMove.jet", function: "ir_move_box_body", count: 2},
+    RmlrRow{path: "BuildMove.jet", function: "ir_move_list_body", count: 2},
+    RmlrRow{path: "BuildMove.jet", function: "ir_move_wrapper", count: 1},
+    RmlrRow{path: "BuildOwn.jet", function: "ir_box_unique_helper", count: 1},
+    RmlrRow{path: "BuildOwn.jet", function: "ir_unique_helper", count: 5},
+    RmlrRow{path: "BuildParallel.jet", function: "ir_closure_parallel", count: 2},
+    RmlrRow{path: "BuildParallel.jet", function: "ir_para_fold", count: 2},
+    RmlrRow{path: "BuildParallel.jet", function: "ir_para_fold_try", count: 2},
+    RmlrRow{path: "BuildPriorityQueues.jet", function: "ir_heap_swap", count: 3},
+    RmlrRow{path: "BuildPriorityQueues.jet", function: "ir_list_sort_body", count: 3},
+    RmlrRow{path: "BuildPriorityQueues.jet", function: "ir_priority_queue_pop_body", count: 2},
+    RmlrRow{path: "BuildPriorityQueues.jet", function: "ir_priority_queue_push_body", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_cache_add", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_cache_builtin", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_cache_touch", count: 3},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_closure_sort", count: 6},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_core_region", count: 2},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_free", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_list_append", count: 3},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_list_fill_span", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_list_grow_buffer", count: 2},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_list_insert", count: 3},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_list_remove", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_list_retire", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_list_slot", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_list_swap_bytes", count: 3},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_list_try_reserve", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_queue_pop_front", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_record_handles", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_record_handles_free", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_route_plain", count: 1},
+    RmlrRow{path: "BuildRoutes.jet", function: "ir_route_store_payload", count: 1},
+    RmlrRow{path: "BuildSentry.jet", function: "ir_core_alloc_raw", count: 2},
+    RmlrRow{path: "BuildSentry.jet", function: "ir_core_free_raw", count: 2},
+    RmlrRow{path: "BuildSentry.jet", function: "ir_core_list_append", count: 3},
+    RmlrRow{path: "BuildSentry.jet", function: "ir_core_list_copy", count: 1},
+    RmlrRow{path: "BuildSentry.jet", function: "ir_core_mem_block", count: 1},
+    RmlrRow{path: "BuildSentry.jet", function: "ir_core_mem_fill", count: 2},
+    RmlrRow{path: "BuildSets.jet", function: "ir_set_insert_body", count: 1},
+    RmlrRow{path: "BuildSets.jet", function: "ir_set_keyed_place", count: 1},
+    RmlrRow{path: "BuildSets.jet", function: "ir_set_take_body", count: 1},
+    RmlrRow{path: "BuildTransact.jet", function: "ir_transact", count: 1},
+}
+
+// The top-level function a line opens (`name: fn…` at column 0), or None.
+rmlr_function_opened: fn(line: String) -> String? Never! {
+    if line.starts_with(" ") || line.starts_with("\t") || line.starts_with("/") || line.starts_with("#") -> return None
+    parts: line.split(": fn").to_list()
+    if parts.len() < 2 -> return None
+    name: parts[0].to_string()
+    if name.len() == 0 || name.contains(" ") || name.contains("(") || name.contains("\"") -> return None
+    Val(name)
+}
+
+// Whether a line emits a call of a raw memory routine.
+rmlr_raw_call: fn(line: String) -> Bool Never! {
+    if !line.contains("ir_runtime(") -> return false
+    loop routine in RMLR_ROUTINES {
+        if line.contains("\"{routine}\"") -> return true
+    }
+    false
+}
+
+// The raw routine calls of one builder source, by the function holding them.
+rmlr_census: fn(path: String, source: String, found: &[String:Int]) {
+    function := ""
+    loop line in source.split("\n") {
+        if rmlr_function_opened(line) == .Val(name) -> function = name
+        if rmlr_raw_call(line) {
+            key: "{path}|{function}"
+            found[key] = (found.get(key) ?? 0) + 1
+        }
+    }
+}
+
+// The census against the named rows: one line per function whose count differs.
+rmlr_findings: fn(found: [String:Int]) -> [String] Never! {
+    findings := [String]{}
+    rows := [String:Int]{}
+    loop row in RMLR_ROWS -> rows["{row.path}|{row.function}"] = row.count
+    loop key in found.keys() {
+        count: found[key]
+        if rows.get(key) == .Val(expected) {
+            if count != expected -> findings.push("{key}: {count} raw memory routine calls, its row names {expected}; update the RMLR_ROWS row")
+        } else {
+            findings.push("{key}: {count} raw memory routine calls and no RMLR_ROWS row; lower through an existing row, or name the new row")
+        }
+    }
+    loop key in rows.keys() {
+        if found.get(key) == None -> findings.push("{key}: no raw memory routine calls left; delete its RMLR_ROWS row")
+    }
+    findings.sort()
+    findings
+}
+
+#Test("generated raw memory goes only through the named lowering rows") {
+    guards_enter_root()
+    found := [String:Int]{}
+    files := 0
+    loop child in (rmlr_files.list_dir(RMLR_SOURCE) ?? panic("list {RMLR_SOURCE}: {err}")) {
+        if !child.name.ends_with(".jet") -> next
+        files += 1
+        rmlr_census(child.name, rmlr_files.read(child.path) ?? panic("read {child.path}: {err}"), found)
+    }
+    assert(files > 50, "the census read only {files} builder files")
+    assert_eq(rmlr_findings(found).join("\n"), "")
+}
+
+#Test("a checked index or field access lowers to plain loads and stores, never a lowering row") {
+    loop row in RMLR_ROWS {
+        assert(!RMLR_PLAIN_ACCESS.contains(row.function), "{row.function} lowers a checked access; it must stay a plain load or store")
+    }
+}
+
+#Test("every core.mem intrinsic row lowers a primitive the memory kernel declares") {
+    guards_enter_root()
+    build: rmlr_files.read("{RMLR_SOURCE}Build.jet") ?? panic("read Build.jet: {err}")
+    kernel: rmlr_files.read("Core/Mem/Mem.jet") ?? panic("read Core/Mem/Mem.jet: {err}")
+    rows := 0
+    loop line in build.split("\n") {
+        if !line.contains("IRCoreIntrinsicRow{{module_name: \"core.mem\", name: \"") -> next
+        rows += 1
+        name: line.split("name: \"").to_list()[2].split("\"").to_list()[0].to_string()
+        assert(kernel.contains("\n{name}: fn") || kernel.contains(" {name}: fn"), "IR_CORE_INTRINSICS row `{name}` lowers no primitive of Core/Mem/Mem.jet")
+    }
+    assert(rows >= 10, "found only {rows} core.mem intrinsic rows")
+}
+
+#Test("the lowering-row census reads emitted calls, not mentions") {
+    assert_eq(rmlr_function_opened("ir_list_append: fn(m: &IRModule) -> Int Never!") ?? "", "ir_list_append")
+    assert(rmlr_function_opened("    inner: fn() -> Int") == None)
+    assert(rmlr_raw_call("    _: ir_runtime(m, b, \"jet_rt_mem_move\", [Int]{{to, from, bytes}}, -1)"))
+    assert(!rmlr_raw_call("        \"jet_rt_alloc\" | \"jet_rt_free\" -> false"))
+    assert(!rmlr_raw_call("    _: ir_runtime(m, b, \"jet_rt_mem_move_count\", [Int]{{}}, -1)"))
+    found := [String:Int]{}
+    rmlr_census("BuildNew.jet", "ir_new_route: fn() {{\n    _: ir_runtime(m, b, \"jet_rt_free\", [Int]{{p}}, -1)\n}}\n", found)
+    findings: rmlr_findings(found)
+    assert(findings.contains("BuildNew.jet|ir_new_route: 1 raw memory routine calls and no RMLR_ROWS row; lower through an existing row, or name the new row"))
+    assert(findings.len() == RMLR_ROWS.len() + 1)
+}
