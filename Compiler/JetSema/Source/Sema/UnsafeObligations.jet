@@ -10,6 +10,10 @@ SemaGateModule: struct {
     // A path relative to the owning package; None for compiler/private sources.
     policy_path: String?{None}
     unsafe_paths: [String]?{None}
+    // `policy.memory`: the package-relative kernel files, the only ones whose
+    // gates may hold a raw memory operation (E3113). None: no kernel rule (a
+    // single program, Core, compiler-private sources); empty: no kernel file.
+    memory_kernel: [String]?{None}
     expert: Bool?{None}
 }
 
@@ -30,6 +34,10 @@ UnsafeGateInspection: struct {
     mode: String
     provenance: [String]
     operations: [UnsafeOperationInspection]
+    // The gate's raw memory operations that carry no obligation (a
+    // `core.mem` call, pointer stepping); the kernel rule reads them with
+    // `operations`.
+    memory_operations: [SemaUnsafeOperation]{[SemaUnsafeOperation]{}}
 }
 
 UnsafeOperationInspection: struct {
@@ -69,14 +77,19 @@ sema_unsafe_package_surface: fn(modules: [SemaGateModule], result: &UnsafeInspec
     loop row in modules {
         path: row.policy_path ?? next
         if row.unsafe_paths == .Val(allowed) {
-            permitted := false
-            loop prefix in allowed {
-                if path == prefix || path.starts_with("{prefix}/") -> permitted = true
-            }
-            if !permitted {
+            if !sema_unsafe_path_within(path, allowed) {
                 loop gate in result.gates {
                     if gate.source != row.source -> next
                     sema_unsafe_diagnostic(result, row.source, "E2960", Val(gate.span), "Package policy `policy.unsafe` rejects `#Unsafe` at `{path}`", "The package policy gives `{path}` an explicit ceiling, so this source use is outside the team's declared boundary.", "Change the source or update `policy.unsafe` in `package.jet`.")
+                }
+            }
+        }
+        if row.memory_kernel == .Val(kernel) {
+            if !sema_unsafe_path_within(path, kernel) {
+                loop gate in result.gates {
+                    if gate.source != row.source -> next
+                    loop operation in gate.operations -> sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span)
+                    loop operation in gate.memory_operations -> sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span)
                 }
             }
         }
@@ -90,6 +103,22 @@ sema_unsafe_package_surface: fn(modules: [SemaGateModule], result: &UnsafeInspec
             }
         }
     }
+}
+
+// True when `path` is one of `prefixes` or inside one of them.
+sema_unsafe_path_within: fn(path: String, prefixes: [String]) -> Bool Never! {
+    loop prefix in prefixes {
+        if path == prefix || path.starts_with("{prefix}/") -> return true
+    }
+    false
+}
+
+// A raw memory operation in a package file `policy.memory` does not name: the
+// fix names the safe type that replaces it, then the kernel field.
+sema_unsafe_memory_refusal: fn(result: &UnsafeInspection, source: String, path: String, no_kernel: Bool, kind: String, span: Span) Never! {
+    safe: if kind == "alloc_raw" || kind == "free_raw" -> "hold the memory in a `[T]` list or an owner a kernel file hands out" else -> "read and write through a `[T]` list or a `View<T>` a kernel owner hands out"
+    field: if no_kernel -> "name the package's kernel files in `package.jet`: `policy: {{ memory: .Kernel([\"{path}\"]) }}`" else -> "add `{path}` to `policy.memory` in `package.jet`"
+    sema_unsafe_diagnostic(result, source, "E3113", Val(span), "`{kind}` is a raw memory operation outside the package's memory kernel", "Raw memory operations stand only in the kernel files `policy.memory` names, so the package's memory safety is audited in one place.", "Outside the kernel, {safe}; to make `{path}` a kernel file, {field}.")
 }
 
 sema_unsafe_expert_diagnostic: fn(result: &UnsafeInspection, source: String, subject: String, path: String, span: Span?) Never! {
@@ -364,7 +393,7 @@ sema_unsafe_scan_sequence: fn(body: [Stmt], track: Bool, gate: &UnsafeGateInspec
     pending := [SemaUnsafeOperation]{}
     loop statement in body {
         if sema_unsafe_assertion(statement) == .Val(assertion) {
-            if pending.len() == 0 {
+            if !sema_unsafe_any_obligation(pending) {
                 diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error("E3108", assertion.span, "this unsafe assertion has no preceding operation", "typed obligations attach only to the immediately preceding low-level operation statement", "move the assertion directly after the operation it proves")})
                 next
             }
@@ -392,8 +421,21 @@ sema_unsafe_scan_sequence: fn(body: [Stmt], track: Bool, gate: &UnsafeGateInspec
     sema_unsafe_discharge(pending, [String]{}, track, gate, source, diagnostics)
 }
 
-sema_unsafe_discharge: fn(operations: [SemaUnsafeOperation], asserted: [String], track: Bool, gate: &UnsafeGateInspection, source: String, diagnostics: &[UnsafeDiagnostic]) Never! {
-    loop operation in operations {
+// True when some pending operation owes a typed proof; a raw memory call with
+// no obligation leaves an assertion after it unattached (E3108).
+sema_unsafe_any_obligation: fn(pending: [SemaUnsafeOperation]) -> Bool Never! {
+    loop operation in pending {
+        if operation.required.len() > 0 -> return true
+    }
+    false
+}
+
+sema_unsafe_discharge: fn(operations: &&[SemaUnsafeOperation], asserted: [String], track: Bool, gate: &UnsafeGateInspection, source: String, diagnostics: &[UnsafeDiagnostic]) Never! {
+    loop operation in operations.move() {
+        if operation.required.len() == 0 {
+            gate.memory_operations.push(operation)
+            next
+        }
         missing := [String]{}
         loop name in operation.required {
             if !asserted.contains(name) -> missing.push(name.copy())
@@ -482,6 +524,14 @@ sema_unsafe_expr_operations: fn(expression: Expr, out: &[SemaUnsafeOperation]) N
                 }
                 "cast_ptr" -> {
                     out.push(SemaUnsafeOperation{kind: "pointer_cast", span: span, required: ["valid_ptr", "aligned"]})
+                }
+                "alloc_raw" | "free_raw" | "offset" | "byte_offset" -> {
+                    out.push(SemaUnsafeOperation{kind: method, span: span, required: [String]{}})
+                }
+                "copy" | "fill" | "window" | "address_of" -> {
+                    if receiver == .Ident(alias, _, _) {
+                        if alias == "mem" -> out.push(SemaUnsafeOperation{kind: method, span: span, required: [String]{}})
+                    }
                 }
                 else -> {}
             }

@@ -1,0 +1,8 @@
+Error [jet.RawMemoryOutsideKernel]: `alloc_raw` is a raw memory operation outside the package's memory kernel
+  --> tests/ui/E3113_raw_memory_outside_kernel/run.jet:6:9
+    |
+  6 |     mem.alloc_raw(16, 8)
+    |         ^^^^^^^^^
+ Why: Raw memory operations stand only in the kernel files `policy.memory` names, so the package's memory safety is audited in one place.
+ Fix: Outside the kernel, hold the memory in a `[T]` list or an owner a kernel file hands out; to make `run.jet` a kernel file, add `run.jet` to `policy.memory` in `package.jet`.
+More: jet-lang.dev/e/E3113

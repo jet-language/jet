@@ -1223,6 +1223,9 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     settings := [JetDriverPackageSetting]{}
     profile_settings := [JetDriverProfileSetting]{}
     policy_unsafe_paths := [String]?{None}
+    // A `package.jet` that names no kernel file gives the package none; an
+    // inline package that names none is a single program and its own kernel.
+    policy_memory_kernel := if inline_carrier == None -> Val([String]{}) else -> [String]?{None}
     boundaries := [ImportBoundary]{}
     policy_expert := Bool?{None}
     policy_lints_deny := [String]{}
@@ -1324,6 +1327,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
                         .Ok(policy) -> {
                             policy_declarations = policy.declarations.move()
                             policy_unsafe_paths = policy.unsafe_paths.move()
+                            if policy.memory_kernel != None -> policy_memory_kernel = policy.memory_kernel.move()
                             policy_expert = policy.expert
                             policy_lints_deny = policy.lints_deny ?? [String]{}
                             policy_harden = policy.harden
@@ -1490,7 +1494,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     identity: jet_driver_package_identity(name, version ?? "")
     manifest_directory: jet_driver_dependency_path(root.canonical_path, "{root.files[manifest].relative_path}/..")
     read_scope: jet_driver_package_read_scope(authority_allow, if manifest_directory.valid -> manifest_directory.path else -> root.canonical_path)
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), authority_read_scope: read_scope, entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move(), markers: markers.move()}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), authority_read_scope: read_scope, entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_memory_kernel: policy_memory_kernel.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move(), markers: markers.move()}
 }
 
 // The header markers of `package.jet` as the Jet parser reads them, each

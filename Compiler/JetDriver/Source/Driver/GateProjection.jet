@@ -16,6 +16,7 @@ jet_driver_doc_gate_projection: fn(docs: &[JetDriverDocModule], graph: SemaGraph
         loop package in packages {
             if package.identity == owner {
                 row.policy_path = Val(jet_driver_display_path(package.root_path, doc.physical_path))
+                row.memory_kernel = package.policy_memory_kernel
                 break
             }
         }
@@ -83,12 +84,14 @@ jet_driver_gate_query: fn(request: JetDriverCompileRequest) -> JetDriverGateQuer
 }
 
 // A module gate row's package display path and `policy.unsafe` /
-// `policy.expert` surface, then any host-supplied gate policy for the package.
+// `policy.expert` / `policy.memory` surface, then any host-supplied gate
+// policy for the package.
 jet_driver_gate_module_policy: fn(row: &SemaGateModule, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo], package_identity: String, physical_path: String) Never! {
     loop package in packages {
         if package.identity != package_identity -> next
         row.policy_path = Val(jet_driver_display_path(package.root_path, physical_path))
         row.unsafe_paths = package.policy_unsafe_paths
+        row.memory_kernel = package.policy_memory_kernel
         row.expert = package.policy_expert
         break
     }

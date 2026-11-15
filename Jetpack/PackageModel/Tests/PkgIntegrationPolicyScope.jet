@@ -43,6 +43,18 @@ use {
     assert_eq(package.policy.lints_deny, Val([String]{"float_money"}))
 }
 
+#Test("package memory policy names the kernel files") {
+    package: PackageFacts.parse("name: \"policy\"\nversion: \"0.1.0\"\npolicy: {{ memory: .Kernel([\"src/kernel\", \"./src/kernel\", \"src/arena.jet\"]) }}\n", "test") ?? panic("memory kernel parse")
+    assert_eq(package.policy.memory_kernel, Val([String]{"src/arena.jet", "src/kernel"}))
+    plain: PackageFacts.parse("name: \"plain\"\nversion: \"0.1.0\"\n", "test") ?? panic("plain parse")
+    assert_eq(plain.policy.memory_kernel, None)
+    rejected: if PackageFacts.parse("name: \"bad\"\nversion: \"0.1.0\"\npolicy: {{ memory: [\"src\"] }}\n", "test") == {
+        .Ok(_) -> false
+        .Err(error) -> error.message().contains(".Kernel(")
+    }
+    assert(rejected)
+}
+
 #Test("manifest memory denial uses the effects rights tree") {
     package: PackageFacts.parse("name: \"memory\"\nversion: \"0.1.0\"\nauthority: {{ deny: [Mem.Alloc(above: 65536)] }}\n", "test") ?? panic("memory denial parse")
     assert_eq(package.effects_deny, Val([String]{"Mem.Alloc(above: 65536)"}))

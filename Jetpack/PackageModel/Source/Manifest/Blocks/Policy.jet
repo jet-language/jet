@@ -11,7 +11,7 @@ use {
         POLICY_EXCEPTION_FIELD_REASON, POLICY_EXCEPTION_FIELD_SCOPE, POLICY_EXCEPTION_TYPE,
         POLICY_FIELD_CLAIMS, POLICY_FIELD_CONTAIN, POLICY_FIELD_DEPS,
         POLICY_FIELD_EXCEPTIONS, POLICY_FIELD_EXPERT, POLICY_FIELD_HARDEN, POLICY_FIELD_LICENSES,
-        POLICY_FIELD_LINTS, POLICY_FIELD_SOURCES, POLICY_FIELD_UNSAFE,
+        POLICY_FIELD_LINTS, POLICY_FIELD_MEMORY, POLICY_FIELD_SOURCES, POLICY_FIELD_UNSAFE,
     ]
 }
 
@@ -47,7 +47,7 @@ pkg_parse_policy: fn(body: String, package_only_fields: Bool) -> [PolicyDeclarat
         name: entry.key
         raw: entry.value
         if name == "trust" || name == "providers" -> return Err(PackageParseError.RetiredAuthorityField{field: "policy.{name}", replacement: "authority.{name}"})
-        if package_only_fields && (name == POLICY_FIELD_UNSAFE || name == POLICY_FIELD_EXPERT || name == POLICY_FIELD_DEPS || name == POLICY_FIELD_CLAIMS) -> next
+        if package_only_fields && (name == POLICY_FIELD_UNSAFE || name == POLICY_FIELD_EXPERT || name == POLICY_FIELD_DEPS || name == POLICY_FIELD_CLAIMS || name == POLICY_FIELD_MEMORY) -> next
         if policy_key_parse(name) == None {
             pkg_policy_unknown_key(name, raw, package_only_fields)
             next
@@ -102,17 +102,21 @@ PackagePolicySurface: struct {
     source_maps: [PolicySourceMap]
     exceptions: [PackagePolicyException]
     unsafe_paths: [String]?
+    // `None`: no `memory:` field, so the package has no kernel files;
+    // otherwise the `.Kernel([...])` paths.
+    memory_kernel: [String]?
     expert: Bool?
     deps: [String]?
     claims_min: ClaimsGrade?
 }
 
 pkg_parse_package_policy_surface: fn(body: String) -> PackagePolicySurface PackageParseError! {
-    surface := PackagePolicySurface{licenses: None, source_maps: [PolicySourceMap]{}, exceptions: [PackagePolicyException]{}, unsafe_paths: None, expert: None, deps: None, claims_min: None}
+    surface := PackagePolicySurface{licenses: None, source_maps: [PolicySourceMap]{}, exceptions: [PackagePolicyException]{}, unsafe_paths: None, memory_kernel: None, expert: None, deps: None, claims_min: None}
     seen_sources := [String]{}
     sources_seen := false
     exceptions_seen := false
     unsafe_seen := false
+    memory_seen := false
     expert_seen := false
     deps_seen := false
     claims_seen := false
@@ -129,6 +133,12 @@ pkg_parse_package_policy_surface: fn(body: String) -> PackagePolicySurface Packa
                     list: pkg_strip_wrapped(value, ".Paths(", ")") ?? return Err(pkg_bad_policy("`policy.unsafe` must be `.Deny` or `.Paths([\"src/audited\"])`"))
                     surface.unsafe_paths = Val(pkg_parse_policy_path_list(list, "policy.unsafe"))
                 }
+            }
+            POLICY_FIELD_MEMORY -> {
+                if memory_seen -> return Err(pkg_bad_policy("`policy.memory` is declared more than once"))
+                memory_seen = true
+                list: pkg_strip_wrapped(raw.trim(), ".Kernel(", ")") ?? return Err(pkg_bad_policy("`policy.memory` must be `.Kernel([\"src/kernel\"])`"))
+                surface.memory_kernel = Val(pkg_parse_policy_path_list(list, "policy.memory"))
             }
             POLICY_FIELD_EXPERT -> {
                 if expert_seen -> return Err(pkg_bad_policy("`policy.expert` is declared more than once"))

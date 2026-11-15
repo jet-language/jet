@@ -11316,6 +11316,31 @@ MissingUnsafeReason: struct {
     }
 }
 
+RawMemoryOutsideKernel: struct {
+    operation: String
+    path: String
+
+    impl Diagnostic {
+        code: "E3113"
+        safety_class: .Opinion
+        safety_reason: "The raw operation may be correct; the package keeps every raw memory operation in the kernel files it names so they are audited in one place."
+        meaning: "Raw memory operation in a package file that is not one of its memory kernel files"
+        detail: true
+
+        what: fn(self) -> String {
+            "`{self.operation}` is a raw memory operation outside the package's memory kernel"
+        }
+
+        why: fn(self) -> String {
+            "Raw memory operations stand only in the kernel files `policy.memory` names, so the package's memory safety is audited in one place."
+        }
+
+        fix: fn(self) -> String {
+            "Outside the kernel, read and write through a `[T]` list or a `View<T>` a kernel owner hands out; to make `{self.path}` a kernel file, add it to `policy: {{ memory: .Kernel([...]) }}` in `package.jet`."
+        }
+    }
+}
+
 ImpureReason: struct {
     impl Diagnostic {
         code: "L3102"

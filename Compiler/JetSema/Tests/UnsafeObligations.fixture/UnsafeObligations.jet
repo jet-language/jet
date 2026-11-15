@@ -41,6 +41,19 @@ run: fn() Never! {
     parsed: parse_source(source.bytes())
     restricted: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: parsed.program, policy_path: Val("src/app.jet"), unsafe_paths: Val([String]{"src/audited"})}], GateSet{})
     unsafe_test_require(restricted.diagnostics[0].diagnostic.code == "E2960", "package path refusal")
+    raw: parse_source("run: fn() {{ #Unsafe(\"live\") {{ q := mem.alloc_raw(16, 8)\nx := q.offset(1)\nmem.copy(x, q, 1) }} }}".bytes())
+    outside_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: raw.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
+    // alloc_raw, offset and copy: each is refused.
+    unsafe_test_require(outside_kernel.diagnostics.len() == 3, "each raw memory call outside the kernel is refused")
+    loop refused in outside_kernel.diagnostics -> unsafe_test_require(refused.diagnostic.code == "E3113", "raw memory refusal code")
+    unsafe_test_require(outside_kernel.gates[0].operations.len() == 0 && outside_kernel.gates[0].memory_operations.len() == 3, "raw memory calls carry no obligation")
+    inside_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: raw.program, policy_path: Val("src/kernel/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
+    unsafe_test_require(inside_kernel.diagnostics.len() == 0, "a kernel file holds raw memory calls")
+    no_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: parsed.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{})}], GateSet{})
+    // The raw pointer `*cell` and the dereference `p.*`.
+    unsafe_test_require(no_kernel.diagnostics.len() == 2 && no_kernel.diagnostics[0].diagnostic.code == "E3113", "a package naming no kernel refuses raw pointers")
+    single_program: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: raw.program, policy_path: Val("app.jet")}], GateSet{})
+    unsafe_test_require(single_program.diagnostics.len() == 0, "a single program is its own kernel")
     invocation: GateSet{allowed: [PolicyKey.Unsafe]}
     declaration: PolicyDeclaration{key: PolicyKey.Unsafe, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 1}, target: None, source: "org.jet"}
     refusal: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: parsed.program, declarations: [declaration]}], invocation)

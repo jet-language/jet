@@ -8512,7 +8512,14 @@ expert-only constructs such as `#Shield`, `#Context`, `#Region`, `#Transact`,
 `deps` is absent or `.List([...])`; when present it is an allow-list over the
 resolved dependency graph, and an empty list denies every dependency. Repeated
 list entries normalize to one sorted value. `.Allow` is not a valid
-`policy.unsafe` value.
+`policy.unsafe` value. `memory` is absent or `.Kernel([...])`, the package's
+memory kernel files: a raw memory operation (`from_addr`, a dereference, a
+pointer step or cast, `alloc_raw`, `free_raw`, `mem.copy`, `mem.fill`,
+`mem.window`, `mem.address_of`, a volatile access) stands only in a file the
+list names, and anywhere else in the package is `E3113`. A package whose
+manifest names no `memory` has no kernel file; a single program (a source
+root without `package.jet`, or an inline package naming none) is its own
+kernel, and Core is the compiler's.
 
 The parser reports malformed package policy as `E1215`. A valid policy
 violation is a compile/check error `E2960` naming the policy key, rejected
