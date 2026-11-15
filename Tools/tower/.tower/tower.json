@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6953,
-    "rev": 105250,
+    "rev": 105275,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34790,39 +34790,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The chosen declaration form has one parser/formatter meaning shared with ordinary Jet defaults, not a second hand-written constructor language.",
+          "text": "Package settings defaults are read by the ordinary Jet lexer (`lex_config`), with one parser and formatter meaning shared with ordinary Jet defaults and no hand-written equals split or quote scanner, so a `=` or `,` inside a String default is read correctly. Proof: `jet test Compiler --profile packages --filter PackageFacts/settings_default_with_equals_in_string`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-21T20:57:27.055Z"
+          "at": "2026-11-15T05:09:52.898Z"
         },
         {
           "n": 2,
-          "text": "If constructor form wins, tls: Bool{true} and api_base: String{\"https://api.example.com\"} work and old equals declarations are not Jet syntax and get no migration diagnostic (owner order).",
+          "text": "D-SETTINGS-CTOR2=A: `tls: Bool{true}` and `api_base: String{\"https://api.example.com\"}` work, and the old `key: Type = value` form is not Jet syntax and gets only the generic error, with no migration error (owner order). Proof: `jet test Compiler --profile packages --filter PackageFacts/settings_ctor_form`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-21T20:57:27.055Z"
+          "at": "2026-11-15T05:09:53.783Z"
         },
         {
           "n": 3,
-          "text": "Package declarations, profile/CLI/computed contributions, types, precedence, provenance and cache identity remain correct; compiler mode is not controlled by an application setting.",
+          "text": "Package declarations, profile, CLI and computed contributions, types, precedence, provenance and cache identity stay correct with the new form, and profile `settings: { key: value }` and `--set key=value` are unchanged. Proof: `jet test Compiler --profile packages --filter PackageFacts/settings_contributions_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-21T20:57:27.055Z"
+          "at": "2026-11-15T05:09:54.693Z"
         },
         {
           "n": 4,
-          "text": "All active fixtures, diagnostic fixes, help/current explanations and relevant tooling migrate in one cutover; immutable history remains unchanged.",
+          "text": "All active fixtures, examples, fix texts and help migrate in one cutover, leaving historical decisions and audits unchanged. Proof: `git grep -nE '^\\s+[a-z_]+: [A-Z][A-Za-z]* = ' -- '*package.jet' Jetpack/PackageModel/Source/Manifest/Blocks/BuildProfiles.jet` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-21T20:57:27.055Z"
+          "at": "2026-11-15T05:09:55.620Z"
         },
         {
           "n": 5,
@@ -34865,8 +34865,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:57:27.055Z",
-      "updated": "2026-11-13T01:57:17.561Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:09:55.620Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
       ],
@@ -54031,48 +54031,48 @@
       "criteria": [
         {
           "n": 2,
-          "text": "Each accepted option is set from a package.jet profile, from fn build and from the CLI through one definition, with an executable example and golden output.",
+          "text": "Each accepted option is set from a package.jet profile, from fn build and from the CLI through one definition, with an executable example and golden output. Proof: `jet test Compiler --profile golden --filter BuildOptions/one_definition_three_sources`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-16T00:48:32.350Z"
+          "at": "2026-11-15T05:07:32.944Z"
         },
         {
           "n": 3,
-          "text": "No option disables a memory-safety check outside an audited #Unsafe scope (I1); the refusal has a registered diagnostic and UI snapshot.",
+          "text": "No option disables a memory-safety check outside an audited #Unsafe scope (I1), and the refusal is a registered error with a UI snapshot. Proof: `jet test Compiler --profile ui --filter build_option_unsafe_refused`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-16T00:48:34.111Z"
+          "at": "2026-11-15T05:07:33.847Z"
         },
         {
           "n": 4,
-          "text": "(was #5836) #5005 child: build option `polymorph_depth` (Jai 8, `maximum_polymorph_depth`)",
+          "text": "The `polymorph_depth` option (Jai `maximum_polymorph_depth`) caps generic instantiation depth and is in the option table with a golden. Proof: `jet test Compiler --profile golden --filter BuildOptions/polymorph_depth`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:56:31.429Z"
+          "at": "2026-11-15T05:07:34.747Z"
         },
         {
           "n": 5,
-          "text": "(was #5837) #5005 child: build option `comptime_array_limit` (Jai 9, `maximum_array_count_before_compile_time_returns_are_not_reflected_in_ast`)",
+          "text": "The `comptime_array_limit` option (Jai `maximum_array_count_before_compile_time_returns_are_not_reflected_in_ast`) is in the option table with a golden. Proof: `jet test Compiler --profile golden --filter BuildOptions/comptime_array_limit`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:56:41.379Z"
+          "at": "2026-11-15T05:07:35.630Z"
         },
         {
           "n": 6,
-          "text": "(was #5838) #5005 child: build option `temp_storage` (Jai 2, `temporary_storage_size`)",
+          "text": "The `temp_storage` option (Jai `temporary_storage_size`) sets the scratch-allocator size and is in the option table with a golden. Proof: `jet test Compiler --profile golden --filter BuildOptions/temp_storage`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:56:50.086Z"
+          "at": "2026-11-15T05:07:36.499Z"
         },
         {
           "n": 7,
@@ -54085,21 +54085,21 @@
         },
         {
           "n": 8,
-          "text": "Every option is auditable and controllable: the chosen value of each option is recorded in the build record and shown by jet inspect, and a project or package policy can forbid or pin any option with a registered diagnostic naming the place that set it. Options that relax a safety check give experts full control through an explicit, recorded opt-in.",
+          "text": "The chosen value of each option is recorded in the build record and shown by `jet inspect`; a project or package policy can forbid or pin any option with a registered error naming where it was set; an option that relaxes a safety check needs an explicit recorded opt-in. Proof: `jet test Compiler --profile cases --filter build_options/audit_and_policy_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T18:55:44.867Z"
+          "at": "2026-11-15T05:07:37.370Z"
         },
         {
           "n": 9,
-          "text": "(proof addition for criterion 7; reflection proposal B9) Runtime type-info retention is the `type_info` option with values `full`, `reachable` and `none`. `reachable` is the default and keeps only the types reachable from run-time reflect calls and explicit retain roots, as D-META-REFLECT2 requires. `full` keeps every type. `none` refuses `reflect.of` at compile time with a registered code and UI snapshot.",
+          "text": "Run-time type-info retention is the `type_info` option with values `full`, `reachable` and `none`: `reachable` is the default and keeps only types reachable from run-time reflect calls and explicit retain roots (D-META-REFLECT2=A), `full` keeps every type, and `none` refuses `reflect.of` at compile time with a registered error and UI snapshot. Proof: `jet test Compiler --profile golden --filter BuildOptions/type_info` and `jet test Compiler --profile ui --filter type_info_none_reflect`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T15:56:38.085Z"
+          "at": "2026-11-15T05:07:38.313Z"
         },
         {
           "n": 10,
@@ -54178,7 +54178,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:48:22.419Z",
-      "updated": "2026-11-15T05:07:31.804Z",
+      "updated": "2026-11-15T05:07:38.313Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
@@ -67202,8 +67202,8 @@
     {
       "id": "c0cwk90x",
       "num": 6040,
-      "title": "Ladder L-01 (Packages/modules): Loose prototype -> package is a rewrite: file imports become E0623/E0602, call names change, jet fix no-op, jet init unbuilt",
-      "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-01; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: Loose prototype -> package is a rewrite: file imports become E0623/E0602, call names change, jet fix no-op, jet init unbuilt\n\nEvidence: probes p17-p20; DiagnosticRows.jet:5155-5168; S16 SD:2028-2041\n\nAudit action: ballot. The fix needs an owner choice of spelling or behaviour, so it goes on a ballot before code.",
+      "title": "Packages ladder: loose files grow into a package with `jet init`, workspaces serve every command, and the effects and gate rungs are decided",
+      "body": "Destination: climbing from loose files to a package to a workspace needs no rewrite (philosophy pillar 4, Ladders, Not Cliffs). `jet init` grows loose files into a package, writing package.jet and rewriting path imports with every edit shown (D-LOOSE-GROW1=A); a workspace serves check, test and run at its root (D-WORKSPACE-CMD1=A); the workspace inheritance, effects block and audited-gate rungs follow owner rulings that are not yet ballots.\n\nSource: Docs/audits/ladder-audit-2026-10-28.md findings L-01, L-03, L-04, L-05 and L-13 (merged cards #6042, #6043, #6044, #6051). The audit's drafted ballots D-WORKSPACE-INHERIT1, D-ABILITIES-BLOCK1 and D-ORG-POLICY1 are not on Tower; they are rows in the TowerKeeper-1 owner-gates list. E0982 must be registered again with its emitter when `jet init` lands (2026-11-12 log).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e5",
@@ -67264,57 +67264,58 @@
         },
         {
           "n": 2,
-          "text": "The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot.",
+          "text": "`jet init` in a folder of loose files writes package.jet and rewrites every path import, showing each edit (D-LOOSE-GROW1=A), and the resulting package checks and runs with the same output; E0982 is registered with its emitter and a UI snapshot. Proof: `jet test Compiler --profile cases --filter jet_init/grows_loose_files_into_package` and `jet test Compiler --profile ui --filter E0982`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T18:07:00.925Z"
+          "at": "2026-11-15T05:08:55.337Z"
         },
         {
           "n": 3,
-          "text": "(from #6042 Ladder L-03 (Packages/modules): Workspace rung only serves r) The L-03 probe in the audit now behaves as the ratified rule says, and an example or UI test with a golden or snapshot proves it on every applicable tier.",
+          "text": "In the monorepo example, `jet check` and `jet test` at the workspace root cover every member (D-WORKSPACE-CMD1=A) instead of E2104 ambiguous, and `jet run hello` and `jet run repo.hello` select the member instead of E2105. Proof: `jet test Compiler --profile cases --filter workspace/root_commands_cover_members`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T08:01:38.943Z"
+          "at": "2026-11-15T05:08:56.509Z"
         },
         {
           "n": 5,
           "text": "(from #6043 Ladder L-04 (Run/dev): Flagship script->system continuity ex) The L-04 probe in the audit now behaves as the ratified rule says, and an example or UI test with a golden or snapshot proves it on every applicable tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T08:01:50.451Z"
+          "evidence": "Merged into #6040 c11: the L-04 witness is the script-to-system continuity case that c11 proves",
+          "at": "2026-11-15T05:09:01.781Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
-          "text": "(from #6044 Ladder L-05 (Effects/authority): Ratified #Abilities block r) The L-05 probe in the audit now behaves as the ratified rule says, and an example or UI test with a golden or snapshot proves it on every applicable tier.",
+          "text": "The effects block rung follows the owner's ruling on L-05 (drafted as D-ABILITIES-BLOCK1, not yet a ballot): either `#Abilities(E) { … }` and a module rung are built, or `#Abilities` is retired from D-EFF1, D-SCAP1, D-EFFTREE1 and D-EFFECT-DECL1 in Docs/spec. Proof: `jet test Compiler --profile ui --filter abilities_block_` or `git grep -n '#Abilities' -- Docs/spec` printing nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T08:02:02.485Z"
+          "at": "2026-11-15T05:08:57.643Z"
         },
         {
           "n": 9,
-          "text": "(from #6051 Ladder L-13 (Markers/policy): Audited gates claim ALL_SCOPES) An owner ballot on L-13 is ratified.",
+          "text": "An owner ruling on L-13 (audited gates are unwritable in source; drafted as D-ORG-POLICY1, not yet a ballot) is ratified. Proof: `tower decision show <id>` shows status ratified.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T08:02:14.767Z"
+          "at": "2026-11-15T05:08:58.941Z"
         },
         {
           "n": 10,
-          "text": "(from #6051 Ladder L-13 (Markers/policy): Audited gates claim ALL_SCOPES) The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot.",
+          "text": "After the L-13 ruling, each audited gate is writable at every scope the ruling names (source `#Policy` at fn and block, and the org rung), with one spelling in code, examples, tests and Docs/spec and a golden or snapshot per rung. Proof: `jet test Compiler --profile ui --filter policy_gate_scopes_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T08:02:16.709Z"
+          "at": "2026-11-15T05:09:00.420Z"
         },
         {
           "n": 11,
@@ -67324,6 +67325,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T04:54:50.031Z"
+        },
+        {
+          "n": 12,
+          "text": "Workspace root `policy:`, `settings:` and `authority.deny` reach members as the owner's ruling on L-03 decides (drafted as D-WORKSPACE-INHERIT1, not yet a ballot), and `jet explain` shows the workspace rung. Proof: `jet test Compiler --profile cases --filter workspace/root_policy_inheritance`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:08:54.257Z"
         }
       ],
       "refs": [],
@@ -67334,12 +67344,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:00.925Z",
-      "updated": "2026-11-15T04:54:50.031Z",
+      "updated": "2026-11-15T05:09:03.940Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 11
+      "criteriaLastN": 12
     },
     {
       "id": "c0qz3x03",
@@ -68130,57 +68140,57 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A loose script with `use py.numpy as np` and `print(np.mean([1.0, 2.0, 3.0]))` prints 2.0 under `jet run`; the first run fetches and hash-pins numpy from PyPI, the second run works with the network disabled (test). Today E0603 (probe `jet run -A b/pyuse.jet`, commit 8fbf094).",
+          "text": "A loose script with `use py.numpy as np` and `print(np.mean([1.0, 2.0, 3.0]))` prints 2.0 under `jet run`: the first run fetches and hash-pins numpy from PyPI, and the second works with the network disabled (today E0603). Proof: `jet test Compiler --profile cases --filter ffi_python/loose_script_numpy_pins_then_offline`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:44.302Z"
+          "at": "2026-11-15T05:09:47.483Z"
         },
         {
           "n": 2,
-          "text": "Reach census: of the 100 most-downloaded PyPI packages, at least 90 import and pass a one-call smoke test through `use py.X` on Linux x86-64 (script and table checked in; the failing ones are listed with the reason).",
+          "text": "Reach census: at least 90 of the 100 most-downloaded PyPI packages import and pass a one-call smoke test through `use py.X` on Linux x86-64, with the script and table checked in and each failure listed with its reason. Proof: the checked-in census table and the committed receipt of its script's run.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:44.302Z"
+          "at": "2026-11-15T05:09:48.410Z"
         },
         {
           "n": 3,
-          "text": "Fence test: a fixture PyPI package that opens ~/.ssh/id_ed25519 at import is refused with an authority error naming FS.Read and the path, unless that grant was given; the same package under `pip install` plus `python3 -c 'import fixture'` reads the file (paired test).",
+          "text": "A fixture PyPI package that opens ~/.ssh/id_ed25519 at import is refused with an authority error naming FS.Read and the path unless that grant was given, while the same package under `pip install` and `python3 -c 'import fixture'` reads the file (paired test). Proof: `jet test Compiler --profile cases --filter ffi_python/pypi_package_fenced_by_grant`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:44.302Z"
+          "at": "2026-11-15T05:09:49.318Z"
         },
         {
           "n": 4,
-          "text": "The #5949 prompt lists `FFI.Py` and the Python package names when a script first uses `py.*`, and a dependency update that adds a new Python package asks again (#5459 rules).",
+          "text": "The #5949 first-run prompt lists `FFI.Py` and the Python package names when a script first uses `py.*`, and a dependency update that adds a Python package asks again (#5459 rules). Proof: `jet test Compiler --profile cases --filter ffi_python/prompt_lists_python_packages`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:44.302Z"
+          "at": "2026-11-15T05:09:50.217Z"
         },
         {
           "n": 5,
-          "text": "Call cost: with `py@embed`, 100k calls of a small pure Python function finish in less than 1.5x the time of the same calls made inside CPython; with the sidecar default, the median round trip is below 20 microseconds (numbers logged per release).",
+          "text": "With `py@embed`, 100k calls of a small pure Python function take less than 1.5x the same calls inside CPython, and with the sidecar default the median round trip is under 20 microseconds. Proof: a committed benchmark receipt per release.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:44.302Z"
+          "at": "2026-11-15T05:09:51.108Z"
         },
         {
           "n": 6,
-          "text": "A manifest dependency in the D-JPK-EXTPROV1 form (`leftpad: npm@\"1.3.0\"`, syntax-decisions.md:4186) fetches, pins and is called through its typed first-party stub package (:4220); the second run works offline (test).",
+          "text": "A manifest dependency in the D-JPK-EXTPROV1 form (`leftpad: npm@\"1.3.0\"`) fetches, pins and is called through its typed first-party stub package, and the second run works offline. Proof: `jet test Compiler --profile cases --filter jetpack/npm_extprov_stub_pins_then_offline`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:44.302Z"
+          "at": "2026-11-15T05:09:52.011Z"
         }
       ],
       "refs": [
@@ -68201,8 +68211,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T21:05:44.302Z",
-      "updated": "2026-11-13T02:05:25.725Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:09:52.011Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
       ]
@@ -216198,6 +216208,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:09:55.620Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l5ld15",
+      "note": "#4: proof; was: All active fixtures, diagnostic fixes, help/current explanations and relevant tooling migrate in one cutover; immutable history remains unchanged."
+    },
+    {
+      "at": "2026-11-15T05:09:54.693Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l5ld15",
+      "note": "#3: proof; was: Package declarations, profile/CLI/computed contributions, types, precedence, provenance and cache identity remain correct; compiler mode is not controlled by an application setting."
+    },
+    {
+      "at": "2026-11-15T05:09:53.783Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l5ld15",
+      "note": "#2: decision is ratified; proof; was: If constructor form wins, tls: Bool{true} and api_base: String{\"https://api.example.com\"} work and old equals declarations are not Jet syntax and get no migration diagnostic (owner order)."
+    },
+    {
+      "at": "2026-11-15T05:09:52.898Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l5ld15",
+      "note": "#1: concrete per D-SETTINGS-CTOR2=A; proof; was: The chosen declaration form has one parser/formatter meaning shared with ordinary Jet defaults, not a second hand-written constructor language."
+    },
+    {
+      "at": "2026-11-15T05:09:52.011Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0lyckm2",
+      "note": "#6: proof; was: A manifest dependency in the D-JPK-EXTPROV1 form (`leftpad: npm@\"1.3.0\"`, syntax-decisions.md:4186) fetches, pins and is called through its typed first-party stub package (:4220); the second run works"
+    },
+    {
+      "at": "2026-11-15T05:09:51.109Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0lyckm2",
+      "note": "#5: proof; was: Call cost: with `py@embed`, 100k calls of a small pure Python function finish in less than 1.5x the time of the same calls made inside CPython; with the sidecar default, the median round trip is below"
+    },
+    {
+      "at": "2026-11-15T05:09:50.218Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0lyckm2",
+      "note": "#4: proof; was: The #5949 prompt lists `FFI.Py` and the Python package names when a script first uses `py.*`, and a dependency update that adds a new Python package asks again (#5459 rules)."
+    },
+    {
+      "at": "2026-11-15T05:09:49.318Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0lyckm2",
+      "note": "#3: proof; was: Fence test: a fixture PyPI package that opens ~/.ssh/id_ed25519 at import is refused with an authority error naming FS.Read and the path, unless that grant was given; the same package under `pip insta"
+    },
+    {
+      "at": "2026-11-15T05:09:48.410Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0lyckm2",
+      "note": "#2: proof; was: Reach census: of the 100 most-downloaded PyPI packages, at least 90 import and pass a one-call smoke test through `use py.X` on Linux x86-64 (script and table checked in; the failing ones are listed w"
+    },
+    {
+      "at": "2026-11-15T05:09:47.483Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0lyckm2",
+      "note": "#1: proof; was: A loose script with `use py.numpy as np` and `print(np.mean([1.0, 2.0, 3.0]))` prints 2.0 under `jet run`; the first run fetches and hash-pins numpy from PyPI, the second run works with the network di"
+    },
+    {
+      "at": "2026-11-15T05:09:03.941Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0cwk90x",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T05:09:01.781Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0cwk90x",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T05:09:00.420Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0cwk90x",
+      "note": "#10: strip debris; proof; was: (from #6051 Ladder L-13 (Markers/policy): Audited gates claim ALL_SCOPES) The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden "
+    },
+    {
+      "at": "2026-11-15T05:08:58.941Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0cwk90x",
+      "note": "#9: strip debris; owner-gated; was: (from #6051 Ladder L-13 (Markers/policy): Audited gates claim ALL_SCOPES) An owner ballot on L-13 is ratified."
+    },
+    {
+      "at": "2026-11-15T05:08:57.643Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0cwk90x",
+      "note": "#7: strip debris; owner-gated; proof; was: (from #6044 Ladder L-05 (Effects/authority): Ratified #Abilities block r) The L-05 probe in the audit now behaves as the ratified rule says, and an example or UI test with a golden or snapshot proves "
+    },
+    {
+      "at": "2026-11-15T05:08:56.509Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0cwk90x",
+      "note": "#3: strip debris; proof; root-policy inheritance is the gated c13; was: (from #6042 Ladder L-03 (Packages/modules): Workspace rung only serves r) The L-03 probe in the audit now behaves as the ratified rule says, and an example or UI test with a golden or snapshot proves "
+    },
+    {
+      "at": "2026-11-15T05:08:55.337Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0cwk90x",
+      "note": "#2: concrete per D-LOOSE-GROW1; proof; was: The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot."
+    },
+    {
+      "at": "2026-11-15T05:08:54.257Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0cwk90x",
+      "note": "#12 Workspace root `policy:`, `settings:` and `authority.deny` r"
+    },
+    {
+      "at": "2026-11-15T05:07:38.313Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0acg7c2",
+      "note": "#9: strip debris; proof; was: (proof addition for criterion 7; reflection proposal B9) Runtime type-info retention is the `type_info` option with values `full`, `reachable` and `none`. `reachable` is the default and keeps only the"
+    },
+    {
+      "at": "2026-11-15T05:07:37.371Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0acg7c2",
+      "note": "#8: proof; was: Every option is auditable and controllable: the chosen value of each option is recorded in the build record and shown by jet inspect, and a project or package policy can forbid or pin any option with "
+    },
+    {
+      "at": "2026-11-15T05:07:36.499Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0acg7c2",
+      "note": "#6: strip debris; proof; was: (was #5838) #5005 child: build option `temp_storage` (Jai 2, `temporary_storage_size`)"
+    },
+    {
+      "at": "2026-11-15T05:07:35.630Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0acg7c2",
+      "note": "#5: strip debris; proof; was: (was #5837) #5005 child: build option `comptime_array_limit` (Jai 9, `maximum_array_count_before_compile_time_returns_are_not_reflected_in_ast`)"
+    },
+    {
+      "at": "2026-11-15T05:07:34.747Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0acg7c2",
+      "note": "#4: strip debris; proof; was: (was #5836) #5005 child: build option `polymorph_depth` (Jai 8, `maximum_polymorph_depth`)"
+    },
+    {
+      "at": "2026-11-15T05:07:33.847Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0acg7c2",
+      "note": "#3: proof; was: No option disables a memory-safety check outside an audited #Unsafe scope (I1); the refusal has a registered diagnostic and UI snapshot."
+    },
+    {
+      "at": "2026-11-15T05:07:32.944Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0acg7c2",
+      "note": "#2: proof; was: Each accepted option is set from a package.jet profile, from fn build and from the CLI through one definition, with an executable example and golden output."
+    },
     {
       "at": "2026-11-15T05:07:31.804Z",
       "by": "TowerKeeper-1",
