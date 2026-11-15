@@ -231,9 +231,11 @@ whose Core is the built-in one (no release profile, no `--deep-checks`)
 checks a function with an `S` line by its signature alone, with the line's
 facts, and its Core demand stops there; a function a body names as a value,
 a shared global's initializer, an error conversion or a template item is
-checked in full. The run decides whether its Core is the built-in one, and
-reads the seal, only when its Core demand first names a Core body, so a
-program that names none never compares its tree's Core. It reads the seal
+checked in full. The compile decides whether its Core is the built-in one
+before its check, comparing its tree's Core byte for byte when it names a
+toolchain tree, so a run in a checkout whose Core is the built-in one loads
+`core.bodies` as one outside it does. The run reads the seal only when its
+Core demand first names a Core body. It reads the seal
 jet carries by key, a binary search per function its demand names, and
 parses no other line. When a stand-in
 can't stand for its body (an error a whole-program pass reports, whose call

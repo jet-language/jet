@@ -94,62 +94,31 @@ jet_cli_core_asset_bytes: fn(path: String) -> [U8]? Never! {
     None
 }
 
-// Whether a compile takes the Core built into this jet, so a native run may
-// bind its Core calls to the Core library's code the jet carries (Host.jet
-// jet_cli_native_executable): the jet carries its runtime
-// (jet_cli_runtime_embedded), no Core source is under test, and the compile
-// names no toolchain tree (jet_cli_named_toolchain) or one whose Core is the
-// built-in one (jet_cli_core_tree_matches). A tree whose Core differs, as
-// while Core is being edited, compiles every Core function a program calls.
-// The tree is compared when a compile first asks
-// (jet_cli_core_binding_built_in): until then `toolchain` names it, and
-// "" after.
-JetCLICoreBinding: struct {
-    toolchain: String
-    built_in: Bool
-}
-
-// The binding of a compile of `entry` whose Core sources under test are
-// `core_tests` ("" for none).
-jet_cli_core_binding: fn(entry: String, core_tests: String) -> Shared<JetCLICoreBinding> Never! {
-    if core_tests != "" || !jet_cli_runtime_embedded() {
-        return Shared{JetCLICoreBinding{toolchain: "", built_in: false}}
-    }
-    toolchain: jet_cli_named_toolchain(entry) ?? ""
-    built_in: toolchain == ""
-    Shared{JetCLICoreBinding{toolchain: toolchain, built_in: built_in}}
-}
-
-// Whether `binding`'s compile takes the built-in Core, comparing its tree's
-// Core now if no one has yet.
-jet_cli_core_binding_built_in: fn(binding: Shared<JetCLICoreBinding>) -> Bool Never! {
-    permit: binding.guard_edit()
-    if permit.value.toolchain != "" {
-        permit.value.built_in = jet_cli_core_tree_matches(permit.value.toolchain)
-        permit.value.toolchain = ""
-    }
-    permit.value.built_in
-}
-
-// Whether `binding`'s compile takes the built-in Core as far as it has
-// decided: false while its tree's Core is not yet compared.
-jet_cli_core_binding_bound: fn(binding: Shared<JetCLICoreBinding>) -> Bool Never! {
-    permit: binding.guard_read()
-    permit.value.toolchain == "" && permit.value.built_in
+// Whether a compile of `entry` whose Core sources under test are
+// `core_tests` ("" for none) takes the Core built into this jet, so it loads
+// the Core library's function checks (Request.jet jet_cli_core_bodies_lend)
+// and a native run may bind its Core calls to the Core library's code the
+// jet carries (Host.jet jet_cli_native_executable): the jet carries its
+// runtime (jet_cli_runtime_embedded), no Core source is under test, and the
+// compile names no toolchain tree (jet_cli_named_toolchain) or one whose
+// Core is the built-in one (jet_cli_core_tree_matches). A tree whose Core
+// differs, as while Core is being edited, checks and compiles every Core
+// function a program calls.
+jet_cli_core_binding: fn(entry: String, core_tests: String) -> Bool Never! {
+    if core_tests != "" || !jet_cli_runtime_embedded() -> return false
+    toolchain: jet_cli_named_toolchain(entry) ?? return true
+    jet_cli_core_tree_matches(toolchain)
 }
 
 // A `jet run`'s read of this jet's Core seal (JetSema CoreSeal.jet
 // SemaCoreSealSource), which its Core demand makes when it first names a
-// deferred Core body: only then does the run decide whether its Core is
-// the built-in one (`binding`). The seal is the image's part, lent from
-// its mapped image (jet_cli_runtime_part), which the demand searches by
-// key: no whole read or parse.
+// deferred Core body, for a run whose Core is the built-in one
+// (jet_cli_core_binding). The seal is the image's part, lent from its
+// mapped image (jet_cli_runtime_part), which the demand searches by key: no
+// whole read or parse.
 JetCLICoreSealRead: struct {
-    binding: Shared<JetCLICoreBinding>
-
     impl SemaCoreSealSource {
         read: fn(self) -[FS, Env]> SemaCoreSeal? {
-            if !jet_cli_core_binding_built_in(self.binding) -> return None
             Val(SemaCoreSeal{bytes: jet_cli_runtime_part(JET_CLI_CORE_SEAL_FILE)})
         }
     }

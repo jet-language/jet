@@ -2146,7 +2146,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             // function checks as a bound native compile does. Neither a
             // Prelude source's check nor `jet check Core` does, as they check
             // that Core.
-            if selected.mode == JetDriverCompileMode.Check && !prelude && !every_core_body && jet_cli_core_binding_built_in(jet_cli_core_binding(snapshot.entry_path, selected.core_tests)) {
+            if selected.mode == JetDriverCompileMode.Check && !prelude && !every_core_body && jet_cli_core_binding(snapshot.entry_path, selected.core_tests) {
                 if jet_cli_core_bodies_lend(selected) == .Val(problem) {
                     return JetCLICompiled.Refused{output: jet_cli_ice(problem)}
                 }
@@ -2246,50 +2246,45 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             }
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: compiled_request.compiler_threads.copy()
-            // A run binds its Core calls to the Core library's code this jet
-            // carries only when its Core is the Core built into this jet
-            // (CoreSources.jet JetCLICoreBinding; Host.jet
-            // jet_cli_native_executable).
-            binding: jet_cli_core_binding(snapshot.entry_path, compiled_request.core_tests)
+            // A compile loads the Core library's function checks, and a run
+            // binds its Core calls to the Core library's code this jet
+            // carries, only when its Core is the Core built into this jet
+            // (CoreSources.jet jet_cli_core_binding; Host.jet
+            // jet_cli_native_executable). It decides that now, before its
+            // check, so a compile in a checkout whose Core is the built-in one
+            // loads those checks as one outside it does.
+            built_in: jet_cli_core_binding(snapshot.entry_path, compiled_request.core_tests)
             // A traced run with per-function spans whose Core is the built-in
             // one counts its Core demand's checks against the Core facts this
             // jet carries: the sealed keys, and each excluded key's reason
             // (JetSema CoreDemand.jet sema_core_bound_counters).
             if trace_sink == .Val(sink) {
-                if sink.functions && jet_cli_core_binding_built_in(binding) {
+                if sink.functions && built_in {
                     facts: jet_cli_core_facts(jet_cli_runtime_part(JET_CLI_CORE_FACTS_FILE))
                     compiled_request.core_bound_keys = facts.sealed.move()
                     compiled_request.core_excluded_keys = facts.excluded.move()
                     compiled_request.core_excluded_reasons = facts.reasons.move()
                 }
             }
-            // A `jet run` checks the sealed Core functions its demand reaches
-            // as stand-ins of this jet's Core seal rows (JetSema CoreSeal.jet),
-            // which the image the run links checked: a build that keeps
-            // `#Off(.Release)` code and no `--deep-checks` bodies, as that
-            // image does. It decides whether its Core is the built-in one
-            // when its demand first names a deferred Core body
-            // (JetCLICoreSealRead): a run that names none has no Core call
-            // to bind, so it never reads its toolchain tree's Core. Any other
-            // compile decides now.
+            // A `jet run` whose Core is the built-in one checks the sealed
+            // Core functions its demand reaches as stand-ins of this jet's
+            // Core seal rows (JetSema CoreSeal.jet), which the image the run
+            // links checked: a build that keeps `#Off(.Release)` code and no
+            // `--deep-checks` bodies, as that image does. Its demand reads the
+            // seal when it first names a deferred Core body
+            // (JetCLICoreSealRead).
             stand_ins: options.command == "run" && compiled_request.mode == JetDriverCompileMode.Program && options.profile != "release" && options.profile != "hardened" && !options.deep_checks.all && options.deep_checks.scopes.len() == 0
-            if {
-                stand_ins -> {
+            if built_in {
+                if stand_ins {
                     hooks: compiled_request.eval_config.host_hooks.guard_edit()
-                    hooks.value.core_seal = Val(JetCLICoreSealRead{binding: binding})
+                    hooks.value.core_seal = Val(JetCLICoreSealRead{})
                 }
-                else -> { _: jet_cli_core_binding_built_in(binding) }
-            }
-            // A run whose tree's Core is not yet compared checks its Core
-            // bodies from text, so it still reads that Core only if its
-            // demand names a deferred body.
-            if jet_cli_core_binding_bound(binding) {
                 if jet_cli_core_bodies_lend(compiled_request) == .Val(problem) {
                     return JetCLIExecutableCompiled.Refused{output: jet_cli_ice(problem)}
                 }
             }
             front := jet_cli_lowering_inputs(compiled_request, trace_sink)
-            front.compile.core_built_in = jet_cli_core_binding_bound(binding)
+            front.compile.core_built_in = built_in
             // The native route traces through the same sink and builds on the
             // request's threads (Host.jet jet_cli_native_executable).
             front.compile.trace_sink = jet_cli_trace_boxed(trace_sink)
