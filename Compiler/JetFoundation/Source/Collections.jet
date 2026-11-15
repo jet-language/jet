@@ -14,17 +14,18 @@
 
 // Append owning compiler rows in input order, leaving the source empty.
 // Use pops instead of moving an indexed field/list payload out of a borrowed
-// aggregate; both passes transfer whole locals and never clone a row.
+// aggregate; both passes transfer whole locals and never clone a row. The
+// destination grows once to its final length, the source is reversed in
+// place and popped, and its emptied buffer is released at once, so a
+// transfer never holds a third buffer of rows.
 compiler_transfer_rows: fn<T>(to: &[T], from: &[T]) Never! {
-    reversed := [T]{}
+    to.try_reserve(from.len()) ?? panic("cannot reserve {from.len()} compiler rows: {err}")
+    from.reverse()
     loop from.len() > 0 {
         row := from.pop() ?? panic("a nonempty compiler row source failed to pop")
-        reversed.push(row)
-    }
-    loop reversed.len() > 0 {
-        row := reversed.pop() ?? panic("a nonempty compiler row buffer failed to pop")
         to.push(row)
     }
+    from = [T]{}
 }
 
 // Compiler-internal permutation: order[new index] is the original row index.
@@ -61,15 +62,18 @@ compiler_apply_order: fn<T>(rows: &[T], order: [Int]) Never! {
 }
 
 // Compiler-internal transfer: moves every row out of `rows` into the returned
-// list, in order, leaving `rows` empty. Each row is popped (an owned move) and
-// the result is reversed in place, so no owning payload is copied; reading a
-// list field of a borrowed owner into a binding would copy every row.
+// list, in order, leaving `rows` empty with its buffer released. Each row is
+// popped (an owned move) into a list reserved to its length, and the result
+// is reversed in place, so no owning payload is copied; reading a list field
+// of a borrowed owner into a binding would copy every row.
 compiler_take_rows: fn<T>(rows: &[T]) -> [T] Never! {
     taken := [T]{}
+    taken.try_reserve(rows.len()) ?? panic("cannot reserve {rows.len()} compiler rows: {err}")
     loop rows.len() > 0 {
         row := rows.pop() ?? panic("a nonempty compiler row list failed to pop")
         taken.push(row)
     }
+    rows = [T]{}
     taken.reverse()
     taken
 }
