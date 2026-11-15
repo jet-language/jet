@@ -100097,6 +100097,65 @@
       "completedAt": "2026-11-12T09:15:50.594Z",
       "questions": [],
       "retiredAt": "2026-11-15T09:27:19.301Z"
+    },
+    {
+      "id": "c01afamh",
+      "num": 6761,
+      "title": "jet test packages profile ignores the memory limit: package_jobs runs 4+ children of about 5.5 GB each and is OOM-killed under any cap below about 22G",
+      "body": "Found by G5DevX-1, 2026-11-11 23:56: jet test Compiler --profile packages under a systemd-run scope with MemoryMax 12G or 14G was OOM-killed. The journal says the kernel OOM killer killed processes in the unit, and OOMPolicy=stop then sent SIGTERM to the parent jet, which gave rc 143 with no output. That happens even for a 2-package filter. Compiler/test.jet package_jobs() runs max(PACKAGE_JOBS=4, cpus/4) package children at once, and its own comment budgets about 5.5 GB each. It never reads the profile memory setting or the cgroup memory.max, while the corpus pool does. The job count should come from the same memory budget the corpus pool uses, and never exceed the number of selected packages.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c1 (JetLSP packages 39/39 under a 10G scope, plus the job-count #Test) and c2 (the census jetpack-areas row fits its lanes, no exit 137) are met. All criteria met."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet test Compiler --profile packages sizes its concurrent package children from the cgroup memory.max and the profile memory setting, through the same budget function as the corpus pool, and never runs more children than the selected packages. Proof: jet test Compiler --profile packages --filter Compiler/JetLSP under a 10G MemoryMax scope passes with 39 rows, 39 passed, plus a #Test of the job count for given memory, CPU and package numbers.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G5DevX-package-jobs-memory landed as afca453b51: Compiler/test.jet package_jobs sizes concurrent package children from a quarter of the CPUs, lowered to the PACKAGE_MEMORY claims that fit the cgroup memory.max and the profile memory setting through JetTestKit's kit_claim_jobs, the same budget function as the corpus pool, and capped at the runs there are. b11 deferred pass (Lander5, 2026-11-12) on the batch tip with seed-b11 jet@a0.0.45#3667b9a1 (built at 19333b2bb3). systemd-run --user --scope -p MemoryMax=10G -p MemorySwapMax=0 jet test Compiler --profile packages --filter Compiler/JetLSP: rc 0, '39 rows, 39 passed, 0 failed' (deferred-b11/159.out; without the patch the same scope was OOM-killed, rc 143). jet test Compiler/JetTestKit/Tests/Core.jet --filter 'claimed runs': 1 passed, 0 failed (the #Test of the job count for given memory, CPU and run numbers; deferred-b11/158.out). The SUB's other two lines are outside c1 and route to G5DevX-1: the whole-JetTestKit run (242 pass, red only on the judge's skip flag) and jet build Compiler/ (rc 137 at its 10G scope cap, rerun under 24G in b12).",
+          "at": "2026-11-12T09:33:24.029Z"
+        },
+        {
+          "n": 2,
+          "text": "The census jetpack-areas row fits its lane budget. Found 2026-11-12 02:15 by Lander5 (Land.jet census alone, seed-b10, run=16, lanes=6): the CLI area check peaked at 5.72G against a 5857M lane cap, and JetOS at 5.21G against 5336M, so both were OOM-killed (exit 137) with check-errors 0. The other areas peak at 3.85-5.17G. Either the area checks shrink below their share, or the lane split gives each area what it measures (kit_execute_budget sizing lanes by measured peaks, not an even split of the room). Proof: jet Tools/agent/Land.jet census, run alone on the batch compiler, passes jetpack-areas with no area at exit 137.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "b12 admit census, 2026-11-12 04:23-04:31: jet Tools/agent/Land.jet census run alone with dev Land.jet 690bb98a80 on the batch compiler seed-b12 jet@a0.0.45#b5c287db (built from 2844b04984), CENSUS_CORE_TESTS=0. census rc 0 in 514 s, receipt 725d9b41 written; receipt rc 0 ('admitted by preflight receipt'); admit --check-gate rc 0. The jetpack-areas row: areas 427 s rc 0, '16 run, 0 carried over, 3 lanes'. No area exited 137, none was killed at its cap, and none reran alone. Peaks against lane caps (MB): CLI 5965/7344, JetOS 5375/6648, Engine 5260/6482, Services 5190/6429, Image 5178/6376, Secrets 5161/6360, Nix 3944/4961, Environment 3931/4888, Trust 3869/4815, Integrations 3748/4714, Publication 3743/4686, EnvModel 3745/4684, PackageModel 3658/4557, TrustRoot 2195/2834, Foundation 2184/2773, NixEval 233/607. Source: $JET_SCRATCH_ROOT/../discovery/r14/census/phases.tsv.",
+          "at": "2026-11-12T09:32:42.609Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T04:59:43.939Z",
+      "updated": "2026-11-12T09:33:25.649Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-12T09:33:25.649Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T09:48:38.197Z"
     }
   ]
 }
