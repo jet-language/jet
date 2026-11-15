@@ -20,9 +20,11 @@ use {
         JET_DRIVER_EXIT_USER_ERROR,
         jet_driver_entry_root_path,
         jet_driver_ice_record,
+        jet_driver_target_machine_by_name,
     ]
-    jet_foundation.[BuildOptions, FnBody, cli_schema_embed_wasm_record, foundation_byte_text, module_is_core]
-    jet_web.[WEB_SOURCE_MAP_FILE, web_app_js, web_dom_runtime_js, web_index_html, web_program, web_source_map, web_source_name]
+    jet_foundation.[BuildOptions, FnBody, cli_schema_embed_wasm_record, foundation_byte_text, jet_target_environment_identity, jet_target_machine_dossier_json, jet_target_provider_identity, module_is_core, sha256_bytes, sha256_hex, sha256_hex_bytes]
+    jet_pkg_model.[JET_VERSION]
+    jet_web.[WEB_SOURCE_MAP_FILE, WebTargetBinding, web_app_js, web_dom_runtime_js, web_index_html, web_manifest, web_program, web_source_map, web_source_name]
 }
 
 // The runtime partition and its receipt beside the runtime pack
@@ -82,10 +84,11 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     if jet_cli_web_write(file, color, "{build_dir}/rt.wasm", partition) == .Val(failure) {
         return failure
     }
-    if jet_cli_web_write_text(file, color, "{build_dir}/web.manifest.json", web.manifest) == .Val(failure) {
+    binding: jet_cli_web_binding(app, partition) ?? return jet_cli_ice("the web target machine `wasm.browser` is not declared, so the build of `{file}` has no target binding")
+    if jet_cli_web_write_text(file, color, "{build_dir}/web.manifest.json", web_manifest(web.partitions, binding)) == .Val(failure) {
         return failure
     }
-    if jet_cli_web_write_text(file, color, "{build_dir}/app.js", web_app_js()) == .Val(failure) {
+    if jet_cli_web_write_text(file, color, "{build_dir}/app.js", web_app_js(binding)) == .Val(failure) {
         return failure
     }
     if jet_cli_web_write_text(file, color, "{build_dir}/jet_dom_runtime.js", web_dom_runtime_js()) == .Val(failure) {
@@ -95,6 +98,28 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
         return failure
     }
     JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// The target binding of a web build (Host.jet WebTargetBinding): the
+// browser machine the program was checked for, as `jet inspect target
+// wasm.browser` shows it, and the identities of the two modules the build
+// writes, `app` (app.wasm) and `partition` (rt.wasm).
+jet_cli_web_binding: fn(app: [U8], partition: [U8]) -> WebTargetBinding? Never! {
+    machine: jet_driver_target_machine_by_name("wasm.browser", JET_VERSION) ?? return None
+    environment: jet_target_environment_identity(machine)
+    provider: jet_target_provider_identity(machine)
+    dossier: jet_target_machine_dossier_json(machine) ?? ""
+    layer: if machine.no_os -> "no-os" else -> "hosted"
+    Val(WebTargetBinding{
+        machine: machine.name,
+        triple: machine.triple,
+        environment: environment,
+        runtime_layer: layer,
+        provider_identity: provider,
+        dossier_identity: "sha256:{sha256_hex(dossier)}",
+        runtime_identity: "sha256:{sha256_hex_bytes(sha256_bytes(partition[0..<partition.len()]))}",
+        artifact_identity: "sha256:{sha256_hex_bytes(sha256_bytes(app[0..<app.len()]))}",
+    })
 }
 
 // `jet build --explain-partition`: one row per function of the program's own

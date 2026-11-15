@@ -62,16 +62,16 @@ web_runtime_partition: fn(m: IRModule, exports: [IRLibraryExport], data: [X64Dat
 // its source line, in offset order.
 WebProgram: struct {
     bytes: [U8]
-    manifest: String
+    partitions: [String]
     errors: [String]
     sources: [String]
     lines: [Int]
 }
 
 // The program partition of built module `program` (its entry `program.entry`)
-// against the runtime partition's receipt `receipt`, and the manifest of the
-// two. The module's last section is `sourceMappingURL`, naming
-// WEB_SOURCE_MAP_FILE.
+// against the runtime partition's receipt `receipt`, and the manifest rows
+// of the two (Host.jet web_manifest). The module's last section is
+// `sourceMappingURL`, naming WEB_SOURCE_MAP_FILE.
 web_program: fn(program: &&IRModule, receipt: String) -> WebProgram Never! {
     runtime_end := -1
     runtime_slots := -1
@@ -89,13 +89,13 @@ web_program: fn(program: &&IRModule, receipt: String) -> WebProgram Never! {
         }
     }
     if runtime_end < 0 || runtime_slots < 0 {
-        return WebProgram{bytes: [U8]{}, manifest: "", errors: [String]{"the runtime partition's receipt has no layout row"}, sources: [String]{}, lines: [Int]{}}
+        return WebProgram{bytes: [U8]{}, partitions: [String]{}, errors: [String]{"the runtime partition's receipt has no layout row"}, sources: [String]{}, lines: [Int]{}}
     }
     m := program.move()
     web_lower(m)
     base: web_align_up(runtime_end, 16)
     built := web_module(m, true, WebLayout{data_base: base, table_base: runtime_slots}, runtime, armed, web_host_functions(), [String:Int]{}, [WebHook]{})
-    manifest: web_manifest(runtime_end, runtime_slots, base, built.data_end, built.slots)
+    partitions: web_manifest_partitions(runtime_end, runtime_slots, base, built.data_end, built.slots)
     sources := [String]{}
     source_rows := [String:Int]{}
     lines := [Int]{}
@@ -117,7 +117,7 @@ web_program: fn(program: &&IRModule, receipt: String) -> WebProgram Never! {
     wat_put_name(section, "sourceMappingURL")
     wat_put_name(section, WEB_SOURCE_MAP_FILE)
     wat_put_section(bytes, WEB_SECTION_CUSTOM, section)
-    WebProgram{bytes: bytes.move(), manifest: manifest, errors: built.errors.move(), sources: sources.move(), lines: lines.move()}
+    WebProgram{bytes: bytes.move(), partitions: partitions, errors: built.errors.move(), sources: sources.move(), lines: lines.move()}
 }
 
 // The version 3 source map of the program module (WebProgram): `names[k]`
@@ -202,10 +202,8 @@ web_source_name: fn(source: String, entry: String) -> String Never! {
     parts.join("/")
 }
 
-// The generated host files of a web build: `app.js`, `jet_dom_runtime.js`,
-// `index.html`.
-web_app_js: fn() -> String Never! { WEB_APP_JS }
-
+// The generated host files of a web build beside `app.js` (Host.jet
+// web_app_js): `jet_dom_runtime.js` and `index.html`.
 web_dom_runtime_js: fn() -> String Never! { WEB_DOM_RUNTIME_JS }
 
 web_index_html: fn() -> String Never! { WEB_INDEX_HTML }

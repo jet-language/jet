@@ -15,16 +15,29 @@ D-DOMGEN1. Per-function partition pins use `#Target(JS)` and `#Target(Wasm)`;
 
 ## Build and inspect
 
-`jet build --target web FILE` (also `--os=web`, or `os: web` in the selected
-profile) writes five files beside the entry in `.jet/build/`, whatever the
-entry is named: `app.wasm` (the program partition), `rt.wasm` (the runtime
-partition), `web.manifest.json`, the entry `app.js` and its host
-`jet_dom_runtime.js`. `node .jet/build/app.js` runs the program with the
-process's arguments and environment and exits with its status. A page or a
-harness imports `jet_main` from `app.js`: it resolves when the program exits 0
-and rejects with `JetHostExitError` (its `status`) otherwise, or
-`JetHostWasmError` on a trap. `instantiateWasm` and `takeWasmError` from
-`jet_dom_runtime.js` drive the modules directly.
+`jet build --target web FILE` (also `--target wasm.browser`, the browser's
+target machine, `--os=web`, or `os: web` in the selected profile) writes
+five files beside the entry in `.jet/build/`, whatever the entry is named:
+`app.wasm` (the program partition), `rt.wasm` (the runtime partition),
+`web.manifest.json`, the entry `app.js` and its host `jet_dom_runtime.js`.
+`node .jet/build/app.js` runs the program with the process's arguments and
+environment and exits with its status. A page or a harness imports
+`jet_main` from `app.js`: it resolves when the program exits 0 and rejects
+with `JetHostExitError` (its `status`) otherwise, `JetHostWasmError` on a
+trap, or `JetHostAbiError` when the files are not one build's.
+`instantiateWasm` and `takeWasmError` from `jet_dom_runtime.js` drive the
+modules directly.
+
+The manifest's `binding` and `app.js`'s `JET_TARGET_BINDING` hold the same
+target binding: the machine the program was checked for (`targetMachine`,
+`wasmTriple`, `targetEnvironment`, `runtimeLayer`, `providerIdentity` and
+`targetDossierIdentity`, the SHA-256 of the dossier `jet inspect target
+wasm.browser --json` prints) and the SHA-256 of each module the build wrote
+(`runtimeIdentity` for `rt.wasm`, `artifactIdentity` for `app.wasm`). Before
+it runs any program code, the host checks that the two agree and that each
+module's bytes hash to its identity. Otherwise it stops with `target binding
+mismatch`, so a module or manifest that another build wrote never runs
+under this entry.
 
 ```sh
 jet build --target web Examples/Basics/Hello.jet

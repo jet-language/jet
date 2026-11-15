@@ -1334,9 +1334,9 @@ jet_cli_check_prelude: fn(args: [String], color: Bool, quiet: Bool, threads: Int
 // conflicting writer, or a profile no member declares, is refused here too
 // (jet_cli_build_options). `--style` adds the opt-in style checks. A
 // `--target` naming a machine without an OS checks one file for that machine,
-// as `jet build --target` does, and `--target web` checks it for the
-// browser's machine, which `jet build --target web` builds for; any other
-// value leaves the host's.
+// as `jet build --target` does, and `--target web` (or `wasm.browser`)
+// checks it for the browser's machine, which `jet build --target web`
+// builds for; any other value leaves the host's.
 jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     settings := [BuildSettingOverride]{}
     if jet_cli_setting_flags(jet_argv, color) == {
@@ -1347,7 +1347,7 @@ jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet
     machine := ""
     if jet_cli_target_flag(jet_argv) == .Named(name) {
         if {
-            name == "web" -> machine = "wasm.browser"
+            name == "web" || name == "wasm.browser" -> machine = "wasm.browser"
             jet_cli_no_os_machine(name) -> machine = name
         }
     }
@@ -1554,11 +1554,12 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
         written.insert(0, BuildOptionChoice{name: "optimize", value: build_options_value(build_options_stock("dev"), "optimize"), layer: BuildOptionLayer.Stock, written: "", site: "", pinned: false})
     }
     // `jet build --target=<machine>` of a machine without an OS checks the
-    // program for that machine (BuildOptions.target_machine).
+    // program for that machine (BuildOptions.target_machine); the browser's
+    // machine, `wasm.browser`, is the web build's.
     machine := ""
     if jet_cli_target_flag(jet_argv) == {
         .Named(target) -> {
-            if target == "web" -> web = true
+            if target == "web" || target == "wasm.browser" -> web = true
             if command == "build" && jet_cli_no_os_machine(target) -> machine = target
         }
         .Absent -> {
