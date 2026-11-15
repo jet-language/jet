@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6923,
-    "rev": 104475,
+    "rev": 104500,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -28601,6 +28601,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: debris stripped and every criterion has a proof."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -28657,93 +28662,93 @@
         },
         {
           "n": 8,
-          "text": "Every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, and genuinely source-free diagnostics carry no origin.",
+          "text": "Every source-bound diagnostic identifies the checked snapshot it came from, pathless input still gets a digest, and a source-free diagnostic carries no origin. Proof: `jet test Compiler --profile cases --filter compiler_api/diagnostic_origin_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:19:51.470Z"
+          "at": "2026-11-15T04:22:04.061Z"
         },
         {
           "n": 9,
-          "text": "No diagnostic inherits the entry path because its own origin is missing; an imported/local contrast fixture run through the self-hosted compiler identifies the right document for each diagnostic.",
+          "text": "No diagnostic inherits the entry path because its own origin is missing: an imported-versus-local contrast fixture names the right document for each diagnostic. Proof: `jet test Compiler --profile cases --filter compiler_api/diagnostic_origin_imported_vs_local`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:19:52.924Z"
+          "at": "2026-11-15T04:22:05.092Z"
         },
         {
           "n": 10,
-          "text": "The typed CompilerDiagnostic value (JetSema), the host DiagnosticCodec and the CLI/LSP report cut over together to one versioned shape; package-model schemas are unchanged.",
+          "text": "The typed CompilerDiagnostic value (JetSema), the host DiagnosticCodec and the CLI and LSP report cut over together to one versioned shape, and the package-model schemas are unchanged. Proof: `jet test Compiler --profile cases --filter compiler_api/` and `--filter lsp/lsp_diagnostics_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:19:54.384Z"
+          "at": "2026-11-15T04:22:06.079Z"
         },
         {
           "n": 11,
-          "text": "The digest is computed or reused once per snapshot, never once per diagnostic or from re-read disk text.",
+          "text": "The digest is computed or reused once per snapshot, never once per diagnostic, and never from re-read disk text. Proof: `jet test Compiler/JetSema --filter diagnostic_digest_once_per_snapshot`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:19:55.877Z"
+          "at": "2026-11-15T04:22:07.175Z"
         },
         {
           "n": 12,
-          "text": "No new runtime compiler service, AST mutation, third-party dependency or optional Core library is added.",
+          "text": "The change adds no runtime compiler service, AST mutation, third-party dependency or optional Core library. Proof: the landing diff adds no package.jet dependency and no new module outside the files named in the plan.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:19:57.462Z"
+          "at": "2026-11-15T04:22:08.296Z"
         },
         {
           "n": 13,
-          "text": "#3509 consumers read the same canonical checked source and result/error model.",
+          "text": "The #3509 compiler-session consumers read the same canonical checked source and result and error model. Proof: `jet test Compiler --profile cases --filter session/diagnostics_carry_origin`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:19:59.504Z"
+          "at": "2026-11-15T04:22:09.489Z"
         },
         {
           "n": 17,
-          "text": "[#4089] Equivalent Jet-side two-file, pathless and source-free witnesses pass through the public API and report.",
+          "text": "Two-file, pathless and source-free witnesses pass through the public core.compiler API and the CLI report alike. Proof: `jet test Compiler --profile cases --filter compiler_api/diagnostic_origin_witnesses`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:24:25.110Z"
+          "at": "2026-11-15T04:22:10.521Z"
         },
         {
           "n": 18,
-          "text": "[#3205] D-BIG-CAUSE1=A (ratified 2026-09-12): Same-code causes at different locations stay distinct and ordered. Missing locations stay unknown and never inherit the root file or span. Cause sources come from originating snapshots. Every report producer and consumer (CLI, LSP) cuts over, with no legacy cause list.",
+          "text": "D-BIG-CAUSE1=A: same-code causes at different locations stay distinct and ordered. A missing location stays unknown and never inherits the root file or span, and cause sources come from their originating snapshots. Every report producer and consumer (CLI, LSP) cuts over, with no legacy cause list. Proof: `jet test Compiler --profile cases --filter compiler_api/diagnostic_causes_keep_locations`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:20:01.163Z"
+          "at": "2026-11-15T04:22:11.642Z"
         },
         {
           "n": 19,
-          "text": "[#3199] Typed consumers read definitions, references, calls, effects, state_graphs, fact_registry and derivations. Values match exactly across the typed result and CLI JSON. A semantic-error result keeps diagnostics and an absent index, with no fallback faking complete facts. A new public record member goes to a ballot.",
+          "text": "Typed consumers read definitions, references, calls, effects, state_graphs, fact_registry and derivations, with values identical in the typed result and the CLI JSON. A semantic-error result keeps its diagnostics and an absent index, with no fallback faking complete facts; a new public record member needs a ballot. Proof: `jet test Compiler --profile cases --filter compiler_api/typed_consumers_match_cli_json`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:56:55.291Z"
+          "at": "2026-11-15T04:22:12.637Z"
         },
         {
           "n": 20,
-          "text": "[#3266] Build, package and debug provenance fixtures cover export discovery, dependency features, the build graph, diagnostics, generated dependencies and exact source/executable identities. They never infer a clean build from archived receipts.",
+          "text": "Build, package and debug provenance fixtures cover export discovery, dependency features, the build graph, diagnostics, generated dependencies and exact source and executable identities, and never infer a clean build from archived receipts. Proof: `jet test Compiler --profile cases --filter compiler_api/provenance_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:24:28.266Z"
+          "at": "2026-11-15T04:22:13.546Z"
         },
         {
           "n": 21,
@@ -28783,12 +28788,12 @@
         },
         {
           "n": 25,
-          "text": "(was #1049 c1) Every behavior named by “core.compiler: schema-versioned CLI JSON mirror”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: failing on 9c7ddf1359: C:compiler_api/compiler_api_json_mirrors_are_schema_versioned KNOWN-FAILING #4260 no doc fixes the schema_version of the semantic_index embedded in `jet inspect compiler check`: Jet emits the semindex schema 20, the Rust-e (known-failing #4260:…] (was #4260 c18)",
+          "text": "The core.compiler CLI JSON mirrors are schema-versioned: `jet inspect compiler check` documents the schema_version of the semantic_index it embeds. Proof: `jet test Compiler --profile cases --filter compiler_api/compiler_api_json_mirrors_are_schema_versioned` (known-failing on #4260 today).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:22:30.967Z"
+          "at": "2026-11-15T04:22:14.467Z"
         }
       ],
       "refs": [
@@ -28818,8 +28823,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-14T01:23:19.936Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:22:25.417Z",
+      "updatedBy": "TowerKeeper-1",
       "workOrder": 19,
       "goals": [
         "G5"
@@ -43285,8 +43290,8 @@
     {
       "id": "c0q38sm2",
       "num": 4022,
-      "title": "Elegance audit ballots: diagnostic code law, one name per Core operation, effect root spelling, Core module map, sigil meanings",
-      "body": "Drafts the five owner ballots the elegance audit (Docs/audits/elegance-audit-2026-09-30.md) asked for, on the short profile, one per member card. Implementation after ratification gets its own cards. Members are closed into this one.\n\nMembers (closed into this card): #3994, #3995, #3996, #3997, #3998. Read each member's body and log for repros, sites and evidence. Board prep 2026-10-01 (plan by TowerPrep, applied by TowerCloser); estimate 2 sessions.",
+      "title": "Elegance audit follow-through: the diagnostic code law, the effect root list, one meaning per sigil, power as a method, PascalCase markers",
+      "body": "Destination: the follow-through of the elegance audit (Docs/audits/elegance-audit-2026-09-30.md). Its five ballots are all ratified:\n- D-DIAG-CODE-LAW1=A;\n- D-EFFECT-ROOT-WORDS1=A;\n- the sigil dive (D-SIGIL-ALGEBRA1=B, D-MOVE-SIGIL1=A, D-BIT-SIGILS1=A);\n- the Core module map and the one name per Core operation (their cutovers are on #6880).\n\nWhat remains is the code-law cutover, the documented effect list, the executable sigil table, power as `x.pow(n)`, and PascalCase-only markers.\n\nMembers (closed into this card): #3994, #3995, #3996, #3997, #3998.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
@@ -43300,6 +43305,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15. c6 and c7 are duplicates of done work (#4138 c2, #4140 c2). c9 merged into #6896 c1, and c20 into #4913 c5, with an owner-gate row for the kept spelling. c1, c3, c5 and c8 are restated as the cutovers of their ratified decisions."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -43432,20 +43442,22 @@
         {
           "n": 6,
           "text": "[#4138] ratified. After ratification, every GateKind can be forbidden or made reason-required by org/package policy, with a UI snapshot per refusal.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:29:27.848Z"
+          "evidence": "Duplicate of #4138 c2 (met; card done): every GateKind can be forbidden or made reason-required by organization or package policy, with UI snapshots per refusal (D-GATE-LAW1=A).",
+          "at": "2026-11-15T04:22:15.538Z",
+          "closure": "duplicate"
         },
         {
           "n": 7,
           "text": "[#4140] ratified. After ratification, `jet <job>` runs a project job, and a job named like a Jet command is rejected with a registered diagnostic and UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:29:29.037Z"
+          "evidence": "Duplicate of #4140 c2 (met; card done): `jet <job>` runs a project job, and a job named like a Jet command is rejected with a registered diagnostic and UI snapshot (D-JET-VERBS1=A).",
+          "at": "2026-11-15T04:22:16.708Z",
+          "closure": "duplicate"
         },
         {
           "n": 8,
@@ -43459,11 +43471,12 @@
         {
           "n": 9,
           "text": "(was #4759) Marker root resolution: local names win, Jet built-ins explicit, safe shadow diagnostics",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:10:21.923Z"
+          "evidence": "Merged into #6896 c1: a marker name that silently resolves to a local over a Jet built-in is one of the name-wins cases, which must be a tidy error with a rename fix",
+          "at": "2026-11-15T04:22:17.792Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
@@ -43532,11 +43545,12 @@
         {
           "n": 20,
           "text": "The CLI has one spelling per flag meaning: for each pair the Jet CLI accepts (--route/--path, --cook/--cook-mode, --force-clean/--clean in Compiler/JetCli/Source/Cli/Commands.jet) the owner chooses keep both or keep one; a removed spelling is an ordinary unknown-flag error, and help, completion and CLI snapshots are regenerated. Proof: `jet test Compiler --profile cases --filter cli_flag_one_spelling`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:03:23.256Z"
+          "evidence": "Merged into #4913 c5: one spelling per flag meaning is #4913 c5; the pairs (--route/--path, --cook/--cook-mode, --force-clean/--clean) are listed there, and the choice of the kept spelling is an owner-gate row",
+          "at": "2026-11-15T04:22:18.868Z",
+          "closure": "obsolete"
         },
         {
           "n": 21,
@@ -43557,7 +43571,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-01T12:12:31.228Z",
-      "updated": "2026-11-15T04:22:00.726Z",
+      "updated": "2026-11-15T04:22:23.452Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -49076,12 +49090,12 @@
         },
         {
           "n": 2,
-          "text": "Probe F reports `nickname` (never read) and `Legacy` (never built) once each as tidy errors with a delete-or-rename fix: jet check and jet build list them and exit non-zero, and `jet run` runs with unchanged output and prints neither (UI snapshot).",
+          "text": "Probe F reports `nickname` (never read) and `Legacy` (never built) once each as tidy errors with a delete-or-rename fix: `jet check` and `jet build` list them and exit non-zero, and `jet run` runs with unchanged output and prints neither. Proof: `jet test Compiler --profile ui --filter member_liveness_probe_f`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:10:35.568Z"
+          "at": "2026-11-15T04:24:24.734Z"
         },
         {
           "n": 3,
@@ -49136,8 +49150,8 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.924Z",
-      "updated": "2026-11-13T02:10:39.041Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:24:24.734Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ]
@@ -49625,6 +49639,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: every criterion has a proof."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 1 criteria from archived #2487: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -49728,7 +49747,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:53.383Z",
-      "updated": "2026-11-15T04:21:56.658Z",
+      "updated": "2026-11-15T04:22:27.322Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -50579,8 +50598,8 @@
     {
       "id": "c0bk3yid",
       "num": 4720,
-      "title": "Move dev canvas, debug and retained REPL off the evaluator; Learn excluded",
-      "body": "Implementation task under ratified decisions; no owner decision is needed. D-EXEC1 = A: one runtime; O0 serves run, dev and compile-time code. D-EXEC2 = A: until the native backend covers every program, run and dev use the build path and execute the result; dev rebuilds and restarts on a saved change instead of replacing functions in a running process. D-DX-DEBUGBACK1 = A: reverse execution extends jet debug. Work: (1) jet dev --canvas: restart on save per D-EXEC2; live values stream from the built program over the devtools channel. (2) jet debug: the native LLDB/DAP backend becomes the only backend; record/replay and reverse execution stay in jet debug per D-DX-DEBUGBACK1 through a native recorder. (3) jet repl: each input runs through the build-and-execute path (reuse :run). (4) Learn (REMOVED; e10 frozen, no current delivery): run the exercise as a child jet run and compare output. Owner: JitRemoval2. Context: $JET_STATE_ROOT/scratch/JitRemoval1/HANDOFF.md.\n\nCurrent scope: NO Learn evaluator retirement/reimplementation or browser lane; owner #4752 removes it, #4630 frozen e10. D-REPL-FAIL1=A supplies prefix-preserving recoverable failure and fatal resource-stop restart/lost-name behavior; retained producer still requires admission. #29 permits minimal port seams only, with dies-at-cutover ledger; #31 forbids skipping actual Jet runtime ports.",
+      "title": "jet repl on the native toolchain: bindings across inputs, typed echo, authority prompts, packages and failure recovery",
+      "body": "Destination: `jet repl` runs every input through the build-and-execute path (D-EXEC1=A, D-EXEC2=A: one runtime, O0 serves run, dev and compile-time code). Bindings survive across inputs and echo with their types. Inputs needing authority ask once. Packages work with the same pins and permissions as a script (D-REPL-PKG1=A). A run-time failure keeps what ran, and a trap restarts and lists the lost bindings (D-REPL-FAIL1=A). Input is classified by the parser.\n\nThe tests/cases/repl rows in tests/known-failing.tsv are on #6418 (unbuilt `jet repl`, E2104).\n\nOut of scope: the Learn evaluator (owner #4752 removes it; #4630 is frozen at e10). Dev canvas and debug moved off the evaluator under #5931, #6618 and #6730.\n\nSource: #4891 (native REPL bindings), #4719 and #3122 c9.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e14",
@@ -50596,6 +50615,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: the title and body now cover the REPL alone (dev canvas and debug have their own cards), and every criterion has a proof."
+        },
         {
           "at": "2026-11-12",
           "by": "Main",
@@ -50714,7 +50738,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-07T09:50:33.240Z",
-      "updated": "2026-11-15T04:21:47.654Z",
+      "updated": "2026-11-15T04:22:24.462Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -52080,12 +52104,12 @@
         },
         {
           "n": 5,
-          "text": "No two registry flags share a meaning, and a removed spelling gets the ordinary unknown-flag error with its normal suggestion. Proof: `jet test tests/guards --filter cli_flag_meanings_unique`.",
+          "text": "No two registry flags share a meaning: of each pair the Jet CLI accepts today (--route/--path, --cook/--cook-mode, --force-clean/--clean in Compiler/JetCli/Source/Cli/Commands.jet), one spelling is kept, and a removed spelling gets the ordinary unknown-flag error with its normal suggestion. Proof: `jet test tests/guards --filter cli_flag_meanings_unique`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:18:55.866Z"
+          "at": "2026-11-15T04:22:02.011Z"
         },
         {
           "n": 6,
@@ -52126,7 +52150,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T15:49:16.817Z",
-      "updated": "2026-11-15T04:19:29.488Z",
+      "updated": "2026-11-15T04:22:02.012Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -55843,7 +55867,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: every criterion has a proof; c1 drops warnings (D-NO-WARNINGS1=A)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -55927,7 +55957,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-17T23:30:06.429Z",
-      "updated": "2026-11-15T04:21:39.596Z",
+      "updated": "2026-11-15T04:22:26.396Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -106073,12 +106103,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every case where one name silently wins is a registered tidy error with what/why/fix text, a `jet fix` rename, and a UI snapshot per case. Proof: `jet test Compiler --profile ui --filter name_wins_`.",
+          "text": "Every case where one name silently wins is a registered tidy error with what/why/fix text, a `jet fix` rename, and a UI snapshot per case. This includes a local marker that would resolve over a Jet built-in marker of the same name. Proof: `jet test Compiler --profile ui --filter name_wins_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:50:54.793Z"
+          "at": "2026-11-15T04:22:02.991Z"
         },
         {
           "n": 2,
@@ -106111,7 +106141,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:54.793Z",
-      "updated": "2026-11-15T03:50:54.793Z",
+      "updated": "2026-11-15T04:22:02.991Z",
       "updatedBy": "TowerKeeper-1"
     },
     {
@@ -213966,6 +213996,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:24:24.734Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eve9h3",
+      "note": "#2: proof; was: Probe F reports `nickname` (never read) and `Legacy` (never built) once each as tidy errors with a delete-or-rename fix: jet check and jet build list them and exit non-zero, and `jet run` runs with un"
+    },
+    {
+      "at": "2026-11-15T04:22:27.322Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0x5guom",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:22:26.396Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c07bi8ml",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:22:25.417Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:22:24.462Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0bk3yid",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:22:23.452Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0q38sm2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:22:22.517Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0q38sm2",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T04:22:20.696Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0bk3yid",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T04:22:18.868Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0q38sm2",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T04:22:17.792Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0q38sm2",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T04:22:16.708Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0q38sm2",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T04:22:15.538Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0q38sm2",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T04:22:14.468Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#25: strip debris; the source criterion was a generic \"every behavior works\" row; was: (was #1049 c1) Every behavior named by “core.compiler: schema-versioned CLI JSON mirror”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim sub"
+    },
+    {
+      "at": "2026-11-15T04:22:13.546Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#20: strip debris; proof; was: [#3266] Build, package and debug provenance fixtures cover export discovery, dependency features, the build graph, diagnostics, generated dependencies and exact source/executable identities. They neve"
+    },
+    {
+      "at": "2026-11-15T04:22:12.637Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#19: strip debris; proof; was: [#3199] Typed consumers read definitions, references, calls, effects, state_graphs, fact_registry and derivations. Values match exactly across the typed result and CLI JSON. A semantic-error result ke"
+    },
+    {
+      "at": "2026-11-15T04:22:11.642Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#18: strip debris; proof; was: [#3205] D-BIG-CAUSE1=A (ratified 2026-09-12): Same-code causes at different locations stay distinct and ordered. Missing locations stay unknown and never inherit the root file or span. Cause sources c"
+    },
+    {
+      "at": "2026-11-15T04:22:10.521Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#17: strip debris; proof; was: [#4089] Equivalent Jet-side two-file, pathless and source-free witnesses pass through the public API and report."
+    },
+    {
+      "at": "2026-11-15T04:22:09.489Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#13: proof; was: #3509 consumers read the same canonical checked source and result/error model."
+    },
+    {
+      "at": "2026-11-15T04:22:08.296Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#12: proof; was: No new runtime compiler service, AST mutation, third-party dependency or optional Core library is added."
+    },
+    {
+      "at": "2026-11-15T04:22:07.175Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#11: proof; was: The digest is computed or reused once per snapshot, never once per diagnostic or from re-read disk text."
+    },
+    {
+      "at": "2026-11-15T04:22:06.079Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#10: proof; was: The typed CompilerDiagnostic value (JetSema), the host DiagnosticCodec and the CLI/LSP report cut over together to one versioned shape; package-model schemas are unchanged."
+    },
+    {
+      "at": "2026-11-15T04:22:05.093Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#9: proof; was: No diagnostic inherits the entry path because its own origin is missing; an imported/local contrast fixture run through the self-hosted compiler identifies the right document for each diagnostic."
+    },
+    {
+      "at": "2026-11-15T04:22:04.061Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#8: proof; was: Every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, and genuinely source-free diagnostics carry no origin."
+    },
+    {
+      "at": "2026-11-15T04:22:02.991Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00gioxt",
+      "note": "#1: carry marker root resolution from #4022 c9; was: Every case where one name silently wins is a registered tidy error with what/why/fix text, a `jet fix` rename, and a UI snapshot per case. Proof: `jet test Compiler --profile ui --filter name_wins_`."
+    },
+    {
+      "at": "2026-11-15T04:22:02.012Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#5: carry the pairs from #4022 c20; was: No two registry flags share a meaning, and a removed spelling gets the ordinary unknown-flag error with its normal suggestion. Proof: `jet test tests/guards --filter cli_flag_meanings_unique`."
+    },
     {
       "at": "2026-11-15T04:22:00.726Z",
       "by": "TowerKeeper-1",
