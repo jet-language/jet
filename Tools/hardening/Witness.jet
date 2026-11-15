@@ -171,16 +171,17 @@ with_frame: fn(chain: [String], frame: String) -> [String] Never! {
     out
 }
 
-probe_matches: fn(expression: Expr, probe: Probe) -> Bool Never! {
+probe_matches: fn(tables: ASTTables, expression: Expr, probe: Probe) -> Bool Never! {
     if probe == {
         .Member(alias, member) -> {
             if expression == .MethodCall(receiver, method, _, _, _, _, _) {
                 if method != member -> return false
-                if receiver == .Ident(name, _, _) -> return name == alias
+                receiver_view: ast_expr(tables, receiver)
+                if receiver_view == .Ident(name, _, _) -> return name == alias
                 // `alias.Type<T>.member(...)`: the member is reached through a
                 // generic receiver of the module.
-                if receiver == .Field(base, _, _, _) {
-                    if base == .Ident(name, _, _) -> return name == alias
+                if receiver_view == .Field(base, _, _, _) {
+                    if ast_expr(tables, base) == .Ident(name, _, _) -> return name == alias
                 }
             }
             false
@@ -233,7 +234,7 @@ walk_args: fn(tables: ASTTables, args: [CallArg], frame: String, chain: [String]
 
 walk_expr: fn(tables: ASTTables, expression: ExprNode, chain: [String], walk: Walk, hits: &[Hit]) Never! {
     view: ast_expr(tables, expression)
-    if probe_matches(view, walk.probe) {
+    if probe_matches(tables, view, walk.probe) {
         at: hit_at(view)
         known := false
         loop old in hits {

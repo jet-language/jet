@@ -1,7 +1,7 @@
 // What the graph projection reads off the source and the semantic index:
 // ids, source offsets, titles, value types, and effect badges.
 use {
-    jet_foundation.[BinOp, Binding, Expr, Func, LValue, Span, Type, foundation_byte_text, type_name]
+    jet_foundation.[ASTTables, BinOp, Binding, ExprNode, Func, LValue, Span, Type, ast_expr, foundation_byte_text, type_name]
     jet_parser.[jfmt_bin_op_spell, jfmt_stmt_span]
     jet_semindex.[SemCallable, SemIndex]
 }
@@ -82,8 +82,8 @@ lvalue_type: fn(g: GraphBuilder, target: LValue) -> String Never! {
     "unknown"
 }
 
-expr_title: fn(expr: Expr) -> String Never! {
-    if expr == {
+expr_title: fn(tables: ASTTables, expr: ExprNode) -> String Never! {
+    if ast_expr(tables, expr) == {
         .StructLit(_, _, _, _, _, _, _, _) -> "construct"
         .EnumLit(_, _, _, _, _, _, _) -> "variant"
         .Lambda(_, _) -> "lambda"
@@ -116,8 +116,8 @@ binding_type: fn(g: GraphBuilder, name: String, b: Binding) -> String Never! {
     "unknown"
 }
 
-expr_type: fn(g: GraphBuilder, index: SemIndex, expr: Expr) -> String Never! {
-    if expr == {
+expr_type: fn(g: GraphBuilder, index: SemIndex, expr: ExprNode) -> String Never! {
+    if ast_expr(g.tables, expr) == {
         .Int(_, _, _, _, _) -> "Int"
         .Float(_, _, is_f32, _, _) -> if is_f32 -> "F32" else -> "Float"
         .Bool(_, _, _) -> "Bool"
@@ -194,8 +194,8 @@ call_has_effects: fn(index: SemIndex, name: String) -> Bool Never! {
     function_has_effects(index, name) ?? true
 }
 
-pure_leaf: fn(expr: Expr) -> Bool Never! {
-    if expr == {
+pure_leaf: fn(tables: ASTTables, expr: ExprNode) -> Bool Never! {
+    if ast_expr(tables, expr) == {
         .Str(_, _, _) -> true
         .Int(_, _, _, _, _) -> true
         .Float(_, _, _, _, _) -> true
@@ -206,37 +206,37 @@ pure_leaf: fn(expr: Expr) -> Bool Never! {
         .OptField(_, _, _, _, _, _) -> true
         .Absent(_, _) -> true
         .Todo(_, _, _) -> true
-        .Unary(_, inner, _, _) -> pure_leaf(inner)
-        .Paren(inner, _, _) -> pure_leaf(inner)
-        .Copy(inner, _, _) -> pure_leaf(inner)
-        .Binary(_, left, right, _, _) -> pure_leaf(left) && pure_leaf(right)
+        .Unary(_, inner, _, _) -> pure_leaf(tables, inner)
+        .Paren(inner, _, _) -> pure_leaf(tables, inner)
+        .Copy(inner, _, _) -> pure_leaf(tables, inner)
+        .Binary(_, left, right, _, _) -> pure_leaf(tables, left) && pure_leaf(tables, right)
         .CompareChain(operands, _, _, _, _) -> {
             loop operand in operands {
-                if !pure_leaf(operand) -> return false
+                if !pure_leaf(tables, operand) -> return false
             }
             true
         }
         .MapLit(entries, _, _) -> {
             loop entry in entries {
-                if !pure_leaf(entry.key) || !pure_leaf(entry.value) -> return false
+                if !pure_leaf(tables, entry.key) || !pure_leaf(tables, entry.value) -> return false
             }
             true
         }
         .TupleLit(fields, _, _, _) -> {
             loop field in fields {
-                if !pure_leaf(field.value) -> return false
+                if !pure_leaf(tables, field.value) -> return false
             }
             true
         }
-        .Ok(inner, _, _) -> pure_leaf(inner)
-        .Err(inner, _, _) -> pure_leaf(inner)
-        .Present(inner, _, _) -> pure_leaf(inner)
+        .Ok(inner, _, _) -> pure_leaf(tables, inner)
+        .Err(inner, _, _) -> pure_leaf(tables, inner)
+        .Present(inner, _, _) -> pure_leaf(tables, inner)
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> false
     }
 }
 
-wire_ident_refs: fn(g: &GraphBuilder, expr: Expr, input_pin: String) {
-    if expr == .Ident(name, span, _) {
+wire_ident_refs: fn(g: &GraphBuilder, expr: ExprNode, input_pin: String) {
+    if ast_expr(g.tables, expr) == .Ident(name, span, _) {
         if g.local_pins.get(name) == .Val(pin) {
             add_wire_with_span(g, pin, input_pin, "data", Val(span))
         }

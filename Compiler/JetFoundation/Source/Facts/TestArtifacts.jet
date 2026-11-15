@@ -104,9 +104,9 @@ checked_test_artifact_function_ref: fn(module_identity: ModuleID, module_text: S
 // The checked
 // `expected_fail:` marker argument is the test's flag. As with the test name,
 // only a literal argument is materialized here.
-checked_test_expected_fail: fn(test: TestDef) -> Bool Never! {
+checked_test_expected_fail: fn(tables: ASTTables, test: TestDef) -> Bool Never! {
     if test.expected_fail_expr == .Val(expression) {
-        if expression == .Bool(value, _, _) -> return value
+        if ast_expr(tables, expression) == .Bool(value, _, _) -> return value
     }
     test.expected_fail
 }
@@ -114,12 +114,12 @@ checked_test_expected_fail: fn(test: TestDef) -> Bool Never! {
 // The checked `faults:` marker list's effect paths (`Rand`,
 // `FS.Read`) are the test's selectors. Sema reports E0119 for an unknown
 // root, so each checked element is an effect path.
-checked_test_faults: fn(test: TestDef) -> [String] Never! {
+checked_test_faults: fn(tables: ASTTables, test: TestDef) -> [String] Never! {
     if test.faults_expr == .Val(expression) {
-        if expression == .ListLit(elements, _, _) {
+        if ast_expr(tables, expression) == .ListLit(elements, _, _) {
             faults := [String]{}
             loop element in elements {
-                if checked_test_fault_path(element) == .Val(path) -> faults.push(path)
+                if checked_test_fault_path(tables, element) == .Val(path) -> faults.push(path)
             }
             return faults
         }
@@ -127,11 +127,11 @@ checked_test_faults: fn(test: TestDef) -> [String] Never! {
     test.faults
 }
 
-checked_test_fault_path: fn(expression: Expr) -> String? Never! {
-    if expression == {
+checked_test_fault_path: fn(tables: ASTTables, expression: ExprNode) -> String? Never! {
+    if ast_expr(tables, expression) == {
         .Ident(name, _, _) -> Val(name)
         .Field(base, member, _, _) -> {
-            path: checked_test_fault_path(base) ?? return None
+            path: checked_test_fault_path(tables, base) ?? return None
             Val("{path}.{member}")
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
@@ -230,8 +230,8 @@ checked_test_artifact_fact: fn(tables: ASTTables, module_identity: ModuleID, mod
         span: test.span,
         kind: if test.params.len() == 0 -> TTestKind.Unit else -> TTestKind.Property,
         parameters: parameters,
-        faults: checked_test_faults(test),
-        expected_failure: checked_test_expected_fail(test),
+        faults: checked_test_faults(tables, test),
+        expected_failure: checked_test_expected_fail(tables, test),
         contract_generated: false,
         eligibility: None,
         generation_unavailable_reason: None,

@@ -3,7 +3,7 @@
 // facts Canvas reads beside the graphs.
 use {
     jet_driver.[JetDriverDocModule]
-    jet_foundation.[Func, Item, Span, Type, access_sigil, type_name]
+    jet_foundation.[ASTTables, Func, Item, Span, Type, access_sigil, type_name]
     jet_parser.[jet_format_source]
     jet_semindex.[SEMINDEX_SCHEMA_VERSION, SemEffectProjection, SemIndex]
 }
@@ -39,6 +39,8 @@ Projection: struct {
 
 GraphBuilder: struct {
     graph_id: String
+    // The AST tables of the function's module.
+    tables: ASTTables
     nodes: [NodeRec]{[NodeRec]{}}
     pins: [PinRec]{[PinRec]{}}
     wires: [WireRec]{[WireRec]{}}
@@ -160,7 +162,7 @@ collect_item_graphs: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, i
 }
 
 add_function_graph: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, f: Func, ledger_name: String, sink: &GraphSink) {
-    graph: project_func(index, doc.path, doc.source, f)
+    graph: project_func(index, doc.tables, doc.path, doc.source, f)
     loop inline in graph.inline_exprs {
         sink.inline_exprs.push(InlineExpr{id: inline.id, span: inline.span})
     }
@@ -254,12 +256,12 @@ collect_pattern_variants: fn(items: [Item], catalog: &[String:[String]]) {
     }
 }
 
-project_func: fn(index: SemIndex, module_display: String, module_src: String, f: Func) -> GraphBuilder {
+project_func: fn(index: SemIndex, tables: ASTTables, module_display: String, module_src: String, f: Func) -> GraphBuilder {
     id: graph_id(module_display, f)
-    g := GraphBuilder{graph_id: id}
+    g := GraphBuilder{graph_id: id, tables: tables}
     entry_id: "{id}:entry"
     entry_descriptor: descriptor_for_id("entry")
-    g.nodes.push(NodeRec{id: entry_id, kind: entry_descriptor.kind, archetype: entry_descriptor.archetype, title: f.name, span: f.name_span, x: 40, y: 40, badges: effect_badges(index, f.name), affordances: [String]{"source_jump", "insert_call", "rename_function", "edit_function_signature", "create_function"}, meta_json: meta_attr_json(f.meta)})
+    g.nodes.push(NodeRec{id: entry_id, kind: entry_descriptor.kind, archetype: entry_descriptor.archetype, title: f.name, span: f.name_span, x: 40, y: 40, badges: effect_badges(index, f.name), affordances: [String]{"source_jump", "insert_call", "rename_function", "edit_function_signature", "create_function"}, meta_json: meta_attr_json(tables, f.meta)})
     loop p in f.params {
         pin_id: "{entry_id}:out:{p.name}"
         ty: type_name(p.ty)

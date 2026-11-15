@@ -856,7 +856,7 @@ validated_collapse_selection: fn(checker: LSPChecker, path: String, src: String,
     func: checked_func_for_graph(checker, path, src, graph_id)
     locs := [StatementLoc]{}
     block := [Int]{}
-    collect_statement_locs(src, func.body, block, locs)
+    collect_statement_locs(func.tables, src, func.body, block, locs)
     first: collapse_first(locs, requested.start) ?? return Err(edit_error("bad_request", "Canvas collapse must select whole statements from this graph"))
     last: collapse_last(locs, requested.end) ?? return Err(edit_error("bad_request", "Canvas collapse must select whole statements from this graph"))
     if !same_block(locs[first].block, locs[last].block) || locs[first].index > locs[last].index {

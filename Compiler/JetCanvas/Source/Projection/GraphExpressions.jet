@@ -1,7 +1,7 @@
 // The data side of a graph: value providers, operator and call nodes, and the
 // wires from them into the pins that read them.
 use {
-    jet_foundation.[Binding, Expr, Span, access_sigil, expr_span]
+    jet_foundation.[ASTTables, Binding, ExprNode, Span, access_sigil, ast_expr, ast_expr_span]
     jet_parser.[jfmt_bin_op_spell]
     jet_semindex.[SemIndex]
 }
@@ -13,66 +13,71 @@ ExprPlacement: enum {
     Data
 }
 
-connect_expr_to_input: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: Int, role: String, owner_node_id: String, input_pin: String, x: Int, y: Int) {
-    connect_expr_to_input_with_span(g, index, src, expr, expr_span(expr), ordinal, role, owner_node_id, input_pin, x, y)
+connect_expr_to_input: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: ExprNode, ordinal: Int, role: String, owner_node_id: String, input_pin: String, x: Int, y: Int) {
+    inline_span: ast_expr_span(g.tables, expr)
+    connect_expr_to_input_with_span(g, index, src, expr, inline_span, ordinal, role, owner_node_id, input_pin, x, y)
 }
 
 // Compound-assignment sema gives the binary node the target span; its
 // original right-hand side retains the actual source end.
-expr_source_end: fn(expr: Expr) -> Int {
-    if expr == .Binary(_, left, right, _, _) {
-        left_end: expr_source_end(left)
-        right_end: expr_source_end(right)
+expr_source_end: fn(tables: ASTTables, expr: ExprNode) -> Int {
+    if ast_expr(tables, expr) == .Binary(_, left, right, _, _) {
+        left_end: expr_source_end(tables, left)
+        right_end: expr_source_end(tables, right)
         return if left_end > right_end -> left_end else -> right_end
     }
-    expr_span(expr).end
+    ast_expr_span(tables, expr).end
 }
 
 // From the binding's name through its initializer and any closing
 // parentheses the initializer leaves open.
-binding_source_span: fn(src: String, binding: Binding) -> Span {
+binding_source_span: fn(tables: ASTTables, src: String, binding: Binding) -> Span {
     bytes: src.bytes()
-    init_end := expr_source_end(binding.init)
+    init_end := expr_source_end(tables, binding.init)
     loop init_end < bytes.len() && is_space_byte(Int{bytes[init_end]}) -> init_end += 1
     if init_end < bytes.len() && bytes[init_end] == 40 -> init_end += 1
-    init_span: span_through_closing_parens(src, Span{start: expr_span(binding.init).start, end: init_end})
+    init_span: span_through_closing_parens(src, Span{start: ast_expr_span(tables, binding.init).start, end: init_end})
     Span{start: binding.name_span.start, end: init_span.end}
 }
 
-binding_init_span: fn(src: String, binding: Binding) -> Span {
-    end: expr_source_end(binding.init)
-    start := if binding.sigil_span == .Val(sigil) -> sigil.end else -> expr_span(binding.init).start
+binding_init_span: fn(tables: ASTTables, src: String, binding: Binding) -> Span {
+    end: expr_source_end(tables, binding.init)
+    start := if binding.sigil_span == .Val(sigil) -> sigil.end else -> ast_expr_span(tables, binding.init).start
     bytes: src.bytes()
     loop start < end && start < bytes.len() && is_space_byte(Int{bytes[start]}) -> start += 1
     Span{start: start, end: end}
 }
 
-connect_expr_to_input_with_span: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr, inline_span: Span, ordinal: Int, role: String, owner_node_id: String, input_pin: String, x: Int, y: Int) {
+connect_expr_to_input_with_span: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: ExprNode, inline_span: Span, ordinal: Int, role: String, owner_node_id: String, input_pin: String, x: Int, y: Int) {
     provider_y: data_provider_y(y, ordinal)
     if project_value_node(g, index, src, expr, ordinal, role, x, provider_y) == .Val(out) {
         add_inline(g, owner_node_id, ordinal, role, src, inline_span)
-        add_wire_with_span(g, out, input_pin, "data", Val(expr_span(expr)))
+        wire_span: ast_expr_span(g.tables, expr)
+        add_wire_with_span(g, out, input_pin, "data", Val(wire_span))
         return
     }
-    if pure_leaf(expr) && !is_binary(expr) {
+    if pure_leaf(g.tables, expr) && !is_binary(g.tables, expr) {
         add_inline(g, owner_node_id, ordinal, role, src, inline_span)
         wire_ident_refs(g, expr, input_pin)
         return
     }
     out: project_expr_node(g, index, src, expr, ordinal, x, provider_y, ExprPlacement.Data) ?? return
-    if details_composite_expr(expr) -> add_inline(g, owner_node_id, ordinal, role, src, inline_span)
-    add_wire_with_span(g, out, input_pin, "data", Val(expr_span(expr)))
+    if details_composite_expr(g.tables, expr) {
+        add_inline(g, owner_node_id, ordinal, role, src, inline_span)
+    }
+    wire_span: ast_expr_span(g.tables, expr)
+    add_wire_with_span(g, out, input_pin, "data", Val(wire_span))
 }
 
-is_binary: fn(expr: Expr) -> Bool Never! {
-    if expr == .Binary(_, _, _, _, _) -> return true
+is_binary: fn(tables: ASTTables, expr: ExprNode) -> Bool Never! {
+    if ast_expr(tables, expr) == .Binary(_, _, _, _, _) -> return true
     false
 }
 
 // Composite values, enum variants, and variant-style method calls keep an
 // inline editor beside their wire.
-details_composite_expr: fn(expr: Expr) -> Bool Never! {
-    if expr == {
+details_composite_expr: fn(tables: ASTTables, expr: ExprNode) -> Bool Never! {
+    if ast_expr(tables, expr) == {
         .ListLit(_, _, _) | .MapLit(_, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .TupleLit(_, _, _, _) -> true
         .Present(_, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .EnumLit(_, _, _, _, _, _, _) -> true
         .MethodCall(_, method, _, _, _, _, _) -> starts_uppercase(method)
@@ -84,8 +89,8 @@ data_provider_y: fn(y: Int, ordinal: Int) -> Int Never! { y + 96 + (ordinal % 2)
 
 // The getter or constant node that provides `expr`, or None when `expr` is
 // not a plain value.
-project_value_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: Int, role: String, x: Int, y: Int) -> String? {
-    if expr == {
+project_value_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: ExprNode, ordinal: Int, role: String, x: Int, y: Int) -> String? {
+    if ast_expr(g.tables, expr) == {
         .Place(inner, _, _, _) -> project_value_node(g, index, src, inner, ordinal, role, x, y)
         .Ident(name, span, _) -> {
             key: getter_key(index, name, span)
@@ -105,7 +110,7 @@ project_value_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Exp
             Val(pin)
         }
         .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Str(_, _, _) | .Char(_, _, _) | .Absent(_, _) | .Todo(_, _, _) -> {
-            span: expr_span(expr)
+            span: ast_expr_span(g.tables, expr)
             node_id: "{g.graph_id}:value:{ordinal}:{role}:{span.start}-{span.end}"
             add_node(g, node_id, "constant", snippet(src, span), span, x, y, [String]{"const"}, [String]{"edit_inline_expr", "source_jump"})
             ty: expr_type(g, index, expr)
@@ -156,16 +161,16 @@ canvas_ident_fragment: fn(name: String) -> String Never! {
 }
 
 // A game's `assets.image(...)`/`assets.sound(...)` receiver.
-game_assets_receiver: fn(expr: Expr) -> Bool Never! {
-    if expr == {
+game_assets_receiver: fn(tables: ASTTables, expr: ExprNode) -> Bool Never! {
+    if ast_expr(tables, expr) == {
         .Field(_, name, _, _) -> name == "assets"
-        .Paren(inner, _, _) -> game_assets_receiver(inner)
+        .Paren(inner, _, _) -> game_assets_receiver(tables, inner)
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> false
     }
 }
 
-project_expr_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: Int, x: Int, y: Int, placement: ExprPlacement) -> String? {
-    if expr == {
+project_expr_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: ExprNode, ordinal: Int, x: Int, y: Int, placement: ExprPlacement) -> String? {
+    if ast_expr(g.tables, expr) == {
         .Binary(op, left, right, span, _) -> {
             node_id: "{g.graph_id}:expr:{ordinal}:operator:{span.start}-{span.end}"
             add_node(g, node_id, "expression", jfmt_bin_op_spell(op), span, x, y, [String]{}, [String]{"edit_inline_expr", "source_jump"})
@@ -196,7 +201,7 @@ project_expr_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr
             variant_like: starts_uppercase(method)
             archetype: if variant_like || method_is_pure(index, method_span) -> "function_pure" else -> "function_exec"
             affordances := [String]{"insert_call", "source_jump"}
-            if ((method == "image" || method == "sound") && game_assets_receiver(receiver)) || method == "component" {
+            if ((method == "image" || method == "sound") && game_assets_receiver(g.tables, receiver)) || method == "component" {
                 affordances.push("edit_game_selection")
             }
             add_node(g, node_id, if variant_like -> "variant" else -> archetype, if variant_like -> method else -> ".{method}", method_span, x, y, [String]{}, affordances)
@@ -227,7 +232,8 @@ project_expr_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr
             loop (i, item) in items {
                 item_type: expr_type(g, index, item)
                 input: add_pin(g, node_id, "item{i + 1}", "input", item_type, "", false)
-                set_pin_source_span(g, input, expr_span(item))
+                item_span: ast_expr_span(g.tables, item)
+                set_pin_source_span(g, input, item_span)
                 set_pin_append(g, input, "remove_multi_input_element", i)
                 connect_expr_to_input(g, index, src, item, ordinal * 1000 + i + 1, "item{i + 1}", node_id, input, x - 220, y + i * 74)
             }
@@ -236,8 +242,9 @@ project_expr_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr
         }
         .Field(_, _, _, _) | .Paren(_, _, _) | .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> {
             node_id: "{g.graph_id}:expr:{ordinal}:expr"
-            span: expr_span(expr)
-            add_node(g, node_id, "expression", expr_title(expr), span, x, y, [String]{"expression"}, [String]{"edit_inline_expr", "source_jump"})
+            span: ast_expr_span(g.tables, expr)
+            title: expr_title(g.tables, expr)
+            add_node(g, node_id, "expression", title, span, x, y, [String]{"expression"}, [String]{"edit_inline_expr", "source_jump"})
             add_inline(g, node_id, ordinal, "value", src, span)
             ty: expr_type(g, index, expr)
             Val(add_pin(g, node_id, "value", "output", ty, "", false))

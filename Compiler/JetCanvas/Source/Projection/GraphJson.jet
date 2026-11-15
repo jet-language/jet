@@ -2,17 +2,20 @@
 // overlay wired over them, and their JSON.
 use {
     jet_foundation.[
+        ASTTables,
         DOC_COMMENT_PREFIX,
-        Expr,
+        ExprNode,
         Func,
         LValue,
         MetaAttr,
         NameLedger,
         Span,
-        Stmt,
+        StmtNode,
         Type,
         access_sigil,
-        expr_span,
+        ast_expr,
+        ast_expr_span,
+        ast_stmt,
         foundation_byte_text,
         name_ledger_declaration,
         type_name,
@@ -96,13 +99,13 @@ add_authority_region: fn(g: &GraphBuilder, ordinal: Int, title: String, required
     g.regions.push("{{\"region_id\":{json_str("{g.graph_id}:region:{ordinal}:authority")},\"kind\":\"authority\",\"title\":{json_str(title)},\"required_effects\":{json_strs(required_effects)},\"granted_effects\":{json_strs(granted_effects)},\"denied_effects\":{json_strs(denied_effects)},\"authority\":{json_str(authority)},\"source_span\":{span_json(span)}}}")
 }
 
-meta_attr_json: fn(meta: MetaAttr?) -> String? Never! {
+meta_attr_json: fn(tables: ASTTables, meta: MetaAttr?) -> String? Never! {
     value: meta ?? return None
     category := String?{None}
     tunable := false
     loop field in value.fields {
         if field == {
-            .Category(text, _) -> { category = literal_text(text) }
+            .Category(text, _) -> { category = literal_text(tables, text) }
             .Tunable(_) -> tunable = true
             .Maturity(_, _) | .Unknown(_, _, _) -> {}
         }
@@ -113,8 +116,8 @@ meta_attr_json: fn(meta: MetaAttr?) -> String? Never! {
 }
 
 // The text of a plain string literal.
-literal_text: fn(expr: Expr) -> String? Never! {
-    if expr == .Str(parts, _, _) {
+literal_text: fn(tables: ASTTables, expr: ExprNode) -> String? Never! {
+    if ast_expr(tables, expr) == .Str(parts, _, _) {
         text := ""
         loop part in parts {
             if part == .Lit(piece) -> text = "{text}{piece}" else -> return None
@@ -173,7 +176,7 @@ is_identifier_text: fn(text: String) -> Bool Never! {
     true
 }
 
-add_execution_overlay: fn(g: &GraphBuilder, src: String, body: [Stmt]) {
+add_execution_overlay: fn(g: &GraphBuilder, src: String, body: [StmtNode]) {
     exec_nodes := [NodeRec]{}
     loop node in g.nodes {
         // copy: the overlay below adds pins to g while it walks these nodes
@@ -237,7 +240,7 @@ empty_flow: fn() -> ExecutionFlow Never! {
     ExecutionFlow{entry: None, exits: [ExecutionEndpoint]{}}
 }
 
-execution_block: fn(g: &GraphBuilder, src: String, stmts: [Stmt]) -> ExecutionFlow {
+execution_block: fn(g: &GraphBuilder, src: String, stmts: [StmtNode]) -> ExecutionFlow {
     flow := empty_flow()
     exits := [ExecutionEndpoint]{}
     reachable := true
@@ -266,7 +269,7 @@ execution_block: fn(g: &GraphBuilder, src: String, stmts: [Stmt]) -> ExecutionFl
 switched_off: fn(marker_name: String) -> Bool Never! { marker_name == "Off" }
 
 // Wires every switch or `#If` arm to its body, and collects the arms' exits.
-execution_arms: fn(g: &GraphBuilder, src: String, stmt: Stmt, arm_bodies: [[Stmt]], else_body: [Stmt]?) -> ExecutionFlow {
+execution_arms: fn(g: &GraphBuilder, src: String, stmt: StmtNode, arm_bodies: [[StmtNode]], else_body: [StmtNode]?) -> ExecutionFlow {
     node: direct_execution_node(g, stmt) ?? return empty_flow()
     exits := [ExecutionEndpoint]{}
     arm_pins: node_has_arm_pins(g, node.id)
@@ -291,7 +294,7 @@ execution_arms: fn(g: &GraphBuilder, src: String, stmt: Stmt, arm_bodies: [[Stmt
     ExecutionFlow{entry: exec_input(node), exits: exits}
 }
 
-execution_loop: fn(g: &GraphBuilder, src: String, stmt: Stmt, body: [Stmt]) -> ExecutionFlow {
+execution_loop: fn(g: &GraphBuilder, src: String, stmt: StmtNode, body: [StmtNode]) -> ExecutionFlow {
     node: direct_execution_node(g, stmt) ?? return empty_flow()
     body_flow: execution_block(g, src, body)
     if exec_output(g, node.id, "body") == .Val(output) {
@@ -309,13 +312,13 @@ execution_loop: fn(g: &GraphBuilder, src: String, stmt: Stmt, body: [Stmt]) -> E
     ExecutionFlow{entry: exec_input(node), exits: exits}
 }
 
-execution_stmt: fn(g: &GraphBuilder, src: String, stmt: Stmt) -> ExecutionFlow {
-    if stmt == {
+execution_stmt: fn(g: &GraphBuilder, src: String, stmt: StmtNode) -> ExecutionFlow {
+    if ast_stmt(g.tables, stmt) == {
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
             bodies: loop arm in arms -> arm.body
             execution_arms(g, src, stmt, bodies, else_body)
         }
-        .ComptimeIf(_, _, then_body, else_body, _, _) -> execution_arms(g, src, stmt, [[Stmt]]{then_body}, else_body)
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> execution_arms(g, src, stmt, [[StmtNode]]{then_body}, else_body)
         .While(_, body, _, _, _) -> execution_loop(g, src, stmt, body)
         .For(_, _, _, _, body, _, _, _, _) -> execution_loop(g, src, stmt, body)
         .Loop(body, _, _, _) -> execution_loop(g, src, stmt, body)
@@ -331,7 +334,7 @@ execution_stmt: fn(g: &GraphBuilder, src: String, stmt: Stmt) -> ExecutionFlow {
         .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> {
             node: direct_execution_node(g, stmt) ?? return empty_flow()
             exits := [ExecutionEndpoint]{}
-            if !stmt_is_terminal(stmt) && exec_output(g, node.id, "then") == .Val(pin) {
+            if !stmt_is_terminal(g.tables, stmt) && exec_output(g, node.id, "then") == .Val(pin) {
                 exits.push(ExecutionEndpoint{pin: pin, span: node.span})
             }
             ExecutionFlow{entry: exec_input(node), exits: exits}
@@ -339,14 +342,14 @@ execution_stmt: fn(g: &GraphBuilder, src: String, stmt: Stmt) -> ExecutionFlow {
     }
 }
 
-stmt_is_terminal: fn(stmt: Stmt) -> Bool Never! {
-    if stmt == {
+stmt_is_terminal: fn(tables: ASTTables, stmt: StmtNode) -> Bool Never! {
+    if ast_stmt(tables, stmt) == {
         .Return(_, _) | .Break(_) | .BreakValue(_, _) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .Continue(_) | .ContinueLabel(_, _) -> true
         .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> false
     }
 }
 
-append_branch_path: fn(g: &GraphBuilder, src: String, output: String?, body: [Stmt], owner_span: Span, exits: &[ExecutionEndpoint]) {
+append_branch_path: fn(g: &GraphBuilder, src: String, output: String?, body: [StmtNode], owner_span: Span, exits: &[ExecutionEndpoint]) {
     pin: output ?? return
     body_flow: execution_block(g, src, body)
     if {
@@ -358,21 +361,21 @@ append_branch_path: fn(g: &GraphBuilder, src: String, output: String?, body: [St
     }
 }
 
-direct_execution_node: fn(g: GraphBuilder, stmt: Stmt) -> NodeRec? Never! {
-    anchor: stmt_execution_anchor(stmt)
+direct_execution_node: fn(g: GraphBuilder, stmt: StmtNode) -> NodeRec? Never! {
+    anchor: stmt_execution_anchor(g.tables, stmt)
     loop node in g.nodes {
         if !node_wants_exec(node) || node.kind == "entry" -> next
-        matched: if stmt == .Val(binding) -> node.kind == "binding" && node.title == binding.name && node.span.start == binding.name_span.start else -> node.span.start == anchor.start && node.span.end == anchor.end
+        matched: if ast_stmt(g.tables, stmt) == .Val(binding) -> node.kind == "binding" && node.title == binding.name && node.span.start == binding.name_span.start else -> node.span.start == anchor.start && node.span.end == anchor.end
         if matched -> return Val(node)
     }
     None
 }
 
-stmt_execution_anchor: fn(stmt: Stmt) -> Span Never! {
-    if stmt == {
+stmt_execution_anchor: fn(tables: ASTTables, stmt: StmtNode) -> Span Never! {
+    if ast_stmt(tables, stmt) == {
         .Val(binding) -> binding.name_span
         .Assign(target, _, _, _) -> lvalue_span(target)
-        .Expr(expr) -> expr_execution_anchor(expr)
+        .Expr(expr) -> expr_execution_anchor(tables, expr)
         .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> jfmt_stmt_span(stmt)
     }
 }
@@ -385,13 +388,13 @@ lvalue_span: fn(target: LValue) -> Span Never! {
     }
 }
 
-expr_execution_anchor: fn(expr: Expr) -> Span Never! {
-    if expr == {
+expr_execution_anchor: fn(tables: ASTTables, expr: ExprNode) -> Span Never! {
+    if ast_expr(tables, expr) == {
         .Call(call, _) -> call.name_span
         .MethodCall(_, _, method_span, _, _, _, _) -> method_span
         .Try(_, span, _, _, _) -> span
-        .OrFallback(value, _, _, _, _) -> expr_execution_anchor(value)
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> expr_span(expr)
+        .OrFallback(value, _, _, _, _) -> expr_execution_anchor(tables, value)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> ast_expr_span(tables, expr)
     }
 }
 
@@ -492,16 +495,16 @@ graph_to_json: fn(g: GraphBuilder, f: Func, src: String, visibility: String) -> 
         if node.kind == "return" -> exit_nodes.push(json_str(node.id))
     }
     event_views: callback_event_view_json(g.graph_id, f) ?? ""
-    "{{\"graph_id\":{json_str(g.graph_id)},\"title\":{json_str(f.name)},\"function\":{function_metadata_json(src, f, visibility)},\"event_views\":[{event_views}],\"entry_node\":{json_str("{g.graph_id}:entry")},\"exit_nodes\":[{exit_nodes.join(",")}],\"nodes\":[{nodes.join(",")}],\"pins\":[{pins.join(",")}],\"wires\":[{wires.join(",")}],\"regions\":[{g.regions.join(",")}],\"inline_exprs\":[{inline.join(",")}],\"rails\":{rails_json(g)},\"layout_hints\":{{\"algorithm\":\"source-order-v1\",\"direction\":\"data-left-to-right/control-top-to-bottom\"}}}}"
+    "{{\"graph_id\":{json_str(g.graph_id)},\"title\":{json_str(f.name)},\"function\":{function_metadata_json(g.tables, src, f, visibility)},\"event_views\":[{event_views}],\"entry_node\":{json_str("{g.graph_id}:entry")},\"exit_nodes\":[{exit_nodes.join(",")}],\"nodes\":[{nodes.join(",")}],\"pins\":[{pins.join(",")}],\"wires\":[{wires.join(",")}],\"regions\":[{g.regions.join(",")}],\"inline_exprs\":[{inline.join(",")}],\"rails\":{rails_json(g)},\"layout_hints\":{{\"algorithm\":\"source-order-v1\",\"direction\":\"data-left-to-right/control-top-to-bottom\"}}}}"
 }
 
 func_return_name: fn(f: Func) -> String Never! {
     if f.return_type == .Val(ty) -> type_name(ty) else -> "Unit"
 }
 
-function_metadata_json: fn(src: String, f: Func, visibility: String) -> String Never! {
+function_metadata_json: fn(tables: ASTTables, src: String, f: Func, visibility: String) -> String Never! {
     params: loop p in f.params -> {
-        default: if p.default == .Val(expr) -> json_str(snippet(src, expr_span(expr))) else -> "null"
+        default: if p.default == .Val(expr) -> json_str(snippet(src, ast_expr_span(tables, expr))) else -> "null"
         "{{\"name\":{json_str(p.name)},\"type\":{json_str(type_name(p.ty))},\"ability\":{json_str(access_sigil(p.convention))},\"default\":{json_bool(p.default != None)},\"default_source\":{default},\"source_span\":{span_json(p.name_span)}}}"
     }
     effects := [String]{}
@@ -509,8 +512,8 @@ function_metadata_json: fn(src: String, f: Func, visibility: String) -> String N
         loop entry in entries -> effects.push(json_str(entry.name))
     }
     effect_via: if f.effect_via == .Val(via) -> json_str(via.name) else -> "null"
-    meta: meta_attr_json(f.meta) ?? "null"
-    "{{\"name\":{json_str(f.name)},\"signature\":{json_str(function_signature_text(src, f))},\"visibility\":{json_str(visibility)},\"docs\":{json_str(doc_comment_before(src, f.name_span.start))},\"pure\":{json_bool(f.is_pure)},\"unsafe\":{json_bool(f.is_unsafe)},\"effects\":[{effects.join(",")}],\"effect_via\":{effect_via},\"returns\":{json_str(func_return_name(f))},\"params\":[{params.join(",")}],\"meta\":{meta},\"source_span\":{span_json(f.span)},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}"
+    meta: meta_attr_json(tables, f.meta) ?? "null"
+    "{{\"name\":{json_str(f.name)},\"signature\":{json_str(function_signature_text(tables, src, f))},\"visibility\":{json_str(visibility)},\"docs\":{json_str(doc_comment_before(src, f.name_span.start))},\"pure\":{json_bool(f.is_pure)},\"unsafe\":{json_bool(f.is_unsafe)},\"effects\":[{effects.join(",")}],\"effect_via\":{effect_via},\"returns\":{json_str(func_return_name(f))},\"params\":[{params.join(",")}],\"meta\":{meta},\"source_span\":{span_json(f.span)},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}"
 }
 
 ledger_function_visibility: fn(ledger: NameLedger, module_index: Int, name: String) -> String Never! {
@@ -524,10 +527,12 @@ ledger_function_visibility: fn(ledger: NameLedger, module_index: Int, name: Stri
 
 // Declarations are public by default, so the signature carries no visibility
 // marker.
-function_signature_text: fn(src: String, f: Func) -> String Never! {
+function_signature_text: fn(tables: ASTTables, src: String, f: Func) -> String Never! {
     params: loop p in f.params -> {
         text := "{p.name}: {type_name(p.ty)}"
-        if p.default == .Val(default) -> text = "{text}{{{snippet(src, expr_span(default))}}}"
+        if p.default == .Val(default) {
+            text = "{text}{{{snippet(src, ast_expr_span(tables, default))}}}"
+        }
         text
     }
     out := "{f.name}: fn({params.join(", ")}) {func_return_name(f)}"
