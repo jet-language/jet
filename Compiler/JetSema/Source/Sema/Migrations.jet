@@ -75,7 +75,7 @@ sema_migration_canonical_shape: fn(definition: StructDef, migrations: [Migration
         key := sema_migration_json_key(definition, style, definition.fields[field_index].name)
         names.push(SemaMigrationFieldName{field: definition.fields[field_index].name, json_key: key})
         if {
-            sema_checked_marker(definition.fields[field_index].serde_markers, "Skip") != None -> skipped = sema_migration_insert_sorted(skipped, key)
+            sema_serde_items_skips(definition.fields[field_index]) -> skipped = sema_migration_insert_sorted(skipped, key)
             else -> current = sema_migration_insert_sorted(current, key)
         }
     }

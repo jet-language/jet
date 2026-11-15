@@ -1,0 +1,126 @@
+// The options of `#Codable`, the one serialization marker. On a type it
+// takes `only: .Encode | .Decode` (one direction; both when absent),
+// `unknown: .Deny` (a decoded key the struct doesn't declare fails),
+// `tag: .External | .Field("kind") | .None` (how an enum names its case),
+// `from: .Base` (a distinct type codes as its base) and the bare word
+// `published` (the struct's wire shape is pinned for schema snapshots and
+// migrations). On a field it takes one form: `.Skip` leaves the field off the
+// wire and `.Flatten` splices a struct field's keys into the enclosing object.
+// The parser, sema, the formatter and the CLI read every option here.
+
+CODABLE_ONLY: "only"
+CODABLE_UNKNOWN: "unknown"
+CODABLE_TAG: "tag"
+CODABLE_FROM: "from"
+CODABLE_PUBLISHED: "published"
+
+// The `#Codable` marker among `markers`, if one is written. `#!Codable`
+// refuses the codecs and carries no options.
+codable_marker: fn(markers: [Marker]) -> Marker? Never! {
+    loop marker in markers {
+        if marker.name == MARKER_CODABLE && !marker.negated -> return Val(marker)
+    }
+    None
+}
+
+// The argument written for the labeled option `label`.
+codable_option: fn(marker: Marker, label: String) -> Expr? Never! {
+    loop index in 0..<marker.arg_labels.len() {
+        if index >= marker.args.len() -> break
+        if marker.arg_labels[index] == .Val(written) && written.name == label {
+            if marker.args[index] == .Expr(value) -> return Val(value)
+        }
+    }
+    None
+}
+
+// The menu word of the labeled option `label` (`Encode` for `only: .Encode`).
+codable_option_word: fn(marker: Marker, label: String) -> String? Never! {
+    value: codable_option(marker, label) ?? return None
+    if value == .EnumLit(_, variant, _, _, _, _, _) -> return Val(variant)
+    None
+}
+
+// The field form of a `#Codable(.Skip)` or `#Codable(.Flatten)` marker: its
+// one unlabeled menu word.
+codable_form: fn(marker: Marker) -> String? Never! {
+    loop index in 0..<marker.args.len() {
+        if index < marker.arg_labels.len() && marker.arg_labels[index] != None -> next
+        if marker.args[index] == .Expr(value) && value == .EnumLit(_, variant, _, _, _, _, _) -> return Val(variant)
+    }
+    None
+}
+
+// Whether `#Codable` derives the codec trait `trait_name` (`Encode` or
+// `Decode`): both directions, unless `only:` names one.
+codable_derives: fn(marker: Marker, trait_name: String) -> Bool Never! {
+    only: codable_option_word(marker, CODABLE_ONLY) ?? return true
+    only == trait_name
+}
+
+// Whether a field's markers leave it off the wire (`#Codable(.Skip)`).
+codable_skips: fn(markers: [Marker]) -> Bool Never! {
+    marker: codable_marker(markers) ?? return false
+    codable_form(marker) == Val("Skip")
+}
+
+// Whether a field's markers splice its keys into the enclosing object
+// (`#Codable(.Flatten)`).
+codable_flattens: fn(markers: [Marker]) -> Bool Never! {
+    marker: codable_marker(markers) ?? return false
+    codable_form(marker) == Val("Flatten")
+}
+
+// Whether a type's decoder refuses a key it doesn't declare
+// (`#Codable(unknown: .Deny)`).
+codable_denies_unknown: fn(markers: [Marker]) -> Bool Never! {
+    marker: codable_marker(markers) ?? return false
+    codable_option_word(marker, CODABLE_UNKNOWN) == Val("Deny")
+}
+
+// Whether a distinct type codes as its base (`#Codable(from: .Base)`).
+codable_from_base: fn(marker: Marker) -> Bool Never! {
+    codable_option_word(marker, CODABLE_FROM) == Val("Base")
+}
+
+// Whether a struct's wire shape is published (`#Codable(published)`, or
+// `published: true`).
+codable_published: fn(markers: [Marker]) -> Bool Never! {
+    marker: codable_marker(markers) ?? return false
+    if codable_option(marker, CODABLE_PUBLISHED) == .Val(value) && value == .Bool(flag, _, _) -> return flag
+    loop index in 0..<marker.args.len() {
+        if index < marker.arg_labels.len() && marker.arg_labels[index] != None -> next
+        if marker.args[index] == .Expr(value) && value == .Ident(name, _, _) && name == CODABLE_PUBLISHED -> return true
+    }
+    false
+}
+
+// The key an enum's case name rides under beside its fields
+// (`tag: .Field("kind")`): "" when the key isn't written as one string, None
+// for any other tag. With no `tag:`, the case name keys the payload.
+codable_tag_field: fn(markers: [Marker]) -> String? Never! {
+    marker: codable_marker(markers) ?? return None
+    value: codable_option(marker, CODABLE_TAG) ?? return None
+    if value == .EnumLit(_, variant, _, args, _, _, _) && variant == "Field" -> return Val(codable_tag_key(args) ?? "")
+    None
+}
+
+// Whether an enum writes its payload alone, without its case name, and
+// decodes by trying each case's shape (`tag: .None`).
+codable_untagged: fn(markers: [Marker]) -> Bool Never! {
+    marker: codable_marker(markers) ?? return false
+    codable_option_word(marker, CODABLE_TAG) == Val("None")
+}
+
+// The key text of `tag: .Field("kind")`: its one string literal argument.
+codable_tag_key: fn(args: [EnumLitArg]) -> String? Never! {
+    if args.len() != 1 -> return None
+    value: if args[0] == {
+        .Positional(expression) -> expression
+        .Named(_, expression) -> expression
+    }
+    if value == .Str(parts, _, _) && parts.len() == 1 {
+        if parts[0] == .Lit(text) -> return Val(text)
+    }
+    None
+}

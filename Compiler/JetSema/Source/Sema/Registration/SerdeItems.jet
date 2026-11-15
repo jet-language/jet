@@ -65,6 +65,11 @@ use jet_foundation.[
     ast_comptime_key_to_value,
     ast_empty_call_arg_flags,
     ast_func,
+    codable_denies_unknown,
+    codable_flattens,
+    codable_skips,
+    codable_tag_field,
+    codable_untagged,
     compiler_take_rows,
     expr_span,
     owned_trait_codec,
@@ -135,7 +140,7 @@ sema_serde_expand_builtin_items: fn(items: &[Item], foreign: [String:Bool]) {
 sema_serde_items_struct_valid: fn(items: [Item], facts: SemaDeriveItemIndex, definition: StructDef, trait_name: String, auto: [String:Bool]) -> Bool Never! {
     decode: trait_name == "Decode"
     loop field in definition.fields {
-        if field.computed != None || sema_serde_items_has_marker(field.serde_markers, "Skip") || sema_serde_items_has_marker(field.serde_markers, "Flatten") -> next
+        if field.computed != None || sema_serde_items_skips(field) || sema_serde_items_flattens(field) -> next
         if !sema_serde_items_codable(items, facts, field.ty, trait_name, auto) -> return false
         if decode && sema_serde_items_union_shapes_invalid(items, field.ty, field.name_span) -> return false
     }
@@ -283,6 +288,22 @@ sema_serde_items_has_marker: fn(markers: [Marker], name: String) -> Bool Never! 
     false
 }
 
+// A field `#Codable(.Skip)` (or `#Skip`) leaves off the wire.
+sema_serde_items_skips: fn(field: Field) -> Bool Never! {
+    codable_skips(field.serde_markers) || sema_serde_items_has_marker(field.serde_markers, "Skip")
+}
+
+// A field `#Codable(.Flatten)` (or `#Flatten`) splices into its object.
+sema_serde_items_flattens: fn(field: Field) -> Bool Never! {
+    codable_flattens(field.serde_markers) || sema_serde_items_has_marker(field.serde_markers, "Flatten")
+}
+
+// A struct whose decoder refuses keys it doesn't declare:
+// `#Codable(unknown: .Deny)` (or `#DenyUnknownFields`).
+sema_serde_items_denies_unknown: fn(definition: StructDef) -> Bool Never! {
+    codable_denies_unknown(definition.type_markers) || sema_serde_items_has_marker(definition.serde_markers, "DenyUnknownFields")
+}
+
 // Rust `codec_params`: every type parameter a wire type mentions gains the
 // codec bound (10); phantom or skip-only parameters stay unbounded.
 sema_serde_items_codec_params: fn(params: [TypeParam], wire_types: [Type], encode: Bool, decode: Bool) -> [TypeParam] Never! {
@@ -312,7 +333,7 @@ sema_serde_items_codec_params: fn(params: [TypeParam], wire_types: [Type], encod
 sema_serde_items_struct_wire: fn(definition: StructDef) -> [Type] Never! {
     wire := [Type]{}
     loop field in definition.fields {
-        if field.computed == None && !sema_serde_items_has_marker(field.serde_markers, "Skip") -> wire.push(field.ty.copy())
+        if field.computed == None && !sema_serde_items_skips(field) -> wire.push(field.ty.copy())
     }
     wire
 }
@@ -330,7 +351,7 @@ sema_serde_items_struct_encode: fn(definition: StructDef, span: Span) -> Item Ne
 // for them.
 sema_serde_items_struct_streams: fn(definition: StructDef, items: [Item]) -> Bool Never! {
     loop field in definition.fields {
-        if field.computed == None && sema_serde_items_has_marker(field.serde_markers, "Flatten") -> return false
+        if field.computed == None && sema_serde_items_flattens(field) -> return false
     }
     sema_serde_items_migration_blocks(definition, items).len() == 0
 }
@@ -390,11 +411,11 @@ sema_serde_items_enum_decode: fn(definition: EnumDef, encode: Bool, decode: Bool
     sema_serde_items_impl(definition.name, "Decode", methods, definition.is_pub, definition.is_package_pub, span)
 }
 
-// An externally tagged enum (no `#Tag`, not `#Untagged`) whose variants with
+// An externally tagged enum (no tag key, not untagged) whose variants with
 // a payload have distinct wire keys reads from a `__DecodeSource` (`__read`,
 // sema_serde_items_enum_read_body); its `decode(tree)` keeps the tree body.
 sema_serde_items_enum_streams: fn(definition: EnumDef) -> Bool Never! {
-    if sema_serde_items_enum_tag(definition.serde_markers) != None || sema_serde_items_has_marker(definition.serde_markers, "Untagged") -> return false
+    if sema_serde_items_enum_tag(definition) != None || sema_serde_items_untagged(definition) -> return false
     style: sema_checked_rename_case(definition.serde_markers)
     keys := [String]{}
     loop variant in definition.variants {
@@ -581,9 +602,9 @@ sema_serde_items_struct_encode_body: fn(definition: StructDef, span: Span) -> [S
     pair_type: if pairs_type == .List(element) -> element.copy() else -> panic("the ordered Object payload is a list")
     body := [Stmt]{sema_serde_items_binding(pairs, Val(pairs_type), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span)}
     loop field in definition.fields {
-        if field.computed != None || sema_serde_items_has_marker(field.serde_markers, "Skip") -> next
+        if field.computed != None || sema_serde_items_skips(field) -> next
         key: sema_serde_items_field_key(definition, field)
-        if sema_serde_items_has_marker(field.serde_markers, "Flatten") {
+        if sema_serde_items_flattens(field) {
             nested: "jet_serde_nested_{field.name}"
             body.push(sema_serde_items_binding(nested, None, sema_serde_items_method_call(sema_serde_items_field_value(field, span), "encode", [Expr]{}, span), false, span))
             row: sema_serde_items_push_row(pairs, sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span), sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), pair_type, span)
@@ -630,8 +651,8 @@ sema_serde_items_decode_error_body: fn(error_name: String, missing: String?, key
 sema_serde_items_allowed_keys: fn(definition: StructDef, items: [Item]) -> [String]? Never! {
     keys := [String]{}
     loop field in definition.fields {
-        if field.computed != None || sema_serde_items_has_marker(field.serde_markers, "Skip") -> next
-        if sema_serde_items_has_marker(field.serde_markers, "Flatten") {
+        if field.computed != None || sema_serde_items_skips(field) -> next
+        if sema_serde_items_flattens(field) {
             name := ""
             if field.ty == .Named(flattened) -> name = flattened.copy() else -> return None
             inner := StructDef?{None}
@@ -775,7 +796,7 @@ sema_serde_items_struct_decode_body: fn(definition: StructDef, items: [Item], sp
         sema_serde_items_pattern_switch(sema_serde_items_copy(sema_serde_items_ident("tree", span), span), "Object", [String]{"jet_serde_root_entries"}, [Stmt]{sema_serde_items_assign_local("jet_serde_is_object", Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, span)}, Val([Stmt]{}), span),
         sema_serde_items_if(sema_serde_items_not(sema_serde_items_ident("jet_serde_is_object", span), span), [Stmt]{sema_serde_items_return(Expr.Err{value: Expr.ListLit{elements: [Expr]{sema_serde_items_field_error("", "expected an object", span)}, span: span, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}, span)}, span),
     }
-    if sema_serde_items_has_marker(definition.serde_markers, "DenyUnknownFields") {
+    if sema_serde_items_denies_unknown(definition) {
         if sema_serde_items_allowed_keys(definition, items) == .Val(keys) {
             allowed := [Expr]{}
             loop key in keys -> allowed.push(sema_serde_items_string(key, span))
@@ -789,7 +810,7 @@ sema_serde_items_struct_decode_body: fn(definition: StructDef, items: [Item], sp
     required_names := [String]{}
     required_keys := [String]{}
     loop field in definition.fields {
-        if field.computed != None || sema_serde_items_has_marker(field.serde_markers, "Skip") || sema_serde_items_has_marker(field.serde_markers, "Flatten") -> next
+        if field.computed != None || sema_serde_items_skips(field) || sema_serde_items_flattens(field) -> next
         if field.ty == .Option(_) || sema_serde_items_default_expr(field) != None -> next
         required_names.push("jet_serde_missing_required_{field.name}")
         required_keys.push(sema_serde_items_field_key(definition, field))
@@ -808,9 +829,9 @@ sema_serde_items_struct_decode_body: fn(definition: StructDef, items: [Item], sp
     loop field in definition.fields {
         if field.computed != None -> next
         value := Expr.Absent{span: span, id: AST_NODE_GENERATED}
-        if sema_serde_items_has_marker(field.serde_markers, "Skip") {
+        if sema_serde_items_skips(field) {
             value = sema_serde_items_default_expr(field) ?? sema_serde_items_zero_expr(field.ty, span)
-        } else if sema_serde_items_has_marker(field.serde_markers, "Flatten") {
+        } else if sema_serde_items_flattens(field) {
             index: field_values.len()
             result: "jet_serde_decode_{field.name}"
             slot: "jet_serde_field_value_{index}"
@@ -901,7 +922,7 @@ sema_serde_items_struct_read_body: fn(definition: StructDef, span: Span) -> [Stm
     loop field in definition.fields {
         if field.computed != None -> next
         value := Expr.Absent{span: span, id: AST_NODE_GENERATED}
-        if sema_serde_items_has_marker(field.serde_markers, "Skip") {
+        if sema_serde_items_skips(field) {
             value = sema_serde_items_default_expr(field) ?? sema_serde_items_zero_expr(field.ty, span)
         } else {
             key: sema_serde_items_field_key(definition, field)
@@ -974,7 +995,7 @@ sema_serde_items_struct_read_body: fn(definition: StructDef, span: Span) -> [Stm
         field_values.push(ExprField{name: field.name, name_span: span, value: value})
     }
     unknown := [Stmt]{}
-    if sema_serde_items_has_marker(definition.serde_markers, "DenyUnknownFields") {
+    if sema_serde_items_denies_unknown(definition) {
         key_name: "jet_serde_unknown_key"
         reason: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "E2412: unknown field `"}, StrPart.Interp{expr: sema_serde_items_ident(key_name, span), format: StrFormat.Display}, StrPart.Lit{text: "`"}}, span: span, id: AST_NODE_GENERATED}
         unknown.push(sema_serde_items_binding(key_name, None, sema_serde_items_reader_call("key_text", [Expr]{}, span), false, span))
@@ -1285,11 +1306,18 @@ sema_serde_items_static_string: fn(marker: Marker) -> String? Never! {
     None
 }
 
-sema_serde_items_enum_tag: fn(markers: [Marker]) -> String? Never! {
-    loop marker in markers {
+// An enum's internal tag key: `#Codable(tag: .Field("kind"))` (or `#Tag`).
+sema_serde_items_enum_tag: fn(definition: EnumDef) -> String? Never! {
+    if codable_tag_field(definition.type_markers) == .Val(key) -> return Val(key)
+    loop marker in definition.serde_markers {
         if marker.name == "Tag" -> return sema_serde_items_static_string(marker)
     }
     None
+}
+
+// An enum coded without a case name: `#Codable(tag: .None)` (or `#Untagged`).
+sema_serde_items_untagged: fn(definition: EnumDef) -> Bool Never! {
+    codable_untagged(definition.type_markers) || sema_serde_items_has_marker(definition.serde_markers, "Untagged")
 }
 
 // Rust `serde_enum_variant_key`: the variant's `#Rename` (its `json:` label
@@ -1316,8 +1344,8 @@ sema_serde_items_payload_bindings: fn(payload: VariantPayload, prefix: String) -
 }
 
 sema_serde_items_enum_encode_body: fn(definition: EnumDef, span: Span) -> [Stmt] Never! {
-    tag_key: sema_serde_items_enum_tag(definition.serde_markers)
-    untagged: sema_serde_items_has_marker(definition.serde_markers, "Untagged")
+    tag_key: sema_serde_items_enum_tag(definition)
+    untagged: sema_serde_items_untagged(definition)
     style: sema_checked_rename_case(definition.serde_markers)
     arms := [SwitchArm]{}
     loop variant in definition.variants {
@@ -1374,8 +1402,8 @@ sema_serde_items_no_matching_enum: fn(span: Span) -> Stmt Never! {
 }
 
 sema_serde_items_enum_decode_body: fn(definition: EnumDef, span: Span) -> [Stmt] Never! {
-    tag_key: sema_serde_items_enum_tag(definition.serde_markers)
-    untagged: sema_serde_items_has_marker(definition.serde_markers, "Untagged")
+    tag_key: sema_serde_items_enum_tag(definition)
+    untagged: sema_serde_items_untagged(definition)
     style: sema_checked_rename_case(definition.serde_markers)
     body := [Stmt]{}
     if untagged {

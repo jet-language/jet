@@ -69,6 +69,10 @@ use jet_foundation.[
     Variant,
     ViewProvenance,
     ViewProvenanceMap,
+    codable_flattens,
+    codable_skips,
+    codable_tag_field,
+    codable_untagged,
     expr_span,
 ]
 
@@ -447,10 +451,11 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
             .Enum(def) -> {
                 if def.name == name {
                     if !jfmt_has_name(def.derives, "Decode") -> return None
+                    if codable_tag_field(def.type_markers) != None -> return Val([SerdeWireShape]{SerdeWireShape.Object})
                     loop marker in def.serde_markers {
                         if marker.name == "Tag" -> return Val([SerdeWireShape]{SerdeWireShape.Object})
                     }
-                    untagged := false
+                    untagged := codable_untagged(def.type_markers)
                     loop marker in def.serde_markers {
                         if marker.name == MARKER_UNTAGGED -> untagged = true
                     }
@@ -2163,7 +2168,7 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
     } else if member.kind == JFMT_MEMBER_FIELD {
         field: body.fields[member.index]
         jfmt_emit_leading_declaration(f, field.name_span.start)
-        skipped := false
+        skipped := codable_skips(field.serde_markers) || codable_flattens(field.serde_markers)
         loop marker in field.serde_markers {
             if marker.name == MARKER_SKIP || marker.name == MARKER_FLATTEN -> skipped = true
         }

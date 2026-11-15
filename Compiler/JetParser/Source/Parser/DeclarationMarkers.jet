@@ -13,6 +13,7 @@ use jet_foundation.[
     JobMetadata,
     JobScope,
     JobSkip,
+    MARKER_CODABLE,
     MARKER_JOB,
     Marker,
     MaturityTag,
@@ -25,6 +26,7 @@ use jet_foundation.[
     StructLayout,
     UnOp,
     ast_job_metadata,
+    codable_derives,
     expr_span,
     jet_layout_integer_backing_name,
     marker_registered_signature,
@@ -33,7 +35,8 @@ use jet_foundation.[
 ]
 
 // A struct or enum's derives and serde markers. A family marker (`#Codable`)
-// derives each of its traits; a refused auto-derive (`!Debug`) derives nothing.
+// derives each of its traits, `#Codable(only: …)` the one it names; a
+// refused auto-derive (`!Debug`) derives nothing.
 parser_split_type_markers: fn(markers: [Marker]) -> (derives: [NamedSpan], serde_markers: [Marker]) Never! {
     serde := [Marker]{}
     derives := [NamedSpan]{}
@@ -41,7 +44,9 @@ parser_split_type_markers: fn(markers: [Marker]) -> (derives: [NamedSpan], serde
         if marker.negated && owned_trait_auto_derive_marker(marker.name) -> next
         family: owned_trait_family(marker.name, false)
         if family.len() > 0 {
-            loop name in family -> derives.push(NamedSpan{name: name, span: marker.name_span})
+            loop name in family {
+                if marker.name != MARKER_CODABLE || codable_derives(marker, name) -> derives.push(NamedSpan{name: name, span: marker.name_span})
+            }
             next
         }
         if marker.name == {

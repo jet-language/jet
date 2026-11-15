@@ -8,6 +8,7 @@ use {
         DistinctDef,
         IntegerRange,
         Item,
+        MARKER_CODABLE,
         Marker,
         MarkerCallArg,
         NamedSpan,
@@ -17,7 +18,10 @@ use {
         UnitFamilyMember,
         UnitRatio,
         UnitScaleProvenance,
+        codable_derives,
+        codable_from_base,
         owned_trait_bundle,
+        owned_trait_family,
     ]
     jet_lexer.[
         TOKEN_COLON,
@@ -132,9 +136,18 @@ parser_unit_family_ahead: fn(state: &JetParserState) -> Bool Never! {
 }
 
 // The traits a distinct type's bundle markers re-expose from its base type.
+// `#Codable(from: .Base)` re-exposes the base's codecs, in the directions
+// its `only:` keeps.
 parser_distinct_marker_derives: fn(markers: [Marker]) -> [NamedSpan] Never! {
     derives := [NamedSpan]{}
     loop marker in markers {
+        if marker.name == MARKER_CODABLE {
+            if marker.negated || !codable_from_base(marker) -> next
+            loop name in owned_trait_family(MARKER_CODABLE, false) {
+                if codable_derives(marker, name) -> derives.push(NamedSpan{name: name, span: marker.name_span})
+            }
+            next
+        }
         loop name in owned_trait_bundle(marker.name) -> derives.push(NamedSpan{name: name, span: marker.name_span})
     }
     derives

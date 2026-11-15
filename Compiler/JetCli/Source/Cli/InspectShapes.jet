@@ -18,7 +18,7 @@ use {
         diagnostic_from_registry,
         type_name,
     ]
-    jet_sema.[sema_checked_rename_case, sema_checked_wire_case, sema_registration_cli_arg_text]
+    jet_sema.[sema_checked_rename_case, sema_checked_wire_case, sema_registration_cli_arg_text, sema_serde_items_skips]
 }
 
 // `ShapeProjectionKind::ALL`, in order.
@@ -270,7 +270,7 @@ jet_cli_shape_fact: fn(source: String, structure: StructDef) -> JetCLIShapeBuild
         ty: jet_cli_shape_type(source, field.ty)
         default: if field.default_ct == .Val(value) -> jet_cli_shape_default(value) else -> None
         short: sema_registration_cli_arg_text(field.serde_markers, "short")
-        skip: field.computed != None || jet_cli_shape_marker(field.serde_markers, "Skip") != None
+        skip: field.computed != None || sema_serde_items_skips(field)
         fields.push(JetCLIShapeField{name: field.name, ty: ty, order: order, names: jet_cli_shape_field_names(structure, field), encoding: jet_cli_shape_encoding(ty), default: default, skip: skip, short: short})
     }
     seen := [String]{}

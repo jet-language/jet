@@ -1272,7 +1272,7 @@ sema_data_db_names: fn(target: Type, environment: SemaScopeEnvironment, program:
     rows := [Expr]{}
     definition: sema_http_route_find_struct(environment, program, target, environment.module_identity) ?? return Expr.ListLit{elements: rows, span: span, id: AST_NODE_GENERATED}
     loop field in definition.fields {
-        if field.computed != None || sema_checked_marker(field.serde_markers, "Skip") != None || sema_checked_marker(field.serde_markers, "skip") != None -> next
+        if field.computed != None || sema_serde_items_skips(field) || sema_checked_marker(field.serde_markers, "skip") != None -> next
         names: sema_checked_field_shape_names(definition, field)
         column: names.db ?? names.text
         key: names.json ?? names.text

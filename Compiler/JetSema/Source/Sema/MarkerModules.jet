@@ -738,9 +738,10 @@ sema_marker_module_prelude_declaration: fn(name: String) -> MarkerDecl? {
 
 // An applied rule evaluates an argument only where its binding observes one. A
 // menu word or identifier (`#Layout(c)`, `#Rename(.Camel)`), an open value
-// (outside `#Default`), an effect-root list and a duration unit literal are
-// read as written, so the first argument of such a marker stages no
-// compile-time value. A marker no applied rule names keeps its first argument.
+// (outside `#Default`), an effect-root list, a duration unit literal and a
+// bare flag word (`published` for `published: true`) are read as written, so
+// the first argument of such a marker stages no compile-time value. A marker
+// no applied rule names keeps its first argument.
 sema_marker_module_first_argument_evaluates: fn(rules: [TAppliedRule], marker: Marker) -> Bool {
     if marker.declaration_module != None -> return true
     index: sema_marker_rules_catalog_rule_index(rules, marker.name) ?? return true
@@ -756,7 +757,8 @@ sema_marker_module_first_argument_evaluates: fn(rules: [TAppliedRule], marker: M
                 return true
             }
             .StringOrMenu -> return !sema_marker_rules_names_menu_word(argument)
-            .String | .Path | .Bool | .Int | .DurationOrInstant -> return true
+            .Bool -> return !sema_marker_rules_bare_flag(argument, binding.parameter_index, rules[index].signature)
+            .String | .Path | .Int | .DurationOrInstant -> return true
         }
     }
     true

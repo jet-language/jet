@@ -72,6 +72,8 @@ use {
         ast_enum,
         ast_func,
         ast_struct,
+        codable_marker,
+        codable_published,
         diagnostic_from_registry,
         expr_span,
         diagnostic_with_edit,
@@ -2610,6 +2612,11 @@ parser_apply_type_markers: fn(state: &JetParserState, value: &StructDef, markers
             value.is_published_schema = true
             value.published_schema_span = Val(marker.span)
         }
+    }
+    // `#Codable(published)` pins the struct's wire shape.
+    if codable_published(markers) && codable_marker(markers) == .Val(codable) {
+        value.is_published_schema = true
+        value.published_schema_span = Val(codable.span)
     }
 }
 

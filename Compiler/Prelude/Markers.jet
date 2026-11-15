@@ -247,9 +247,25 @@ Deprecated: struct {
     }
 }
 
+// `#Codable` on a type derives its wire codecs, Encode and Decode. Its
+// options pick a variant of that one contract: `only:` derives a single
+// direction, `unknown: .Deny` refuses a decoded key the struct doesn't
+// declare, `tag:` sets how an enum names its case (`.External`, the default;
+// `.Field("kind")`, a key beside the payload; `.None`, no name), `from: .Base`
+// codes a distinct type as its base, and the bare word `published` pins a
+// struct's wire shape for schema snapshots and migrations. On a field it
+// takes one form: `.Skip` leaves the field off the wire and `.Flatten`
+// splices a struct field's keys into the enclosing object.
 Codable: struct {
+    form: CodableField{none}
+    only: CodableDirection{none}
+    unknown: CodableUnknown{none}
+    tag: CodableTag{none}
+    from: CodableOrigin{none}
+    published: Bool{false}
+
     impl Marker {
-        sites: [.Type]
+        sites: [.Type, .Field]
     }
 }
 

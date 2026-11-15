@@ -44,6 +44,10 @@ use {
         TComptimeEnumArg,
         TComptimeField,
         TComptimeKey,
+        codable_denies_unknown,
+        codable_marker,
+        codable_tag_field,
+        codable_untagged,
         checked_comptime_integer_key,
         TComptimeKeyField,
         TComptimeMapEntry,
@@ -378,13 +382,19 @@ sema_checked_serde_attribute: fn(marker: Marker) -> TSerdeAttribute? {
     TSerdeAttribute{kind: kind_value, value: value, span: marker.span}
 }
 
-sema_checked_serde_attributes: fn(markers: [Marker]) -> [TSerdeAttribute] Never! {
+// The serde attributes of a type: its `#Rename` and the retiring wire
+// markers among `markers`, then the type options of its `#Codable`.
+sema_checked_serde_attributes: fn(markers: [Marker], type_markers: [Marker]) -> [TSerdeAttribute] Never! {
     attributes := [TSerdeAttribute]{}
     loop marker in markers {
         if marker.negated -> next
         attribute: sema_checked_serde_attribute(marker) ?? next
         attributes.push(attribute)
     }
+    codable: codable_marker(type_markers) ?? return attributes
+    if codable_denies_unknown(type_markers) -> attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.DenyUnknownFields, value: None, span: codable.span})
+    if codable_tag_field(type_markers) == .Val(key) -> attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.Tag, value: Val(key), span: codable.span})
+    if codable_untagged(type_markers) -> attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.Untagged, value: None, span: codable.span})
     attributes
 }
 
@@ -2061,7 +2071,7 @@ sema_checked_field: fn(field: Field, ty: Type, shape_names: TShapeFieldNames) ->
     TField{
         name: field.name,
         shape_names: shape_names,
-        skip: sema_checked_marker(field.serde_markers, "Skip") != None || sema_checked_marker(field.serde_markers, "skip") != None,
+        skip: sema_serde_items_skips(field) || sema_checked_marker(field.serde_markers, "skip") != None,
         ty: ty,
         span: field.name_span,
         public: field.is_pub,
@@ -3053,7 +3063,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
             single_use = value.is_single_use
             must_use = value.is_must_use
             layout = sema_checked_layout(value.layout)
-            serde = sema_checked_serde_attributes(value.serde_markers)
+            serde = sema_checked_serde_attributes(value.serde_markers, value.type_markers)
             cli_bindings = sema_checked_cli_bindings(module_text(graph.module_table, module_row.module_identity), value)
             ownership = sema_checked_ownership(single_use)
             sema_checked_validate_field_policy(value, diagnostics)
@@ -3069,7 +3079,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
             auto_derive_default = value.auto_derive_default
             single_use = value.is_single_use
             must_use = value.is_must_use
-            serde = sema_checked_serde_attributes(value.serde_markers)
+            serde = sema_checked_serde_attributes(value.serde_markers, value.type_markers)
             ownership = sema_checked_ownership(single_use)
             c_layout_tag = sema_checked_foreign_enum_c_layout_tag(value)
             if c_layout_tag != None {

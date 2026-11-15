@@ -10,6 +10,7 @@ use {
         AST_NODE_GENERATED,
         AccessConvention,
         CORE_SOURCE_OWNED_ROWS,
+        CODABLE_TAG,
         CallArg,
         CallContractRow,
         CallablePolicy,
@@ -23,9 +24,12 @@ use {
         MARKER_CLI,
         MARKER_DEPRECATED,
         MARKER_DOC,
-        MARKER_FLATTEN,
         MARKER_RENAME,
-        MARKER_SKIP,
+        codable_form,
+        codable_from_base,
+        codable_marker,
+        codable_option,
+        codable_tag_field,
         decl_id_index,
         decl_table_add,
         decl_table_find,
@@ -3150,6 +3154,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
     // shapes are checked on the registered items, as the Rust reference's
     // `validate_serde_items` runs after the trait registry is built.
     sema_registration_serde_items(module_row.program.items, diagnostics)
+    sema_registration_codable_options(module_row.program.items, diagnostics)
     // Checked
     // on the registered items, as the Rust reference's `validate_cli_items`
     // runs after struct registration.
@@ -3868,17 +3873,12 @@ sema_registration_serde_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
             if !encode && !decode -> next
             sema_registration_serde_rename_all(definition.serde_markers, diagnostics)
             loop field in definition.fields {
-                skip := false
-                flatten := false
-                loop marker in field.serde_markers {
-                    if marker.name == MARKER_SKIP -> skip = true
-                    if marker.name == MARKER_FLATTEN -> flatten = true
-                }
+                flatten: sema_serde_items_flattens(field)
                 if flatten && !sema_registration_serde_struct_named(field.ty) {
                     diagnostics.push(sema_error("E2408", field.name_span, "`#[Flatten]` on `{field.name}` needs a struct-typed field", "flatten splices another struct's keys into this object, so the field must be a `#[Codable]` struct — not a primitive, list, or map", "give `{field.name}` a `#[Codable]` struct type, or drop `#[Flatten]`"))
                     next
                 }
-                if skip || flatten -> next
+                if flatten || sema_serde_items_skips(field) -> next
                 sema_registration_serde_wire_form(items, facts, no_auto, field.ty, encode, decode, field.name_span, diagnostics)
                 if decode -> sema_registration_serde_union_shapes(items, field.ty, field.name_span, diagnostics)
             }
@@ -3903,6 +3903,60 @@ sema_registration_serde_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
             }
         }
     }
+}
+
+// E0930: `#Codable` takes its type options on a type and one form on a
+// field. `.Skip` and `.Flatten` belong on a field and the type options on
+// the type; `tag:` applies to an enum, whose `.Field(…)` names its key as one
+// string, and `from: .Base` to a distinct type.
+sema_registration_codable_options: fn(items: [Item], diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == .Struct(definition) {
+            sema_registration_codable_type(item, definition.type_markers, diagnostics)
+            loop field in definition.fields -> sema_registration_codable_field(field.serde_markers, diagnostics)
+        }
+        if item == .Enum(definition) -> sema_registration_codable_type(item, definition.type_markers, diagnostics)
+        if item == .Distinct(definition) -> sema_registration_codable_type(item, definition.type_markers, diagnostics)
+    }
+}
+
+// `item` is the struct, enum or distinct type `markers` mark.
+sema_registration_codable_type: fn(item: Item, markers: [Marker], diagnostics: &[Diagnostic]) {
+    marker: codable_marker(markers) ?? return
+    is_enum: item == .Enum(_)
+    is_distinct: item == .Distinct(_)
+    shown: if {
+        is_enum -> "an enum"
+        is_distinct -> "a distinct type"
+        else -> "a struct"
+    }
+    if codable_form(marker) == .Val(form) {
+        diagnostics.push(sema_registration_codable_error(marker, "`.{form}` is a field form of `#Codable`", "`.Skip` and `.Flatten` say how one field rides on the wire, so they go on a field, not on {shown}", "move `#Codable(.{form})` onto the field"))
+    }
+    if !is_enum && codable_option(marker, CODABLE_TAG) != None {
+        diagnostics.push(sema_registration_codable_error(marker, "`tag:` applies to enums only", "`tag:` sets how an enum names its case on the wire, and {shown} has no cases", "remove `tag:`"))
+    }
+    if is_enum && codable_tag_field(markers) == Val("") {
+        diagnostics.push(sema_registration_codable_error(marker, "`tag: .Field(…)` needs its key as one string", "the case name rides under this key in the encoded object", "write the key, as in `tag: .Field(\"kind\")`"))
+    }
+    if !is_distinct && codable_from_base(marker) {
+        diagnostics.push(sema_registration_codable_error(marker, "`from: .Base` applies to distinct types only", "a distinct type codes as its base type; {shown} codes its own fields or cases", "remove `from: .Base`"))
+    }
+}
+
+sema_registration_codable_field: fn(markers: [Marker], diagnostics: &[Diagnostic]) {
+    marker: codable_marker(markers) ?? return
+    labeled := false
+    loop label in marker.arg_labels {
+        if label != None -> labeled = true
+    }
+    if labeled || marker.args.len() != 1 || codable_form(marker) == None {
+        diagnostics.push(sema_registration_codable_error(marker, "`#Codable` on a field takes `.Skip` or `.Flatten`", "a field rides on the wire as written, skipped, or flattened; the options `only:`, `unknown:`, `tag:`, `from:` and `published` belong on the type", "write `#Codable(.Skip)` or `#Codable(.Flatten)` on the field, and the options on the type"))
+    }
+}
+
+sema_registration_codable_error: fn(marker: Marker, what: String, why: String, fix: String) -> Diagnostic Never! {
+    sema_error("E0930", Span{start: marker.name_span.start, end: marker.span.end}, what, why, fix)
 }
 
 // E2409 (Rust `validate_serde_items`): the container casing menu

@@ -545,12 +545,7 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
     saw_named := false
     loop source_index in 0..<marker.args.len() {
         label := sema_marker_rules_label(marker, source_index)
-        if label == None && meta {
-            expression: sema_marker_rules_marker_expression(marker, source_index)
-            if expression == .Val(value) && value == .Ident(name, _, _) && name == "tunable" {
-                label = Val(name)
-            }
-        }
+        if label == None -> label = sema_marker_rules_flag_label(marker, source_index, signature)
         parameter_index := Int?{None}
         if {
             label != None -> {
@@ -601,6 +596,24 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
         }
     }
     Val(bindings)
+}
+
+// A bare word naming a Bool parameter is that flag set: `#Meta(tunable)`,
+// `#Codable(published)`.
+sema_marker_rules_flag_label: fn(marker: Marker, source_index: Int, signature: TAppliedRuleSignature) -> String? {
+    expression: sema_marker_rules_marker_expression(marker, source_index) ?? return None
+    if expression == .Ident(name, _, _) {
+        loop parameter in signature.params {
+            if parameter.name == name && parameter.kind == TAppliedRuleArgKind.Bool -> return Val(name)
+        }
+    }
+    None
+}
+
+sema_marker_rules_bare_flag: fn(argument: Expr, parameter_index: Int?, signature: TAppliedRuleSignature) -> Bool {
+    index: parameter_index ?? return false
+    if argument == .Ident(name, _, _) -> return name == signature.params[index].name
+    false
 }
 
 sema_marker_rules_signature_text: fn(name: String, signature: TAppliedRuleSignature) -> String Never! {
@@ -1050,7 +1063,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
             !declared && (binding.kind == TAppliedRuleArgKind.Ident || binding.kind == TAppliedRuleArgKind.Any || (binding.kind == TAppliedRuleArgKind.DurationOrString && unit_argument) || (binding.kind == TAppliedRuleArgKind.StringOrMenu && sema_marker_rules_names_menu_word(argument)) || binding.kind == TAppliedRuleArgKind.EffectRoots) -> {
                 observe = false
             }
-            !declared && binding.kind == TAppliedRuleArgKind.Bool && sema_marker_is_hook(marker, MarkerHook.Meta) && argument == .Ident(name, _, _) && name == "tunable" -> {
+            !declared && binding.kind == TAppliedRuleArgKind.Bool && sema_marker_rules_bare_flag(argument, binding.parameter_index, signature) -> {
                 observation.ty = Val(Type.Bool)
                 observe = false
             }
