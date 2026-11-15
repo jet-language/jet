@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106088,
+    "rev": 106089,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95520,6 +95520,15 @@
           "verifiedBy": null,
           "evidence": "Holds on dev 980e02feb4, proved by G6Meta-4 on the batch-16 jet (gate-p21): cases backend_ice/rdtsc_lowers_on_every_tier_and_an_unencoded_mnemonic_is_e3221 1/0 (rdtsc lowers on every tier; landed in 68461dd578) and ui ffi_asm_unencoded_mnemonic 1/0 (registered E3221).",
           "at": "2026-11-14T01:34:36.331Z"
+        },
+        {
+          "n": 2,
+          "text": "Inline asm 'add reg, imm' passes sema (E3221) but the template assembler cannot encode it: the native runtime pack's lowering ICEs with E3505 'unsupported register or stale placeholder (add rax, 1)' (found in census206, dev 92742e9897 plus compare-vector-step-r4, 2026-11-15). Sema's operand-form check and the assembler's encodable forms must be one table: either the assembler encodes every form sema admits (reg,imm for add/sub/and/or/xor/cmp at least), or sema refuses the form with a registered diagnostic and snapshot. Proof: a UI or run case with 'add rax, 1' in an #Asm leaf either runs at O0/O1/O2 or is refused by sema, never an ICE.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T10:10:05.378Z"
         }
       ],
       "refs": [],
@@ -95530,9 +95539,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:00:03.093Z",
-      "updated": "2026-11-14T03:02:07.220Z",
+      "updated": "2026-11-15T10:10:05.378Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1,
+      "criteriaLastN": 2,
       "completedAt": "2026-11-14T03:02:07.220Z"
     },
     {
@@ -217779,6 +217788,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T10:10:05.378Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hvgx07",
+      "note": "#2 Inline asm 'add reg, imm' passes sema (E3221) but the templa"
+    },
     {
       "at": "2026-11-15T10:04:58.544Z",
       "by": "Main",
