@@ -1061,6 +1061,36 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         }
         Ok(data.query(out))
     }
+
+    // Rewrites each stored row that an older version of its row type wrote
+    // into the current shape, and answers how many it rewrote. A row type's
+    // `migration` block is its table's history: every read already decodes
+    // an older row through it, and this stores what that read gives, so the
+    // block's steps are the table's steps. A row already in the current shape
+    // is left alone, so a second call rewrites none. Each row is its own
+    // write: a failure part way leaves every row readable, and calling again
+    // finishes. It is a schema step, so it runs as the system: the row policy
+    // judges none of it.
+    upgrade: fn(self) -[DB.Read, DB.Write]> Int DBError! {
+        rows: table_rows<K, T>(self, "", [DBValue]{}) ?? return Err(err)
+        rewritten := 0
+        loop stored in rows {
+            text: row_text(stored, TABLE_ROW_COLUMN) ?? return Err(err)
+            row: table_decode<T>(stored) ?? return Err(err)
+            cells: table_cells(self.name, self.key_of(row.copy()).encode()) ?? return Err(err)
+            encoded: json.to_string(row.encode_stored()) ?? return Err(db_error("the row for table `{self.name}` does not encode: {err}"))
+            if encoded != text {
+                values := [DBValue]{.Text(encoded)}
+                loop value in table_values(cells) -> values.push(value)
+                guard := self.state.guard_edit()
+                if driver_closed(guard.value.driver) -> return Err(db_closed())
+                _: __driver_execute(guard.value.driver, "UPDATE \"{self.name}\" SET {TABLE_ROW_COLUMN} = ? WHERE {table_match(cells)}", values) ?? return Err(err)
+                guard.value.wrote(self.name)
+                rewritten += 1
+            }
+        }
+        Ok(rewritten)
+    }
 }
 
 // The stored rows `filter` (a WHERE clause, empty for every row) selects,

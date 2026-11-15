@@ -4105,7 +4105,8 @@ an unrelated type. A `#Secret` field has no wire form: the derived codec
 leaves it out as it does a `#Codable(.Skip)` field, and decodes it to its
 default or its type's zero. Only storage keeps it: a struct with a `#Secret`
 field also derives a storage codec, which carries the field, and only Core
-calls it (a typed table stores rows through it).
+calls it (a typed table stores rows through it). A published struct's
+`migration` block reads its older stored shapes too, secret fields included.
 Text never implicitly decodes as an integer, float, or Boolean, except in
 text-native sources: environment variables, CSV cells, route and query
 parameters. `Dyn.Int` owns its exact integer even beyond machine range.
@@ -6411,6 +6412,18 @@ read set, even before the table exists. An `add` or `put`, or a `delete`
 that removes a row, re-runs every binding that reads the table once the write
 is committed: immediately outside a transaction, and at the commit (or
 rollback) inside one, as for a scope's `execute`.
+
+A row type's `migration` block is its table's history (D-DATA-EVOLVE1). A
+read decodes a row an older version of the type stored through the block, as
+a JSON decode does, and a write stores the current shape, so an `add`, a
+`rename`, a `remove` or a `change` in the block needs no table step of its
+own. `upgrade() -[DB.Read, DB.Write]> Int DBError!` rewrites every row still
+stored in an older shape into the current one and answers how many it
+rewrote; a row already current is left alone, so a second call rewrites
+none. Each row is its own write, so a failure part way leaves every row
+readable and another call finishes the rest. `upgrade` is a schema step and
+runs as the system, so the row policy judges none of it. A changed key type
+is not covered: the key columns stay as the table was created.
 
 A row policy, attached with `table.guard(policy)`, is a function from a row,
 the operation (`Op`: `Read`, `Insert`, `Update` or `Delete`), the caller

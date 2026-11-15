@@ -66,7 +66,9 @@ sema_migration_json_key: fn(definition: StructDef, style: String?, name: String)
     sema_migration_wire_name(style, name)
 }
 
-sema_migration_canonical_shape: fn(definition: StructDef, migrations: [MigrationDecl]) -> SemaMigrationCanonicalShape Never! {
+// The JSON key sets of a struct's shapes. `stored` reads the storage
+// codec's shapes, which keep `#Secret` fields; the wire codec's leave them off.
+sema_migration_canonical_shape: fn(definition: StructDef, migrations: [MigrationDecl], stored: Bool) -> SemaMigrationCanonicalShape Never! {
     style := sema_checked_rename_case(definition.serde_markers)
     names := [SemaMigrationFieldName]{}
     current := [String]{}
@@ -75,7 +77,7 @@ sema_migration_canonical_shape: fn(definition: StructDef, migrations: [Migration
         key := sema_migration_json_key(definition, style, definition.fields[field_index].name)
         names.push(SemaMigrationFieldName{field: definition.fields[field_index].name, json_key: key})
         if {
-            sema_serde_items_skips(definition.fields[field_index]) -> {
+            sema_serde_items_drops(definition.fields[field_index], stored) -> {
                 skipped = sema_migration_insert_sorted(skipped, key)
             }
             else -> current = sema_migration_insert_sorted(current, key)

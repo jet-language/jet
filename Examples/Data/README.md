@@ -23,7 +23,9 @@ Run a lesson from the repository root, for example `jet run Examples/Data/<Lesso
 - [Migrations](Migrations/) — #Codable(published) structs + migration blocks.
 - [SerdeGeneric](SerdeGeneric.jet) — generic #Codable.
 - [ShapeProjection](ShapeProjection.jet) — One shape fact feeds every projection.
+- [TableMigration](TableMigration.jet) — A typed table upgrades across a change to its row type through the type's one `migration` block.
 - [TableSecretField](TableSecretField.jet) — A typed table stores a `#Secret` field through the storage codec, and the wire codec leaves it off.
+- [TableSecretMigration](TableSecretMigration.jet) — A typed table's row with a `#Secret` field upgrades through the migration block and keeps the secret.
 - [UnionCodec](UnionCodec.jet) — An anonymous union encodes and decodes through its structural enum, alone and as a struct field, and a decoded union matches by member.
 - [Validate](Validate.jet)
 
