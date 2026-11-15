@@ -534,17 +534,18 @@ revert: fn(dir: String, applied: [String]) Never! -[Exec, IO, Time.Wait]> {
 
 // The lane check (Tools/agent/LaneCheck.jet, with $JET, else `jet` on PATH)
 // of the patched tree: the whole compiler, with Jetpack's assembly check,
-// when a patch touches a compiler input, else each touched .jet file. Both
-// run the personal-information guard and the script-pairing guard first; a
-// patch with no Jet source runs the script-pairing guard alone. Error rows
-// are shown as the check prints them.
+// when a patch touches a compiler input, else each touched .jet source. A
+// package.jet manifest is no entry file: it is read when its package's
+// sources are checked. Both run the personal-information guard and the
+// script-pairing guard first; a patch with no Jet source runs the
+// script-pairing guard alone. Error rows are shown as the check prints them.
 check: fn(dir: String, touched: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool Never! {
     jet: jet_binary()
     compiler := false
     targets := [String]{}
     loop path in touched {
         if compiler_input(path) -> compiler = true
-        if path.ends_with(".jet") && files.exists(files.join(dir, path)) -> targets.push(path.copy())
+        if path.ends_with(".jet") && files.basename(path) != "package.jet" && files.exists(files.join(dir, path)) -> targets.push(path.copy())
     }
     if compiler -> targets = [String]{""}
     if targets.len() == 0 {
