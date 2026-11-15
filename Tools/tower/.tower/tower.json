@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6975,
-    "rev": 106106,
+    "rev": 106109,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74998,29 +74998,29 @@
         {
           "n": 12,
           "text": "A local perf gate builds hello with the smallest-size build profile, records binary size and the median start time over 50 runs on the reference Linux x86-64 machine, and fails when size exceeds 200 KB or start exceeds 5 ms. Proof: `jet Tools/perf/budget/check/run.jet` receipt on the reference machine.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:38:07.002Z"
+          "evidence": "dev c4c56b4ca6 (landed c4c56b4ca6), run with the p173 batch compiler on the reference machine, 2026-11-15 06:05: jet Tools/perf/budget/check/run.jet --hello builds Examples/Basics/Hello.jet with jet build --small, runs it 50 times and prints: Hello binary size 100,808 B against a 200 KB (204,800 B) limit, ok; Hello start time 0.366 ms median of 50 against 5 ms, ok (range 0.302-0.536 ms); PASS, rc 0. jet test Tools/perf/budget/check/run.jet: 10 passed.",
+          "at": "2026-11-15T11:05:36.635Z"
         },
         {
           "n": 13,
           "text": "The thresholds live in one table in the binary-size budget doc, and the job reads them from there. Proof: the thresholds are one table in Docs/spec/reference/binary-size.md and `git grep -n -E \"200 ?KB|5 ms\" -- Tools/perf/budget` finds no second copy.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:38:07.943Z"
+          "evidence": "dev c4c56b4ca6 (landed c4c56b4ca6), run with the p173 batch compiler on the reference machine, 2026-11-15 06:05: the two limits are one table in Docs/spec/reference/binary-size.md, which run.jet reads (it prints 'limits: Docs/spec/reference/binary-size.md'). git grep -n -E '200 ?KB|5 ms' -- Tools/perf/budget finds 0 lines.",
+          "at": "2026-11-15T11:05:37.806Z"
         },
         {
           "n": 14,
           "text": "Until both thresholds pass, the job runs in report mode and logs size and start time on this card for each change; it turns blocking in the change that first passes both. Proof: this card logs a size and start row for each change until the job turns blocking.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:38:08.926Z"
+          "evidence": "dev c4c56b4ca6 (landed c4c56b4ca6), run with the p173 batch compiler on the reference machine, 2026-11-15 06:05: the job passed both limits in the change that introduced it (c4c56b4ca6), so it is blocking from that change and no report-mode rows were needed. The row for this change: hello size 100,808 B, start 0.366 ms (median of 50 runs). PrecompiledCore-5 measured 104,040 B and 0.339 ms on p170.",
+          "at": "2026-11-15T11:05:39.062Z"
         },
         {
           "n": 15,
@@ -75290,7 +75290,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T10:52:46.607Z",
+      "updated": "2026-11-15T11:05:39.062Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -217534,6 +217534,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T11:05:39.062Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T11:05:37.806Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T11:05:36.635Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#12"
+    },
     {
       "at": "2026-11-15T10:59:11.916Z",
       "by": "Main",
