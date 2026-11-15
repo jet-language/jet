@@ -20,8 +20,8 @@ use {
 // typed (`field` / `int` / `float` / `bool`); `redact` marks a key so sinks
 // must not print its value. Spans are `span` + `enter` / `close`. Every
 // record's first field is `module`: the dotted module of the call
-// (SourceLocation.module). This is not a tracing SDK; OTLP file export is
-// the one optional bridge.
+// (SourceLocation.module). This is not a tracing SDK: OTLP file export of
+// records, and `otlp_traces_json` for finished `TraceSpan`s, are the bridges.
 //
 // The level a record must reach comes from five sources, each later one
 // above the earlier: the stock `info`, the package's `log:` field, the
@@ -700,6 +700,86 @@ time: fn(event: LogRecord, timestamp: Int) -> LogRecord Never! { add(event, int(
 
 clear: fn(event: LogRecord) -> LogRecord Never! { record(event.level, event.message, [LogField]{}) }
 
+/// The role of a traced span, as OTLP numbers it.
+SpanKind: enum {
+    Internal
+    Server
+    Client
+    Producer
+    Consumer
+}
+
+/// How a traced span ended: not said, ok, or failed with a message.
+SpanStatus: enum {
+    Unset
+    Ok
+    Error(String)
+}
+
+/// One finished span of a trace, in the shape OTLP exports. `trace_id` is
+/// 32 lowercase hex digits and `span_id` 16; `parent_span_id` is "" for a
+/// trace's root. Times are Unix nanoseconds. The attributes are typed log
+/// fields, and a redacted one exports `[redacted]`, never its value.
+TraceSpan: struct {
+    trace_id: String
+    span_id: String
+    parent_span_id: String
+    name: String
+    kind: SpanKind
+    start_ns: Int
+    end_ns: Int
+    attributes: [LogField]
+    status: SpanStatus
+}
+
+/// The OTLP/HTTP JSON export request (`ExportTraceServiceRequest`) that
+/// carries `spans` for the service named `service`: one resource, one
+/// instrumentation scope, the spans in the order given.
+otlp_traces_json: fn(service: String, spans: [TraceSpan]) -> String Never! {
+    rows := [String]{}
+    loop item in spans -> rows.push(otlp_span_json(item))
+    "{{\"resourceSpans\":[{{\"resource\":{{\"attributes\":[{otlp_attribute_json(field("service.name", service))}]}},\"scopeSpans\":[{{\"scope\":{{\"name\":\"core.log\"}},\"spans\":[{rows.join(",")}]}}]}}]}}"
+}
+
+// One span object. OTLP's JSON mapping writes IDs as hex, 64-bit integers
+// as decimal strings and enums as their numbers.
+otlp_span_json: fn(item: TraceSpan) -> String Never! {
+    parent: if item.parent_span_id == "" -> "" else -> ",\"parentSpanId\":\"{escape(item.parent_span_id)}\""
+    attributes := [String]{}
+    loop attribute in item.attributes -> attributes.push(otlp_attribute_json(attribute))
+    "{{\"traceId\":\"{escape(item.trace_id)}\",\"spanId\":\"{escape(item.span_id)}\"{parent},\"name\":\"{escape(item.name)}\",\"kind\":{otlp_kind(item.kind)},\"startTimeUnixNano\":\"{item.start_ns}\",\"endTimeUnixNano\":\"{item.end_ns}\",\"attributes\":[{attributes.join(",")}],\"status\":{otlp_status_json(item.status)}}}"
+}
+
+otlp_kind: fn(kind: SpanKind) -> Int Never! {
+    if kind == {
+        .Internal -> 1
+        .Server -> 2
+        .Client -> 3
+        .Producer -> 4
+        .Consumer -> 5
+    }
+}
+
+otlp_status_json: fn(status: SpanStatus) -> String Never! {
+    if status == {
+        .Unset -> "{{}}"
+        .Ok -> "{{\"code\":1}}"
+        .Error(message) -> "{{\"code\":2,\"message\":\"{escape(message)}\"}}"
+    }
+}
+
+// One `KeyValue`: a field's kind picks its `AnyValue` member.
+otlp_attribute_json: fn(attribute: LogField) -> String Never! {
+    value: if {
+        attribute.redacted -> "{{\"stringValue\":\"[redacted]\"}}"
+        attribute.kind == "int" || attribute.kind == "counter" -> "{{\"intValue\":\"{escape(attribute.value)}\"}}"
+        attribute.kind == "float" -> "{{\"doubleValue\":{attribute.value}}}"
+        attribute.kind == "bool" -> "{{\"boolValue\":{attribute.value}}}"
+        else -> "{{\"stringValue\":\"{escape(attribute.value)}\"}}"
+    }
+    "{{\"key\":\"{escape(attribute.key)}\",\"value\":{value}}}"
+}
+
 #Test("log level policy uses raw state") {
     saved_level: rt.level_load()
     saved_filter: rt.filter_load()
@@ -768,4 +848,38 @@ clear: fn(event: LogRecord) -> LogRecord Never! { record(event.level, event.mess
     assert_eq(fields[2].key, "\"")
     assert_eq(fields[2].value, "\n")
     assert_eq(fields[2].kind, "string")
+}
+
+#Test("an OTLP trace export writes hex IDs, decimal-string nanoseconds and typed attributes") {
+    server: TraceSpan{
+        trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
+        span_id: "00f067aa0ba902b7",
+        parent_span_id: "",
+        name: "POST /api/lookup",
+        kind: .Server,
+        start_ns: 1700000000000000000,
+        end_ns: 1700000000250000000,
+        attributes: [LogField]{field("jet.request_id", "req-1"), int("http.response.status_code", 200), bool("jet.limited", false), redact("jet.token")},
+        status: .Ok
+    }
+    statement: TraceSpan{
+        trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
+        span_id: "b7ad6b7169203331",
+        parent_span_id: "00f067aa0ba902b7",
+        name: "db \"select\"",
+        kind: .Internal,
+        start_ns: 1700000000100000000,
+        end_ns: 1700000000200000000,
+        attributes: [LogField]{},
+        status: .Error("no such table")
+    }
+    expected: [String]{
+        "{{\"resourceSpans\":[{{\"resource\":{{\"attributes\":[{{\"key\":\"service.name\",\"value\":{{\"stringValue\":\"crew\"}}}}]}},\"scopeSpans\":[{{\"scope\":{{\"name\":\"core.log\"}},\"spans\":[",
+        "{{\"traceId\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"spanId\":\"00f067aa0ba902b7\",\"name\":\"POST /api/lookup\",\"kind\":2,\"startTimeUnixNano\":\"1700000000000000000\",\"endTimeUnixNano\":\"1700000000250000000\",\"attributes\":[",
+        "{{\"key\":\"jet.request_id\",\"value\":{{\"stringValue\":\"req-1\"}}}},{{\"key\":\"http.response.status_code\",\"value\":{{\"intValue\":\"200\"}}}},{{\"key\":\"jet.limited\",\"value\":{{\"boolValue\":false}}}},{{\"key\":\"jet.token\",\"value\":{{\"stringValue\":\"[redacted]\"}}}}],\"status\":{{\"code\":1}}}},",
+        "{{\"traceId\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"spanId\":\"b7ad6b7169203331\",\"parentSpanId\":\"00f067aa0ba902b7\",\"name\":\"db \\\"select\\\"\",\"kind\":1,\"startTimeUnixNano\":\"1700000000100000000\",\"endTimeUnixNano\":\"1700000000200000000\",\"attributes\":[],\"status\":{{\"code\":2,\"message\":\"no such table\"}}}}",
+        "]}}]}}]}}"
+    }.join("")
+    assert_eq(otlp_traces_json("crew", [TraceSpan]{server, statement}), expected)
+    assert_eq(otlp_traces_json("crew", [TraceSpan]{}), "{{\"resourceSpans\":[{{\"resource\":{{\"attributes\":[{{\"key\":\"service.name\",\"value\":{{\"stringValue\":\"crew\"}}}}]}},\"scopeSpans\":[{{\"scope\":{{\"name\":\"core.log\"}},\"spans\":[]}}]}}]}}")
 }
