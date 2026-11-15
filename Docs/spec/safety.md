@@ -237,14 +237,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1400,
+  "total": 1402,
   "counts": {
     "Compiler": 638,
     "Core": 178,
     "Docs": 10,
     "Examples": 42,
     "Jetpack": 8,
-    "Tools": 9,
+    "Tools": 11,
     "tests": 515
   },
   "regions": [
@@ -6424,6 +6424,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tools",
+      "file": "Tools/perf/asm-parity/allocfree/run.jet",
+      "line": 51,
+      "column": 5,
+      "reason": "each slot holds the address of one block alloc_raw gave and nothing else does; the block is released once, before its slot takes the next one or after the passes"
+    },
+    {
+      "package": "Tools",
       "file": "Tools/perf/asm-parity/memcopy/run.jet",
       "line": 63,
       "column": 5,
@@ -6442,6 +6449,13 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 47,
       "column": 5,
       "reason": "the block holds WORDS words, every index is below WORDS, and the block is freed once after the passes"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/asm-parity/resize/run.jet",
+      "line": 56,
+      "column": 5,
+      "reason": "every append reads the first `op.size` of the 64 bytes `source` holds, and `source` neither grows nor drops while the appends run"
     },
     {
       "package": "tests",
@@ -10061,9 +10075,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
-| Tools | 9 |
+| Tools | 11 |
 | tests | 515 |
-| **total** | **1400** |
+| **total** | **1402** |
 
 ### Regions
 
@@ -10951,9 +10965,11 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 596:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 90:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
 | Tools | Tools/packaging/NativeCCompiler.jet | 68:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
+| Tools | Tools/perf/asm-parity/allocfree/run.jet | 51:5 | "each slot holds the address of one block alloc_raw gave and nothing else does; the block is released once, before its slot takes the next one or after the passes" |
 | Tools | Tools/perf/asm-parity/memcopy/run.jet | 63:5 | "the block holds the source, the target and the moved bytes, LARGEST bytes and their room each, every offset stays inside its room, and the block is freed once after the passes" |
 | Tools | Tools/perf/asm-parity/memfill/run.jet | 54:5 | "the block holds LARGEST bytes and their room, every fill stays inside it, and the block is freed once after the passes" |
 | Tools | Tools/perf/asm-parity/rawword/run.jet | 47:5 | "the block holds WORDS words, every index is below WORDS, and the block is freed once after the passes" |
+| Tools | Tools/perf/asm-parity/resize/run.jet | 56:5 | "every append reads the first `op.size` of the 64 bytes `source` holds, and `source` neither grows nor drops while the appends run" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 44:5 | "call the leaf the build refuses" |

@@ -80,6 +80,54 @@
     }
   },
   {
+    "name": "mapping",
+    "what": "the memory kernel's page mapping: mem.Region.reserve of 64 KiB and the region's close",
+    "gauntlet": [],
+    "jet": "mapping",
+    "args": ["100000"],
+    "expect": "sum 6553600000\n",
+    "kernel": {
+      "jet": { "routines": ["jet_rt_mem_region_reserve", "jet_rt_mem_region_release", "unit_alloc_reservation_map", "unit_alloc_page_set"], "source": "run.jet", "use": "// the mapping" },
+      "ref": { "routines": [], "source": "ref.S", "use": "# the mapping" }
+    }
+  },
+  {
+    "name": "compare",
+    "what": "the memory kernel's byte compare: the safe equality of two [U8], 1 byte to 16 KiB",
+    "gauntlet": [],
+    "jet": "compare",
+    "args": ["4000"],
+    "expect": "sum 1088319\n",
+    "kernel": {
+      "jet": { "routines": [], "source": "run.jet", "use": "// the compare" },
+      "ref": { "routines": ["dispatch", "equal_avx2", "equal_sse2"], "source": "ref.S", "use": "# the compare", "data": 8 }
+    }
+  },
+  {
+    "name": "allocfree",
+    "what": "the memory kernel's heap: mem.alloc_raw and mem.free_raw of 1 byte to 1 KiB over 256 slots",
+    "gauntlet": [],
+    "jet": "allocfree",
+    "args": ["4000"],
+    "expect": "sum 2072832000\n",
+    "kernel": {
+      "jet": { "routines": ["jet_rt_alloc_try", "unit_alloc_try", "unit_alloc_try_validated", "unit_alloc_try_reserved", "unit_alloc_reserve", "unit_alloc_class", "unit_alloc_head", "jet_rt_free", "unit_alloc_free_validated", "unit_alloc_untrack"], "source": "run.jet", "use": "// the heap" },
+      "ref": { "routines": ["alloc", "free"], "source": "ref.S", "use": "# the heap" }
+    }
+  },
+  {
+    "name": "resize",
+    "what": "the memory kernel's resize: mem.list_append of 1 to 64 bytes over 256 byte lists, grown in place or moved",
+    "gauntlet": [],
+    "jet": "resize",
+    "args": ["8000"],
+    "expect": "sum 16993628314\n",
+    "kernel": {
+      "jet": { "routines": ["jet_rt_mem_move", "jet_rt_alloc_try", "unit_alloc_try", "unit_alloc_try_validated", "unit_alloc_try_reserved", "unit_alloc_reserve", "unit_alloc_class", "unit_alloc_head", "jet_rt_free_8", "jet_rt_block_inherit_zero"], "source": "run.jet", "use": "// the resize" },
+      "ref": { "routines": ["grow", "alloc", "free", "copy"], "source": "ref.S", "use": "# the resize" }
+    }
+  },
+  {
     "name": "sieve",
     "what": "the gauntlet numerics.int-kernel cell",
     "gauntlet": ["numerics.int-kernel"],
