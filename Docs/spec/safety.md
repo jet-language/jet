@@ -232,350 +232,399 @@ directory is test-only, and the inventory marks it so: its kernel may name
 only `*Tests.jet` test files, and a shipped package's kernel may not name a
 file in a `Tests/` tree. The ratchet refuses either.
 
-<!-- memory-kernel:outside 294 -->
+<!-- memory-kernel:outside 0 -->
 <!-- unsafe-ratchet:begin -->
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1369,
+  "total": 1375,
   "counts": {
-    "Compiler": 627,
+    "Compiler": 630,
     "Core": 174,
     "Docs": 10,
     "Examples": 42,
     "Jetpack": 8,
     "Tools": 7,
-    "tests": 501
+    "tests": 504
   },
   "regions": [
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 181,
+      "line": 171,
+      "column": 5,
+      "reason": "`address` is the fresh mapping just made, page-rounded past the NUL"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
+      "line": 183,
       "column": 5,
       "reason": "memfd_create reads the NUL-terminated name at `name`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 195,
+      "line": 197,
       "column": 5,
       "reason": "the caller owns `fd` and nothing uses it any more"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 205,
+      "line": 207,
       "column": 9,
       "reason": "the caller mapped `count` writable bytes at `address`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 379,
+      "line": 381,
       "column": 9,
       "reason": "a private read-only view of the memfd aliases nothing writable"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 462,
+      "line": 446,
+      "column": 17,
+      "reason": "loader_map_file mapped this segment private and writable at its vaddr above"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
+      "line": 468,
       "column": 5,
       "reason": "MAP_FIXED_NOREPLACE never replaces an existing mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 503,
+      "line": 509,
       "column": 5,
       "reason": "MAP_FIXED replaces only the image's own reserved pages"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 508,
+      "line": 514,
       "column": 9,
       "reason": "the bytes lie in the segment's last file page, mapped private and writable above"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 521,
-      "column": 13,
+      "line": 523,
+      "column": 1,
       "reason": "the caller mapped [from, to) + delta private and writable"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 537,
-      "column": 5,
-      "reason": "MAP_FIXED replaces only the view's own fresh pages"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
       "line": 541,
       "column": 5,
+      "reason": "MAP_FIXED replaces only the view's own fresh pages"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
+      "line": 545,
+      "column": 5,
       "reason": "the bytes lie in the view's last image page, mapped private and writable above"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 546,
+      "line": 548,
+      "column": 5,
+      "reason": "the view's image pages are mapped private and writable above"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
+      "line": 552,
       "column": 9,
       "reason": "MAP_FIXED replaces only the view's own fresh pages; the memfd is never written again"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 868,
+      "line": 874,
       "column": 5,
       "reason": "openat reads the NUL-terminated path at `name`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 892,
+      "line": 898,
       "column": 5,
       "reason": "the timespec lies in the fresh zeroed page; nanosleep only reads it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 903,
-      "column": 5,
+      "line": 906,
+      "column": 1,
       "reason": "the caller owns the stack bytes below `at`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 913,
-      "column": 5,
+      "line": 915,
+      "column": 1,
       "reason": "the caller owns the stack bytes below `at`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1020,
-      "column": 5,
-      "reason": "brk(0) only reports the current break"
+      "line": 1008,
+      "column": 1,
+      "reason": "the map's 104 bytes lie in the caller's data page, in its auxiliary-vector room, read already; brk(0) only reports the current break"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1024,
-      "column": 5,
-      "reason": "the map's 104 bytes lie in the data page's auxiliary-vector room, read already"
+      "line": 1030,
+      "column": 1,
+      "reason": "prlimit64 writes one rlimit (two words) at `scratch`, which the caller owns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1035,
-      "column": 5,
-      "reason": "prlimit64 writes one rlimit (two words) at `scratch`"
+      "line": 1094,
+      "column": 1,
+      "reason": "the caller's executor page is its own fresh read+write mapping of one page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1100,
-      "column": 5,
-      "reason": "the caller's executor page is its own fresh mapping"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1116,
+      "line": 1109,
       "column": 5,
       "reason": "the data page is this plan's own fresh mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1150,
+      "line": 1120,
+      "column": 5,
+      "reason": "`executor` is the one-page read+write mapping just made for it"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
+      "line": 1146,
       "column": 13,
       "reason": "F_GETFD only reads the descriptor's flags"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1160,
+      "line": 1156,
       "column": 9,
       "reason": "rt_sigaction with no new action writes the old one (32 bytes) to the scratch"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1174,
+      "line": 1169,
+      "column": 5,
+      "reason": "the data page's scratch words are this plan's own"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
+      "line": 1173,
       "column": 5,
       "reason": "a fresh anonymous reservation aliases nothing"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1184,
+      "line": 1193,
       "column": 5,
-      "reason": "getrandom fills the 16 stack bytes at `random`"
+      "reason": "getrandom fills the 16 stack bytes at `random`, and each string goes below them, in the fresh main stack this plan owns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1223,
+      "line": 1226,
       "column": 5,
       "reason": "the data page holds 3840 bytes from LOADER_DATA_AUXV; /proc/self/auxv is [type, value] word pairs"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1239,
+      "line": 1242,
       "column": 9,
       "reason": "the pair lies inside the bytes read into the data page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1266,
+      "line": 1269,
       "column": 5,
       "reason": "the words lie in the stack mapping, above its guard page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1288,
+      "line": 1272,
+      "column": 5,
+      "reason": "the data page's mm-map room is this plan's own"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
+      "line": 1293,
       "column": 5,
       "reason": "the block is this plan's own fresh mapping of plan_size bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1310,
+      "line": 1315,
       "column": 5,
       "reason": "the executor's records only reset process state; it then enters the loaded image on its own stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1329,
+      "line": 1334,
       "column": 5,
       "reason": "the executor's first record forks; the child runs only the executor and enters the image, the parent returns here"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1355,
+      "line": 1360,
       "column": 5,
       "reason": "landlock_create_ruleset reads the 8-byte handled-access word at the start of the fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1368,
+      "line": 1370,
+      "column": 9,
+      "reason": "`page` is this function's fresh scratch page"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
+      "line": 1375,
       "column": 5,
       "reason": "no_new_privs and landlock_restrict_self change only this thread's own rights; the ruleset fd is this function's"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1388,
-      "column": 5,
-      "reason": "openat reads the NUL-terminated path at `name`"
+      "line": 1390,
+      "column": 1,
+      "reason": "landlock_add_rule reads the packed 12-byte rule this writes at the start of the caller's scratch `page`; openat reads the NUL-terminated path at `name`, and the O_PATH fd is this function's"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1398,
-      "column": 5,
-      "reason": "landlock_add_rule reads the packed 12-byte rule at the start of the caller's page; the O_PATH fd is this function's"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1413,
+      "line": 1414,
       "column": 5,
       "reason": "wait4 writes one int status to the fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1423,
+      "line": 1424,
       "column": 5,
       "reason": "SIGKILL to a child this process started and has not reaped"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1434,
+      "line": 1435,
       "column": 9,
       "reason": "a kernel sigaction with handler SIG_IGN on a fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1452,
+      "line": 1453,
       "column": 9,
       "reason": "a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1489,
+      "line": 1478,
+      "column": 5,
+      "reason": "the bytes below `at` lie in the fresh block mapped above, sized for every string"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
+      "line": 1494,
       "column": 5,
       "reason": "execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 114,
+      "line": 57,
+      "column": 9,
+      "reason": "the scratch mapping is the child's own, made above"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
+      "line": 117,
       "column": 9,
       "reason": "getrandom fills the first word of our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 121,
+      "line": 124,
       "column": 9,
       "reason": "getrandom wrote the scratch page's first word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 155,
-      "column": 5,
-      "reason": "pipe2 writes two descriptors into our scratch page"
+      "line": 156,
+      "column": 1,
+      "reason": "pipe2 writes two descriptors into the first word of the caller's scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 160,
-      "column": 5,
-      "reason": "pipe2 wrote the scratch page's first word"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 166,
+      "line": 165,
       "column": 9,
       "reason": "fcntl duplicates our own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 178,
+      "line": 177,
       "column": 5,
       "reason": "closes our own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 225,
-      "column": 9,
-      "reason": "the poll set is our scratch page's first three entries"
+      "line": 182,
+      "column": 1,
+      "reason": "the caller owns the `size` bytes at `buffer`, a multiple of 8"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 232,
+      "line": 203,
+      "column": 5,
+      "reason": "the buffer is the child's scratch mapping past its first page"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
+      "line": 228,
       "column": 9,
-      "reason": "poll reads and writes the three entries of our scratch page"
+      "reason": "the poll set is our scratch page's first three entries, which poll reads and writes; the clock words lie past them"
     },
     {
       "package": "Compiler",
@@ -587,56 +636,70 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 280,
+      "line": 268,
+      "column": 13,
+      "reason": "os_read just wrote `moved` bytes past the scratch page's first page"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
+      "line": 282,
       "column": 9,
       "reason": "the poll set is our scratch page's first two entries"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 285,
+      "line": 287,
       "column": 9,
       "reason": "poll reads and writes the two entries of our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 291,
+      "line": 293,
       "column": 9,
       "reason": "poll wrote the entries' returned events"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 327,
+      "line": 317,
       "column": 5,
-      "reason": "the bytes lie in our scratch mapping"
+      "reason": "os_read just wrote `moved` bytes past the scratch page's first page"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
+      "line": 330,
+      "column": 1,
+      "reason": "the caller's `count` bytes at `address` lie in our mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
       "line": 335,
-      "column": 5,
-      "reason": "clock_gettime writes two words at scratch + 64, past the poll set"
+      "column": 1,
+      "reason": "clock_gettime writes two words at scratch + 64, past the poll set of the caller's scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 347,
+      "line": 345,
       "column": 9,
       "reason": "kills our own child"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 354,
+      "line": 352,
       "column": 9,
       "reason": "wait4 writes the status word into our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 359,
+      "line": 357,
       "column": 5,
       "reason": "wait4 wrote the status word"
     },
@@ -713,490 +776,497 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 183,
-      "column": 5,
-      "reason": "the caller owns the destination words"
+      "line": 175,
+      "column": 1,
+      "reason": "the caller owns `bytes.len()` rounded up to 8 bytes at `address`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 192,
+      "line": 182,
+      "column": 1,
+      "reason": "the caller owns `count` rounded up to 8 bytes at `address`"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 190,
       "column": 1,
       "reason": "calls machine code; the caller vouches for the code and its System V signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 205,
+      "line": 203,
       "column": 1,
       "reason": "calls machine code; the caller vouches for the code and its two-word System V signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 220,
+      "line": 218,
       "column": 1,
       "reason": "calls machine code; the caller holds the mapping and its checked zero-argument Unit System V signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 230,
+      "line": 228,
       "column": 1,
       "reason": "calls machine code; the caller holds the mapping and its checked three-word Unit System V signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 246,
+      "line": 244,
       "column": 1,
       "reason": "calls machine code; the caller holds the mapping and its checked one-word Unit System V signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 258,
+      "line": 256,
       "column": 1,
       "reason": "calls machine code; the caller holds the mapping and its checked two-word Unit System V signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 275,
+      "line": 273,
       "column": 1,
       "reason": "a raw Linux x86-64 syscall; the caller supplies the syscall's valid machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 292,
+      "line": 290,
       "column": 1,
       "reason": "reads one aligned machine word in live allocator-owned mapped memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 299,
+      "line": 297,
       "column": 1,
       "reason": "stores one aligned machine word in live allocator-owned mapped memory; x86 TSO makes this a release store"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 308,
+      "line": 306,
       "column": 1,
       "reason": "atomically compares and exchanges one aligned live machine word; every non-atomic access to protected data holds its lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 323,
+      "line": 321,
       "column": 1,
       "reason": "x86 pause only hints that this thread is waiting in a spin loop"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 333,
+      "line": 331,
       "column": 1,
       "reason": "cpuid only reports processor identification; rbx is saved and restored"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 346,
+      "line": 344,
       "column": 1,
       "reason": "cpuid only reports processor identification; rbx is saved and restored"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 360,
+      "line": 358,
       "column": 1,
       "reason": "cpuid only reports processor identification; rbx is saved and restored"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 373,
+      "line": 371,
       "column": 1,
       "reason": "cpuid only reports processor identification; rbx is saved and restored"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 388,
+      "line": 386,
       "column": 1,
       "reason": "xgetbv only reads an extended control register; the caller has seen CPUID.1:ECX.OSXSAVE"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 403,
+      "line": 401,
       "column": 1,
       "reason": "reads 32 state bytes at state, 64 block bytes at data and 272 table bytes at table, and writes the 32 state bytes; the caller has seen the SHA extensions"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 600,
+      "line": 598,
       "column": 1,
       "reason": "reads 176 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 678,
+      "line": 676,
       "column": 1,
       "reason": "reads 208 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 766,
+      "line": 764,
       "column": 1,
       "reason": "reads 240 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 864,
+      "line": 862,
       "column": 1,
       "reason": "reads 176 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 942,
+      "line": 940,
       "column": 1,
       "reason": "reads 208 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1030,
+      "line": 1028,
       "column": 1,
       "reason": "reads 240 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1132,
+      "line": 1130,
       "column": 1,
       "reason": "reads 176 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1168,
+      "line": 1166,
       "column": 1,
       "reason": "reads 208 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1208,
+      "line": 1206,
       "column": 1,
       "reason": "reads 240 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1261,
+      "line": 1259,
       "column": 1,
       "reason": "reads and writes 16 bytes at y and reads 16 bytes at data and at h and the 16-byte mask at table; the caller has seen PCLMULQDQ and SSSE3"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1336,
+      "line": 1334,
       "column": 1,
       "reason": "reads and writes 16 bytes at y and reads 64 bytes at data and at powers and the 16-byte mask at table; the caller has seen PCLMULQDQ and SSSE3"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1460,
+      "line": 1458,
       "column": 1,
       "reason": "reads the stack pointer register after one balanced push; no memory is read"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1476,
+      "line": 1474,
       "column": 1,
       "reason": "the caller owns count readable bytes at source and count writable bytes at target; an overlap has target below source"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1497,
+      "line": 1495,
       "column": 1,
       "reason": "the caller owns count readable bytes at source and count writable bytes at target, and count is 1 through 3"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1520,
+      "line": 1518,
       "column": 1,
       "reason": "the caller owns count readable bytes at source and count writable bytes at target, and count is 4 through 7"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1535,
+      "line": 1533,
       "column": 1,
       "reason": "the caller owns count readable bytes at source and count writable bytes at target, and count is 8 through 16"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1550,
+      "line": 1548,
       "column": 1,
       "reason": "the caller owns count readable bytes at source and count writable bytes at target, and count is 16 through 32"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1565,
+      "line": 1563,
       "column": 1,
       "reason": "the caller owns count readable bytes at source and count writable bytes at target, and count is 32 through 64"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1584,
+      "line": 1582,
       "column": 1,
       "reason": "the caller owns count readable bytes at source and count writable bytes at target, and count is 64 through 128"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1613,
+      "line": 1611,
       "column": 1,
       "reason": "the caller owns 64 readable bytes at source and 64 writable bytes at target"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1630,
+      "line": 1628,
       "column": 1,
       "reason": "the caller owns count writable words starting at target"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1645,
+      "line": 1643,
       "column": 1,
       "reason": "reads one byte from a live readable mapped address supplied by the caller"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1652,
+      "line": 1650,
       "column": 1,
       "reason": "writes one byte to a live writable mapped address supplied by the caller"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1662,
+      "line": 1660,
       "column": 1,
       "reason": "writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1683,
+      "line": 1681,
       "column": 1,
       "reason": "bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1720,
+      "line": 1718,
       "column": 1,
       "reason": "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1767,
+      "line": 1765,
       "column": 1,
       "reason": "the calling thread is attached and GS points at its live Jet TCB"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1776,
+      "line": 1774,
       "column": 1,
       "reason": "ARCH_GET_GS writes one initialized aligned stack word only during this syscall; no TLS or heap is read, and the push/pop is balanced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1796,
+      "line": 1794,
       "column": 1,
       "reason": "base is a live self-addressed Jet TCB the calling thread runs on until the next switch, and the kernel enabled FSGSBASE"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1810,
+      "line": 1808,
       "column": 1,
       "reason": "only a signal restorer's own frame calls this, on the stack its handler returned to"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1828,
+      "line": 1826,
       "column": 1,
       "reason": "save is a writable word the resumer reads; target is a stack this switch or a fresh fiber seed left, owned by no running thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1853,
+      "line": 1851,
       "column": 1,
       "reason": "atomically adds to one aligned live word and returns its previous value"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1866,
+      "line": 1864,
       "column": 1,
       "reason": "atomically exchanges one aligned live word; xchg has an implicit full barrier"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1879,
+      "line": 1877,
       "column": 1,
       "reason": "calls executable System V code with one raw word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1892,
+      "line": 1890,
       "column": 1,
       "reason": "calls a Jet closure's code with the live closure header and one raw word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1910,
+      "line": 1908,
       "column": 1,
       "reason": "calls C code; the caller vouches for the code and its word-argument System V signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1937,
+      "line": 1935,
       "column": 1,
       "reason": "raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1978,
+      "line": 1976,
       "column": 1,
       "reason": "calls checked System V Unit code; the caller lends one live raw machine-word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1990,
+      "line": 1988,
       "column": 1,
       "reason": "calls checked System V Unit code; the caller vouches for both raw machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2004,
+      "line": 2002,
       "column": 1,
       "reason": "calls checked System V Unit code; the caller vouches for all three raw machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2020,
+      "line": 2018,
       "column": 1,
       "reason": "calls a checked native runtime callback with one machine-word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2033,
+      "line": 2031,
       "column": 1,
       "reason": "calls a checked native runtime callback with two machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2048,
+      "line": 2046,
       "column": 1,
       "reason": "calls a checked native runtime callback with three machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2065,
+      "line": 2063,
       "column": 1,
       "reason": "calls a checked native runtime callback with four machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2084,
+      "line": 2082,
       "column": 1,
       "reason": "calls a checked native runtime callback with five machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2105,
+      "line": 2103,
       "column": 1,
       "reason": "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2128,
+      "line": 2126,
       "column": 1,
       "reason": "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2217,
+      "line": 2215,
       "column": 1,
       "reason": "the audited caller lends the stat scalar row and valid syscall object"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2219,
+      "line": 2217,
       "column": 5,
       "reason": "packed Linux 32-bit fields become independent portable machine words without any allocation"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2230,
+      "line": 2228,
       "column": 1,
       "reason": "calls a checked System V void(void) process entry that remains executable for the entire call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2240,
+      "line": 2238,
       "column": 1,
       "reason": "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2342,
+      "line": 2340,
       "column": 1,
       "reason": "calls machine code; the caller vouches for its three-word System V signature"
     },
@@ -4317,13 +4387,6 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocationPolicyTests.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/CollectionsStopTests.jet",
       "line": 22,
       "column": 5,
@@ -4349,48 +4412,6 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 5,
       "column": 5,
       "reason": "an isolated failed scheduler witness exits with no further runtime cleanup"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
-      "line": 209,
-      "column": 5,
-      "reason": "fixture byte writes stay within owned 19/20-byte text buffers"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
-      "line": 213,
-      "column": 5,
-      "reason": "fixture byte writes stay within owned 19/20-byte text buffers"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
-      "line": 217,
-      "column": 5,
-      "reason": "fixture byte writes stay within owned 19/20-byte text buffers"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
-      "line": 221,
-      "column": 5,
-      "reason": "fixture byte writes stay within owned 19/20-byte text buffers"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
-      "line": 230,
-      "column": 5,
-      "reason": "fixture byte writes stay within an owned one-byte text buffer"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
-      "line": 234,
-      "column": 5,
-      "reason": "fixture byte writes stay within an owned one-byte text buffer"
     },
     {
       "package": "Compiler",
@@ -4528,42 +4549,42 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
-      "line": 36,
+      "line": 37,
       "column": 5,
       "reason": "gettid verifies identity without trusting the TCB under test"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
-      "line": 45,
+      "line": 47,
       "column": 5,
       "reason": "ARCH_GET_GS writes a caller-owned word; the inherited pointer is compared, never dereferenced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
-      "line": 118,
+      "line": 120,
       "column": 5,
       "reason": "rt_sigprocmask writes this thread's mask to a caller-owned word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
-      "line": 205,
+      "line": 207,
       "column": 13,
       "reason": "sched_yield widens both sides of the check-to-wait race without timing assumptions"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
-      "line": 243,
+      "line": 245,
       "column": 5,
       "reason": "rt_sigprocmask writes this thread's mask to a caller-owned word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
-      "line": 377,
+      "line": 379,
       "column": 5,
       "reason": "heap-free fixture success line is one eight-byte write"
     },
@@ -9343,6 +9364,27 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet",
+      "line": 6,
+      "column": 1,
+      "reason": "each caller vouches for the address"
+    },
+    {
+      "package": "tests",
+      "file": "tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "the kernel's own leaf reads a word its caller lends"
+    },
+    {
+      "package": "tests",
+      "file": "tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet",
+      "line": 18,
+      "column": 5,
+      "reason": "the host holds the word at this address"
+    },
+    {
+      "package": "tests",
       "file": "tests/ui/E3114_raw_address_into_kernel/run.jet",
       "line": 8,
       "column": 5,
@@ -9839,75 +9881,84 @@ file in a `Tests/` tree. The ratchet refuses either.
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 627 |
+| Compiler | 630 |
 | Core | 174 |
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 7 |
-| tests | 501 |
-| **total** | **1369** |
+| tests | 504 |
+| **total** | **1375** |
 
 ### Regions
 
 | crate/package | file | line | reason |
 | --- | --- | ---: | --- |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 181:5 | "memfd_create reads the NUL-terminated name at `name`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 195:5 | "the caller owns `fd` and nothing uses it any more" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 205:9 | "the caller mapped `count` writable bytes at `address`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 379:9 | "a private read-only view of the memfd aliases nothing writable" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 462:5 | "MAP_FIXED_NOREPLACE never replaces an existing mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 503:5 | "MAP_FIXED replaces only the image's own reserved pages" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 508:9 | "the bytes lie in the segment's last file page, mapped private and writable above" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 521:13 | "the caller mapped [from, to) + delta private and writable" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 537:5 | "MAP_FIXED replaces only the view's own fresh pages" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 541:5 | "the bytes lie in the view's last image page, mapped private and writable above" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 546:9 | "MAP_FIXED replaces only the view's own fresh pages; the memfd is never written again" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 868:5 | "openat reads the NUL-terminated path at `name`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 892:5 | "the timespec lies in the fresh zeroed page; nanosleep only reads it" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 903:5 | "the caller owns the stack bytes below `at`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 913:5 | "the caller owns the stack bytes below `at`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1020:5 | "brk(0) only reports the current break" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1024:5 | "the map's 104 bytes lie in the data page's auxiliary-vector room, read already" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1035:5 | "prlimit64 writes one rlimit (two words) at `scratch`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1100:5 | "the caller's executor page is its own fresh mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1116:5 | "the data page is this plan's own fresh mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1150:13 | "F_GETFD only reads the descriptor's flags" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1160:9 | "rt_sigaction with no new action writes the old one (32 bytes) to the scratch" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1174:5 | "a fresh anonymous reservation aliases nothing" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1184:5 | "getrandom fills the 16 stack bytes at `random`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1223:5 | "the data page holds 3840 bytes from LOADER_DATA_AUXV; /proc/self/auxv is [type, value] word pairs" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1239:9 | "the pair lies inside the bytes read into the data page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1266:5 | "the words lie in the stack mapping, above its guard page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1288:5 | "the block is this plan's own fresh mapping of plan_size bytes" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1310:5 | "the executor's records only reset process state; it then enters the loaded image on its own stack" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1329:5 | "the executor's first record forks; the child runs only the executor and enters the image, the parent returns here" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1355:5 | "landlock_create_ruleset reads the 8-byte handled-access word at the start of the fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1368:5 | "no_new_privs and landlock_restrict_self change only this thread's own rights; the ruleset fd is this function's" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1388:5 | "openat reads the NUL-terminated path at `name`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1398:5 | "landlock_add_rule reads the packed 12-byte rule at the start of the caller's page; the O_PATH fd is this function's" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1413:5 | "wait4 writes one int status to the fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1423:5 | "SIGKILL to a child this process started and has not reaped" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1434:9 | "a kernel sigaction with handler SIG_IGN on a fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1452:9 | "a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1489:5 | "execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 114:9 | "getrandom fills the first word of our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 121:9 | "getrandom wrote the scratch page's first word" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 155:5 | "pipe2 writes two descriptors into our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 160:5 | "pipe2 wrote the scratch page's first word" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 166:9 | "fcntl duplicates our own descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 178:5 | "closes our own descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 225:9 | "the poll set is our scratch page's first three entries" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 232:9 | "poll reads and writes the three entries of our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 171:5 | "`address` is the fresh mapping just made, page-rounded past the NUL" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 183:5 | "memfd_create reads the NUL-terminated name at `name`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 197:5 | "the caller owns `fd` and nothing uses it any more" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 207:9 | "the caller mapped `count` writable bytes at `address`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 381:9 | "a private read-only view of the memfd aliases nothing writable" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 446:17 | "loader_map_file mapped this segment private and writable at its vaddr above" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 468:5 | "MAP_FIXED_NOREPLACE never replaces an existing mapping" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 509:5 | "MAP_FIXED replaces only the image's own reserved pages" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 514:9 | "the bytes lie in the segment's last file page, mapped private and writable above" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 523:1 | "the caller mapped [from, to) + delta private and writable" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 541:5 | "MAP_FIXED replaces only the view's own fresh pages" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 545:5 | "the bytes lie in the view's last image page, mapped private and writable above" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 548:5 | "the view's image pages are mapped private and writable above" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 552:9 | "MAP_FIXED replaces only the view's own fresh pages; the memfd is never written again" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 874:5 | "openat reads the NUL-terminated path at `name`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 898:5 | "the timespec lies in the fresh zeroed page; nanosleep only reads it" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 906:1 | "the caller owns the stack bytes below `at`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 915:1 | "the caller owns the stack bytes below `at`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1008:1 | "the map's 104 bytes lie in the caller's data page, in its auxiliary-vector room, read already; brk(0) only reports the current break" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1030:1 | "prlimit64 writes one rlimit (two words) at `scratch`, which the caller owns" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1094:1 | "the caller's executor page is its own fresh read+write mapping of one page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1109:5 | "the data page is this plan's own fresh mapping" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1120:5 | "`executor` is the one-page read+write mapping just made for it" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1146:13 | "F_GETFD only reads the descriptor's flags" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1156:9 | "rt_sigaction with no new action writes the old one (32 bytes) to the scratch" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1169:5 | "the data page's scratch words are this plan's own" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1173:5 | "a fresh anonymous reservation aliases nothing" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1193:5 | "getrandom fills the 16 stack bytes at `random`, and each string goes below them, in the fresh main stack this plan owns" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1226:5 | "the data page holds 3840 bytes from LOADER_DATA_AUXV; /proc/self/auxv is [type, value] word pairs" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1242:9 | "the pair lies inside the bytes read into the data page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1269:5 | "the words lie in the stack mapping, above its guard page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1272:5 | "the data page's mm-map room is this plan's own" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1293:5 | "the block is this plan's own fresh mapping of plan_size bytes" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1315:5 | "the executor's records only reset process state; it then enters the loaded image on its own stack" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1334:5 | "the executor's first record forks; the child runs only the executor and enters the image, the parent returns here" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1360:5 | "landlock_create_ruleset reads the 8-byte handled-access word at the start of the fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1370:9 | "`page` is this function's fresh scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1375:5 | "no_new_privs and landlock_restrict_self change only this thread's own rights; the ruleset fd is this function's" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1390:1 | "landlock_add_rule reads the packed 12-byte rule this writes at the start of the caller's scratch `page`; openat reads the NUL-terminated path at `name`, and the O_PATH fd is this function's" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1414:5 | "wait4 writes one int status to the fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1424:5 | "SIGKILL to a child this process started and has not reaped" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1435:9 | "a kernel sigaction with handler SIG_IGN on a fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1453:9 | "a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1478:5 | "the bytes below `at` lie in the fresh block mapped above, sized for every string" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1494:5 | "execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 57:9 | "the scratch mapping is the child's own, made above" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 117:9 | "getrandom fills the first word of our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 124:9 | "getrandom wrote the scratch page's first word" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 156:1 | "pipe2 writes two descriptors into the first word of the caller's scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 165:9 | "fcntl duplicates our own descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 177:5 | "closes our own descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 182:1 | "the caller owns the `size` bytes at `buffer`, a multiple of 8" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 203:5 | "the buffer is the child's scratch mapping past its first page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 228:9 | "the poll set is our scratch page's first three entries, which poll reads and writes; the clock words lie past them" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 251:9 | "poll wrote the entries' returned events" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 280:9 | "the poll set is our scratch page's first two entries" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 285:9 | "poll reads and writes the two entries of our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 291:9 | "poll wrote the entries' returned events" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 327:5 | "the bytes lie in our scratch mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 335:5 | "clock_gettime writes two words at scratch + 64, past the poll set" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 347:9 | "kills our own child" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 354:9 | "wait4 writes the status word into our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 359:5 | "wait4 wrote the status word" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 268:13 | "os_read just wrote `moved` bytes past the scratch page's first page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 282:9 | "the poll set is our scratch page's first two entries" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 287:9 | "poll reads and writes the two entries of our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 293:9 | "poll wrote the entries' returned events" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 317:5 | "os_read just wrote `moved` bytes past the scratch page's first page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 330:1 | "the caller's `count` bytes at `address` lie in our mapping" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 335:1 | "clock_gettime writes two words at scratch + 64, past the poll set of the caller's scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 345:9 | "kills our own child" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 352:9 | "wait4 writes the status word into our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 357:5 | "wait4 wrote the status word" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 82:1 | "a raw Linux x86-64 system call; the caller passes the call number and arguments that call expects" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 110:5 | "the caller owns `count` writable bytes at `address`" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 117:5 | "the caller owns `count` readable bytes at `address`" |
@@ -9918,76 +9969,77 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 150:1 | "reads one word at an address the caller owns and has mapped readable" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 157:1 | "reads one byte at an address the caller owns and has mapped readable" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 164:1 | "stores one byte at an address the caller owns and has mapped writable" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 183:5 | "the caller owns the destination words" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 192:1 | "calls machine code; the caller vouches for the code and its System V signature" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 205:1 | "calls machine code; the caller vouches for the code and its two-word System V signature" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 220:1 | "calls machine code; the caller holds the mapping and its checked zero-argument Unit System V signature" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 230:1 | "calls machine code; the caller holds the mapping and its checked three-word Unit System V signature" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 246:1 | "calls machine code; the caller holds the mapping and its checked one-word Unit System V signature" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 258:1 | "calls machine code; the caller holds the mapping and its checked two-word Unit System V signature" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 275:1 | "a raw Linux x86-64 syscall; the caller supplies the syscall's valid machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 292:1 | "reads one aligned machine word in live allocator-owned mapped memory" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 299:1 | "stores one aligned machine word in live allocator-owned mapped memory; x86 TSO makes this a release store" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 308:1 | "atomically compares and exchanges one aligned live machine word; every non-atomic access to protected data holds its lock" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 323:1 | "x86 pause only hints that this thread is waiting in a spin loop" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 333:1 | "cpuid only reports processor identification; rbx is saved and restored" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 346:1 | "cpuid only reports processor identification; rbx is saved and restored" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 360:1 | "cpuid only reports processor identification; rbx is saved and restored" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 373:1 | "cpuid only reports processor identification; rbx is saved and restored" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 388:1 | "xgetbv only reads an extended control register; the caller has seen CPUID.1:ECX.OSXSAVE" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 403:1 | "reads 32 state bytes at state, 64 block bytes at data and 272 table bytes at table, and writes the 32 state bytes; the caller has seen the SHA extensions" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 600:1 | "reads 176 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 678:1 | "reads 208 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 766:1 | "reads 240 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 864:1 | "reads 176 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 942:1 | "reads 208 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1030:1 | "reads 240 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1132:1 | "reads 176 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1168:1 | "reads 208 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1208:1 | "reads 240 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1261:1 | "reads and writes 16 bytes at y and reads 16 bytes at data and at h and the 16-byte mask at table; the caller has seen PCLMULQDQ and SSSE3" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1336:1 | "reads and writes 16 bytes at y and reads 64 bytes at data and at powers and the 16-byte mask at table; the caller has seen PCLMULQDQ and SSSE3" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1460:1 | "reads the stack pointer register after one balanced push; no memory is read" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1476:1 | "the caller owns count readable bytes at source and count writable bytes at target; an overlap has target below source" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1497:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 1 through 3" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1520:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 4 through 7" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1535:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 8 through 16" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1550:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 16 through 32" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1565:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 32 through 64" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1584:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 64 through 128" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1613:1 | "the caller owns 64 readable bytes at source and 64 writable bytes at target" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1630:1 | "the caller owns count writable words starting at target" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1645:1 | "reads one byte from a live readable mapped address supplied by the caller" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1652:1 | "writes one byte to a live writable mapped address supplied by the caller" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1662:1 | "writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1683:1 | "bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1720:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1767:1 | "the calling thread is attached and GS points at its live Jet TCB" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1776:1 | "ARCH_GET_GS writes one initialized aligned stack word only during this syscall; no TLS or heap is read, and the push/pop is balanced" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1796:1 | "base is a live self-addressed Jet TCB the calling thread runs on until the next switch, and the kernel enabled FSGSBASE" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1810:1 | "only a signal restorer's own frame calls this, on the stack its handler returned to" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1828:1 | "save is a writable word the resumer reads; target is a stack this switch or a fresh fiber seed left, owned by no running thread" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1853:1 | "atomically adds to one aligned live word and returns its previous value" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1866:1 | "atomically exchanges one aligned live word; xchg has an implicit full barrier" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1879:1 | "calls executable System V code with one raw word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1892:1 | "calls a Jet closure's code with the live closure header and one raw word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1910:1 | "calls C code; the caller vouches for the code and its word-argument System V signature" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1937:1 | "raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1978:1 | "calls checked System V Unit code; the caller lends one live raw machine-word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1990:1 | "calls checked System V Unit code; the caller vouches for both raw machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2004:1 | "calls checked System V Unit code; the caller vouches for all three raw machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2020:1 | "calls a checked native runtime callback with one machine-word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2033:1 | "calls a checked native runtime callback with two machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2048:1 | "calls a checked native runtime callback with three machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2065:1 | "calls a checked native runtime callback with four machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2084:1 | "calls a checked native runtime callback with five machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2105:1 | "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2128:1 | "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2217:1 | "the audited caller lends the stat scalar row and valid syscall object" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2219:5 | "packed Linux 32-bit fields become independent portable machine words without any allocation" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2230:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2240:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2342:1 | "calls machine code; the caller vouches for its three-word System V signature" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 175:1 | "the caller owns `bytes.len()` rounded up to 8 bytes at `address`" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 182:1 | "the caller owns `count` rounded up to 8 bytes at `address`" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 190:1 | "calls machine code; the caller vouches for the code and its System V signature" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 203:1 | "calls machine code; the caller vouches for the code and its two-word System V signature" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 218:1 | "calls machine code; the caller holds the mapping and its checked zero-argument Unit System V signature" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 228:1 | "calls machine code; the caller holds the mapping and its checked three-word Unit System V signature" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 244:1 | "calls machine code; the caller holds the mapping and its checked one-word Unit System V signature" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 256:1 | "calls machine code; the caller holds the mapping and its checked two-word Unit System V signature" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 273:1 | "a raw Linux x86-64 syscall; the caller supplies the syscall's valid machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 290:1 | "reads one aligned machine word in live allocator-owned mapped memory" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 297:1 | "stores one aligned machine word in live allocator-owned mapped memory; x86 TSO makes this a release store" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 306:1 | "atomically compares and exchanges one aligned live machine word; every non-atomic access to protected data holds its lock" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 321:1 | "x86 pause only hints that this thread is waiting in a spin loop" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 331:1 | "cpuid only reports processor identification; rbx is saved and restored" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 344:1 | "cpuid only reports processor identification; rbx is saved and restored" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 358:1 | "cpuid only reports processor identification; rbx is saved and restored" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 371:1 | "cpuid only reports processor identification; rbx is saved and restored" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 386:1 | "xgetbv only reads an extended control register; the caller has seen CPUID.1:ECX.OSXSAVE" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 401:1 | "reads 32 state bytes at state, 64 block bytes at data and 272 table bytes at table, and writes the 32 state bytes; the caller has seen the SHA extensions" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 598:1 | "reads 176 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 676:1 | "reads 208 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 764:1 | "reads 240 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 862:1 | "reads 176 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 940:1 | "reads 208 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1028:1 | "reads 240 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1130:1 | "reads 176 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1166:1 | "reads 208 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1206:1 | "reads 240 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1259:1 | "reads and writes 16 bytes at y and reads 16 bytes at data and at h and the 16-byte mask at table; the caller has seen PCLMULQDQ and SSSE3" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1334:1 | "reads and writes 16 bytes at y and reads 64 bytes at data and at powers and the 16-byte mask at table; the caller has seen PCLMULQDQ and SSSE3" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1458:1 | "reads the stack pointer register after one balanced push; no memory is read" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1474:1 | "the caller owns count readable bytes at source and count writable bytes at target; an overlap has target below source" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1495:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 1 through 3" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1518:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 4 through 7" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1533:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 8 through 16" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1548:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 16 through 32" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1563:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 32 through 64" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1582:1 | "the caller owns count readable bytes at source and count writable bytes at target, and count is 64 through 128" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1611:1 | "the caller owns 64 readable bytes at source and 64 writable bytes at target" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1628:1 | "the caller owns count writable words starting at target" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1643:1 | "reads one byte from a live readable mapped address supplied by the caller" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1650:1 | "writes one byte to a live writable mapped address supplied by the caller" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1660:1 | "writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1681:1 | "bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1718:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1765:1 | "the calling thread is attached and GS points at its live Jet TCB" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1774:1 | "ARCH_GET_GS writes one initialized aligned stack word only during this syscall; no TLS or heap is read, and the push/pop is balanced" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1794:1 | "base is a live self-addressed Jet TCB the calling thread runs on until the next switch, and the kernel enabled FSGSBASE" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1808:1 | "only a signal restorer's own frame calls this, on the stack its handler returned to" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1826:1 | "save is a writable word the resumer reads; target is a stack this switch or a fresh fiber seed left, owned by no running thread" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1851:1 | "atomically adds to one aligned live word and returns its previous value" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1864:1 | "atomically exchanges one aligned live word; xchg has an implicit full barrier" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1877:1 | "calls executable System V code with one raw word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1890:1 | "calls a Jet closure's code with the live closure header and one raw word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1908:1 | "calls C code; the caller vouches for the code and its word-argument System V signature" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1935:1 | "raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1976:1 | "calls checked System V Unit code; the caller lends one live raw machine-word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1988:1 | "calls checked System V Unit code; the caller vouches for both raw machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2002:1 | "calls checked System V Unit code; the caller vouches for all three raw machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2018:1 | "calls a checked native runtime callback with one machine-word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2031:1 | "calls a checked native runtime callback with two machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2046:1 | "calls a checked native runtime callback with three machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2063:1 | "calls a checked native runtime callback with four machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2082:1 | "calls a checked native runtime callback with five machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2103:1 | "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2126:1 | "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2215:1 | "the audited caller lends the stat scalar row and valid syscall object" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2217:5 | "packed Linux 32-bit fields become independent portable machine words without any allocation" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2228:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2238:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2340:1 | "calls machine code; the caller vouches for its three-word System V signature" |
 | Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2053:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 147:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 155:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
@@ -10433,17 +10485,10 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 424:5 | "row is this thread's own cache row" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 433:5 | "the test owns this fresh align-8 block and its header words" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 516:5 | "the exact success line is two bounded stack words written to stdout" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocationPolicyTests.jet | 5:5 | "the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/CollectionsStopTests.jet | 22:5 | "the single-threaded fixture host owns the snapshot from a case to its check" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/CollectionsStopTests.jet | 37:5 | "the single-threaded fixture host owns the snapshot from a case to its check" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/EnvOverlayKernel.jet | 6:5 | "failed witness terminates its isolated real-runtime process" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 5:5 | "an isolated failed scheduler witness exits with no further runtime cleanup" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 209:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 213:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 217:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 221:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 230:5 | "fixture byte writes stay within an owned one-byte text buffer" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 234:5 | "fixture byte writes stay within an owned one-byte text buffer" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 9:5 | "a failed isolated Secret witness terminates this test process" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 17:5 | "header is fresh aligned24B storage owned by the test; data owns cap times the host U8 stride bytes or is zero for an empty List" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 29:5 | "the pointer is a live small allocation; this isolated test is the sole allocator user and can inspect its slab's class metadata" |
@@ -10463,12 +10508,12 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 305:5 | "this isolated native witness writes its17B success literal without introducing any text or collection runtime dependency" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/TextTests.jet | 6:5 | "a failed text runtime witness terminates only its isolated process" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 8:5 | "a failed isolated runtime witness ends the process without allocation or libc" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 36:5 | "gettid verifies identity without trusting the TCB under test" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 45:5 | "ARCH_GET_GS writes a caller-owned word; the inherited pointer is compared, never dereferenced" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 118:5 | "rt_sigprocmask writes this thread's mask to a caller-owned word" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 205:13 | "sched_yield widens both sides of the check-to-wait race without timing assumptions" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 243:5 | "rt_sigprocmask writes this thread's mask to a caller-owned word" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 377:5 | "heap-free fixture success line is one eight-byte write" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 37:5 | "gettid verifies identity without trusting the TCB under test" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 47:5 | "ARCH_GET_GS writes a caller-owned word; the inherited pointer is compared, never dereferenced" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 120:5 | "rt_sigprocmask writes this thread's mask to a caller-owned word" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 207:13 | "sched_yield widens both sides of the check-to-wait race without timing assumptions" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 245:5 | "rt_sigprocmask writes this thread's mask to a caller-owned word" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 379:5 | "heap-free fixture success line is one eight-byte write" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/UnicodeTests.jet | 8:5 | "a failed Unicode runtime witness ends only its isolated test process" |
 | Compiler | Compiler/JetSema/Tests/ScalarGlobalFixtures.jet | 21:5 | "single-threaded test: plain module writes of each scalar type" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |
@@ -11151,6 +11196,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/ui/E3113_package_without_kernel_files/run.jet | 6:1 | "the caller releases the storage with `free_raw`, exactly once" |
 | tests | tests/ui/E3113_raw_memory_outside_kernel/kernel.jet | 4:1 | "the caller releases the storage with `free_raw`, exactly once" |
 | tests | tests/ui/E3113_raw_memory_outside_kernel/run.jet | 5:1 | "the caller releases the storage with `free_raw`, exactly once" |
+| tests | tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet | 6:1 | "each caller vouches for the address" |
+| tests | tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet | 11:5 | "the kernel's own leaf reads a word its caller lends" |
+| tests | tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet | 18:5 | "the host holds the word at this address" |
 | tests | tests/ui/E3114_raw_address_into_kernel/run.jet | 8:5 | "the caller hands the address of a live Int" |
 | tests | tests/ui/E3114_raw_address_into_kernel/run.jet | 18:5 | "kernel code hands the address of a live Int" |
 | tests | tests/ui/audited_gate_ladder_forbidden/run.jet | 3:5 | "the organization policy refuses this audited escape" |
