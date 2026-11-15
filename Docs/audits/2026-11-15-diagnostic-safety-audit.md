@@ -208,7 +208,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0737 | FixedTimingSteer | Compiler/JetSema/Source/Sema/Taint.jet:1396 | fixed-timing values are handled with branch-free operations |
 | E0738 | FixedTimingWideHolder | Compiler/JetSema/Source/Sema/Taint.jet:1406 | a fixed-timing value lives in a fixed-width holder |
 | E0739 | FixedTimingCheckedArithmetic | Compiler/JetSema/Source/Sema/Taint.jet:1416 | fixed-timing arithmetic wraps instead of checking |
-| E0740 | EffectBoundExceeded | Compiler/JetSema/Source/Sema/Calls/Live.jet:260 | the row lists the effect, or the body stops reaching it |
+| E0740 | EffectBoundExceeded | Compiler/JetSema/Source/Sema/Calls/Live.jet:263 | the row lists the effect, or the body stops reaching it |
 | E0742 | ImplEffectBoundExceeded | Compiler/JetSema/Source/Sema/Effects/Checks.jet:4203 | the implementation fits the trait's bound |
 | E0743 | MissingDynamicEffectBound | Compiler/JetSema/Source/Sema/Effects/Checks.jet:4147 | the trait method declares its effect row |
 | E0744 | FixedTimingUnconfirmedTarget | Compiler/JetDriver/Source/Driver/Pipeline.jet:475 | a hardened package with fixed-timing values builds for a confirmed target |

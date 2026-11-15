@@ -846,13 +846,14 @@ priv db_shutdown: fn(state: Shared<DBState>) -> Bool Never! {
 // write is committed: at once outside a transaction, and at the commit or
 // rollback inside one. A binding re-run on another connection before the
 // commit reads the old rows, so a mark made before the commit would leave
-// that old result stored as current.
+// that old result stored as current. A write that changed no row leaves its
+// table's bindings current; a schema statement always marks them.
 priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError! {
     scoped: policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
     guard := scope.state.guard_edit()
     if driver_closed(guard.value.driver) -> return Err(db_closed())
     changed: __driver_execute(guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
-    if sql_table(scoped) == .Val(table) {
+    if sql_table(scoped) == .Val(table) && (changed > 0 || sql_schema(scoped)) {
         if guard.value.open != 0 {
             if !guard.value.written.contains(table) -> guard.value.written.push(table.copy())
         } else {
@@ -892,6 +893,15 @@ priv sql_table: fn(sql: SQL) -> String? Never! {
     target: sql_target_index(tokens, kind)
     if target < 0 -> return None
     Val(tokens[target].word.copy())
+}
+
+// Whether `sql` is a CREATE, ALTER or DROP statement, which changes its
+// table's shape however many rows it reports.
+priv sql_schema: fn(sql: SQL) -> Bool Never! {
+    tokens: sql_tokens(sql.text.bytes())
+    if tokens.len() == 0 -> return false
+    kind: tokens[0].word
+    kind == "create" || kind == "alter" || kind == "drop"
 }
 
 // ---- transactions and migrations -----------------------------------------

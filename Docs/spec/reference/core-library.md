@@ -5461,7 +5461,7 @@ tasks never read or change the process registry. The module source is
 | Signature | Result | Description |
 |---|---|---|
 | `live(query, args...) -> Live<T, E>` | binding | Bind `query: fn(args...) -[DB.Read]> T E!` to one argument list. The arguments are checked as a call to `query`, evaluated once and kept by the binding; the same source and arguments return the existing binding. |
-| `subscribe(source, args..., every: Duration? = None) -> Live<T, E>` | binding | Bind any named `source: fn(args...) -> T E!` to one argument list; with `every`, a read re-runs the source once the interval has passed since its last run. |
+| `subscribe(source, args..., every: Duration? = None) -> Live<T, E>` | binding | Bind a named `source: fn(args...) -[DB.Read, Net, Time]> T E!` to one argument list; with `every`, a read re-runs the source once the interval has passed since its last run. A source that declares another effect is E0740. |
 | `state(binding: Live<T, E>) -> Loadable<T, E>` | state | Read the binding's snapshot: `Loaded(value)` or `Failed(reason)`, running the source first when the binding is new, invalidated, or due to poll. |
 | `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list without running the source. |
 | `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. |
@@ -5472,7 +5472,10 @@ tasks never read or change the process registry. The module source is
 | `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
 
 A source must be a named function, not a closure: its module path and name
-identify it on the wire. `T` and `E` must be `Encode` and `Decode`, and the
+identify it on the wire. It may read the database, fetch over `Net` and wait
+on `Time`, nothing more: a binding re-runs its source wherever its state is
+read, on a server or in a browser, so `state` builds for the web target too.
+`T` and `E` must be `Encode` and `Decode`, and the
 encoded arguments tell bindings of one source apart (an argument type without
 `Encode`, such as a database scope, does not). A stored value that equals the
 previous one is not a change, so readers wake only when the value changed.
@@ -6373,10 +6376,14 @@ policy-applied SQL and its bound values: the same query from the same user
 returns the same binding, and another user's gets its own. `app.state`
 runs the query on first read and again, with the policy applied anew, after a
 scope write (`execute`, `transaction`, `migrate`) to the table it reads, or
-after a rollback that undid one. A write to another table leaves it current.
-Each invalidation also goes to the WebSocket live hub, reaching only the
-connections that `app.watch` the binding, and `app.live_stats()` counts it as
-`ws_pushes`.
+after a rollback that undid one. A write to another table, or one that changed
+no row (an `UPDATE` or `DELETE` that matched nothing), leaves it current and
+its stored result untouched; a `CREATE`, `ALTER` or `DROP` of its table always
+re-runs it. Each invalidation also goes to the WebSocket live hub, reaching
+only the connections that `app.watch` the binding, and `app.live_stats()`
+counts it as `ws_pushes`. Nothing re-runs a binding but a read: a connection
+that closes stops watching, so a write after that reaches it no longer and
+re-runs nothing until the binding is read again.
 
 `DBPool.acquire(deadline:)` admits waiters first come, first served. A waiter
 leaves the queue when it gets a lease, when its deadline passes, when the pool

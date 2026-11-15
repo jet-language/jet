@@ -364,10 +364,12 @@ canonical_providers: fn(values: [String]) -> [String] {
 
 // A live binding: one source function applied to one argument list. The
 // compiler builds it from `live(source, args...)` or
-// `subscribe(source, args...)`; `state` reads it.
+// `subscribe(source, args...)`; `state` reads it. A source may read the
+// database, fetch over the network and wait, nothing more, so `state` runs
+// on every target that has those, the web included.
 Live: struct<T, E> {
     id: Int
-    run: fn() -> T E!
+    run: fn() -[DB.Read, Net, Time]> T E!
 }
 
 // One registry binding, named by its source's wire name and its encoded
@@ -468,12 +470,12 @@ live_query_count: fn(registry: LiveRegistry) -> Int {
 }
 
 // `live(source, args...)`: `args` are the encoded arguments.
-__live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: &&fn() -> T E!) -> Live<T, E> Never! {
+__live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
     Live<T, E>{id: live_register(source, live_key(args), 0), run: run}
 }
 
 // `subscribe(source, args..., every:)`: a binding polled every `every`.
-__live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: &&fn() -> T E!) -> Live<T, E> Never! {
+__live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
     every_ns := 0
     if every == .Val(interval) && interval.ns > 0 -> every_ns = interval.ns
     Live<T, E>{id: live_register(source, live_key(args), every_ns), run: run}

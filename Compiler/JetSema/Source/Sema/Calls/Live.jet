@@ -1,7 +1,8 @@
 // `live`, `subscribe`, `push` and `invalidate` (in `app`) name
 // a source function and the arguments of one call to it. The checker proves
 // the source is a named function whose result and error types are Encode and
-// Decode (and, for `live`, that it only reads the database), checks the
+// Decode (and, for `live`, that it only reads the database; for `subscribe`,
+// that it declares no effect beyond `DB.Read`, `Net` and `Time`), checks the
 // arguments as a call to it, and lowers the call to the module's `__live_*`
 // helper: each argument is evaluated once into a hidden local, the encoded
 // arguments name the binding, and the closure that re-runs the source owns
@@ -29,6 +30,7 @@ use jet_foundation.[
     expr_span,
     owned_trait_codec_names,
     module_text,
+    sema_effect_covers,
 ]
 
 SemaLiveSource: struct {
@@ -241,6 +243,7 @@ sema_live_source: fn(expression: Expr, member: String, environment: SemaScopeEnv
         result: ret ?? Type.Named{name: "Unit"}
         if result == .Result(ok, err) {
             if member == "live" && !sema_live_reads_only(name, effect_bound, source_span, diagnostics) -> return None
+            if member == "subscribe" && !sema_live_subscribable(name, effect_bound, source_span, diagnostics) -> return None
             graph: program.registration_graph ?? return None
             if !sema_live_codable(graph, name, "result", ok, environment, source_span, diagnostics) -> return None
             if !sema_live_codable(graph, name, "error", err, environment, source_span, diagnostics) -> return None
@@ -257,14 +260,29 @@ sema_live_source: fn(expression: Expr, member: String, environment: SemaScopeEnv
 // `DB.Read` at most.
 sema_live_reads_only: fn(name: String, effect_bound: [EffectRowEntry]?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     rows: effect_bound ?? {
-        diagnostics.push(sema_error("E0740", span, "`{name}` declares no effects, so a live query can't prove it only reads", "`live` re-runs its query whenever the data it read changes, so the query may only read the database", "declare it `{name}: fn(...) -[DB.Read]> ...`, or use `subscribe` for another source"))
+        diagnostics.push(sema_error("E0740", span, "`{name}` declares no effects, so a live query can't prove it only reads", "`live` re-runs its query whenever the data it read changes, so the query may only read the database", "declare it `{name}: fn(...) -[DB.Read]> ...`, or use `subscribe` for a source that also fetches over `Net` or waits on `Time`"))
         return false
     }
     loop row in rows {
         if row.name != "DB.Read" {
-            diagnostics.push(sema_error("E0740", span, "`{name}` uses the effect `{row.name}`, which a live query doesn't allow", "`live` re-runs its query whenever the data it read changes, so the query may only read the database", "keep the query to `-[DB.Read]>`, or use `subscribe` for another source"))
+            diagnostics.push(sema_error("E0740", span, "`{name}` uses the effect `{row.name}`, which a live query doesn't allow", "`live` re-runs its query whenever the data it read changes, so the query may only read the database", "keep the query to `-[DB.Read]>`, or use `subscribe` for a source that also fetches over `Net` or waits on `Time`"))
             return false
         }
+    }
+    true
+}
+
+// A `subscribe` source declares only `DB.Read`, `Net` and `Time` effects: a
+// binding re-runs its source wherever `state` reads it, a server or a
+// browser, and every such target provides those (`app.Live` bounds its run to
+// them). A source that declares none is held to that bound by its body's
+// inferred effects where the binding is made.
+sema_live_subscribable: fn(name: String, effect_bound: [EffectRowEntry]?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    rows: effect_bound ?? return true
+    loop row in rows {
+        if sema_effect_covers("DB.Read", row.name) || sema_effect_covers("Net", row.name) || sema_effect_covers("Time", row.name) -> next
+        diagnostics.push(sema_error("E0740", span, "`{name}` uses the effect `{row.name}`, which a subscribed source doesn't allow", "a binding re-runs its source wherever its state is read, on a server or in a browser, so a source may only read the database (`DB.Read`), fetch over `Net` and wait on `Time`", "keep `{name}` to `-[DB.Read, Net, Time]>`, and do the `{row.name}` work outside the source"))
+        return false
     }
     true
 }
