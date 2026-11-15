@@ -896,6 +896,12 @@ trap_require_stop: fn(kind: I64, descriptor: I64, message: I64, left: I64, right
         trap_build_msg_got(raw)
         jet_rt_string_builder_push(raw, left)
     }
+    // A stop inside a task keeps its report context as its site, so a join
+    // that re-raises this failure names where it stopped (trap_task_site_end).
+    if trap_task_site_begin() {
+        trap_context(trap_word(descriptor), trap_word(wrapping(descriptor + I64{8})), trap_line(trap_word(wrapping(descriptor + I64{16}))), trap_word(wrapping(descriptor + I64{24})), trap_word(wrapping(descriptor + I64{32})), trap_word(wrapping(descriptor + I64{40})), trap_word(wrapping(descriptor + I64{48})), trap_line(trap_word(wrapping(descriptor + I64{56}))), trap_line(trap_word(wrapping(descriptor + I64{64}))))
+        trap_task_site_end(trap_word(raw), trap_word(wrapping(raw + I64{8})))
+    }
     published: rt_task_panic_publish(trap_word(raw), trap_word(wrapping(raw + I64{8})), I64{0})
     if (kind == I64{1}) -> jet_rt_string_drop(raw)
     if published -> return
@@ -913,6 +919,8 @@ trap_require_stop: fn(kind: I64, descriptor: I64, message: I64, left: I64, right
     }
     trap_msg_message_end()
     trap_descriptor_context(descriptor, locals)
+    // An equality stop's message is its operands, never a joined reason.
+    if (kind != I64{1}) -> trap_joined_site(trap_word(message), trap_word(wrapping(message + I64{8})))
     trap_footer(I64{0})
 }
 
