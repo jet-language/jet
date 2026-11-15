@@ -201,16 +201,24 @@ RT_FILL_STRING_FROM: I64{2048}
 // The first differing byte of the two ranges, as unsigned bytes: below zero
 // when `left`'s is lower, above when higher, 0 when the ranges are equal.
 // It is also the native lowering's equality of two Lists of plain data
-// (JetIR BuildTypes.jet ir_bytes_equal_row). Equal words are skipped
-// whole; the bytes from the first differing word decide.
+// (JetIR BuildTypes.jet ir_bytes_equal_row). Equal 64-byte blocks are
+// skipped with one os_equal_64_i64 step each (a vector compare on x64), then
+// equal words; equal words to within 8 bytes of the end are settled by the
+// last word, read overlapped.
+// Otherwise the bytes from the first differing word decide.
 #Export(c) memcmp: fn(left: I64, right: I64, count: I64) -> I64 {
     if (left == right) -> return I64{0}
     at := I64{0}
+    last_block: count - I64{64}
     last_word: count - I64{8}
     #Unsafe("the caller (C, or the List equality's lowering) holds count readable bytes at left and at right") {
+        loop at <= last_block && os_equal_64_i64(wrapping(left + at), wrapping(right + at)) != (I64{0}) {
+            at += I64{64}
+        }
         loop at <= last_word && os_load_i64(wrapping(left + at)) == os_load_i64(wrapping(right + at)) {
             at += I64{8}
         }
+        if (at > last_word && count >= I64{8} && os_load_i64(wrapping(left + last_word)) == os_load_i64(wrapping(right + last_word))) -> return I64{0}
         loop at < count {
             a: os_load_u8(wrapping(left + at))
             b: os_load_u8(wrapping(right + at))

@@ -7,7 +7,10 @@
 // read-modify-write. Calls through a code address are `call_indirect`
 // through the module table.
 
-use jet_ir.[IRFunction, IRModule, ir_stop_routine]
+use {
+    jet_foundation.[Type]
+    jet_ir.[IRFunction, IRModule, IRSlotKind, ir_function_new, ir_intern_name, ir_module_new, ir_slot, ir_stop_routine, ir_type_row]
+}
 
 // The host's system call: number and six arguments.
 WEB_SYSCALL_SIG: "lllllll:l"
@@ -162,6 +165,20 @@ web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: B
             web_at(e, args[1])
             web_i32(e, 64)
             web_memory_copy(e)
+        }
+        // 1 when the 64 bytes at the first address equal those at the
+        // second, else 0: the eight word pairs' xors, or'd, tested for zero.
+        "os_equal_64_i64" -> {
+            loop word in 0..<8 {
+                web_at(e, args[0])
+                web_mem(e, 0x29, word * 8)
+                web_at(e, args[1])
+                web_mem(e, 0x29, word * 8)
+                web_op(e, 0x85)
+                if word > 0 -> web_op(e, 0x84)
+            }
+            web_op(e, 0x50)
+            web_op(e, 0xad)
         }
         // Every byte-fill leaf is memory.fill, which stores the value's low
         // byte, as the leaf stores the word's.
@@ -419,4 +436,33 @@ web_poll_quiet_unless: fn(e: &WebEmitter, word: Int) Never! {
     web_i64(e, 0)
     web_op(e, 0x0f)
     web_end(e)
+}
+
+// The 64-byte equality leaf over two address parameters: each word pair is
+// read at offsets 0, 8, ..., 56 and xor'd, the xors or'd together, then
+// `i64.eqz` and `i64.extend_i32_u`, so the result is 1 or 0 as on x64.
+#Test("The 64-byte equality leaf answers 1 or 0 from the eight word pairs' xors") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? panic("no U64 row")
+    f := ir_function_new("os_equal_64_i64", "test:leaf.jet::os_equal_64_i64", "", "leaf.jet", 1)
+    left: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "left"), 1)
+    right: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "right"), 1)
+    e := web_emitter(m, f)
+    st := WebState{
+        app: false, stop_points: false, data_at: [Int]{}, table_base: 0, slots: [Int]{}, slot_rows: [Int]{},
+        types: [String]{}, type_rows: [String:Int]{}, refs: [WebRef]{}, ref_rows: [String:Int]{}, internal: [String:Int]{},
+        exports: [String:String]{}, hosts: [String:Bool]{}, sigs: [String]{}, poll: -1, trap: -1, turn: -1, armed: -1, errors: [String]{},
+    }
+    assert(web_leaf(e, st, f.name, [Int]{e.locals[left], e.locals[right]}, true))
+    a: U8{e.locals[left]}
+    b: U8{e.locals[right]}
+    expected := [U8]{}
+    loop k in 0..<8 {
+        offset: U8{8 * k}
+        expected.extend([U8]{0x20, a, 0xa7, 0x29, 0x00, offset, 0x20, b, 0xa7, 0x29, 0x00, offset, 0x85})
+        if k > 0 -> expected.push(0x84)
+    }
+    expected.push(0x50)
+    expected.push(0xad)
+    assert(e.code == expected)
 }

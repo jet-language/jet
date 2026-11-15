@@ -1639,6 +1639,35 @@ os_move_64_i64: fn(target: I64, source: I64) {
     """
 }
 
+// One 64-byte step of the runtime's compare (RawWords.jet memcmp): 1 when
+// the 64 bytes at `left` equal those at `right`, else 0. The pcmpeqb mask is
+// 65535 exactly when all are equal, so mask + 1 has bit 16 set then alone.
+#[Unsafe("the caller holds 64 readable bytes at left and at right"), FFI(asm)]
+os_equal_64_i64: fn(left: I64, right: I64) -> I64 {
+    """
+    movups xmm0, xmmword ptr [{left}]
+    movups xmm1, xmmword ptr [{left} + 16]
+    movups xmm2, xmmword ptr [{left} + 32]
+    movups xmm3, xmmword ptr [{left} + 48]
+    movups xmm4, xmmword ptr [{right}]
+    movups xmm5, xmmword ptr [{right} + 16]
+    movups xmm6, xmmword ptr [{right} + 32]
+    movups xmm7, xmmword ptr [{right} + 48]
+    pcmpeqb xmm0, xmm4
+    pcmpeqb xmm1, xmm5
+    pcmpeqb xmm2, xmm6
+    pcmpeqb xmm3, xmm7
+    pand xmm0, xmm1
+    pand xmm2, xmm3
+    pand xmm0, xmm2
+    pmovmskb rax, xmm0
+    mov rcx, 1
+    add rax, rcx
+    shr rax, 16 ; -> return
+    ; clobbers rcx, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7
+    """
+}
+
 // The word store for the runtime's fill (Collections.jet jet_rt_mem_fill):
 // stores `word` into `count` 8-byte words from `target` upward.
 #[Unsafe("the caller owns count writable words starting at target"), FFI(asm)]
