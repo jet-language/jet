@@ -4707,7 +4707,8 @@ jet_driver_budget_facts_empty: fn() -> JetDriverBudgetFacts Never! {
 // (JetCli Host.jet jet_cli_compile_check with `finish`) the check's result
 // holds it (JetDriverCompileResult.held) and the host ends the process
 // with it still held, so it is never dropped; under `release_state_aside`
-// a build drops it on a detached task (jet_driver_release_aside).
+// a build, or a check stopped before lowering, drops it on a detached task
+// (jet_driver_release_aside).
 JetDriverHeldState: struct {
     load: JetDriverLoadResult
     registration: SemaRegistrationGraph
@@ -5935,8 +5936,11 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             })
             return result
         }
-        // `jet prove --lens solver` reads every checked function, unpruned,
-        // with the declaration table their direct calls name.
+        // `jet prove --lens solver` and the Core library's check (JetCli
+        // CoreLibrary.jet) read every checked function, unpruned, with the
+        // declaration table their direct calls name. Under
+        // `release_state_aside` the rest of the compile state drops on a
+        // detached task while the host builds IR, as a build's does.
         if capture.stop_before_lowering {
             jet_driver_trace_step_begin(request.trace_sink, "driver.check.capture")
             sources := [String:String]{}
@@ -5949,6 +5953,26 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             registration_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
             capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), core_seal: checked_graph.core_seal.move(), core_bodies: checked_graph.core_bodies.move()})
             jet_driver_trace_step_end(request.trace_sink, "driver.check.capture", -1)
+            if request.release_state_aside {
+                // The lowering inputs took the Core seal and bodies file.
+                checked_graph.core_seal = [String]{}
+                checked_graph.core_bodies = [U8]{}
+                jet_driver_release_aside(
+                    checked_row,
+                    JetDriverHeldState{
+                        load: load.move(),
+                        registration: registration_graph.move(),
+                        checked: checked_graph.move(),
+                        // The lowering inputs took the checked functions and modules.
+                        functions: [FnBody]{},
+                        modules: [SemaGraphModuleResult]{},
+                        values: comptime_values.move(),
+                        stage: comptime_stage.move(),
+                        run: comptime_run.move(),
+                        trail: trail.move(),
+                    },
+                )
+            }
         }
         return result
     }

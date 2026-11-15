@@ -253,7 +253,9 @@ jet_cli_core_interface_made: fn(prefix: String, compiler_threads: CompilerThread
 // compiled with every Core body checked, whether a program calls it or not,
 // stopped right before lowering, its phases traced to `trace_sink`; else the
 // output that ends the build (the diagnostics that keep Core from checking
-// clean, a refusal, an internal problem).
+// clean, a refusal, an internal problem). The compile state the lowering
+// inputs leave behind drops on a detached task while the library's IR builds
+// (JetDriverCompileRequest.release_state_aside), not as the check returns.
 JetCLICoreChecked: enum {
     Checked(inputs: JetDriverLoweringInputs)
     Stopped(output: JetDriverVerbOutput)
@@ -295,6 +297,7 @@ jet_cli_core_checked: fn(trace_sink: JetCLITraceSink?) -> JetCLICoreChecked {
             selected.every_core_body = true
             selected.core_seal = true
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
+            selected.release_state_aside = true
             front := jet_driver_lowering_inputs(selected, None)
             if trace_sink == .Val(sink) -> sink.begin("core_check.diagnostics", "", -1, -1)
             diagnostics: jet_driver_present_diagnostics(front.compile.diagnostics, snapshot, front.compile.generated_source_files)
