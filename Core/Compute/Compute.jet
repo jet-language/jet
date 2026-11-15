@@ -1303,7 +1303,7 @@ __ad_tangent: fn(out: Tensor, leaves: [Tensor], tangents: [Tensor]) -> Tensor Ne
 // `autodiff` because the compiler resolves the initializer named in
 // core.mem.__process_shared at module scope and cannot name a function inside
 // a private module there.
-__init_ad_tape: fn() -> Shared<__ADTape> Never! {
+priv init_ad_tape: fn() -> Shared<__ADTape> Never! {
     Shared{__ADTape{depth: 0, nodes: [__ADNode]{}}}
 }
 
@@ -1311,7 +1311,7 @@ __init_ad_tape: fn() -> Shared<__ADTape> Never! {
 // the compute surface.
 priv autodiff: module {
     ad_tape: fn() -> Shared<__ADTape> Never! {
-        core.mem.__process_shared(__init_ad_tape)
+        core.mem.__process_shared(init_ad_tape)
     }
 
     ad_depth: fn() -> Int Never! {

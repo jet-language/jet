@@ -31,13 +31,13 @@ kind_session: fn() -> String Never! { "session" }
 // concurrent task's edit makes it retry instead of being lost.
 
 // The World's entries for `store`; None outside a World.
-__world_entries: fn(store: String) -> [String:String]? {
+priv world_entries: fn(store: String) -> [String:String]? {
     raw: world_rt.world_store_load(store) ?? return None
     Val(world_decode(raw))
 }
 
 // Sets `key` to `value` in the World's `store`; false outside a World.
-__world_set: fn(store: String, key: String, value: String) -> Bool {
+priv world_set: fn(store: String, key: String, value: String) -> Bool {
     loop {
         seen: world_rt.world_store_load(store) ?? return false
         entries := world_decode(seen)
@@ -47,7 +47,7 @@ __world_set: fn(store: String, key: String, value: String) -> Bool {
 }
 
 // Removes `key` from the World's `store`; false outside a World.
-__world_remove: fn(store: String, key: String) -> Bool {
+priv world_remove: fn(store: String, key: String) -> Bool {
     loop {
         seen: world_rt.world_store_load(store) ?? return false
         entries := world_decode(seen)
@@ -57,7 +57,7 @@ __world_remove: fn(store: String, key: String) -> Bool {
 }
 
 // Empties the World's `store`; false outside a World.
-__world_clear: fn(store: String) -> Bool {
+priv world_clear: fn(store: String) -> Bool {
     loop {
         seen: world_rt.world_store_load(store) ?? return false
         if world_rt.world_store_replace(store, seen, [U8]{}) ?? false -> return true

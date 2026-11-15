@@ -19,7 +19,7 @@ C_MAX_BODY_BYTES: 1048576
 C_MAX_URL_BYTES: 8192
 C_MAX_REDIRECTS: 10
 C_MAX_RETRIES: 1
-// `jet prove --capture-sensitive` and `--replay` (core.net.tls __prove_net_mode).
+// `jet prove --capture-sensitive` and `--replay` (core.net.tls prove_net_mode).
 C_CLIENT_PROVE_CAPTURE: 1
 C_CLIENT_PROVE_REPLAY: 2
 // How far a hop got before it ended: resolving, connecting, the TLS
@@ -1091,9 +1091,9 @@ __send: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     }
     if body == None {
         if req.__multipart.len() > 0 {
-            boundary: __client_boundary(req.__multipart)
+            boundary: client_boundary(req.__multipart)
             fields.push(http.Header{name: "content-type", value: "multipart/form-data; boundary={boundary}"})
-            body = Val(__client_multipart(req.__multipart, boundary).bytes())
+            body = Val(client_multipart(req.__multipart, boundary).bytes())
         } else if req.__form.len() > 0 {
             fields.push(http.Header{name: "content-type", value: "application/x-www-form-urlencoded"})
             body = Val(client_form(req.__form).bytes())
@@ -1212,7 +1212,7 @@ priv client_component: fn(text: String) -> String Never! {
 }
 
 // The first `jet-http-boundary-%016x` whose suffix no field contains.
-__client_boundary: fn(pairs: [http.Header]) -> String Never! {
+priv client_boundary: fn(pairs: [http.Header]) -> String Never! {
     used := [String]{}
     loop pair in pairs {
         texts: [String]{pair.name, pair.value}
@@ -1263,7 +1263,7 @@ priv client_hex: fn(value: Int) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-__client_multipart: fn(pairs: [http.Header], boundary: String) -> String Never! {
+priv client_multipart: fn(pairs: [http.Header], boundary: String) -> String Never! {
     out := ""
     loop pair in pairs {
         name: pair.name.replace("\"", "%22").replace("\r", "%0D").replace("\n", "%0A")
@@ -1453,10 +1453,10 @@ priv client_follow: fn(original_method: String, original_url: String, original_f
 priv client_finish: fn(reply: &&__ClientReply, history: [String]) -> HTTPResponse Never! {
     out := reply
     body: if out.live.move() == {
-        .Val(live) -> http.__body_live(live)
+        .Val(live) -> http.body_live(live)
         .None -> http.body_bytes(out.body)
     }
-    http.__client_response(out.status, body, out.headers, history, [Int]{}, false, out.raw_encoding, out.body_error)
+    http.client_response(out.status, body, out.headers, history, [Int]{}, false, out.raw_encoding, out.body_error)
 }
 
 C_LIVE_LENGTH: 0
@@ -1491,7 +1491,7 @@ __LiveBody: struct {
 
 // The body's bytes, reading on until `want` of them are kept or the body
 // has ended; a body chunks already streamed past is BodyConsumed.
-__live_kept: fn(cell: Shared<__LiveBody>, want: Int) -[Net]> [U8] HTTPError! {
+priv live_kept: fn(cell: Shared<__LiveBody>, want: Int) -[Net]> [U8] HTTPError! {
     guard := cell.guard_edit()
     if guard.value.streamed -> return Err(.BodyConsumed)
     loop guard.value.kept.len() < want {
@@ -1504,7 +1504,7 @@ __live_kept: fn(cell: Shared<__LiveBody>, want: Int) -[Net]> [U8] HTTPError! {
 }
 
 // The bytes read so far.
-__live_seen: fn(cell: Shared<__LiveBody>) -> [U8] Never! {
+priv live_seen: fn(cell: Shared<__LiveBody>) -> [U8] Never! {
     guard: cell.guard_read()
     guard.value.kept.copy()
 }
@@ -1512,7 +1512,7 @@ __live_seen: fn(cell: Shared<__LiveBody>) -> [U8] Never! {
 // The next piece of at most `max` bytes for a chunk cursor `at` bytes in:
 // kept bytes first, then the connection's, which are not kept. The count,
 // 0 once the body has ended.
-__live_next: fn(cell: Shared<__LiveBody>, at: Int, max: Int, &out: [U8]) -[Net]> Int HTTPError! {
+priv live_next: fn(cell: Shared<__LiveBody>, at: Int, max: Int, &out: [U8]) -[Net]> Int HTTPError! {
     guard := cell.guard_edit()
     held: guard.value.kept.len()
     if at < held {
@@ -1609,7 +1609,7 @@ priv live_fill: fn(&live: __LiveBody) -[Net]> Int HTTPError! {
     live.at = 0
     wait: Duration{ns: live.read_ns}
     if live.tls == .Val(stream) {
-        if build_tls.__read_into_each(stream, live.buffer, C_BUILD_READ_BYTES, wait) == {
+        if build_tls.read_into_each(stream, live.buffer, C_BUILD_READ_BYTES, wait) == {
             .Ok(count) -> return Ok(count)
             .Err(error) -> return Err(live_tls_error(error))
         }
@@ -1652,7 +1652,7 @@ priv live_tls_error: fn(error: IOError) -> HTTPError Never! {
 // journal instead of the network.
 __client_once: fn(method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?, hop: Int) -[Net, Time.Wait]> __ClientReply HTTPError! {
     if method == "" || !valid_method(method) -> return Err(.InvalidHeader)
-    prove: build_tls.__prove_net_mode()
+    prove: build_tls.prove_net_mode()
     if prove == C_CLIENT_PROVE_REPLAY -> return client_replayed(method, url, fields, body, phases, proxy, hop)
     wire := __BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: phases.end_ns, idle_ns: 0, prove: prove, taped: [U8]{}, sends: 0, ending: "", stage: C_CLIENT_STAGE_RESOLVE, addresses: [[U8]]{}}
     reply := __ClientReply?{None}
@@ -1667,7 +1667,7 @@ __client_once: fn(method: String, url: __ClientURL, fields: [http.Header], body:
         .None -> false
     }
     if !keeps -> client_close(wire)
-    if prove == C_CLIENT_PROVE_CAPTURE -> build_tls.__prove_net_record(__client_net_tape(hop, method, url, fields, body, wire, reply))
+    if prove == C_CLIENT_PROVE_CAPTURE -> build_tls.prove_net_record(__client_net_tape(hop, method, url, fields, body, wire, reply))
     if failure == .Val(error) -> return Err(error)
     answered := reply ?? return Err(.IO{operation: "transport"})
     answered.live = live_attach(answered.live.move(), wire.tcp.move(), wire.tls.move())
@@ -1772,7 +1772,7 @@ priv client_resolve_portable: fn(message: String) -> String Never! {
 // parses exactly the bytes the capture read. A record the run does not hold
 // next ends the hop as IO; the parent reports the divergence (E3623).
 priv client_replayed: fn(method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?, hop: Int) -[Net, Time.Wait]> __ClientReply HTTPError! {
-    record: build_tls.__prove_net_take(__client_net_request(hop, method, url, fields, body))
+    record: build_tls.prove_net_take(__client_net_request(hop, method, url, fields, body))
     stage: client_take_u64(record, 0)
     sends: client_take_u64(record, 8)
     size: client_take_u64(record, 16)

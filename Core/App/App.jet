@@ -110,7 +110,7 @@ Signature: enum {
 }
 
 // The request header that carries a delivery's `signature`.
-__webhook_header: fn(signature: Signature) -> String Never! {
+priv webhook_header: fn(signature: Signature) -> String Never! {
     if signature == {
         .GitHub -> "x-hub-signature-256"
         .Stripe -> "stripe-signature"
@@ -120,7 +120,7 @@ __webhook_header: fn(signature: Signature) -> String Never! {
 // Whether `sent`, the delivery's signature header, signs `body` under `key`
 // by `signature`. Each MAC is compared in constant time, and every `v1`
 // entry of a Stripe header is compared.
-__webhook_signed: fn(signature: Signature, key: String, sent: String, body: String) -> Bool Never! {
+priv webhook_signed: fn(signature: Signature, key: String, sent: String, body: String) -> Bool Never! {
     if signature == {
         .GitHub -> {
             expected: "sha256={crypto.hex_encode(crypto.hmac_sha256(key.bytes(), body.bytes()))}"
@@ -148,15 +148,15 @@ __webhook_signed: fn(signature: Signature, key: String, sent: String, body: Stri
 #Test("webhook signatures check the sender's MAC") {
     // GitHub's published example delivery.
     github: "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
-    assert(__webhook_signed(.GitHub, "It's a Secret to Everybody", github, "Hello, World!"))
-    assert(!__webhook_signed(.GitHub, "It's a Secret to Everybody", github, "Hello, World?"))
-    assert(!__webhook_signed(.GitHub, "another key", github, "Hello, World!"))
-    assert(!__webhook_signed(.GitHub, "It's a Secret to Everybody", "", "Hello, World!"))
+    assert(webhook_signed(.GitHub, "It's a Secret to Everybody", github, "Hello, World!"))
+    assert(!webhook_signed(.GitHub, "It's a Secret to Everybody", github, "Hello, World?"))
+    assert(!webhook_signed(.GitHub, "another key", github, "Hello, World!"))
+    assert(!webhook_signed(.GitHub, "It's a Secret to Everybody", "", "Hello, World!"))
     mac: crypto.hex_encode(crypto.hmac_sha256("whsec".bytes(), "1700000000.{{\"id\":\"evt_1\"}}".bytes()))
-    assert(__webhook_signed(.Stripe, "whsec", "t=1700000000,v1=00,v1={mac}", "{{\"id\":\"evt_1\"}}"))
-    assert(!__webhook_signed(.Stripe, "whsec", "t=1700000001,v1={mac}", "{{\"id\":\"evt_1\"}}"))
-    assert(!__webhook_signed(.Stripe, "whsec", "v1={mac}", "{{\"id\":\"evt_1\"}}"))
-    assert_eq(__webhook_header(.Stripe), "stripe-signature")
+    assert(webhook_signed(.Stripe, "whsec", "t=1700000000,v1=00,v1={mac}", "{{\"id\":\"evt_1\"}}"))
+    assert(!webhook_signed(.Stripe, "whsec", "t=1700000001,v1={mac}", "{{\"id\":\"evt_1\"}}"))
+    assert(!webhook_signed(.Stripe, "whsec", "v1={mac}", "{{\"id\":\"evt_1\"}}"))
+    assert_eq(webhook_header(.Stripe), "stripe-signature")
 }
 
 // A client of the service `S`. It offers only the methods of `S` that
@@ -248,8 +248,8 @@ remote_at: fn<S>(address: String) -> Remote<S> Never! { Remote<S>{service: None,
 // its `x-request-id`, so the server's span of the call has both.
 priv remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wait]> String CallError! {
     seed: "{rt.clock_mono_ns()}:{trace_next()}:{address}/{method}"
-    trace: __trace_id("trace:{seed}", 16)
-    sent: http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{__trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_body("[{args.join(",")}]")
+    trace: make_trace_id("trace:{seed}", 16)
+    sent: http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{make_trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_body("[{args.join(",")}]")
     response: sent.send() ?? return Err(.Unreachable("{address}/{method}: {err}"))
     text: response.body.text(REMOTE_MAX_REPLY) ?? return Err(.Unreachable("{address}/{method}: {err}"))
     if {
@@ -266,7 +266,7 @@ priv remote_post: fn(address: String, method: String, args: [String]) -[Net, Tim
 // lowercase hex: the leading bytes of `seed`'s SHA-256. Each caller's seed
 // holds a clock reading and a count, so no two ids it makes repeat; ids
 // need no random source, which a handler's effects do not allow.
-__trace_id: fn(seed: String, n: Int) -> String Never! {
+priv make_trace_id: fn(seed: String, n: Int) -> String Never! {
     digest: crypto.sha256(seed)
     crypto.hex_encode(digest.bytes.slice(0, n))
 }

@@ -286,7 +286,7 @@ HTTPRequest: struct {
     __route_rejected: fn(self) -> HTTPResponse Never! {
         payload: body_text("400 {reason_phrase(400)}")
         fields: headers()
-        __response(400, payload, fields)
+        make_response(400, payload, fields)
     }
 
     header: fn(self, name: String) -> String? Never! { headers_get(self.headers, name) }
@@ -491,7 +491,7 @@ __HTTPBodyCursor: struct {
             }
             if self.live == .Val(cell) {
                 piece := [U8]{}
-                if provider.__live_next(cell, self.at, self.max, piece) == {
+                if provider.live_next(cell, self.at, self.max, piece) == {
                     .Ok(count) -> {
                         if count == 0 {
                             self.done = true
@@ -521,7 +521,7 @@ __HTTPBodyCursor: struct {
 priv body_bytes_within: fn(body: Body, limit: Int) -[Net]> [U8] HTTPError! {
     if body.stream.live == .Val(cell) {
         if limit < 0 || limit > C_MAX_CONSUME_BYTES -> return Err(.BodyTooLarge{limit: limit})
-        raw: provider.__live_kept(cell, limit + 1) ?? return Err(err)
+        raw: provider.live_kept(cell, limit + 1) ?? return Err(err)
         if raw.len() > limit -> return Err(.BodyTooLarge{limit: limit})
         return Ok(raw)
     }
@@ -556,18 +556,18 @@ priv take_body: fn(cell: Shared<__HTTPBodyCell>?, failure: HTTPError?) HTTPError
     Ok()
 }
 
-__upgrade_cell: fn(fd: Int) -> Shared<__HTTPUpgradeCell> Never! {
+priv upgrade_cell: fn(fd: Int) -> Shared<__HTTPUpgradeCell> Never! {
     Shared{__HTTPUpgradeCell{fd: fd, upgraded: false}}
 }
 
-__upgraded: fn(cell: Shared<__HTTPUpgradeCell>) -> Bool Never! {
+priv cell_upgraded: fn(cell: Shared<__HTTPUpgradeCell>) -> Bool Never! {
     guard: cell.guard_read()
     guard.value.upgraded
 }
 
 // The request's plain socket, taken at most once; None for a client request,
 // a TLS connection or a connection already upgraded.
-__upgrade_claim: fn(request: HTTPRequest) -> Int? Never! {
+priv upgrade_claim: fn(request: HTTPRequest) -> Int? Never! {
     cell: request.__upgrade ?? return None
     guard := cell.guard_edit()
     if guard.value.upgraded || guard.value.fd < 0 -> return None
@@ -579,11 +579,11 @@ __request: fn(method: String, url: String) -> HTTPRequest Never! {
     HTTPRequest{method: method, path: request_target_path(url), body: body_empty(), headers: headers(), __url: url, __cell: Val(Shared{__HTTPBodyCell{taken: false}})}
 }
 
-__server_request: fn(method: String, path: String, body: Body, fields: Headers) -> HTTPRequest Never! {
+priv server_request: fn(method: String, path: String, body: Body, fields: Headers) -> HTTPRequest Never! {
     HTTPRequest{method: method, path: path, body: body, headers: fields, __url: path, __body_set: true, __cell: Val(Shared{__HTTPBodyCell{taken: false}})}
 }
 
-__response: fn(status: Int, body: &&Body, fields: &&Headers) -> HTTPResponse Never! {
+priv make_response: fn(status: Int, body: &&Body, fields: &&Headers) -> HTTPResponse Never! {
     HTTPResponse{status: status, body: body, headers: fields, __cell: Val(Shared{__HTTPBodyCell{taken: false}})}
 }
 
@@ -592,13 +592,13 @@ priv text_response: fn(status: Int, text: String) -> HTTPResponse Never! {
     fields: headers()
     if status < 100 || status > 599 {
         fallback: body_text("500 {reason_phrase(500)}")
-        return __response(500, fallback, fields)
+        return make_response(500, fallback, fields)
     }
     payload: body_text(text)
-    __response(status, payload, fields)
+    make_response(status, payload, fields)
 }
 
-__client_response: fn(status: Int, body: Body, fields: Headers, redirect_history: [String], timings: [Int], reused: Bool, raw_encoding: String?, body_error: HTTPError?) -> HTTPResponse Never! {
+priv client_response: fn(status: Int, body: Body, fields: Headers, redirect_history: [String], timings: [Int], reused: Bool, raw_encoding: String?, body_error: HTTPError?) -> HTTPResponse Never! {
     HTTPResponse{
         status: status, body: body, headers: fields,
         __redirect_history: redirect_history, __timings: timings, __reused: reused,
@@ -681,7 +681,7 @@ HTTPRouter: struct {
     __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) Never! -[Net]> {
         state: self.__state
         index: router_handler_count(self.__state)
-        routes.__route_add(self.__mux, method, pattern, routes.__handler(fn(request: HTTPRequest) { router_call(state, index, request) }), contract, at)
+        routes.route_add(self.__mux, method, pattern, routes.__handler(fn(request: HTTPRequest) { router_call(state, index, request) }), contract, at)
         guard := self.__state.guard_edit()
         guard.value.handlers.push(__HTTPRouterHandler{call: handler.move()})
     }
@@ -708,11 +708,11 @@ priv router_call: fn(state: Shared<__HTTPRouterState>, index: Int, request: HTTP
 }
 
 router: fn() -> HTTPRouter Never! {
-    HTTPRouter{__mux: routes.__mux_new(), __state: Shared{__HTTPRouterState{handlers: [__HTTPRouterHandler]{}}}}
+    HTTPRouter{__mux: routes.mux_new(), __state: Shared{__HTTPRouterState{handlers: [__HTTPRouterHandler]{}}}}
 }
 
 // The router's route table, for `web.openapi(router)`.
-__router_mux: fn(router: HTTPRouter) -> HTTPMux Never! {
+priv router_mux: fn(router: HTTPRouter) -> HTTPMux Never! {
     router.__mux
 }
 
@@ -732,7 +732,7 @@ parse: fn(raw: String) -> HTTPRequest Never! {
 // A request routed as a mux routes it, with no middleware or request id; a
 // handler's error is the dispatch error.
 dispatch: fn(router: HTTPRouter, request: HTTPRequest) -> HTTPResponse HTTPError! {
-    pick: routes.__pick(router.__mux, request)
+    pick: routes.mux_pick(router.__mux, request)
     if pick.answer == .Val(answer) -> return Ok(answer)
     router_call(router.__state, pick.index, pick.request)
 }
@@ -944,7 +944,7 @@ body_text: fn(text: String) -> Body Never! { body_bytes(text.bytes()) }
 body_bytes: fn(bytes: [U8]) -> Body Never! { Body{stream: body_carrier.BodyStream{held: bytes, live: None}} }
 
 // A client response's body still on its connection.
-__body_live: fn(live: &&provider.__LiveBody) -> Body Never! { Body{stream: body_carrier.BodyStream{held: [U8]{}, live: Val(Shared{live})}} }
+priv body_live: fn(live: &&provider.__LiveBody) -> Body Never! { Body{stream: body_carrier.BodyStream{held: [U8]{}, live: Val(Shared{live})}} }
 
 // The `http.Body.text(text, media_type)`, `http.Body.form(fields)` and
 // `http.Body.json(value)` constructors: sema checks the call and runs these.
@@ -1004,7 +1004,7 @@ priv body_read: fn(source: &FileReader, want: Int) -[FS.Read, Time.Wait]> Body H
 __body_multipart: fn(fields: [String:String]) -> Body Never! {
     pairs := [Header]{}
     loop (name, value) in fields -> pairs.push(Header{name: name.copy(), value: value.copy()})
-    body_text(provider.__client_multipart(pairs, provider.__client_boundary(pairs)))
+    body_text(provider.client_multipart(pairs, provider.client_boundary(pairs)))
 }
 
 body_as_text: fn(body: Body) -> String Never! { String.from_bytes(body_as_bytes(body)) ?? "" }
@@ -1012,14 +1012,14 @@ body_as_text: fn(body: Body) -> String Never! { String.from_bytes(body_as_bytes(
 // The bytes a body holds; for a body still on its connection, the bytes
 // read from it so far.
 body_as_bytes: fn(body: Body) -> [U8] Never! {
-    if body.stream.live == .Val(cell) -> return provider.__live_seen(cell)
+    if body.stream.live == .Val(cell) -> return provider.live_seen(cell)
     body.stream.held
 }
 body_len: fn(body: Body) -> Int Never! { body_as_bytes(body).len() }
 
 // All of a body's bytes, reading a body still on its connection to its end.
-__body_all: fn(body: Body) -[Net]> [U8] HTTPError! {
-    if body.stream.live == .Val(cell) -> return provider.__live_kept(cell, C_MAX_CONSUME_BYTES)
+priv body_all: fn(body: Body) -[Net]> [U8] HTTPError! {
+    if body.stream.live == .Val(cell) -> return provider.live_kept(cell, C_MAX_CONSUME_BYTES)
     Ok(body.stream.held)
 }
 
@@ -1269,7 +1269,7 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
     body: body_bytes(body_raw)
     // The method stays as sent: methods are case-sensitive, so `get` is not
     // `GET` (the server reads it the same way).
-    Ok(__server_request(parts[0], parts[1], body, fields))
+    Ok(server_request(parts[0], parts[1], body, fields))
 }
 
 StatusLine: struct {
@@ -1735,7 +1735,7 @@ request_with: fn(method: Method, url: String, h: Headers, body: Body) -> HTTPReq
 
 response_ok: fn(body: Body) -> HTTPResponse Never! {
     fields: headers()
-    __response(200, body.copy(), fields)
+    make_response(200, body.copy(), fields)
 }
 
 response_json_headers: fn() -> Headers Never! { headers_set(headers(), "content-type", "application/json; charset=utf-8") }

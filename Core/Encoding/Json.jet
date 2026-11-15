@@ -1154,12 +1154,12 @@ parse_json: fn(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> 
 // explicit-argument inference binds by name, so a generic caller's
 // `decode<[T]>` would read as `T := [T]`.
 __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
-    __decode_typed_from<Target>(text, 1)
+    decode_typed_from<Target>(text, 1)
 }
 
 // `__decode_typed` of `text` that starts on line `first_line` of its input:
 // a syntax error names the input's line.
-__decode_typed_from: fn<Target: Decode>(text: String, first_line: Int) -> Target [FieldError]! {
+priv decode_typed_from: fn<Target: Decode>(text: String, first_line: Int) -> Target [FieldError]! {
     cursor := Parser.new(text.bytes(), false)
     cursor.typed_numbers = true
     // `??` hands the read value over; a match would copy it out. A syntax
@@ -1201,10 +1201,10 @@ __input_json: fn<Row: Decode>(&&lines: Iter<String>) -> [Row] Err! {
         }
         pending += line
         pending += "\n"
-        depth += __input_json_depth(line)
+        depth += input_json_depth(line)
         if depth > 0 -> next
         // `??` hands each decoded value over; a match would copy it out.
-        value: __decode_typed_from<Row>(pending, start) ?? {
+        value: decode_typed_from<Row>(pending, start) ?? {
             loop failure in err {
                 at: if failure.path.is_empty() -> "" else if failure.path.starts_with("[") -> failure.path.copy() else -> ".{failure.path}"
                 failures.push(FieldError{path: "line {start}{at}", reason: failure.reason})
@@ -1225,7 +1225,7 @@ __input_json: fn<Row: Decode>(&&lines: Iter<String>) -> [Row] Err! {
 // How deep `line` leaves the brackets: each `{` or `[` outside a string
 // opens one and each `}` or `]` closes one. A JSON string holds no line break,
 // so every line starts outside one.
-__input_json_depth: fn(line: String) -> Int Never! {
+priv input_json_depth: fn(line: String) -> Int Never! {
     depth := 0
     quoted := false
     escaped := false
@@ -2071,10 +2071,10 @@ patch_step: fn(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
 }
 
 #Test("input JSON values end at bracket depth zero and keep their input lines") {
-    assert_eq(__input_json_depth("{{\"a\": [1,"), 2)
-    assert_eq(__input_json_depth("\"}}]\\\"{{\" ]}}"), -2)
-    assert_eq(__decode_typed_from<Int>("7", 3) ?? panic("typed JSON from a later line"), 7)
-    failures: if __decode_typed_from<Int>("x", 4) == .Err(errors) -> errors else -> [FieldError]{}
+    assert_eq(input_json_depth("{{\"a\": [1,"), 2)
+    assert_eq(input_json_depth("\"}}]\\\"{{\" ]}}"), -2)
+    assert_eq(decode_typed_from<Int>("7", 3) ?? panic("typed JSON from a later line"), 7)
+    failures: if decode_typed_from<Int>("x", 4) == .Err(errors) -> errors else -> [FieldError]{}
     assert(failures.len() == 1)
     assert(failures[0].reason.contains("(line 4)"))
 }

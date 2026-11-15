@@ -127,12 +127,12 @@ decode: fn(data: [U8], limits: Limits) -> Image ImageError! {
 // bytes written against the output budget. An image whose pixels are not
 // `width * height * 4` bytes is `Malformed`.
 encode: fn(image: Image, format: ImageFormat, limits: Limits) -> [U8] ImageError! {
-    __encode_quality(image, format, C_JPEG_QUALITY, limits)
+    encode_quality(image, format, C_JPEG_QUALITY, limits)
 }
 
 // `encode`, with JPEG at `quality` on libjpeg's 1..100 scale; PNG is lossless
 // and ignores it. A quality outside 1..100 is `Unsupported`.
-__encode_quality: fn(image: Image, format: ImageFormat, quality: Int, limits: Limits) -> [U8] ImageError! {
+priv encode_quality: fn(image: Image, format: ImageFormat, quality: Int, limits: Limits) -> [U8] ImageError! {
     if limits.max_input_bytes < 1 || limits.max_pixels < 1 || limits.max_output_bytes < 1 -> return Err(.TooLarge)
     if image.width < 1 || image.height < 1 -> return Err(.Malformed)
     if image.width > limits.max_pixels /% image.height || image.width * image.height > limits.max_input_bytes /% 4 -> return Err(.TooLarge)
@@ -1206,7 +1206,7 @@ priv at_most: fn(value: Int, last: Int) -> Int {
     if value > last -> last else -> value
 }
 
-// A baseline JPEG of `image` at `quality`, which `__encode_quality` has
+// A baseline JPEG of `image` at `quality`, which `encode_quality` has
 // checked.
 priv jpeg_encode: fn(image: Image, quality: Int, limits: Limits) -> [U8] ImageError! {
     if image.width > 65535 || image.height > 65535 -> return Err(.Unsupported)
@@ -1873,9 +1873,9 @@ priv squared_error: fn(left: Image, right: Image) -> Int {
     assert(encode_error(smooth_image(21, 13, 0), .JPEG, Limits{max_input_bytes: 8192, max_pixels: 1024, max_output_bytes: 300}) == .TooLarge)
 }
 
-// The error `__encode_quality` returns at `quality`, or None.
+// The error `encode_quality` returns at `quality`, or None.
 priv quality_error: fn(picture: Image, quality: Int, limits: Limits) -> ImageError? {
-    if __encode_quality(picture, .JPEG, quality, limits) == {
+    if encode_quality(picture, .JPEG, quality, limits) == {
         .Ok(_) -> None
         .Err(error) -> Val(error)
     }
@@ -1892,14 +1892,14 @@ priv quality_error: fn(picture: Image, quality: Int, limits: Limits) -> ImageErr
     limits: Limits{max_input_bytes: 8192, max_pixels: 1024, max_output_bytes: 8192}
     picture: smooth_image(21, 13, 0)
     standard: encode(picture, .JPEG, limits) ?? panic("encode: {err:Debug}")
-    at_90: __encode_quality(picture, .JPEG, 90, limits) ?? panic("q90: {err:Debug}")
+    at_90: encode_quality(picture, .JPEG, 90, limits) ?? panic("q90: {err:Debug}")
     assert(standard == at_90)
-    at_20: __encode_quality(picture, .JPEG, 20, limits) ?? panic("q20: {err:Debug}")
+    at_20: encode_quality(picture, .JPEG, 20, limits) ?? panic("q20: {err:Debug}")
     assert(at_20.len() < standard.len())
     assert(quality_error(picture, 0, limits) == Val(ImageError.Unsupported))
     assert(quality_error(picture, 101, limits) == Val(ImageError.Unsupported))
     // PNG is lossless: quality changes nothing.
-    png: __encode_quality(picture, .PNG, 20, limits) ?? panic("png: {err:Debug}")
+    png: encode_quality(picture, .PNG, 20, limits) ?? panic("png: {err:Debug}")
     assert(png == (encode(picture, .PNG, limits) ?? panic("png: {err:Debug}")))
 }
 

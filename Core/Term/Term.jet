@@ -371,14 +371,14 @@ __input_edit: fn(&&lines: Iter<String>, change: fn(String) -> String Never!) IOE
     }
     loop path in paths {
         text: core.files.read(path) ?? return Err(err)
-        edited: __input_edit_text(text, change)
+        edited: input_edit_text(text, change)
         if edited != text -> core.files.write_atomic(path, edited.bytes()) ?? return Err(err)
     }
     Ok()
 }
 
 // `text` with each line replaced by `change(line)`; the line endings stay.
-__input_edit_text: fn(text: String, change: fn(String) -> String Never!) -> String Never! {
+priv input_edit_text: fn(text: String, change: fn(String) -> String Never!) -> String Never! {
     edited := ""
     pieces: text.split("\n").to_list()
     loop at in 0..<pieces.len() {
@@ -530,9 +530,9 @@ decode_key: fn(raw: [U8], platform: Int) -> Key Never! {
 
 #Test("input edit keeps each line ending and a missing final line break") {
     cr: "\r"
-    assert_eq(__input_edit_text("a cat{cr}\nno\nlast cat", fn(line) { line.replace("cat", "dog") }), "a dog{cr}\nno\nlast dog")
-    assert_eq(__input_edit_text("cat\n", fn(line) { line.upper() }), "CAT\n")
-    assert_eq(__input_edit_text("", fn(line) { line.upper() }), "")
+    assert_eq(input_edit_text("a cat{cr}\nno\nlast cat", fn(line) { line.replace("cat", "dog") }), "a dog{cr}\nno\nlast dog")
+    assert_eq(input_edit_text("cat\n", fn(line) { line.upper() }), "CAT\n")
+    assert_eq(input_edit_text("", fn(line) { line.upper() }), "")
 }
 
 

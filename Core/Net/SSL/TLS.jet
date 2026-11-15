@@ -4086,13 +4086,13 @@ ct_rsa_kx_block: fn(r: &CtRand, len: Int, kind: Int) -> [U8] {
 }
 
 /// What the server does with a block after its private operation: the
-/// unpadding to 48 bytes with its verdict (rsa.__v15_fixed_of_block), then
-/// the premaster's choice (srv12.__ssl_srv12_take_premaster). Gives a byte
+/// unpadding to 48 bytes with its verdict (rsa.v15_fixed_of_block), then
+/// the premaster's choice (srv12.ssl_srv12_take_premaster). Gives a byte
 /// of the premaster taken.
 ct_rsa_kx_after_private: fn<R: RNG>(ssl: &ssldefs.SSLContext, block: [U8], rng: &R) -> Int {
     buf := block.copy()
-    fixed := rsa.__v15_fixed_of_block(buf, 48)
-    srv12.__ssl_srv12_take_premaster(ssl, fixed.out, fixed.bad, 0, rng) ?? panic("premaster: {err}")
+    fixed := rsa.v15_fixed_of_block(buf, 48)
+    srv12.ssl_srv12_take_premaster(ssl, fixed.out, fixed.bad, 0, rng) ?? panic("premaster: {err}")
     Int{ssl.handshake.premaster[2]}
 }
 

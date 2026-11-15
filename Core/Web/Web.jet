@@ -24,7 +24,7 @@ use {
     // core.web.forms values and calls, so core.web reaches that module.
     core.web.forms.[WebFormTyped]
     core.prelude.[SourceLocation]
-    app.[Signature, __trace_id, __webhook_header, __webhook_signed]
+    app.[Signature, make_trace_id, webhook_header, webhook_signed]
     log: core.log
     core.log.[LogField, TraceSpan]
     log_rt: jet.runtime.log
@@ -238,7 +238,7 @@ App: struct {
     __route: fn(self, path: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String, at: SourceLocation{#caller}) -> App Never! {
         target: self.copy()
         page: path.copy()
-        http_server.__route_add(app_table(self), "GET", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_page_response(target, page, request)) }), "", at)
+        http_server.route_add(app_table(self), "GET", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_page_response(target, page, request)) }), "", at)
         guard := self.__state.guard_edit()
         if guard.value.image_handler == None {
             guard.value.image_handler = Val(app_image_handler(self))
@@ -295,7 +295,7 @@ App: struct {
     __action: fn(self, kind: String, name: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, at: SourceLocation{#caller}) -> App Never! {
         reply: app_handler(handler)
         served: reply.copy()
-        http_server.__route_add(app_table(self), "POST", "/actions/{name}", http_server.__handler(fn(request: HTTPRequest) { Ok(app_action_response(served, request)) }), "", at)
+        http_server.route_add(app_table(self), "POST", "/actions/{name}", http_server.__handler(fn(request: HTTPRequest) { Ok(app_action_response(served, request)) }), "", at)
         guard := self.__state.guard_edit()
         last: guard.value.routes.len() - 1
         if last >= 0 && (kind == "action" || kind == "form") && guard.value.routes[last].form == "" {
@@ -336,8 +336,8 @@ App: struct {
         writes: mounted.copy()
         base: app_trim_slashes(prefix)
         table: app_table(self)
-        http_server.__route_add(table, "GET", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(app_mount_response(reads, request)) }), "", at)
-        http_server.__route_add(table, "POST", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(app_mount_response(writes, request)) }), "", at)
+        http_server.route_add(table, "GET", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(app_mount_response(reads, request)) }), "", at)
+        http_server.route_add(table, "POST", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(app_mount_response(writes, request)) }), "", at)
         guard := self.__state.guard_edit()
         guard.value.mounts.push(__AppMount{prefix: prefix, handler: mounted, effects: effects, security: security})
         self.copy()
@@ -350,7 +350,7 @@ App: struct {
     __remote_public: fn(self, path: String, answer: &&fn(__RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
         endpoint: __AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns)}
         app_traced(self, path, app_endpoint_method(path))
-        http_server.__route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_remote_response(endpoint, request)) }), "", at)
+        http_server.route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_remote_response(endpoint, request)) }), "", at)
         self.copy()
     }
 
@@ -362,7 +362,7 @@ App: struct {
     __remote_signed_in: fn(self, path: String, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
         counted: app_remote_limit(limit, window_ns)
         app_traced(self, path, app_endpoint_method(path))
-        http_server.__route_add(
+        http_server.route_add(
             app_table(self),
             "POST",
             path,
@@ -388,7 +388,7 @@ App: struct {
         if params != "" -> names = params.split(",").to_list()
         hook: __AppWebhook{signature: signature, params: names, key: key, answer: answer}
         app_traced(self, path, "")
-        http_server.__route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_webhook_response(hook, request)) }), "", at)
+        http_server.route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_webhook_response(hook, request)) }), "", at)
         self.copy()
     }
 
@@ -397,45 +397,45 @@ App: struct {
     // with the route's checked contract (sema lowers each). `at` is the
     // registering call's place, which a refused or duplicate row names.
     __http_route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
-        http_server.__route_add(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
+        http_server.route_add(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
         self.copy()
     }
 
     // A route whose pattern is a run-time value: it is checked, and listed,
     // when it registers.
     __http_route_dynamic: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
-        http_server.__route_add_dynamic(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
+        http_server.route_add_dynamic(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
         self.copy()
     }
 
     // `app.custom(method, path, handler)` whose method is a run-time value.
     __http_route_custom: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
-        http_server.__route_add_custom(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
+        http_server.route_add_custom(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
         self.copy()
     }
 
     // `app.middleware(layer)`: the first registered layer is the outermost,
     // and every row, pages included, answers through it.
     __http_middleware: fn(self, middleware: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) -> App Never! {
-        http_server.__layer_add(app_table(self), middleware)
+        http_server.layer_add(app_table(self), middleware)
         self.copy()
     }
 
     // GET `{prefix}/*` answers from the files under `root`.
     static_files: fn(self, prefix: String, root: String, *, index: Bool?{None}, dotfiles: Bool?{None}, follow_links: Bool?{None}, at: SourceLocation{#caller}) -> App Never! {
-        http_server.__static_files(app_table(self), prefix, root, index, dotfiles, follow_links, at)
+        http_server.mount_static_files(app_table(self), prefix, root, index, dotfiles, follow_links, at)
         self.copy()
     }
 
     // Answer cross-origin requests by `policy` (`server.cors_policy(…)`).
     cors: fn(self, policy: HTTPCorsPolicy) -> App Never! {
-        http_server.__layer_add(app_table(self), fn(next: HTTPHandler) { http_server.__cors_handler(policy, next) })
+        http_server.layer_add(app_table(self), fn(next: HTTPHandler) { http_server.cors_handler(policy, next) })
         self.copy()
     }
 
     // Echo a valid incoming `x-request-id` on the response.
     request_id: fn(self) -> App Never! {
-        http_server.__layer_add(app_table(self), fn(next: HTTPHandler) { http_server.__request_id_handler(next) })
+        http_server.layer_add(app_table(self), fn(next: HTTPHandler) { http_server.request_id_handler(next) })
         self.copy()
     }
 
@@ -479,7 +479,7 @@ App: struct {
     assets: fn(self, path: String, at: SourceLocation{#caller}) -> App Never! {
         guard := self.__state.guard_edit()
         if guard.value.assets.len() == 0 {
-            http_server.__static_files(guard.value.table, "/assets", path, None, None, None, at)
+            http_server.mount_static_files(guard.value.table, "/assets", path, None, None, None, at)
         }
         guard.value.assets.push(path.copy())
         self.copy()
@@ -567,13 +567,13 @@ App: struct {
     // A failed bind is the caller's error to handle.
     bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net]> HTTPServer HTTPError! {
         app_image_route(self)
-        http_server.__bind(address, app_table(self), tls, deadline)
+        http_server.server_bind(address, app_table(self), tls, deadline)
     }
 
     // Answer the one connection `listener` accepts next.
     serve_once: fn(self, listener: TCPListener) HTTPError! -[Net, FS.Read, Time]> {
         app_image_route(self)
-        http_server.__serve_once(listener, app_table(self))
+        http_server.server_serve_once(listener, app_table(self))
     }
 }
 
@@ -594,7 +594,7 @@ app: fn() -> App Never! {
             hydration: "dev-overlay",
             mode: "csr",
             explicit_mode: false,
-            table: http_server.__mux_new(),
+            table: http_server.mux_new(),
             images: [__ImageNode]{},
             image_bytes: [String:[U8]]{},
             image_settings: default_image_settings(),
@@ -625,7 +625,7 @@ bind: fn<Settings: Decode>(address: String, *, prefix: String, build: fn(Setting
     app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, app_build_failure("{err}"))
     app_image_route(app)
     _: app_trace_start(app)
-    http_server.__bind(address, app_table(app), tls, deadline)
+    http_server.server_bind(address, app_table(app), tls, deadline)
 }
 
 // The stop report of a `build` that fails on the decoded settings: the app
@@ -715,7 +715,7 @@ priv app_serve: fn(app: App, chosen: __AppPort) Never! -[Env, IO, Net, FS.Read, 
     app_image_route(app)
     if !app_has_root_catch_all(table) {
         fallback: app.copy()
-        http_server.__route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(app_not_found_response(fallback, request)) }), "", #here)
+        http_server.route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(app_not_found_response(fallback, request)) }), "", #here)
     }
     trace: app_trace_start(app)
     core.term.eprint("web app port {chosen.port}: {chosen.source}")
@@ -725,7 +725,7 @@ priv app_serve: fn(app: App, chosen: __AppPort) Never! -[Env, IO, Net, FS.Read, 
 }
 
 priv app_has_root_catch_all: fn(table: HTTPMux) -> Bool Never! {
-    loop route in http_server.__mux_routes(table) {
+    loop route in http_server.mux_routes(table) {
         if route.method == "GET" && route.pattern.starts_with("/*") -> return true
     }
     false
@@ -747,7 +747,7 @@ __app_listen: fn(mux: HTTPMux, port: Int, dev: Bool) -[Net, IO, Time.Wait]> HTTP
         address: "127.0.0.1:{candidate}"
         if core.net.tcp_listen(address) == {
             .Ok(listener) -> {
-                server: http_server.__server_on(listener, mux, None, None)
+                server: http_server.server_on(listener, mux, None, None)
                 suffix: if dev -> " (live reload)" else -> ""
                 print("serving http://{address}{suffix}")
                 return server
@@ -779,8 +779,8 @@ priv app_port_busy: fn(error: NetError) -> Bool Never! {
 // with another.
 priv app_dev_reload: fn(table: HTTPMux) Never! {
     boot: "{rt.clock_mono_ns()}"
-    http_server.__route_add(table, "GET", "/__jet/reload", http_server.__handler(fn(_request: HTTPRequest) { Ok(app_dev_reload_response(boot)) }), "", #here)
-    http_server.__layer_add(table, fn(next: HTTPHandler) { app_dev_layer(next) })
+    http_server.route_add(table, "GET", "/__jet/reload", http_server.__handler(fn(_request: HTTPRequest) { Ok(app_dev_reload_response(boot)) }), "", #here)
+    http_server.layer_add(table, fn(next: HTTPHandler) { app_dev_layer(next) })
 }
 
 priv app_dev_reload_response: fn(boot: String) -> HTTPResponse Never! {
@@ -856,14 +856,14 @@ priv app_not_found_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]>
 // this before.
 priv app_image_route: fn(app: App) Never! {
     table: app_table(app)
-    loop route in http_server.__mux_routes(table) {
+    loop route in http_server.mux_routes(table) {
         if route.pattern.starts_with(C_IMAGE_PREFIX) {
             return
         }
     }
     guard: app.__state.guard_read()
     if guard.value.image_handler == .Val(handler) {
-        http_server.__route_add(table, "GET", "{C_IMAGE_PREFIX}*jet_image", handler.copy(), "", #here)
+        http_server.route_add(table, "GET", "{C_IMAGE_PREFIX}*jet_image", handler.copy(), "", #here)
     }
 }
 
@@ -1042,7 +1042,7 @@ priv image_variant_bytes: fn(data: [U8], node: __ImageNode, variant: __ImageVari
     decoded: codec.decode(data, C_IMAGE_LIMITS) ?? return Err(err)
     scaled: codec.resize(decoded, variant.width, variant.height, .Area, C_IMAGE_LIMITS) ?? return Err(err)
     quality: if variant.format == .JPEG -> variant.quality else -> C_IMAGE_QUALITY
-    encoded: codec.__encode_quality(scaled, variant.format, quality, C_IMAGE_LIMITS) ?? return Err(err)
+    encoded: codec.encode_quality(scaled, variant.format, quality, C_IMAGE_LIMITS) ?? return Err(err)
     if variant.format != node.format || encoded.len() < data.len() -> return Ok(encoded)
     original := [U8]{}
     loop byte in data { original.push(byte) }
@@ -1370,9 +1370,9 @@ priv app_webhook_response: fn(hook: __AppWebhook, request: HTTPRequest) -[Net, F
     params: live_json.parse("[{values.join(",")}]") ?? return unsigned
     // A path parameter the key method can't take, or no key: either is 401.
     key: hook.key(__RemoteArgs{tree: params}) ?? return unsigned
-    sent: request.header(__webhook_header(hook.signature)) ?? return unsigned
+    sent: request.header(webhook_header(hook.signature)) ?? return unsigned
     text: request.text() ?? return unsigned
-    if !__webhook_signed(hook.signature, key, sent, text) -> return unsigned
+    if !webhook_signed(hook.signature, key, sent, text) -> return unsigned
     _ := live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
     values.push(text)
     delivery: live_json.parse("[{values.join(",")}]") ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
@@ -1529,7 +1529,7 @@ priv app_trace_install: fn(app: App, settings: __AppTraceSettings, epoch_ns: Int
     table: app_table(app)
     guard: app.__state.guard_read()
     rows := [__AppTraceRow]{}
-    loop route in http_server.__mux_routes(table) {
+    loop route in http_server.mux_routes(table) {
         if route.method != "POST" -> next
         loop item in guard.value.traced {
             if item.pattern == route.pattern {
@@ -1540,7 +1540,7 @@ priv app_trace_install: fn(app: App, settings: __AppTraceSettings, epoch_ns: Int
     }
     export: __AppTraceExport{settings: settings, rows: rows, epoch_ns: epoch_ns, queue: Shared{__AppTraceQueue{spans: [TraceSpan]{}, first: 0, count: 0, dropped: 0, ids: 0}}}
     held: export.copy()
-    http_server.__layer_add(table, fn(next: HTTPHandler) { app_trace_handler(held, next) })
+    http_server.layer_add(table, fn(next: HTTPHandler) { app_trace_handler(held, next) })
     export
 }
 
@@ -1561,7 +1561,7 @@ priv app_trace_apply: fn(export: __AppTraceExport, next: HTTPHandler, request: H
 // A traced request whose handler failed: its span has the status the server
 // answers that failure with.
 priv app_trace_failed: fn(export: __AppTraceExport, row: __AppTraceRow, request: HTTPRequest, start: Int, error: HTTPError) -> HTTPResponse HTTPError! {
-    status: http_server.__error_response(error).status
+    status: http_server.error_response(error).status
     app_trace_push(export, app_trace_span(export, row, request, start, rt.clock_mono_ns(), status))
     Err(error)
 }
@@ -1569,9 +1569,9 @@ priv app_trace_failed: fn(export: __AppTraceExport, row: __AppTraceRow, request:
 // The index of the traced row `request` selects.
 priv app_trace_row: fn(rows: [__AppTraceRow], request: HTTPRequest) -> Int? Never! {
     if request.method != "POST" -> return None
-    segments: http_server.__path_segments(http_server.access_log_path(request.path)) ?? return None
+    segments: http_server.path_segments(http_server.access_log_path(request.path)) ?? return None
     loop index in 0..<rows.len() {
-        if http_server.__route_matches(rows[index].segments, segments) -> return Val(index)
+        if http_server.route_matches(rows[index].segments, segments) -> return Val(index)
     }
     None
 }
@@ -1643,8 +1643,8 @@ priv app_trace_push: fn(export: __AppTraceExport, span: &&TraceSpan) Never! {
     guard.value.ids += 1
     seed: "{export.epoch_ns}:{guard.value.ids}"
     held := span.move()
-    held.span_id = __trace_id("span:{seed}", 8)
-    if held.trace_id == "" -> held.trace_id = __trace_id("trace:{seed}", 16)
+    held.span_id = make_trace_id("span:{seed}", 8)
+    if held.trace_id == "" -> held.trace_id = make_trace_id("trace:{seed}", 16)
     slot: (guard.value.first + guard.value.count) %% capacity
     if slot < guard.value.spans.len() {
         guard.value.spans[slot] = held
@@ -1912,7 +1912,7 @@ Session: struct {
 // `web.openapi(app)` checks as `__openapi_app(app)` below (sema
 // sema_call_http_web_openapi_mux); a router renders its route table the same way.
 openapi: fn(router: HTTPRouter) -> String OpenAPIError! {
-    openapi_mux(web_http.__router_mux(router))
+    openapi_mux(web_http.router_mux(router))
 }
 
 // An App's document: its handler rows; pages, server functions and static
@@ -1926,7 +1926,7 @@ __openapi_app: fn(app: App) -> String OpenAPIError! { openapi_mux(app_table(app)
 // (JetOpenApiDocument::with_openapi) and rendered (::json).
 priv openapi_mux: fn(mux: HTTPMux) -> String OpenAPIError! {
     routes := [__OpenAPIRoute]{}
-    loop route in http_server.__mux_routes(mux) {
+    loop route in http_server.mux_routes(mux) {
         if route.contract == "" -> next
         routes.push(openapi_route_input(route.contract, route.method, route.pattern) ?? return Err(err))
     }
@@ -2057,7 +2057,7 @@ priv openapi_problem: fn(path: String, reason: String) -> String Never! {
 }
 
 priv openapi_pattern: fn(pattern: String) -> __OpenAPIPattern OpenAPIError! {
-    parsed: http_server.__route_parse(pattern)
+    parsed: http_server.route_parse(pattern)
     if parsed.problem != "" {
         return Err(openapi_fault("invalid HTTP route `{pattern}`: {parsed.problem}"))
     }
@@ -2078,7 +2078,7 @@ priv openapi_pattern: fn(pattern: String) -> __OpenAPIPattern OpenAPIError! {
             }
         }
     }
-    Ok(__OpenAPIPattern{path: http_server.__route_openapi_path(parsed.segments), key: key, names: names, catch_alls: catch_alls})
+    Ok(__OpenAPIPattern{path: http_server.route_openapi_path(parsed.segments), key: key, names: names, catch_alls: catch_alls})
 }
 
 priv openapi_object: fn(value: Dyn) -> [(key: String, value: Dyn)] OpenAPIError! {
@@ -2628,7 +2628,7 @@ auth_show: fn(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
 priv app_webhook_test_status: fn(hook: __AppWebhook, project: String, sent: String, body: String) -[Net, FS.Read]> Int Never! {
     fields := web_http.headers()
     if sent != "" -> fields = web_http.headers_set(fields, "X-Hub-Signature-256", sent)
-    request := web_http.__server_request("POST", "/hooks/{project}", web_http.body_text(body), fields)
+    request := web_http.server_request("POST", "/hooks/{project}", web_http.body_text(body), fields)
     request.__params = [web_http.Header]{web_http.Header{name: "project", value: project}}
     app_webhook_response(hook, request).status
 }
@@ -2691,17 +2691,17 @@ priv app_webhook_test_status: fn(hook: __AppWebhook, project: String, sent: Stri
     table: app_table(served)
     // No collector named: nothing is installed, so a request runs no layer.
     assert(!(app_trace_settings([String:String]{}) == .Val(_)))
-    assert_eq(http_server.__mux_layers(table).len(), 0)
+    assert_eq(http_server.mux_layers(table).len(), 0)
     named := [String:String]{}
     named["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
     export: app_trace_install(served, app_trace_settings(named) ?? panic("an endpoint names a collector"), 1000)
-    assert_eq(http_server.__mux_layers(table).len(), 1)
+    assert_eq(http_server.mux_layers(table).len(), 1)
     fields := web_http.headers_set(web_http.headers(), "traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
     fields = web_http.headers_set(fields, "x-request-id", "4bf92f3577b34da6a3ce929d0e0e4736")
-    answer: http_server.__dispatch(table, web_http.__server_request("POST", "/api/status", web_http.body_text("[]"), fields))
+    answer: http_server.__dispatch(table, web_http.server_request("POST", "/api/status", web_http.body_text("[]"), fields))
     assert_eq(answer.status, 200)
     // Only the traced rows are spanned.
-    refused: http_server.__dispatch(table, web_http.__server_request("GET", "/api/status", web_http.body_empty(), web_http.headers()))
+    refused: http_server.__dispatch(table, web_http.server_request("GET", "/api/status", web_http.body_empty(), web_http.headers()))
     assert_eq(refused.status, 405)
     spans: app_trace_take(export)
     assert_eq(spans.len(), 1)

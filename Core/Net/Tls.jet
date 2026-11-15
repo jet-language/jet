@@ -322,7 +322,7 @@ priv client_connect: fn(stream: &&TCPStream, server_name: String, config: Client
 __server: fn(stream: &&TCPStream, cert_pem: String, key_pem: String, alpn: [String], deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
     tcp := stream.move()
     end_ns: deadline_end(deadline, "tls accept") ?? return Err(err)
-    context := __server_context(cert_pem, key_pem) ?? return Err(net_error("tls accept", err.message))
+    context := server_tls_context(cert_pem, key_pem) ?? return Err(net_error("tls accept", err.message))
     _: add_alpn(context, alpn) ?? return Err(net_error("tls accept", err.message))
     context.conf.authmode = ssldefs.SSL_VERIFY_NONE
     state := open(context, tcp, "") ?? return Err(net_error("tls accept", "TLS handshake failed: {ssl_text(err)}"))
@@ -336,7 +336,7 @@ __server: fn(stream: &&TCPStream, cert_pem: String, key_pem: String, alpn: [Stri
 // Docs/spec/syntax-decisions.md:5083). The messages are the Rust oracle's
 // (c9129d174d^): a certificate PEM holds a CERTIFICATE block, and a key PEM
 // holds a PKCS#8, PKCS#1 or SEC1 private key block.
-__server_context: fn(cert_pem: String, key_pem: String) -> __TLSContext __TLSFailure! {
+priv server_tls_context: fn(cert_pem: String, key_pem: String) -> __TLSContext __TLSFailure! {
     if !cert_pem.contains("-----BEGIN CERTIFICATE-----") -> return Err(fail("TLS certificate PEM did not contain a certificate"))
     if !key_pem.contains("-----BEGIN PRIVATE KEY-----") && !key_pem.contains("-----BEGIN RSA PRIVATE KEY-----") && !key_pem.contains("-----BEGIN EC PRIVATE KEY-----") {
         return Err(fail("TLS private key PEM did not contain a private key"))
@@ -1302,7 +1302,7 @@ priv read_into_locked: fn(&tls: __TLSState, &buffer: [U8], limit: Int, end_ns: I
 // write it makes waits at most `wait`, and it never reads the clock. A wait
 // that runs out is NetError.Timeout, as IOError.TimedOut. The HTTP client
 // reads a response body this way, one read timeout per read.
-__read_into_each: fn(stream: TLSStream, &buffer: [U8], limit: Int, wait: Duration) -[Net]> Int IOError! {
+priv read_into_each: fn(stream: TLSStream, &buffer: [U8], limit: Int, wait: Duration) -[Net]> Int IOError! {
     if limit <= 0 -> return Err(IOError.InvalidInput(io_context(.Read, "tls read_into limit must be positive")))
     if wait.ns < 0 -> return Err(net_to_io(NetError.InvalidInput(tls_error_detail("tls read", "network timeout must be non-negative"))))
     state: __state(stream) ?? return Err(io_error(.Read, "TLS stream is closed"))
@@ -1310,7 +1310,7 @@ __read_into_each: fn(stream: TLSStream, &buffer: [U8], limit: Int, wait: Duratio
     read_into_waiting(guard.value, buffer, limit, wait)
 }
 
-// __read_into_each under the stream's lock.
+// read_into_each under the stream's lock.
 priv read_into_waiting: fn(&tls: __TLSState, &buffer: [U8], limit: Int, wait: Duration) -[Net]> Int IOError! {
     if tls.closed -> return Err(io_error(.Read, "TLS stream is closed"))
     if tls.pending.len() > 0 {
@@ -1563,7 +1563,7 @@ priv test_released: fn(tls: __TLSState) -> Bool Never! {
         client_context := context_new(ssldefs.SSL_IS_CLIENT) ?? panic("client context: {err}")
         client_context.conf.authmode = ssldefs.SSL_VERIFY_NONE
         client_context.conf.max_tls_version = version
-        server_context := __server_context(cert, key) ?? panic("server context: {err}")
+        server_context := server_tls_context(cert, key) ?? panic("server context: {err}")
         server_context.conf.authmode = ssldefs.SSL_VERIFY_NONE
         client := open(client_context, client_tcp, "") ?? panic("client: {ssl_text(err)}")
         server := open(server_context, server_tcp, "") ?? panic("server: {ssl_text(err)}")
@@ -1613,7 +1613,7 @@ priv test_released: fn(tls: __TLSState) -> Bool Never! {
     client_context := context_new(ssldefs.SSL_IS_CLIENT) ?? panic("client context: {err}")
     client_context.conf.authmode = ssldefs.SSL_VERIFY_NONE
     client_context.conf.max_tls_version = ssldefs.SSL_VERSION_TLS1_2
-    server_context := __server_context(cert, key) ?? panic("server context: {err}")
+    server_context := server_tls_context(cert, key) ?? panic("server context: {err}")
     server_context.conf.authmode = ssldefs.SSL_VERIFY_NONE
     server_context.conf.min_tls_version = ssldefs.SSL_VERSION_TLS1_3
     client := open(client_context, client_tcp, "") ?? panic("client: {ssl_text(err)}")
@@ -2039,17 +2039,17 @@ priv unix_ms: fn(time: x509.X509Time) -> Int Never! {
 // core.http.client's capture and replay ride.
 
 // 0 outside `jet prove`, 1 under `--capture-sensitive`, 2 under `--replay`.
-__prove_net_mode: fn() -> Int Never! { core.net.tls.__host_prove_mode() }
+priv prove_net_mode: fn() -> Int Never! { core.net.tls.__host_prove_mode() }
 
 // A capture journals one HTTP client hop's encoded bytes.
-__prove_net_record: fn(tape: [U8]) Never! {
+priv prove_net_record: fn(tape: [U8]) Never! {
     if tape.len() == 0 -> return
     core.net.tls.__host_prove_record(tape)
 }
 
 // A replay traces this hop's request and takes the next recorded hop's
 // bytes; empty once the run diverged.
-__prove_net_take: fn(request: [U8]) -> [U8] Never! { core.net.tls.__host_prove_take(request) ?? [U8]{} }
+priv prove_net_take: fn(request: [U8]) -> [U8] Never! { core.net.tls.__host_prove_take(request) ?? [U8]{} }
 
 #Test("A TLS operation's deadline counts from when the operation reads the clock, not from a reading the build kept") {
     first: deadline_end(Duration{ns: 0}, "tls read") ?? panic("{err}")

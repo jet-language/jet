@@ -36,7 +36,7 @@ __query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
     if reshapes -> return Err(query_field_error("SQL projection/grouping changes the row shape; use the Dyn query result"))
     selected := [T]{}
     loop index in query_sql_select(trees, spec) -> selected.push(rows[index].copy())
-    Ok(core.data.__query_make<T>([String]{"scan", "sql"}, false, DataLimits.safe(), fn() { Ok(selected.copy()) }))
+    Ok(core.data.query_make<T>([String]{"scan", "sql"}, false, DataLimits.safe(), fn() { Ok(selected.copy()) }))
 }
 
 // The CSV header door of `query`: every field the SQL names must be a
@@ -122,7 +122,7 @@ priv query_sql_select: fn(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] N
         keys := [String]{}
         loop index in selected -> keys.push(query_sql_cell(trees[index], order.field) ?? "")
         ordered := [Int]{}
-        loop position in core.data.__query_merge_order(keys, true, order.descending) -> ordered.push(selected[position])
+        loop position in core.data.query_merge_order(keys, true, order.descending) -> ordered.push(selected[position])
         selected = ordered
     }
     if spec.limit == .Val(limit) {
