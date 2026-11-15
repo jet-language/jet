@@ -13,12 +13,13 @@
 // compiles the same text) and runs
 //
 //   systemd-run --user --scope -p MemoryMax=SIZE -p MemorySwapMax=0
-//       /usr/bin/time -v -o <work>/time.txt
+//       <time> -v -o <work>/time.txt
 //       env JET_STORE_DIR=<work>/store XDG_CACHE_HOME=<work>/cache
 //       jet check --trace=<work>/trace.jsonl main.jet
 //
-// in <work>/program, with --memory 8G by default and --time the GNU time
-// (default /usr/bin/time). The empty store and cache keep any compile cache
+// in <work>/program, with --memory 8G by default and <time> the GNU time:
+// --time PATH when given, else `time` found on PATH (NixOS has no
+// /usr/bin/time). The empty store and cache keep any compile cache
 // from serving it. The receipt (<work>/receipt.txt, and --receipt FILE when
 // given) holds the program's size, the jet and its IDENTITY, GNU time's
 // report as it wrote it, and per top-level phase of the compile's opening
@@ -57,7 +58,7 @@ usage: fn(message: String) -> Never {
 }
 
 parse_options: fn(args: [String]) -> Options {
-    options := Options{work: "", memory: "8G", bytes: ORIGINAL_BYTES, receipt: "", time: "/usr/bin/time"}
+    options := Options{work: "", memory: "8G", bytes: ORIGINAL_BYTES, receipt: "", time: ""}
     index := 0
     loop index < args.len() {
         flag: args[index]
@@ -157,7 +158,8 @@ run: fn() -> Never {
     trace_file: files.join(work, "trace.jsonl")
     time_file: files.join(work, "time.txt")
     identity: identity_of(jet)
-    argv := [String]{"systemd-run", "--user", "--scope", "--quiet", "-p", "MemoryMax={options.memory}", "-p", "MemorySwapMax=0", options.time, "-v", "-o", time_file, "env", "JET_STORE_DIR={store}", "XDG_CACHE_HOME={cache}"}
+    gnu_time: if options.time != "" -> options.time else -> process.which("time") ?? usage("no `time` on PATH; pass --time PATH to GNU time")
+    argv := [String]{"systemd-run", "--user", "--scope", "--quiet", "-p", "MemoryMax={options.memory}", "-p", "MemorySwapMax=0", gnu_time, "-v", "-o", time_file, "env", "JET_STORE_DIR={store}", "XDG_CACHE_HOME={cache}"}
     if identity != "" -> argv.push("JET_COMPILER_IDENTITY={identity}")
     argv.extend([String]{jet, "check", "--trace={trace_file}", "main.jet"})
     receipt: process.cmd(argv).cwd(program).output_limit(GIB).run() ?? usage("cannot run systemd-run: {err}")
