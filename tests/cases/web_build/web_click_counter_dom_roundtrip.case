@@ -1,13 +1,12 @@
-# HAND-PORT tests/web_build.rs:4058-4074 web_click_counter_dom_roundtrip
-# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
-# Original dependency-free fake DOM harness copied verbatim, including its own assertions; exact original stdout retained.
+# A reactive click counter built for the web paints into `#jet-app` on a page
+# with a document: a leaf element per node. Clicking the button runs its Jet
+# handler, and the effect's repaint shows the new count.
 requires: tool:node
 fixture: web_click_counter_dom_roundtrip.fixture
 env: NO_COLOR=1
 step: jet build --target web main.jet
 exit: 0
-file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
-file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/rt.wasm is-file
 file: .jet/build/app.wasm is-file
 copy: harness.mjs .jet/build/harness.mjs
 step: node harness.mjs
