@@ -99,6 +99,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `[first, ..rest]` | list pattern with a read-only zero-copy rest window; exact without the rest marker |
 | `[key: pattern, key?: optional, ..]` | map pattern; required and optional keys, exact unless it ends with rest |
 | `if T == { Int -> … else -> … }` | type table: a generic function branches on its type parameter; each arm reads `T` as its type, `else` is required, each instance keeps one arm; `if T == Int { … }` is the one-arm test; `.Int -> …` names a union member without binding it |
+| `if n % _ == 0 { 3 -> … else -> … }` | hole table: the one `_` in an `if` header is filled by each arm's candidate in turn; the header runs once per candidate tried, `(a \| b)` tries a group, and `subject == _` keeps pattern and range arms |
 | `T: trait { name: Type } / name: Type{default} / impl X.T { name: value } / T.name` | trait constant: a compile-time literal, enum case or list each implementation supplies (or takes the default), read from the type |
 | `r"…", raw"…", $"…"` | unclaimed raw-string prefixes |
 | `;` | retired explicit statement terminator |
