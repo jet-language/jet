@@ -1,0 +1,33 @@
+# `#Policy(sentries: .Off)` inside an `#Unsafe` block runs that code without
+# the memory sentry's checks on every tier. A checked `mem.list_copy` of four
+# Ints into a list of three items (with spare capacity past them) is a
+# located R0801 fault that stops before any byte moves; the same copy under
+# the policy runs and its first three Ints land in the items.
+fixture: sentry_policy_off_skips_r0801.fixture
+env: NO_COLOR=1
+step check: jet check off.jet
+exit: 0
+step offnone: jet run -O0 off.jet
+exit: 0
+stdout: = "3 items: 10 11 12\n"
+step offsome: jet run -O1 off.jet
+exit: 0
+stdout: = "3 items: 10 11 12\n"
+step offfull: jet run -O2 off.jet
+exit: 0
+stdout: = "3 items: 10 11 12\n"
+step checkednone: jet run -O0 checked.jet
+exit: 70
+stdout: = "checked\n"
+stderr: ~ "Runtime fault [R0801]" # the sentry is on outside the policy
+stderr: ~ "checked.jet:16:" # the fault is located at the copy's line
+step checkedsome: jet run -O1 checked.jet
+exit: 70
+stdout: = "checked\n"
+stderr: ~ "Runtime fault [R0801]" # the sentry is on outside the policy
+stderr: ~ "checked.jet:16:" # the fault is located at the copy's line
+step checkedfull: jet run -O2 checked.jet
+exit: 70
+stdout: = "checked\n"
+stderr: ~ "Runtime fault [R0801]" # the sentry is on outside the policy
+stderr: ~ "checked.jet:16:" # the fault is located at the copy's line

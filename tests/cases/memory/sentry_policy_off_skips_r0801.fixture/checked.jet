@@ -1,0 +1,19 @@
+// The same copy with the sentries on: the address of an item carries the
+// list's items as its live range, so the fourth Int is outside it and the
+// sentry stops the copy before any byte moves.
+use core.mem
+
+run: fn() {
+    target := [Int]{}
+    loop i in 0..<8 -> target.push(i)
+    loop _ in 0..<5 {
+        _: target.pop()
+    }
+    values: [Int]{10, 11, 12, 13}
+    #Unsafe("target's buffer holds eight Ints: its three items and spare capacity past them") {
+        to: mem.Ptr<Int>.from_addr(mem.address_of(target[0]))
+        print("checked")
+        mem.list_copy<Int>(to, values, 0, 4)
+        print("copied")
+    }
+}
