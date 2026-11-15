@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6932,
-    "rev": 104825,
+    "rev": 104850,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47785,12 +47785,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "[#4293] D-MEMREF1: @T live links replace shared construction and Pin field spellings in one cutover (no parallel forms). == compares values, and same compares identity.",
+          "text": "D-MEMREF1=A: `@T` live links replace the shared-construction and Pin field spellings in one cutover with no parallel form, `==` compares values and `a.same(b)` compares identity, and `@first` (E0107 today) checks and runs. Proof: `jet test Compiler --profile golden --filter memory/live_links_` on O0, O1 and O2, and `jet test tests/guards --filter no_pin_field_spelling`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:45:36.659Z"
+          "at": "2026-11-15T04:44:58.369Z"
         },
         {
           "n": 3,
@@ -47846,8 +47846,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-04T00:21:42.477Z",
-      "updated": "2026-11-13T07:12:31.527Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:44:58.370Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
@@ -48003,30 +48003,30 @@
         },
         {
           "n": 2,
-          "text": "[#4517] D-RT-NATIVE-CAP1=A: hash-admitted core.mem.native with all nine checked tool groups plus the owner-admitted provider registry, on both compilers.",
+          "text": "D-RT-NATIVE-CAP1=A: core.mem.native is hash-admitted, with all nine checked tool groups and the owner-admitted provider registry, on the self-hosted compiler. Proof: `jet test Compiler --profile cases --filter core_mem/native_tool_groups_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:44:32.953Z"
+          "at": "2026-11-15T04:43:45.285Z"
         },
         {
           "n": 3,
-          "text": "[#4339] An address round-trip through core.mem.from_addr keeps allocation provenance, with live and expired storage sentry cases.",
+          "text": "An address round trip through `core.mem.from_addr` keeps allocation provenance, with a live and an expired storage sentry case. Proof: `jet test Compiler --profile cases --filter core_mem/from_addr_provenance_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:44:33.616Z"
+          "at": "2026-11-15T04:43:46.178Z"
         },
         {
           "n": 4,
-          "text": "[#4526] D-USIZE-TARGET1=A: opaque target-size core.mem.CSize, exact conversions, and $build.usize_max / $build.pointer_bytes. Native size_t declarations and SQL ordinals/LIMIT migrate to Int.",
+          "text": "D-USIZE-TARGET1=A: core.mem.CSize is an opaque target-size type with exact conversions, `$build.usize_max` and `$build.pointer_bytes` exist, and native size_t declarations and SQL ordinals and LIMIT use Int. Proof: `jet test Compiler --profile cases --filter core_mem/csize_target_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:44:34.331Z"
+          "at": "2026-11-15T04:43:47.093Z"
         },
         {
           "n": 5,
@@ -48075,12 +48075,12 @@
         },
         {
           "n": 11,
-          "text": "(was #4198 c2) A dependency that dereferences a raw pointer is reported, and a package that denies the leaf fails to build with a registered diagnostic [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "A dependency that dereferences a raw pointer is reported, and a package that denies that leaf fails to build with a registered error. Proof: `jet test Compiler --profile cases --filter authority/raw_pointer_dependency_denied`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:47:13.326Z"
+          "at": "2026-11-15T04:43:47.994Z"
         },
         {
           "n": 12,
@@ -48108,7 +48108,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-04T14:14:26.629Z",
-      "updated": "2026-11-15T04:43:44.213Z",
+      "updated": "2026-11-15T04:43:47.994Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -51486,12 +51486,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Implement complete chosen eligibility/construction inference and published tie facts; Within required for multiple candidates; tied sources stay frozen through escaped kept links and move-apart; ordinary outside links/empty lists/untied records handled correctly; copies share frozen source without retargeting; only tied frozen sibling list exempts D-LINK-ITEM1; Encode allowed and derived Decode refused; C30, MIR safety fixtures, hover/inspect and parser comparison cell supplied.",
+          "text": "D-LINK-SIBLING1=A eligibility: a link field of type @T or [@T] has the sibling fields of type T or [T] as candidates (a String field also qualifies for @String, and a type-parameter field counts); one candidate infers the tie, two or more require `#Within(field)` (an error naming both otherwise), none means untied; a construction in the module that stores links from outside the tied field is an error naming the constructor, while an empty list and untied records follow the ordinary stored-link rules. Proof: `jet test Compiler --profile cases --filter memory/link_sibling_tie_` and `jet test Compiler --profile ui --filter link_sibling_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-07T21:06:44.439Z"
+          "at": "2026-11-15T04:44:59.393Z"
+        },
+        {
+          "n": 2,
+          "text": "A tied record's source field stays frozen while any link taken from it is alive, including links kept past an escape or a move-apart, and a copy of the record shares the frozen source without retargeting its links. Proof: `jet test Compiler --profile cases --filter memory/link_sibling_frozen_source_` on O0, O1 and O2, with a UI snapshot for the write refused while frozen.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:44:48.162Z"
+        },
+        {
+          "n": 3,
+          "text": "Only a tied, frozen sibling list is exempt from D-LINK-ITEM1, and a tied record may derive Encode but a derived Decode is refused with a registered error. Proof: `jet test Compiler --profile cases --filter memory/link_sibling_item_exemption` and `jet test Compiler --profile ui --filter link_sibling_decode_refused`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:44:49.359Z"
+        },
+        {
+          "n": 4,
+          "text": "The tie is published as a fact like inferred link sources, and hover and `jet inspect` show which field a link field is tied to. Proof: `jet test Compiler --profile cases --filter cli_inspect/link_sibling_tie_fact`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:44:50.535Z"
         }
       ],
       "refs": [
@@ -51505,11 +51532,12 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-07T21:06:44.439Z",
-      "updated": "2026-11-09T20:45:08.458Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:44:59.393Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
-      ]
+      ],
+      "criteriaLastN": 4
     },
     {
       "id": "c0tr523z",
@@ -53162,12 +53190,12 @@
       "criteria": [
         {
           "n": 2,
-          "text": "Core CSV row handoff and crypto pending bytes use it instead of the interim copy-then-reset, with no extra allocation per row.",
+          "text": "Core CSV row handoff and the crypto pending bytes use replace instead of the interim copy-then-reset, with no extra allocation per row. Proof: git grep finds no copy-then-reset in Core/Csv and Core/Crypto, and `jet test Compiler --profile golden --filter Csv/` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:27:48.242Z"
+          "at": "2026-11-15T04:45:00.454Z"
         },
         {
           "n": 3,
@@ -53177,6 +53205,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T20:48:36.922Z"
+        },
+        {
+          "n": 4,
+          "text": "Sema tracks each moved-out gap in a borrowed place (E0121): an exit, or a call that can stop, inside a gap is E0201, and its fix offers swap or replace. Proof: `jet test Compiler --profile ui --filter E0201_moved_out_gap` with the fix shown in the snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:44:51.602Z"
+        },
+        {
+          "n": 5,
+          "text": "The generated code moves the value back into the place on every stop path inside a gap, so no place is left empty after a failure. Proof: `jet test Compiler --profile golden --filter memory/take_replace_gap_restore` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:44:52.736Z"
         }
       ],
       "refs": [],
@@ -53190,12 +53236,12 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-09T22:48:33.171Z",
-      "updated": "2026-11-09T20:48:46.453Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:45:00.454Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 3
+      "criteriaLastN": 5
     },
     {
       "id": "c0xgg9f1",
@@ -65886,39 +65932,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Under `--profile=hardened` (D-MEM-HARDEN1=A, on `jet build` and `jet test`; no new spelling), every #Unsafe operation and foreign edge stops with a named runtime code and the source location on: out-of-bounds access, use after release, double release, a data race on shared memory, a read of uninitialised memory, and writing through an aliased mutable view.",
+          "text": "Under `--profile=hardened` (D-MEM-HARDEN1=A, on `jet build` and `jet test`; no new spelling), every #Unsafe operation and foreign edge stops with a named run-time code and the source location on an out-of-bounds access, use after release, double release, a data race on shared memory, a read of uninitialized memory, and a write through an aliased mutable view. Proof: `jet test Compiler --profile cases --filter hardened/` passes one case per class.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:50:24.248Z"
+          "at": "2026-11-15T04:43:48.905Z"
         },
         {
           "n": 2,
-          "text": "A planted-bug corpus with one program per class, each inside `#Unsafe` or a foreign edge, stops in checking mode with a named runtime code and the source location, and runs without a report in normal mode; the corpus runs in the verify batch.",
+          "text": "A planted-bug corpus, one program per class inside #Unsafe or a foreign edge, stops under the hardened profile with a named run-time code and the source location, and runs without a report under the normal profile. Proof: `jet test Compiler --profile cases --filter hardened/planted_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:44:44.143Z"
+          "at": "2026-11-15T04:43:49.831Z"
         },
         {
           "n": 3,
-          "text": "All in-repo `#Test`s pass under checking mode in a nightly job.",
+          "text": "Every in-repo #Test passes under the hardened profile. Proof: a committed receipt of `jet test Compiler --profile=hardened` with no failures.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:52:09.692Z"
+          "at": "2026-11-15T04:43:50.787Z"
         },
         {
           "n": 6,
-          "text": "First slice of c1 (bounds): under --profile=hardened (D-MEM-HARDEN1=A), an out-of-bounds read or write through an #Unsafe pointer or raw slice stops with a named runtime code and the source location at O0, O1 and O2. The normal profile emits no extra check (pinned by an O2 dump or a byte-identical build). A planted-bug case proves both.",
+          "text": "First slice of c1 (bounds): under `--profile=hardened`, an out-of-bounds read or write through an #Unsafe pointer or raw slice stops with a named run-time code and the source location on O0, O1 and O2, and the normal profile emits no extra check (a byte-identical O2 build). Proof: `jet test Compiler --profile cases --filter cli_parts_inspect/test_hardened_profile_catches_a_local_wrong_unsafe_region` passes and leaves tests/known-failing.tsv.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T07:29:47.293Z"
+          "at": "2026-11-15T04:43:51.707Z"
         }
       ],
       "refs": [
@@ -65936,8 +65982,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:15.083Z",
-      "updated": "2026-11-13T07:29:47.293Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:43:51.707Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
@@ -72690,21 +72736,26 @@
     {
       "id": "c0kyjdtx",
       "num": 6295,
-      "title": "Ratified GC opt-in is unbuilt: `#Policy(gc)` still reports E0221, and `!Mem.Gc` is E0750",
-      "body": "Probes q/bd/probe/gc (BallotDesign, dev 94df799429, all non-empty): cycle.jet gives E0221 \"This write can close a strong `Shared` cycle through `Person`\" twice (correct without opt-in). cyclegc.jet (file-level `#Policy(gc)`) and optb.jet (`#Policy(gc) { }` block, ratified D-OPTGC1) give the same two E0221s, so the opt-in lifts nothing. nogc.jet: `!Mem.Gc` (ratified D-DENY-COST1=A / D-MEMREF-LIFE1=A) is E0750 \"`Mem.Gc` isn't a declared effect\". Which items the opt-in covers is on ballot D-GC-OPTIN1 (types vs code); under every option the opted program must stop reporting E0221 and collect its cycles.",
+      "title": "The gc opt-in is built: `#Policy(gc)` collects the cycles of the types under it, and `jet gc report` and `jet audit memory` show every promotion",
+      "body": "Destination: D-GC-OPTIN1=A (2026-10-30) is built. `#Policy(gc)` opts in the types declared under it, so their cycles are collected wherever their values go, with collection only at the D-GC-WHEN1 points; E0221 still fires for code without the opt-in; one Jet-owned collector serves every tier; and trace mode, `jet gc report`, `jet audit memory` and `jet fix memory` explain each promotion and how to remove it.\n\nWhy: a ratified opt-in that lifts nothing leaves cyclic programs with no escape.\n\nSource: probes q/bd/probe/gc (BallotDesign, dev 94df799429), with archived #658, #659 and #1895. `Mem.Gc` became a declared leaf on dev 84f8b2f7ff (c1).",
       "kind": "bug",
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "After D-GC-OPTIN1 is ratified: register `Mem.Gc` in the effect tree; make the opted scope lift E0221 per the outcome and route opted cycle-capable values to the collector (D-GC-WHEN1 timing); keep E0221 for non-opted code.",
+      "plan": "Make the opted scope lift E0221 for the types under it and route their cycle-capable values to the collector (D-GC-WHEN1 timing); keep E0221 elsewhere; then the trace, report, audit and fix tools.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15 by TowerKeeper-1: D-GC-OPTIN1 is ratified A, so c2 states the outcome directly. c1 met (dev 84f8b2f7ff), c7 met (Gc<T> retired). Each other criterion names its case; c5 uses `.copy()` because `~` is retired."
+        },
         {
           "at": "2026-11-09",
           "by": "Main",
@@ -72720,11 +72771,11 @@
         {
           "n": 1,
           "text": "`!Mem.Gc` is a declared effect: nogc.jet checks per D-DENY-COST1 (no E0750)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T01:20:50.043Z"
+          "evidence": "dev 84f8b2f7ff declares `Mem.Gc` as a deny-only leaf in Compiler/Prelude/Effects.jet:120; `jet test Compiler --profile cases --filter effects/every_effect_leaf_checks_through_every_path` PASS 1/1 (gate-p141, dev 4bf7c65a48; its fixtures use `!Mem.Gc`).",
+          "at": "2026-11-15T04:43:52.667Z"
         },
         {
           "n": 2,
@@ -72774,11 +72825,11 @@
         {
           "n": 7,
           "text": "(was #658 c4) Public core.gc/Gc<T> wrappers, aliases, adapters, examples, and docs retire; scoped automatic promotion is the only source mechanism [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:44:51.056Z"
+          "evidence": "The public `core.gc`/`Gc<T>` surface is retired: syntax-decisions.md:5951 records it, and on dev 4bf7c65a48 `git grep -E 'core\\.gc\\b|\\bGc<[A-Z]'` outside Docs/audits, Docs/research and Tools/tower finds only the spec text describing the retirement.",
+          "at": "2026-11-15T04:43:53.650Z"
         },
         {
           "n": 8,
@@ -72861,7 +72912,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T01:20:50.043Z",
-      "updated": "2026-11-15T04:43:37.913Z",
+      "updated": "2026-11-15T04:43:56.087Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 17
     },
@@ -74065,6 +74116,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15 by TowerKeeper-1: c9 split into c9 (#Unchecked scope), UBFLAG (--bounds removed) and UBINDEX (every-tier index stop). Each criterion names its proof; the hosted nightly is replaced by a fixed-budget test."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Tagged G10: zero undefined behavior is soundness. c9 gained #5014 c8 (D-G10-4)."
@@ -74180,7 +74236,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:47.559Z",
-      "updated": "2026-11-15T04:43:43.322Z",
+      "updated": "2026-11-15T04:43:57.410Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 11
     },
@@ -92717,6 +92773,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T20:10:31.986Z"
+        },
+        {
+          "n": 6,
+          "text": "A symbolic checker written in Jet, with no external solver, proves each runtime syscall leaf's JetIR against its contract, and a leaf without a passing proof record fails the build. Proof: `jet test Compiler/JetRuntime --filter leaf_contract_proofs`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:44:54.004Z"
+        },
+        {
+          "n": 7,
+          "text": "A fault-injection test mode makes every runtime syscall leaf return each documented errno (EINTR, EAGAIN, ENOMEM, EMSGSIZE, truncated control data), and every error path runs. Proof: `jet test Compiler/JetRuntime --filter leaf_fault_injection_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:44:55.149Z"
+        },
+        {
+          "n": 8,
+          "text": "The Wayland wire and XKB parsers are fuzzed over a fixed seed budget with no hang or panic. Proof: `jet test Compiler/JetRuntime --filter wayland_xkb_fuzz`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:44:56.312Z"
+        },
+        {
+          "n": 9,
+          "text": "A dated adversarial review in Docs/audits tries to break the claim that the runtime OS edge is proven, and passes before any public text makes that claim (AGENTS.md). Proof: `git ls-files Docs/audits` lists the review, and git grep finds no public claim older than it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:44:57.409Z"
         }
       ],
       "refs": [],
@@ -92731,9 +92823,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T20:10:18.606Z",
-      "updated": "2026-11-13T02:06:09.475Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5
+      "updated": "2026-11-15T04:44:57.409Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 9
     },
     {
       "id": "c0nxjs80",
@@ -215027,6 +215119,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T04:45:00.454Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c01sunrb",
+      "note": "#2: proof; was: Core CSV row handoff and crypto pending bytes use it instead of the interim copy-then-reset, with no extra allocation per row."
+    },
+    {
+      "at": "2026-11-15T04:44:59.393Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0h063eg",
+      "note": "#1: split one mashup criterion into c1, SIBFROZEN, SIBITEM and SIBFACT; the MIR fixtures and parser comparison cell were Rust-era homes (Rust removal finished, #6634 body) and the C30 label has no current home, so the named cases replace them; was: Implement complete chosen eligibility/construction inference and published tie facts; Within required for multiple candidates; tied sources stay frozen through escaped kept links and move-apart; ordin"
+    },
+    {
+      "at": "2026-11-15T04:44:58.370Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0s8gang",
+      "note": "#1: strip debris; proof; was: [#4293] D-MEMREF1: @T live links replace shared construction and Pin field spellings in one cutover (no parallel forms). == compares values, and same compares identity."
+    },
+    {
+      "at": "2026-11-15T04:44:57.409Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0wz8yaf",
+      "note": "#9 A dated adversarial review in Docs/audits tries to break the"
+    },
+    {
+      "at": "2026-11-15T04:44:56.312Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0wz8yaf",
+      "note": "#8 The Wayland wire and XKB parsers are fuzzed over a fixed see"
+    },
+    {
+      "at": "2026-11-15T04:44:55.149Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0wz8yaf",
+      "note": "#7 A fault-injection test mode makes every runtime syscall leaf"
+    },
+    {
+      "at": "2026-11-15T04:44:54.004Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0wz8yaf",
+      "note": "#6 A symbolic checker written in Jet, with no external solver, "
+    },
+    {
+      "at": "2026-11-15T04:44:52.736Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c01sunrb",
+      "note": "#5 The generated code moves the value back into the place on ev"
+    },
+    {
+      "at": "2026-11-15T04:44:51.603Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c01sunrb",
+      "note": "#4 Sema tracks each moved-out gap in a borrowed place (E0121): "
+    },
+    {
+      "at": "2026-11-15T04:44:50.535Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0h063eg",
+      "note": "#4 The tie is published as a fact like inferred link sources, a"
+    },
+    {
+      "at": "2026-11-15T04:44:49.359Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0h063eg",
+      "note": "#3 Only a tied, frozen sibling list is exempt from D-LINK-ITEM1"
+    },
+    {
+      "at": "2026-11-15T04:44:48.162Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0h063eg",
+      "note": "#2 A tied record's source field stays frozen while any link tak"
+    },
+    {
+      "at": "2026-11-15T04:43:57.410Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0sg79an",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:43:56.087Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0kyjdtx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:43:55.159Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0kyjdtx",
+      "note": "title,body,plan"
+    },
+    {
+      "at": "2026-11-15T04:43:53.650Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0kyjdtx",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T04:43:52.667Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0kyjdtx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T04:43:51.707Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0bmxzrb",
+      "note": "#6: proof (KF row names #6011); was: First slice of c1 (bounds): under --profile=hardened (D-MEM-HARDEN1=A), an out-of-bounds read or write through an #Unsafe pointer or raw slice stops with a named runtime code and the source location a"
+    },
+    {
+      "at": "2026-11-15T04:43:50.787Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0bmxzrb",
+      "note": "#3: proof; no hosted nightly; was: All in-repo `#Test`s pass under checking mode in a nightly job."
+    },
+    {
+      "at": "2026-11-15T04:43:49.831Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0bmxzrb",
+      "note": "#2: proof; was: A planted-bug corpus with one program per class, each inside `#Unsafe` or a foreign edge, stops in checking mode with a named runtime code and the source location, and runs without a report in normal "
+    },
+    {
+      "at": "2026-11-15T04:43:48.906Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0bmxzrb",
+      "note": "#1: proof; was: Under `--profile=hardened` (D-MEM-HARDEN1=A, on `jet build` and `jet test`; no new spelling), every #Unsafe operation and foreign edge stops with a named runtime code and the source location on: out-o"
+    },
+    {
+      "at": "2026-11-15T04:43:47.994Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08rdp62",
+      "note": "#11: strip debris; proof; was: (was #4198 c2) A dependency that dereferences a raw pointer is reported, and a package that denies the leaf fails to build with a registered diagnostic [precut audit: no dev test, golden, case or snap"
+    },
+    {
+      "at": "2026-11-15T04:43:47.093Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08rdp62",
+      "note": "#4: strip debris; proof; was: [#4526] D-USIZE-TARGET1=A: opaque target-size core.mem.CSize, exact conversions, and $build.usize_max / $build.pointer_bytes. Native size_t declarations and SQL ordinals/LIMIT migrate to Int."
+    },
+    {
+      "at": "2026-11-15T04:43:46.178Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08rdp62",
+      "note": "#3: strip debris; proof; was: [#4339] An address round-trip through core.mem.from_addr keeps allocation provenance, with live and expired storage sentry cases."
+    },
+    {
+      "at": "2026-11-15T04:43:45.285Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08rdp62",
+      "note": "#2: strip debris; one compiler now; proof; was: [#4517] D-RT-NATIVE-CAP1=A: hash-admitted core.mem.native with all nine checked tool groups plus the owner-admitted provider registry, on both compilers."
+    },
+    {
       "at": "2026-11-15T04:43:44.213Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-edit",
@@ -218441,713 +218708,6 @@
       "action": "card.criteria-meet",
       "ref": "c0y05z3o",
       "note": "#11"
-    },
-    {
-      "at": "2026-11-15T04:12:11.326Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y05z3o",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T04:12:10.428Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y05z3o",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T04:12:09.506Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c01oyhqk",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-15T04:12:08.578Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c01oyhqk",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-15T04:12:07.646Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c01oyhqk",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-15T04:12:06.304Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c01oyhqk",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T04:12:05.343Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c01oyhqk",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T04:12:04.372Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c01oyhqk",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T04:12:03.469Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c01oyhqk",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T04:12:02.567Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c01oyhqk",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T04:12:01.651Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c01oyhqk",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T04:12:00.758Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0y05z3o",
-      "note": "#8: proof; was: The doc graph takes native paths, as the old Docs/Graph.jet:21 DocSource with OsPath did, instead of String paths."
-    },
-    {
-      "at": "2026-11-15T04:11:59.688Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0y05z3o",
-      "note": "#7: proof; was: Semantic blame (old Receipts/SemanticOps.jet:265,281) is reachable from a jet command, or a ratified decision drops it."
-    },
-    {
-      "at": "2026-11-15T04:11:58.817Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0y05z3o",
-      "note": "#6: proof; was: LSP symbol database and hover: build_symbol_db, propagation hints, state-graph hovers, the inferred hover tail and breadcrumb hints (old Finalize.jet:64-299, Structure.jet:427); Rust parity row tests."
-    },
-    {
-      "at": "2026-11-15T04:11:57.932Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0y05z3o",
-      "note": "#5: proof; was: Query API: derivation windows, invalidate_derivations, references_to, call_sites, effect_of, lookup and lookup_identity (old Queries.jet:54-134)."
-    },
-    {
-      "at": "2026-11-15T04:11:57.002Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0y05z3o",
-      "note": "#4: proof; was: Overlay-based open: opening an index over unsaved editor overlays (old Entry.jet:23-96, Open.jet:146-185)."
-    },
-    {
-      "at": "2026-11-15T04:11:56.089Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0y05z3o",
-      "note": "#3: proof; was: Package facts and workspace overlays: package_facts_for_entry, E1215, the overlay policy and the E1202 stale-lock check (old Queries.jet:76,83; Open.jet:58-128); SemIndexJSON.jet stops writing null fo"
-    },
-    {
-      "at": "2026-11-15T04:11:55.198Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0y05z3o",
-      "note": "#2: proof; was: Structural audit: added, removed and changed declarations between two indexes (old Queries.jet:172 structural_audit, :217 semindex_structural_signature)."
-    },
-    {
-      "at": "2026-11-15T04:11:54.281Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0y05z3o",
-      "note": "#1: proof; was: Type dossier: a type dossier query with its status envelope, JSON and text forms (old SemIndex/Queries.jet:138, SemIndex/Facts.jet:114, Codec/Dossier.jet:9-141), with members sorted as semindex_sort_m"
-    },
-    {
-      "at": "2026-11-15T04:11:53.367Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c01oyhqk",
-      "note": "#14: strip debris; proof; was: (moved from #4717 c58) (was #4766) (was #3913) [#3977] A path dependency under the project folder is not checked against the root's policy.unsafe, policy.effects or policy.expert (one fixture each). M"
-    },
-    {
-      "at": "2026-11-15T04:11:52.288Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c01oyhqk",
-      "note": "#13: strip debris; proof; was: (moved from #4717 c55) (was #4766) (was #3913) [#3913] the remaining effect-system codes (package purity, determinism, policy) on the Jet fixture matrix."
-    },
-    {
-      "at": "2026-11-15T04:11:51.306Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c01oyhqk",
-      "note": "#12: strip debris; proof; was: (moved from #4717 c50) (was #4766) (was #3893) [#4030] run the paired fixtures for six written ports with the admitted `jet` (stage-2 output of `jet build Compiler`): #3887 E0433, #3896 Display/Debug "
-    },
-    {
-      "at": "2026-11-15T04:11:50.325Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c01oyhqk",
-      "note": "#11: split: nested patterns and serde are their own criteria; was: (moved from #4717 c49) (was #4766) (was #3893) [#4024] carry over the criteria of #3903 (assert_eq(x, None); L0528 on generated bodies), #3904 (nested-pattern coverage beyond single-slot payloads) and"
-    },
-    {
-      "at": "2026-11-15T04:11:49.413Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c01oyhqk",
-      "note": "#9: split: task rules and doctest are their own criteria; was: (moved from #4717 c39) (was #4766) (was #3898) Parity: Item-level declaration rules missing in JetSema: [#4023] carry over #3899 (#Test scope and test-runner rules), #3900 (task detach/freeze) and #39"
-    },
-    {
-      "at": "2026-11-15T04:11:48.412Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c01oyhqk",
-      "note": "#8: strip debris; proof; was: (moved from #4717 c38) (was #4766) The census is checked into the gate as a guard, every MISSING row is carded or fixed, and nothing is silently dropped."
-    },
-    {
-      "at": "2026-11-15T04:11:47.379Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c01oyhqk",
-      "note": "#27 JetSema reports the serde errors E2408, E2414 and E2415 (#39"
-    },
-    {
-      "at": "2026-11-15T04:11:46.419Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c01oyhqk",
-      "note": "#26 Pattern coverage checks nested patterns beyond single-slot p"
-    },
-    {
-      "at": "2026-11-15T04:11:45.484Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c01oyhqk",
-      "note": "#25 JetSema reports doctest E2901 (#3905). Proof: `jet test Comp"
-    },
-    {
-      "at": "2026-11-15T04:11:44.570Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c01oyhqk",
-      "note": "#24 JetSema reports the task detach and freeze rules the Rust ch"
-    },
-    {
-      "at": "2026-11-15T04:11:43.573Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0ozqnbt",
-      "note": "Impact and hierarchy views agree with the checked graph: body-only versus signature edits, identity, scope and provenance"
-    },
-    {
-      "at": "2026-11-15T04:11:42.636Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c09hk13a",
-      "note": "The Rust-era lint checks exist again under D-NO-WARNINGS1: each is a tidy error, a jet fmt rewrite or a jet lint report, with exact spans"
-    },
-    {
-      "at": "2026-11-15T04:10:11.647Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c06vkd04",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-15T04:10:04.586Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c06vkd04",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-15T04:10:02.754Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c06vkd04",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T04:10:01.782Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c06vkd04",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T04:09:59.898Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T04:09:58.758Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T04:09:57.629Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T04:09:56.646Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T04:09:55.693Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T04:09:54.762Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-15T04:09:53.769Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-15T04:09:52.796Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-15T04:09:51.869Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T04:09:50.895Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T04:09:49.880Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T04:09:48.920Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T04:09:47.790Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T04:09:46.656Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06vkd04",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T04:09:45.499Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#151: proof; was: D-CLI-EVAL1=A is built. `jet eval 'code'` runs code with every power `jet -e` had. `jet -e` and `jet run -e` are removed, and `jet run -` stays. CLI tests cover each form. A retired spelling gets the "
-    },
-    {
-      "at": "2026-11-15T04:09:44.413Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#148: strip debris; proof; was: (was #1901 c1) Every help line resolves to a live command and every dispatcher command appears in help, enforced by generation from the dispatcher table or a golden that is red on the current tree [pr"
-    },
-    {
-      "at": "2026-11-15T04:09:43.421Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#147: strip debris; proof; was: (was #2067 c2) A probe transcript on a fresh build shows each shipped flag working; no unknown-flag E2102 remains for ratified spellings [precut audit: no dev test, golden, case or snapshot proves thi"
-    },
-    {
-      "at": "2026-11-15T04:09:42.200Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#146: strip debris; proof; was: [#3945] On O0, `jet dev` step budget (E2202), `jet debug` (E2203) and the REPL (E1802) each have a working Jet implementation or an owner-ratified retirement. (was #2756 c5)"
-    },
-    {
-      "at": "2026-11-15T04:09:40.917Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#144: split: HeaderBinder syntax and the examples are their own criterion; was: Header binding has one canonical spelling, jet inspect bind <header>, as Docs/spec/cli.md specifies; bind no longer sets also_canonical_top_level in CLICommands.jet. Jetpack/PackageModel/Source/Foreig"
-    },
-    {
-      "at": "2026-11-15T04:09:39.584Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#134: strip debris; proof; was: (was #3949) Parity: Sealed check-input reads and read audit (CheckReads, JET_CHECK_READS_AUDIT/INJECT) have no Jet counterpart [precut audit: failing on 9c7ddf1359: C:build_entry/check_inputs_are_all_"
-    },
-    {
-      "at": "2026-11-15T04:09:38.369Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#115: strip debris; proof; was: (was #2777 c3) The probe program(s) that surfaced the defect (prim-receipts-G2) pass on the affected tier. Proof: the probe command from its gaps.json [precut audit: failing on 9c7ddf1359: C:prove/run"
-    },
-    {
-      "at": "2026-11-15T04:09:37.144Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#47: strip debris; proof; was: (was #502 c1) go/java/cs/fortran binders live behind jet inspect bind <lang>; each with end-to-end example + golden, laundered-diagnostic snapshots (I2/I4), jetpack-provisioned toolchains (I6), effect"
-    },
-    {
-      "at": "2026-11-15T04:09:35.903Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#37: strip debris; proof; was: (was #6308) A C test compiled against the generated header reads and writes an exported default struct (no hand-written declaration), on O0/O1/O2"
-    },
-    {
-      "at": "2026-11-15T04:09:34.795Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#35: strip debris; proof; was: (was #6308) `jet build --lib` produces the archive and .jet/build/<name>.h; guest_import_library_calls_native_c_and_cpp_hosts passes on every applicable tier"
-    },
-    {
-      "at": "2026-11-15T04:09:33.667Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#27: strip debris; the source text was truncated; proof; was: (was #5973) (was #5959) `jet self doctor` reports results of real probes, not static text: Each doctor row comes from running a probe (start `jet self lsp` and send `initialize`; locate the"
-    },
-    {
-      "at": "2026-11-15T04:09:32.593Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#25: strip debris; proof; was: (was #5973) (was #5957) `jet build` names the binary from package.jet, prints its path and size, and keeps profiles apart: `jet new hello && cd hello && jet build` prints one line"
-    },
-    {
-      "at": "2026-11-15T04:09:31.274Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#21: strip debris; restated; was: (was #5973) (was #4875) Native CLI: 'test' with a fn test override is refused and suite install / status / runner TLS has no producer (TestSuite3 blocked)"
-    },
-    {
-      "at": "2026-11-15T04:09:29.754Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#6: proof; was: jet perf is built; every cases row that reported E2104 for it passes on the default tier."
-    },
-    {
-      "at": "2026-11-15T04:09:28.801Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#5: proof; was: jet explain is built (build facts, syntax dictionary, build settings, web graph); every cases row that reported E2104 for it passes on the default tier."
-    },
-    {
-      "at": "2026-11-15T04:09:27.901Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#3: proof; scope from the 2026-11-12 log; was: jet budget is built; every cases row that reported E2104 for it passes on the default tier."
-    },
-    {
-      "at": "2026-11-15T04:09:26.982Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0hn7w1n",
-      "note": "#1: proof; was: jet inspect bind, inspect codemod and inspect audit (including audit copies) are built; every cases row that reported E2104 for it passes on the default tier."
-    },
-    {
-      "at": "2026-11-15T04:09:26.047Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c06vkd04",
-      "note": "#29: proof; was: The time to the first stop and per step is measured and recorded against LLDB on the same image (Docs/audits/2026-11-14-debugging-profiling-review.md)"
-    },
-    {
-      "at": "2026-11-15T04:09:25.106Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c06vkd04",
-      "note": "#28: proof; was: jet debug's DAP supports conditional breakpoints, logpoints and evaluate (Docs/audits/2026-11-14-debugging-profiling-review.md)"
-    },
-    {
-      "at": "2026-11-15T04:09:24.184Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c06vkd04",
-      "note": "#25: state and proof; was: Compiler/JetDebug checks as a package on the admitted jet (today about 150 parse errors from Rust leftovers: std.io/std.fs imports, ? propagation, positional tuples, ..Default, char literals; log $JET"
-    },
-    {
-      "at": "2026-11-15T04:09:23.255Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c06vkd04",
-      "note": "#23: strip debris; proof; was: `jet debug prog.jet --break file:line` stops there, prints locals with their types, and steps over and into; `jet debug --dap` drives the same session from VS Code (DAP fixture test). (moved from #472"
-    },
-    {
-      "at": "2026-11-15T04:09:22.339Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c06vkd04",
-      "note": "#21: strip debris; proof; was: (was #3196) [#3116] Breakpoints, frames and values refer to the accepted revision. Inspection never mutates the guest or grants authority. A script plus library_loadable guest matrix runs with lldb pr"
-    },
-    {
-      "at": "2026-11-15T04:09:21.414Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c06vkd04",
-      "note": "#20: strip debris; proof; was: (was #3064 c1) A rejected unsupported continuation leaves the live session and paused state unchanged; the next valid continuation keeps the same session ID. Source/revision and tier mismatch rejectio"
-    },
-    {
-      "at": "2026-11-15T04:09:20.494Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c06vkd04",
-      "note": "#14: strip debris; proof; was: (was #800 c3, #798 c3) Stale binaries, optimized-away values, process exit, attach denial, signal or exception storms, and disconnect terminate cleanly with an honest state [precut audit: failing on 9"
-    },
-    {
-      "at": "2026-11-15T04:09:19.561Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c06vkd04",
-      "note": "#13: strip debris; proof; was: (was #800 c2) Breakpoints, stepping, frames, variables, async tasks, optimized code, errors, and source locations preserve Jet-level meaning across the platform matrix [precut audit: failing on 9c7ddf"
-    },
-    {
-      "at": "2026-11-15T04:09:18.584Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c06vkd04",
-      "note": "#10: strip debris; proof; was: (was #6164) (from #6167 Debugger reads watch expressions and types from the compiler) One watch-expression parser remains, and it is the compiler's. (was #4917 c18)"
-    },
-    {
-      "at": "2026-11-15T04:09:17.593Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0hn7w1n",
-      "note": "#153 Jetpack/PackageModel/Source/Foreign/C/HeaderBinder.jet emits"
-    },
-    {
-      "at": "2026-11-15T04:09:16.617Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c06lmp17",
-      "note": "jet debug steps backward: record and replay, watch-aware reverse navigation and checked fix-and-continue (D-TIMETRAVEL2)"
-    },
-    {
-      "at": "2026-11-15T04:09:15.712Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0rn7rnu",
-      "note": "Debug info tells the truth: lldb, gdb and perf show Jet names, real values and inlined frames, and no local before its binding"
-    },
-    {
-      "at": "2026-11-15T04:09:05.668Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oo8eeq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T04:07:23.591Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0o8f1p4",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-15T04:07:21.985Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#53"
-    },
-    {
-      "at": "2026-11-15T04:07:20.977Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#52"
-    },
-    {
-      "at": "2026-11-15T04:07:20.024Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c04pj0wn",
-      "note": "#9 A handled ComputeError (for example from `compute.eye(-1)`) "
-    },
-    {
-      "at": "2026-11-15T04:07:19.128Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0zii3oj",
-      "note": "#9 IOOperation resolves to the canonical Core declaration even "
-    },
-    {
-      "at": "2026-11-15T04:07:09.587Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0o8f1p4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T04:07:08.653Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0o8f1p4",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-15T04:07:07.131Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#66"
-    },
-    {
-      "at": "2026-11-15T04:07:05.878Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#67"
-    },
-    {
-      "at": "2026-11-15T04:07:04.887Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#65"
-    },
-    {
-      "at": "2026-11-15T04:07:03.872Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#64"
-    },
-    {
-      "at": "2026-11-15T04:07:02.899Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#63"
-    },
-    {
-      "at": "2026-11-15T04:07:01.933Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#62"
-    },
-    {
-      "at": "2026-11-15T04:07:00.973Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#69"
-    },
-    {
-      "at": "2026-11-15T04:06:59.984Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#68"
-    },
-    {
-      "at": "2026-11-15T04:06:59.009Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#49"
-    },
-    {
-      "at": "2026-11-15T04:06:58.039Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#47"
-    },
-    {
-      "at": "2026-11-15T04:06:57.047Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#84"
-    },
-    {
-      "at": "2026-11-15T04:06:55.538Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-15T04:06:54.348Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-15T04:06:53.310Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-15T04:06:52.337Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#34"
     }
   ],
   "nextNum": 368,
