@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6932,
-    "rev": 104750,
+    "rev": 104775,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32824,93 +32824,93 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The trust prompt follows the owner rule of 2026-10-01: one prompt with Always trust / Once / Cancel; Once runs and asks again next run; Always records trust and never asks again for that target; Cancel runs nothing; a prompt-skipping CLI flag (for example --trusted) counts as Once and never records Always. Proven by focused authority tests on jet run and an AOT-built program.",
+          "text": "The trust prompt follows the owner rule of 2026-10-01: one prompt with Always trust, Once and Cancel. Once runs and asks again next run, Always records trust and never asks again for that target, Cancel runs nothing, and a prompt-skipping CLI flag (such as --trusted) counts as Once and never records Always. Proof: `jet test Compiler --profile cases --filter authority/trust_prompt_` on `jet run` and on a built program.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-01T12:58:47.584Z"
+          "at": "2026-11-15T04:41:13.331Z"
         },
         {
           "n": 2,
-          "text": "The same unchanged program runs without repeated prompts after Always trust and is admitted or refused correctly under restricted policy.",
+          "text": "An unchanged program runs without prompting again after Always trust, and is admitted or refused correctly under restricted policy. Proof: `jet test Compiler --profile cases --filter authority/trusted_rerun_and_restricted_policy`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-01T12:58:47.584Z"
+          "at": "2026-11-15T04:41:14.617Z"
         },
         {
           "n": 3,
-          "text": "Effects remain inferred and explainable without annotations; transitive, generated, callback, and opaque-call cases never become falsely pure.",
+          "text": "Effects stay inferred and explainable without annotations, and transitive, generated, callback and opaque-call cases never become falsely pure. Proof: `jet test Compiler --profile cases --filter effects/inferred_never_falsely_pure_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-01T12:58:47.584Z"
+          "at": "2026-11-15T04:41:15.684Z"
         },
         {
           "n": 4,
-          "text": "Positive rows are checked ceilings, not claims of actual use or self-issued authority; negative and empty ceilings are enforced through reachable calls.",
+          "text": "Positive effect rows are checked ceilings, not claims of actual use or self-issued authority, and negative and empty ceilings are enforced through every reachable call. Proof: `jet test Compiler --profile ui --filter effect_ceiling_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-01T12:58:47.584Z"
+          "at": "2026-11-15T04:41:16.592Z"
         },
         {
           "n": 5,
-          "text": "Approved enclosing budgets cover inferred helpers, while inner declarations, trusted callers and dependencies cannot silently bypass higher restrictions or third-party boundaries.",
+          "text": "An approved enclosing budget covers inferred helpers, while inner declarations, trusted callers and dependencies cannot silently bypass a higher restriction or a third-party boundary. Proof: `jet test Compiler --profile cases --filter effects/budget_no_bypass_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-01T12:58:47.584Z"
+          "at": "2026-11-15T04:41:17.622Z"
         },
         {
           "n": 6,
-          "text": "Every applicable execution path and phase uses the same effect facts and authority law, with separate provenance for prep, AOT build, and application execution.",
+          "text": "Every execution path and phase (run, dev, test, prep and AOT build) uses the same effect facts and authority law, with separate provenance for prep, AOT build and application execution. Proof: `jet test Compiler --profile cases --filter authority/same_law_every_phase`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-01T12:58:47.584Z"
+          "at": "2026-11-15T04:41:18.622Z"
         },
         {
           "n": 7,
-          "text": "Prep is available without running build, AOT preparation results survive into artifacts, and build remains the AOT executable/library/object production entry.",
+          "text": "Prep is available without running a build, AOT preparation results survive into artifacts, and build stays the entry for executables, libraries and objects. Proof: `jet test Compiler --profile cases --filter authority/prep_results_survive_build`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-01T12:58:47.584Z"
+          "at": "2026-11-15T04:41:19.678Z"
         },
         {
           "n": 8,
-          "text": "Policy changes, cache reuse, dev revisions, and child execution preserve applicable authority and required receipts; caching never suppresses observable effects of a logical invocation.",
+          "text": "Policy changes, cache reuse, dev revisions and child execution keep the applicable authority and required receipts, and caching never hides an observable effect of a logical invocation. Proof: `jet test Compiler --profile cases --filter authority/cache_keeps_authority_and_effects`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-01T12:58:47.584Z"
+          "at": "2026-11-15T04:41:20.716Z"
         },
         {
           "n": 9,
-          "text": "Type and memory safety, audited Unsafe, sensitive consent, and independent package/environment/toolchain trust cannot be bypassed by effect trust.",
+          "text": "Effect trust cannot bypass type and memory safety, audited Unsafe, sensitive consent, or independent package, environment and toolchain trust. Proof: `jet test Compiler --profile cases --filter authority/effect_trust_no_bypass_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-01T12:58:47.584Z"
+          "at": "2026-11-15T04:41:21.752Z"
         },
         {
           "n": 10,
-          "text": "The cutover updates every affected caller, policy consumer, diagnostic snapshot, executable example and explanation; focused runtime evidence covers c1-c9.",
+          "text": "The cutover updates every affected caller, policy consumer, error snapshot, executable example and explanation in one change. Proof: `jet test Compiler --profile ui` and `--profile golden` pass with the c1-c9 cases.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:11.382Z"
+          "at": "2026-11-15T04:41:22.688Z"
         },
         {
           "n": 11,
@@ -32988,8 +32988,8 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-09-15T00:27:21.584Z",
-      "updated": "2026-11-13T01:57:09.358Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:41:22.688Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
@@ -44934,21 +44934,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "{\"decisionId\": \"D-AUTHORITY-ROOTS1\", \"text\": \"The closed table becomes thirteen roots: the ratified ten plus FFI, Browser, and Secret. The sixteen language roots become leaves: FFI.Go, FFI.Java, FFI.Lua, and the promised FFI.Py and FFI.Octave arrive as leaves too.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_authority_roots1_contract\", \"suite\": \"tests/ratified/P04.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P04/d_authority_roots1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"13 roots and all FFI language leaves; retired flat roots refused\", \"secret-safe seal/open/sign/verify and rejected raw nonce/algorithm without #Unsafe\", \"folder/host narrowing and derived Authority escape through loop headers/steps rejected\", \"guest declared import needs granted through narrowed host Authority; missing grant fails before side effect\", \"Panic deny is transitive and denial-only; unknown call edges cannot discharge prohibition\", \"all five policy scopes/modes; org refusal defeats family CLI override; retired --allow-impure teaches canonical flag\", \"parse #PII String, propagate facts through branches/containers/calls; denied sinks reject; only checked #Scrub removes tag\", \"devtools unavailable reason and projection use authority/effects/write-access rather than capability\"]}}",
+          "text": "D-AUTHORITY-ROOTS1=A: the closed root table has thirteen roots (the ratified ten plus FFI, Browser and Secret), and the language roots are leaves of FFI (FFI.Go, FFI.Java, FFI.Lua, FFI.Py, FFI.Octave and the rest); a retired flat language root is refused. Proof: `jet test Compiler --profile cases --filter authority/d_authority_roots1_contract`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-02T18:24:06.040Z"
+          "at": "2026-11-15T04:41:00.318Z"
         },
         {
           "n": 2,
-          "text": "{\"decisionId\": \"D-AUTHORITY-WORD1\", \"text\": \"No user-facing surface uses capability for permissions; diagnostics say write access, effects or authority according to the thing described (D-ABILITY-NAME2).\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_authority_word1_contract\", \"suite\": \"tests/ratified/P04.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P04/d_authority_word1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"13 roots and all FFI language leaves; retired flat roots refused\", \"secret-safe seal/open/sign/verify and rejected raw nonce/algorithm without #Unsafe\", \"folder/host narrowing and derived Authority escape through loop headers/steps rejected\", \"guest declared import needs granted through narrowed host Authority; missing grant fails before side effect\", \"Panic deny is transitive and denial-only; unknown call edges cannot discharge prohibition\", \"all five policy scopes/modes; org refusal defeats family CLI override; retired --allow-impure teaches canonical flag\", \"parse #PII String, propagate facts through branches/containers/calls; denied sinks reject; only checked #Scrub removes tag\", \"devtools unavailable reason and projection use authority/effects/write-access rather than capability\"]}}",
+          "text": "D-AUTHORITY-WORD1=A: no user-facing surface uses the word capability for permissions; errors and devtools say write access, effects or authority, according to the thing described (D-ABILITY-NAME2). Proof: `jet test tests/guards --filter no_capability_word` and `jet test Compiler --profile cases --filter authority/d_authority_word1_contract` (the devtools unavailable reason and projection).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-02T18:24:06.678Z"
+          "at": "2026-11-15T04:41:01.249Z"
         },
         {
           "n": 3,
@@ -44979,21 +44979,21 @@
         },
         {
           "n": 6,
-          "text": "{\"decisionId\": \"D-NOPANIC1\", \"text\": \"Enforce the current -[!Panic]> denial row transitively and reject positive grant; the source report's =[!Panic]=> specimen is historical arrow spelling, not revived syntax.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_nopanic1_contract\", \"suite\": \"tests/ratified/P04.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P04/d_nopanic1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"13 roots and all FFI language leaves; retired flat roots refused\", \"secret-safe seal/open/sign/verify and rejected raw nonce/algorithm without #Unsafe\", \"folder/host narrowing and derived Authority escape through loop headers/steps rejected\", \"guest declared import needs granted through narrowed host Authority; missing grant fails before side effect\", \"Panic deny is transitive and denial-only; unknown call edges cannot discharge prohibition\", \"all five policy scopes/modes; org refusal defeats family CLI override; retired --allow-impure teaches canonical flag\", \"parse #PII String, propagate facts through branches/containers/calls; denied sinks reject; only checked #Scrub removes tag\", \"devtools unavailable reason and projection use authority/effects/write-access rather than capability\"]}}",
+          "text": "D-NOPANIC1=A: the `-[!Panic]>` denial row is enforced transitively, a positive Panic grant is refused, and an unknown call edge cannot discharge the prohibition. Proof: `jet test Compiler --profile cases --filter authority/d_nopanic1_contract` and `jet test Compiler --profile ui --filter panic_deny_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-02T18:24:10.141Z"
+          "at": "2026-11-15T04:41:02.161Z"
         },
         {
           "n": 7,
-          "text": "{\"decisionId\": \"D-ONCE-GATE1\", \"text\": \"The unsafe policy ladder generalizes: one policy surface names all audited escapes, with the same five scopes and modes. The one-off --allow-impure spelling retires, replaced by one family flag the org file can refuse \\u2014 solo scripts need no policy file.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_once_gate1_contract\", \"suite\": \"tests/ratified/P04.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P04/d_once_gate1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"13 roots and all FFI language leaves; retired flat roots refused\", \"secret-safe seal/open/sign/verify and rejected raw nonce/algorithm without #Unsafe\", \"folder/host narrowing and derived Authority escape through loop headers/steps rejected\", \"guest declared import needs granted through narrowed host Authority; missing grant fails before side effect\", \"Panic deny is transitive and denial-only; unknown call edges cannot discharge prohibition\", \"all five policy scopes/modes; org refusal defeats family CLI override; retired --allow-impure teaches canonical flag\", \"parse #PII String, propagate facts through branches/containers/calls; denied sinks reject; only checked #Scrub removes tag\", \"devtools unavailable reason and projection use authority/effects/write-access rather than capability\"]}}",
+          "text": "D-ONCE-GATE1=A: one policy surface names every audited escape with the same five scopes and modes; the one-off `--allow-impure` flag is replaced by one family flag that the org policy file can refuse, and a solo script needs no policy file. Proof: `jet test Compiler --profile cases --filter authority/d_once_gate1_contract` covers all five scopes and modes and an org refusal defeating the CLI flag.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-02T18:24:10.888Z"
+          "at": "2026-11-15T04:41:03.695Z"
         },
         {
           "n": 8,
@@ -45096,12 +45096,12 @@
         },
         {
           "n": 29,
-          "text": "(was #1566 c2) Sema effects, the foundation policy, the package effect budget, build effects, both purity checkers and the REPL authorizer read the one effect-root table and hold no private copy of it.",
+          "text": "Sema effects, the foundation policy, the package effect budget, build effects, both purity checkers and the REPL authorizer read the one effect-root table and hold no private copy of it. Proof: `jet test tests/guards --filter single_effect_root_table`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:07:45.109Z"
+          "at": "2026-11-15T04:41:05.010Z"
         },
         {
           "n": 33,
@@ -45177,57 +45177,57 @@
         },
         {
           "n": 45,
-          "text": "(was #2846 c2) A regression test guards the audit sink location [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "The strict conformance gate leaves the checkout's `.jet/secrets-audit` untouched (the sink stays outside the tracked tree). Proof: `jet test tests/guards --filter secrets_audit_sink_location`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:41:54.566Z"
+          "at": "2026-11-15T04:41:06.151Z"
         },
         {
           "n": 50,
-          "text": "D-AUTHORITY-MEM2=A is built: a denial takes arguments; `!Mem.Alloc` stays plain and `!Mem.Alloc(above: 65536)` bounds the heap any call path may allocate, through every callee; manifests write `deny: [Mem.Alloc(above: 65536)]`. Proof: a golden passes under the bound and a UI snapshot shows the refusal naming the call path, on O0, O1 and O2. (was #3239 c35)",
+          "text": "D-AUTHORITY-MEM2=A: a denial takes arguments. `!Mem.Alloc` stays plain, `!Mem.Alloc(above: 65536)` bounds the heap any call path may allocate through every callee, and manifests write `deny: [Mem.Alloc(above: 65536)]`. Proof: `jet test Compiler --profile ui --filter arena_bounded` (the call-path refusal; the source half held on dev fd72bf4d8d per #3645) and `jet test Compiler --profile packages --filter manifest_deny_mem_alloc_bound`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:44:34.305Z"
+          "at": "2026-11-15T04:41:07.313Z"
         },
         {
           "n": 54,
-          "text": "(was #1894 c1) contain/harden implemented as package-only keys with the named D-PACKAGE-POLICY-SCOPE1 amendment; harden:true = sentries in release AND all deps contained (no TRUSTED rows); jet inspect guarantees command; R9 single-file exclusion; freestanding honesty line [precut audit: failing on 9c7ddf1359: C:cli_parts_inspect/hardened_release_sentry_reaches_a_foreign_dependency FAIL stream predicate ~ failed] (moved from #5983 c21)",
+          "text": "`contain` and `harden` are package-only keys (D-PACKAGE-POLICY-SCOPE1 amendment): `harden: true` means sentries in release and every dependency contained (no TRUSTED rows), single files are excluded (R9), and freestanding runs print an honest limits line. Proof: `jet test Compiler --profile cases --filter cli_parts_inspect/hardened_release_sentry_reaches_a_foreign_dependency`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:06:30.694Z"
+          "at": "2026-11-15T04:41:08.540Z"
         },
         {
           "n": 55,
-          "text": "(was #1894 c2) contain/harden parse only in package.jet (source-policy spelling is refused with a teaching diagnostic + snapshot); monotonicity enforced with a targeted test [precut audit: failing on 9c7ddf1359: C:cli_parts_inspect/hardened_release_sentry_reaches_a_foreign_dependency FAIL stream predicate ~ failed] (moved from #5983 c22)",
+          "text": "`contain` and `harden` parse only in package.jet, a source-policy spelling of them is a registered error with a UI snapshot, and the keys are monotonic (a dependency cannot loosen them). Proof: `jet test Compiler --profile ui --filter harden_in_source_refused` and `jet test Compiler --profile cases --filter cli_parts_inspect/harden_monotonic`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:06:32.195Z"
+          "at": "2026-11-15T04:41:09.857Z"
         },
         {
           "n": 56,
-          "text": "(was #1894 c3) jet inspect guarantees renders proven/watched/fenced/TRUSTED for a mixed fixture package; single-file and freestanding runs state their limits; CLI snapshots under tests/cli pin all cases [precut audit: failing on 9c7ddf1359: C:cli_parts_inspect/hardened_release_sentry_reaches_a_foreign_dependency FAIL stream predicate ~ failed] (moved from #5983 c23)",
+          "text": "`jet inspect guarantees` renders proven, watched, fenced and TRUSTED for a mixed fixture package, and single-file and freestanding runs state their limits. Proof: `jet test Compiler --profile cases --filter cli_parts_inspect/guarantees_mixed_package`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:06:33.389Z"
+          "at": "2026-11-15T04:41:11.176Z"
         },
         {
           "n": 57,
-          "text": "(was #1894 c4) harden: true activates containment for every foreign dependency (observable via #1892's sentry path in a targeted runtime test); no gc coupling anywhere [precut audit: failing on 9c7ddf1359: C:cli_parts_inspect/hardened_release_sentry_reaches_a_foreign_dependency FAIL stream predicate ~ failed] (moved from #5983 c24)",
+          "text": "`harden: true` turns on containment for every foreign dependency, observable through the sentry path, with no coupling to gc. Proof: `jet test Compiler --profile cases --filter cli_parts_inspect/hardened_release_sentry_reaches_a_foreign_dependency`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:06:34.630Z"
+          "at": "2026-11-15T04:41:12.249Z"
         },
         {
           "n": 58,
@@ -45268,7 +45268,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:05.406Z",
-      "updated": "2026-11-15T03:03:53.012Z",
+      "updated": "2026-11-15T04:41:12.249Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -89501,6 +89501,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T04:34:50.947Z"
+        },
+        {
+          "n": 109,
+          "text": "The netrc parser follows the exact netrc rules (default entry, macdef, quoting, malformed input) rather than treating netrc as INI, keeps credentials out of errors, and adds no ambient file discovery or network authentication as a side effect. Proof: `jet test Compiler --profile cases --filter jetpack/netrc_parse_` and `--filter jetpack/netrc_redacts_credentials`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:59.410Z"
         }
       ],
       "refs": [],
@@ -89511,9 +89520,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:16:33.944Z",
-      "updated": "2026-11-15T04:34:50.947Z",
+      "updated": "2026-11-15T04:40:59.410Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 108
+      "criteriaLastN": 109
     },
     {
       "id": "c0gztprh",
@@ -92155,6 +92164,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T04:40:55.595Z"
+        },
+        {
+          "n": 6,
+          "text": "Declared filesystem, process, network, environment, device and resource policy is enforced and recorded by the platform backend: a child runs under the native sandbox (Jetpack/Foundation/Source/NativeSandbox.jet, SandboxPolicy.jet) with a declared policy, each denied access fails, and the recorded policy matches. Proof: `jet test Compiler --profile cases --filter authority/native_sandbox_policy_enforced` on Linux.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:56.724Z"
+        },
+        {
+          "n": 7,
+          "text": "A launch's plan, transaction, descendants, limits, outputs and receipt share one policy digest and record the authority actually enforced. Proof: `jet test Compiler --profile cases --filter agent_executor/policy_digest_shared` on Linux.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:57.616Z"
+        },
+        {
+          "n": 8,
+          "text": "Unsupported enforcement, denied access, an escape attempt, limit exhaustion, cancellation and child-process abuse each fail closed, with no leaked handle, secret or process. Proof: `jet test Compiler --profile cases --filter agent_executor/fails_closed_`, one case per failure on Linux.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:58.504Z"
         }
       ],
       "refs": [],
@@ -92165,9 +92201,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T18:43:54.516Z",
-      "updated": "2026-11-15T04:40:55.595Z",
+      "updated": "2026-11-15T04:40:58.504Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 5
+      "criteriaLastN": 8
     },
     {
       "id": "c028lxdd",
@@ -214941,6 +214977,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:41:22.688Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#10: proof; was: The cutover updates every affected caller, policy consumer, diagnostic snapshot, executable example and explanation; focused runtime evidence covers c1-c9."
+    },
+    {
+      "at": "2026-11-15T04:41:21.752Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#9: proof; was: Type and memory safety, audited Unsafe, sensitive consent, and independent package/environment/toolchain trust cannot be bypassed by effect trust."
+    },
+    {
+      "at": "2026-11-15T04:41:20.716Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#8: proof; was: Policy changes, cache reuse, dev revisions, and child execution preserve applicable authority and required receipts; caching never suppresses observable effects of a logical invocation."
+    },
+    {
+      "at": "2026-11-15T04:41:19.678Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#7: proof; was: Prep is available without running build, AOT preparation results survive into artifacts, and build remains the AOT executable/library/object production entry."
+    },
+    {
+      "at": "2026-11-15T04:41:18.622Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#6: proof; was: Every applicable execution path and phase uses the same effect facts and authority law, with separate provenance for prep, AOT build, and application execution."
+    },
+    {
+      "at": "2026-11-15T04:41:17.622Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#5: proof; was: Approved enclosing budgets cover inferred helpers, while inner declarations, trusted callers and dependencies cannot silently bypass higher restrictions or third-party boundaries."
+    },
+    {
+      "at": "2026-11-15T04:41:16.592Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#4: proof; was: Positive rows are checked ceilings, not claims of actual use or self-issued authority; negative and empty ceilings are enforced through reachable calls."
+    },
+    {
+      "at": "2026-11-15T04:41:15.684Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#3: proof; was: Effects remain inferred and explainable without annotations; transitive, generated, callback, and opaque-call cases never become falsely pure."
+    },
+    {
+      "at": "2026-11-15T04:41:14.617Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#2: proof; was: The same unchanged program runs without repeated prompts after Always trust and is admitted or refused correctly under restricted policy."
+    },
+    {
+      "at": "2026-11-15T04:41:13.331Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#1: proof; was: The trust prompt follows the owner rule of 2026-10-01: one prompt with Always trust / Once / Cancel; Once runs and asks again next run; Always records trust and never asks again for that target; Cance"
+    },
+    {
+      "at": "2026-11-15T04:41:12.249Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#57: strip debris; proof; was: (was #1894 c4) harden: true activates containment for every foreign dependency (observable via #1892's sentry path in a targeted runtime test); no gc coupling anywhere [precut audit: failing on 9c7ddf"
+    },
+    {
+      "at": "2026-11-15T04:41:11.177Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#56: strip debris; proof; was: (was #1894 c3) jet inspect guarantees renders proven/watched/fenced/TRUSTED for a mixed fixture package; single-file and freestanding runs state their limits; CLI snapshots under tests/cli pin all cas"
+    },
+    {
+      "at": "2026-11-15T04:41:09.857Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#55: strip debris; proof; was: (was #1894 c2) contain/harden parse only in package.jet (source-policy spelling is refused with a teaching diagnostic + snapshot); monotonicity enforced with a targeted test [precut audit: failing on "
+    },
+    {
+      "at": "2026-11-15T04:41:08.540Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#54: strip debris; proof; was: (was #1894 c1) contain/harden implemented as package-only keys with the named D-PACKAGE-POLICY-SCOPE1 amendment; harden:true = sentries in release AND all deps contained (no TRUSTED rows); jet inspect"
+    },
+    {
+      "at": "2026-11-15T04:41:07.313Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#50: strip debris; proof; was: D-AUTHORITY-MEM2=A is built: a denial takes arguments; `!Mem.Alloc` stays plain and `!Mem.Alloc(above: 65536)` bounds the heap any call path may allocate, through every callee; manifests write `deny: "
+    },
+    {
+      "at": "2026-11-15T04:41:06.151Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#45: strip debris; state the outcome from done #2846; proof; was: (was #2846 c2) A regression test guards the audit sink location [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-15T04:41:05.010Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#29: strip debris; proof; was: (was #1566 c2) Sema effects, the foundation policy, the package effect budget, build effects, both purity checkers and the REPL authorizer read the one effect-root table and hold no private copy of it"
+    },
+    {
+      "at": "2026-11-15T04:41:03.695Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#7: restate ratified JSON; proof; was: {\"decisionId\": \"D-ONCE-GATE1\", \"text\": \"The unsafe policy ladder generalizes: one policy surface names all audited escapes, with the same five scopes and modes. The one-off --allow-impure spelling ret"
+    },
+    {
+      "at": "2026-11-15T04:41:02.161Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#6: restate ratified JSON; proof; was: {\"decisionId\": \"D-NOPANIC1\", \"text\": \"Enforce the current -[!Panic]> denial row transitively and reject positive grant; the source report's =[!Panic]=> specimen is historical arrow spelling, not reviv"
+    },
+    {
+      "at": "2026-11-15T04:41:01.249Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#2: restate ratified JSON; proof; was: {\"decisionId\": \"D-AUTHORITY-WORD1\", \"text\": \"No user-facing surface uses capability for permissions; diagnostics say write access, effects or authority according to the thing described (D-ABILITY-NAME"
+    },
+    {
+      "at": "2026-11-15T04:41:00.318Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#1: restate ratified JSON; proof (Main ruling 2026-11-13: cases rows, not tests/ratified); was: {\"decisionId\": \"D-AUTHORITY-ROOTS1\", \"text\": \"The closed table becomes thirteen roots: the ratified ten plus FFI, Browser, and Secret. The sixteen language roots become leaves: FFI.Go, FFI.Java, FFI.L"
+    },
+    {
+      "at": "2026-11-15T04:40:59.410Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00tcdfc",
+      "note": "#109 The netrc parser follows the exact netrc rules (default entr"
+    },
+    {
+      "at": "2026-11-15T04:40:58.504Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0dlrfkp",
+      "note": "#8 Unsupported enforcement, denied access, an escape attempt, l"
+    },
+    {
+      "at": "2026-11-15T04:40:57.616Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0dlrfkp",
+      "note": "#7 A launch's plan, transaction, descendants, limits, outputs a"
+    },
+    {
+      "at": "2026-11-15T04:40:56.724Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0dlrfkp",
+      "note": "#6 Declared filesystem, process, network, environment, device a"
+    },
     {
       "at": "2026-11-15T04:40:55.595Z",
       "by": "TowerKeeper-1",
