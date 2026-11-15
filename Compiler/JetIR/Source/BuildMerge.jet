@@ -695,13 +695,9 @@ IRMergeTaken: struct {
 // id's slot, and the slots pop from the last id down and are reversed.
 ir_merge_take_functions: fn(parts: &[IRModule], g: IRMerge, functions: &[IRFunction]) Never! {
     count: g.function_part.len()
+    lists := ir_merge_function_lists(parts)
     // Per part row its merged id (-1: not merged).
-    ids := [[Int]]{}
-    lists := [[IRFunction]]{}
-    loop part in 0..<parts.len() {
-        ids.push(ir_merge_unset(parts[part].functions.len()))
-        lists.push(compiler_take_rows<IRFunction>(parts[part].functions))
-    }
+    ids := loop list in lists -> ir_merge_unset(list.len())
     loop id in 0..<count -> ids[g.function_part[id]][g.function_local[id]] = id
     taken := ir_merge_rewrite_parts(lists, g.sides, ids)
     slots := [IRFunction?]{}
@@ -722,19 +718,51 @@ ir_merge_take_functions: fn(parts: &[IRModule], g: IRMerge, functions: &[IRFunct
     functions.reverse()
 }
 
+// Each part's function list, in part order, moved out whole and the part left
+// with none: the parts pop off `parts` and go back in order, so no function
+// moves one at a time.
+ir_merge_function_lists: fn(parts: &[IRModule]) -> [[IRFunction]] Never! {
+    lists := [[IRFunction]]{}
+    kept := [IRModule]{}
+    loop parts.len() > 0 {
+        part := parts.pop() ?? panic("a nonempty part list failed to pop")
+        lists.push(part.functions.move())
+        part.functions = [IRFunction]{}
+        kept.push(part)
+    }
+    loop kept.len() > 0 {
+        part: kept.pop() ?? panic("a nonempty kept part list failed to pop")
+        parts.push(part)
+    }
+    lists.reverse()
+    lists
+}
+
+// One part's functions and, per row, its merged id (-1: not merged), moved
+// into the thread that rewrites them (ir_merge_rewrite_parts).
+IRMergePart: struct {
+    functions: [IRFunction]
+    ids: [Int]
+}
+
 // The rewritten merged functions of every part in `lists`, in part order:
 // each part's on its own thread and the first part's on this one
 // (ir_merge_rewrite_part). The parts pop off `lists` and `ids` whole, last
-// first, so no row moves one at a time.
+// first, so no row moves one at a time. A task's arguments stay shared with
+// the thread that spawns it, which drops them after the join, so a part
+// moves into its task's capture instead: the thread owns it alone and drops
+// what the merge does not keep there.
 ir_merge_rewrite_parts: fn(lists: &[[IRFunction]], sides: [IRMergeSide], ids: &[[Int]]) -> [[IRMergeTaken]] Never! {
     at: lists.len() - 1
     if at < 0 -> return [[IRMergeTaken]]{}
     functions: lists.pop() ?? panic("a nonempty part function list failed to pop")
     part_ids: ids.pop() ?? panic("a nonempty part id list failed to pop")
     if at == 0 -> return [[IRMergeTaken]]{ir_merge_rewrite_part(functions, sides[0], part_ids)}
+    part: IRMergePart{functions: functions, ids: part_ids}
+    side: sides[at].copy()
     taken := [[IRMergeTaken]]{}
     task.group ir_merge_rewrite_threads {
-        last: task ir_merge_rewrite_part(functions, sides[at].copy(), part_ids)
+        last: task &&part { ir_merge_rewrite_part(part.functions, side, part.ids) }
         taken = ir_merge_rewrite_parts(lists, sides, ids)
         taken.push(last.join() ?? panic(compiler_threads_failure_text(err)))
     }
