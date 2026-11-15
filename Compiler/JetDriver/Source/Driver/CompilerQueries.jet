@@ -389,7 +389,9 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization did not return every registered module"))
     }
     schema_check := jet_driver_check_schema_migrations(input.request, registration, graph, input.retain_projection)
-    registration = schema_check.registration.move()
+    checked_registration: schema_check.registration.move()
+    schema_check.registration = None
+    registration = checked_registration.move() ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the schema migration check lost its registration graph"))
     loop diagnostic in schema_check.diagnostics -> load.diagnostics.push(diagnostic)
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
