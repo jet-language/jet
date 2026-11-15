@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6882,
-    "rev": 103425,
+    "rev": 103450,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35003,20 +35003,22 @@
         {
           "n": 37,
           "text": "(was #1680 c2) Every current core.mem item is classified against that rule in one table, and any item the rule would move is either moved or recorded as a named exception [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:25.184Z"
+          "evidence": "Moved to #4524 c13: core.mem tiering belongs on the unsafe-boundary card",
+          "at": "2026-11-15T03:14:29.099Z",
+          "closure": "obsolete"
         },
         {
           "n": 38,
           "text": "(was #1680 c3) A test asserts the classification table matches the checker, so a new mem item cannot ship without a tier [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:26.059Z"
+          "evidence": "Merged into #4524 c13: the table-matches-checker test is in MT2",
+          "at": "2026-11-15T03:14:30.004Z",
+          "closure": "obsolete"
         },
         {
           "n": 39,
@@ -35030,74 +35032,82 @@
         {
           "n": 40,
           "text": "(was #2048 c1) Survey covers the top libraries by real usage across at least: Python, JS/TS, Rust, Go, Java/Kotlin, C#, Swift, Ruby, PHP \\u2014 with usage evidence, not vibes [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:27.393Z"
+          "evidence": "Moved to #6367 c11: a library survey belongs on the API design card",
+          "at": "2026-11-15T03:14:30.876Z",
+          "closure": "obsolete"
         },
         {
           "n": 41,
           "text": "(was #2048 c2) Each candidate maps to: already in Core (evidence), gap worth absorbing (proposed surface), or explicitly out (reason) [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:28.124Z"
+          "evidence": "Moved to #6367 c12: a library survey belongs on the API design card",
+          "at": "2026-11-15T03:14:31.833Z",
+          "closure": "obsolete"
         },
         {
           "n": 42,
           "text": "(was #2048 c3) Report ranks absorption candidates by user-reach and cross-references existing Core coverage and the framework-transplant lineage (#1161); follow-up cards minted, no implementation here [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:28.909Z"
+          "evidence": "Merged into #6367 c12: ranking and minted cards are part of SV2",
+          "at": "2026-11-15T03:14:32.901Z",
+          "closure": "obsolete"
         },
         {
           "n": 43,
           "text": "(was #2854 c1) UTC leap-second parsing/formatting/order stay in shared Time Prelude; checked Civil/Period methods route through one core.time HandleMethod identity across O0, O1, O2 and web where applicable, proven by runtime goldens and diagnostic snapshots on every applicable tier. [precut audit: leap-second label on UTC instants; today's corpus rejects 23:59:60, so the asked label is not shown]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:21:35.751Z"
+          "evidence": "Moved to #6873 c5: time belongs on the core.time card",
+          "at": "2026-11-15T03:14:34.016Z",
+          "closure": "obsolete"
         },
         {
           "n": 45,
           "text": "(was #3997 c2) No job has two owning modules in the Core registry, and a test lists any duplicated export carrier [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:31.075Z"
+          "evidence": "Merged into #6880 c4: duplicate export carriers are the module-ownership guard",
+          "at": "2026-11-15T03:14:34.991Z",
+          "closure": "obsolete"
         },
         {
           "n": 47,
           "text": "(was #4287) {\"decisionId\": \"D-CORE-MODULE-MAP1\", \"text\": \"Canonical modules are collection, file, job, task, unit, test, cli, replica and term.ui, not their plural/older siblings. process owns cwd/env/pid/args/exit, auth owns Session, app folds into cli/process/test, and models is outside Core.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_core_module_map1_contract\", \"suite\": \"tests/ratified/P23.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P23/d_core_module_map1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"only collection/file/job/task/unit/test/cli/replica/term.ui imports/public registry entries; all retired module callers migrated\", \"cwd/env/pid/args/exit owned by process without ProcessSpec cwd/sys pid trampoline; Session owned by auth; app folded and models outside Core\", \"term Reader/Writer retained under D-CORE-IO-BUF1 and nominal Path does not revive a free path module\"]}} (was #4275 c30)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:32:07.038Z"
+          "evidence": "Moved to #6880 c3: module map belongs on the Core names card; split into CNAMES c3 and c4",
+          "at": "2026-11-15T03:14:35.990Z",
+          "closure": "obsolete"
         },
         {
           "n": 48,
           "text": "(was #4287) [#4267] Ratified Prelude contracts: • D-CORE-PRELUDE1. • D-CORE-PRELUDE2: read_file, write_file and file_exists join the prelude. • D-LANGNS-NAME1: language declarations live in core.lang. • D-NAME-ALIAS1: one short prelude module. • D-RULEARG-TYPES1: 14 generated argument enums. (was #4275 c34)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:32:12.475Z"
+          "evidence": "Moved to #6880 c9: prelude contracts belong on the Core names card; split into CNAMES c9-c11",
+          "at": "2026-11-15T03:14:36.988Z",
+          "closure": "obsolete"
         },
         {
           "n": 49,
           "text": "(was #4287) [#4285] Ratified naming contracts: • D-CORE-ONE-NAME1: aliases such as loads/load are deleted. • D-CORE-SPELLING1: American spelling. • D-LISTREMOVE1, D-ONCE-PRINT1, D-ONCE-VERB1 and D-VERDICT-1321-1. (was #4275 c35)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:32:17.602Z"
+          "evidence": "Moved to #6880 c1: naming contracts belong on the Core names card; split into CNAMES c1, c5-c8",
+          "at": "2026-11-15T03:14:37.979Z",
+          "closure": "obsolete"
         },
         {
           "n": 50,
@@ -35111,11 +35121,12 @@
         {
           "n": 51,
           "text": "(was #4287) [#4337] reactive.unsubscribe, reactive.is_active and the text.combinators module are admitted by canonical export generation, with import and call goldens. (was #4275 c37)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:32:28.238Z"
+          "evidence": "Moved to #6880 c12: export admission belongs on the Core names card",
+          "at": "2026-11-15T03:14:38.992Z",
+          "closure": "obsolete"
         },
         {
           "n": 52,
@@ -35129,20 +35140,22 @@
         {
           "n": 53,
           "text": "[#3248]  • Malformed input, EOF, limits, IO, cancel and unsupported target give repairable diagnostics with redaction. • Core failure paths follow the same cleanup order. • archive deflate/compress/tar_add return ArchiveError. • Golden `errors/core_failure_paths`. (was #3239 c12)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:45:10.939Z"
+          "evidence": "Moved to #6881 c1: I/O failures are their own stream",
+          "at": "2026-11-15T03:14:40.028Z",
+          "closure": "obsolete"
         },
         {
           "n": 54,
           "text": "(was #3226) O0, O1 and O2 results use one semantic law; browser process execution is explicitly inapplicable, not faked. (was #3239 c16)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:45:14.318Z"
+          "evidence": "Moved to #6881 c2: I/O failures are their own stream",
+          "at": "2026-11-15T03:14:41.037Z",
+          "closure": "obsolete"
         },
         {
           "n": 55,
@@ -35156,83 +35169,92 @@
         {
           "n": 56,
           "text": "(was #3226) [#3395] delimiter stripping, partial final line, byte errors and resumption after an error are observed per source (golden `io/line_producer_contract`). (was #3239 c20)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:45:22.071Z"
+          "evidence": "Moved to #6881 c3: I/O producers are their own stream",
+          "at": "2026-11-15T03:14:42.013Z",
+          "closure": "obsolete"
         },
         {
           "n": 57,
           "text": "(was #3395) Accept iterators tell waiting, a failed accept and permanent end apart, and keep the supported-platform gates. A golden shows all three outcomes. (Re-homed 2026-11-04 by the #6563 c1 audit: this requirement was merged into a card that was later deleted and survived on no card.) (was #3239 c65)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:45:29.415Z"
+          "evidence": "Moved to #6881 c4: I/O producers are their own stream",
+          "at": "2026-11-15T03:14:42.924Z",
+          "closure": "obsolete"
         },
         {
           "n": 58,
           "text": "(was #3395) Address resolution yields the required sequence of addresses. It is network IO with its effects, never a pure zero-cost source. (Re-homed 2026-11-04 by the #6563 c1 audit: this requirement was merged into a card that was later deleted and survived on no card.) (was #3239 c66)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:45:34.501Z"
+          "evidence": "Moved to #6881 c5: I/O producers are their own stream",
+          "at": "2026-11-15T03:14:43.843Z",
+          "closure": "obsolete"
         },
         {
           "n": 59,
           "text": "(was #3395) Cleanup of owned and borrowed items from I/O and network iterators follows F030, and channel readiness follows F031. (Re-homed 2026-11-04 by the #6563 c1 audit: this requirement was merged into a card that was later deleted and survived on no card.) (was #3239 c67)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:45:41.300Z"
+          "evidence": "Moved to #6881 c6: I/O producers are their own stream",
+          "at": "2026-11-15T03:14:44.788Z",
+          "closure": "obsolete"
         },
         {
           "n": 60,
           "text": "(was #4910) The integrated canonical enum, generated views and host bridge agree on all eleven IOError kinds, complete IOContext payloads and ResourceLimit special payload; callers and sandbox jobs settings migrate coherently without aliases or frozen-data hand edits. (was #3239 c57)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:45:48.068Z"
+          "evidence": "Moved to #6881 c7: I/O failures are their own stream",
+          "at": "2026-11-15T03:14:45.714Z",
+          "closure": "obsolete"
         },
         {
           "n": 61,
           "text": "(was #4910) The io_error unit tests pass, and a negative collect-all regression proves later independent cases run after a failure and the aggregate result stays nonzero. (was #3239 c58)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:45:55.029Z"
+          "evidence": "Moved to #6881 c8: I/O failures are their own stream",
+          "at": "2026-11-15T03:14:46.638Z",
+          "closure": "obsolete"
         },
         {
           "n": 62,
           "text": "(was #4910) Both actual embedded canonical bridge producer tests execute through a hash-qualified materialized bridge and validate all eleven kinds/context and decode-before-one-payload-free behavior; missing provider/build artifacts are explicit BLOCKED, never PASS. (was #3239 c59)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:46:02.813Z"
+          "evidence": "Merged into #6881 c8: BLOCKED-not-PASS is part of IOFAIL c8",
+          "at": "2026-11-15T03:14:47.641Z",
+          "closure": "obsolete"
         },
         {
           "n": 63,
           "text": "(was #4910) Fresh generated decoder, context and free-once behavior is exercised on O0, O1 and O2 with genuine artifacts and providers and one canonical meaning; source text assertions do not count. (was #3239 c60)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:46:08.240Z"
+          "evidence": "Merged into #6881 c7: tier agreement with real providers is part of IOFAIL c7",
+          "at": "2026-11-15T03:14:48.579Z",
+          "closure": "obsolete"
         },
         {
           "n": 64,
           "text": "One copy meaning: `.copy()` forks every component whose type has a fork meaning (Clock, or any type with __fork), recursively, whatever holds it: list, option, struct, tuple, map, enum payload, or a nesting of these. A single type-driven walk does it, not a case per holder kind. Cases cover each holder kind at O0/O1/O2. TlsLead-3timeB covers list and option only.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T23:13:10.317Z"
+          "evidence": "Moved to #3836 c15: copy meaning belongs on the move and copy card",
+          "at": "2026-11-15T03:14:49.574Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -35245,7 +35267,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:02.908Z",
-      "updated": "2026-11-15T03:14:27.950Z",
+      "updated": "2026-11-15T03:14:49.574Z",
       "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-09T19:32:04.021Z",
       "goals": [
@@ -42958,11 +42980,12 @@
         {
           "n": 2,
           "text": "#3995: One name per Core operation; foreign names are taught, never aliased (2 criteria carried over)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-01T12:12:31.228Z"
+          "evidence": "D-CORE-ONE-NAME1=A ratified 2026-09-30: the ballot this item drafted is decided. The cutover (with #5976 c37, merged here) is CNAMES c1.",
+          "at": "2026-11-15T03:14:50.581Z",
+          "closure": "decision"
         },
         {
           "n": 3,
@@ -42976,11 +42999,12 @@
         {
           "n": 4,
           "text": "#3997: Core module map: one owner per job, singular names, nested overlaps (2 criteria carried over)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-01T12:12:31.228Z"
+          "evidence": "D-CORE-MODULE-MAP1=A ratified 2026-09-30: the ballot this item drafted is decided. The cutover is CNAMES c3 and c4.",
+          "at": "2026-11-15T03:14:51.721Z",
+          "closure": "decision"
         },
         {
           "n": 5,
@@ -43103,11 +43127,12 @@
         {
           "n": 21,
           "text": "The 20 most common Python collection and string spellings in the ScriptBench Python programs (`sorted`, `list(range(...))`, `Counter`, `join`, `split`, `strip`, `startswith` and so on) each map to one Jet name or get an E0311 whose `fix_edits` names it; `xs.sorted()` and `(0..<8).to_list()` no longer fail without a fix (today E0311 for both). Proof: `jet test Compiler --profile ui --filter python_spelling_fix_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:03:24.179Z"
+          "evidence": "Moved to #6880 c2: foreign spellings go with the one-name cutover on the Core names card",
+          "at": "2026-11-15T03:14:52.861Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -43118,7 +43143,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-01T12:12:31.228Z",
-      "updated": "2026-11-15T03:03:24.179Z",
+      "updated": "2026-11-15T03:14:52.861Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -208528,6 +208553,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:14:52.861Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0q38sm2",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-15T03:14:51.721Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0q38sm2",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T03:14:50.581Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0q38sm2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T03:14:49.574Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#64"
+    },
+    {
+      "at": "2026-11-15T03:14:48.579Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#63"
+    },
+    {
+      "at": "2026-11-15T03:14:47.641Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#62"
+    },
+    {
+      "at": "2026-11-15T03:14:46.638Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#61"
+    },
+    {
+      "at": "2026-11-15T03:14:45.714Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#60"
+    },
+    {
+      "at": "2026-11-15T03:14:44.788Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#59"
+    },
+    {
+      "at": "2026-11-15T03:14:43.843Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#58"
+    },
+    {
+      "at": "2026-11-15T03:14:42.924Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#57"
+    },
+    {
+      "at": "2026-11-15T03:14:42.013Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#56"
+    },
+    {
+      "at": "2026-11-15T03:14:41.037Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#54"
+    },
+    {
+      "at": "2026-11-15T03:14:40.029Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#53"
+    },
+    {
+      "at": "2026-11-15T03:14:38.992Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#51"
+    },
+    {
+      "at": "2026-11-15T03:14:37.979Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#49"
+    },
+    {
+      "at": "2026-11-15T03:14:36.988Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#48"
+    },
+    {
+      "at": "2026-11-15T03:14:35.990Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#47"
+    },
+    {
+      "at": "2026-11-15T03:14:34.991Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#45"
+    },
+    {
+      "at": "2026-11-15T03:14:34.017Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-15T03:14:32.901Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#42"
+    },
+    {
+      "at": "2026-11-15T03:14:31.833Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#41"
+    },
+    {
+      "at": "2026-11-15T03:14:30.876Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#40"
+    },
+    {
+      "at": "2026-11-15T03:14:30.004Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#38"
+    },
+    {
+      "at": "2026-11-15T03:14:29.099Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#37"
+    },
     {
       "at": "2026-11-15T03:14:27.950Z",
       "by": "TowerKeeper-1",
