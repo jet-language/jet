@@ -99624,6 +99624,139 @@
       "completedAt": "2026-11-12T07:51:53.880Z",
       "questions": [],
       "retiredAt": "2026-11-15T08:16:32.437Z"
+    },
+    {
+      "id": "c0ccjkub",
+      "num": 6089,
+      "title": "Every lazy-iterator pull locks a global mutex to charge comptime fuel",
+      "body": "ScriptBench 2026-10-28 root cause R18 (cells: w10 jet-bin wall/CPU vs Lua and LuaJIT). Report: $JET_SCRATCH_ROOT/lanes/Audit/scripting/bench/BENCH.md.\n\nCause: After R17, the rest is text splitting and iteration. Every pull of a lazy runtime iterator calls `jet_rt_iter_charge` (`Compiler/JetRuntime/Source/Iter.jet:277`), which locks and unlocks a global mutex to charge compile-time fuel even when no compile-time evaluation runs (`IterCharge.jet:4-21`).\n\nEvidence: `perf record` of the timed w10 binary: `jet_rt_native_iter_string_split` 12.1 %, `jet_rt_iter_charge` 8.8 %, `main_run` 6.3 %, `jet_rt_alloc` 5.4 %. Timed: jet-bin cold 4.3 ms / warm 5.3 ms vs LuaJIT 2.7 / 2.7 ms, Lua 4.8 / 3.4 ms; every other peer is slower.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "All criteria met (c2 rev 99877, meet g11a w10 on dev 95dd5a300b with seed-b11). Closed by Main."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "HELD by owner order 2026-11-11 (no small optimizations until the language is mostly stable; architecture and regression fixes go first, per #5479 c5-c8). These criteria stay open and unworked: c2 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c)."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Speed or size card: moved from G4 to G11. Owner order 2026-11-09: all speed and size work is G11."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "2026-11-01 c2 measured on 360e470044 ($JET_SCRATCH_ROOT/lanes/CardClose/sbench/h360-report.md): FAIL. jet-bin 25.4 ms loses to php 1.66/1.59, bun 1.13/1.05, luajit wall 1.01. Root: alloc/free per split piece (280k each); needs a borrowed-view split lowering (sbench/w10-root.md)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "ScriptBench w10 on dev 1620f05362 + tools (wave-27 tree s2, BENCH.md method, 2026-11-01 12:36): still FAIL c2. jet-bin 19.3 ms wall / 19.9 ms cpu loses to php 12.0 ms (1.61x) and bun 13.0 ms (1.49x); ties luajit. The global fuel mutex is gone (c1); the rest is line/word splitting cost. Log: $JET_SCRATCH_ROOT/lanes/Main/sb-w07w10.log"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The cause above is removed at its root, and the probe cited in the evidence scales linearly or shows the gap closed (receipt with the command and numbers).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Iter.jet iter_pull calls jet_rt_iter_charge only when the compile-time request's active word is set; ScriptBench w10 (n=15) jet-bin 15.6 ms vs jet-base 15.9 ms on a34ef0affd + this patch; REF-SAME 48/48; lane-check CHECK OK (jet-lane-check.spRDYt) Landed in wave 25 as dev 367eaf8f0d (Codegen-1-44).",
+          "at": "2026-11-01T14:03:51.675Z"
+        },
+        {
+          "n": 2,
+          "text": "ScriptBench workload w10 (Tools/perf/scriptbench), measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#2858); same output on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Meet g11a (Lander5 meetrun, 2026-11-12 02:5x-03:1x) on dev 95dd5a300b with seed-b11 jet@a0.0.45#3667b9a1 (built at 19333b2bb3); host load during the run: 1-min loadavg mean 20.0, max 45.5 on 32 CPUs. Line 6: bash $JET_SCRATCH_ROOT/lanes/G11Speed/work/gen/sbmeet.sh $JET w10 (the ScriptBench manifest method; jet-bin against every peer, every metric) gave rc 0, with every jet-bin cell a win. The run was under heavy host load, which affects jet and the peers alike. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g11a/6.out.",
+          "at": "2026-11-12T08:20:57.226Z"
+        }
+      ],
+      "refs": [
+        "#6061"
+      ],
+      "tags": [
+        "runtime",
+        "perf"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T22:33:29.358Z",
+      "updated": "2026-11-12T08:22:10.272Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G11"
+      ],
+      "completedAt": "2026-11-12T08:22:10.271Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T08:23:48.373Z"
+    },
+    {
+      "id": "c0nul956",
+      "num": 6764,
+      "title": "RuntimeEffectRows --check is red on dev: 12 dead core.encoding/core.term dispatcher rows",
+      "body": "Found 2026-11-12 by G5DevX-1. jet Tools/agent/RuntimeEffectRows.jet --check reports 5 differences on dev. Root: when 892727fd3a was restaged it lost its Core.jet hunk, leaving 12 dead dispatcher rows (core.encoding __read_byte through __bytes_view, and core.term __stdin_line) that CoreCallRows regenerated with no effect. Fix SUB: G5DevX-runtime-effect-rows, which deletes the rows and regenerates the views with CoreSourceRows.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "All criteria met (c1, rev 99884; G5DevX-runtime-effect-rows landed as 50a2cbc7e6). Closed by Main."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet Tools/agent/RuntimeEffectRows.jet --check on dev reports 0 differences. CoreSourceRows, RuntimeGenerators, UnsafeRatchet and CoreSurfaceLedger --check stay current.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Meet g5a (Lander5 meetrun, 2026-11-12 03:19-03:3x) on dev 50a2cbc7e6 with seed-b11 jet@a0.0.45#3667b9a1 (built at 19333b2bb3); every line rc 0 with a judged PASS and zero FAIL/KF/UNEXPECTED-PASS/SKIP/ERROR/TIMEOUT. G5DevX-runtime-effect-rows landed as 50a2cbc7e6. jet Tools/agent/RuntimeEffectRows.jet --check gives ok (409 interface functions, 252 joined to a Core leaf, 0 differences). CoreSourceRows, RuntimeGenerators, UnsafeRatchet and CoreSurfaceLedger --check all rc 0. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g5a/{9..13}.out.",
+          "at": "2026-11-12T08:21:42.020Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T07:36:31.179Z",
+      "updated": "2026-11-12T08:22:08.039Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-12T08:22:08.038Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T08:23:48.374Z"
     }
   ]
 }
