@@ -69,6 +69,7 @@ use {
         JetDriverToolchainTree,
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_USER_ERROR,
+        JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD,
         jet_driver_report_problems,
         jet_driver_compile,
         jet_driver_compile_keep_going,
@@ -1269,79 +1270,135 @@ jet_cli_cpu_list: fn(text: String) -> [Int]? Never! {
 
 // The compiler's thread default: one thread per CPU this process may run on
 // (`logical`, its affinity mask's count under the cgroup's CPU quota), less
-// the CPUs of that mask other work keeps busy at start. A compile runs
-// faster on every hardware thread than on one per physical core, so SMT
-// siblings count as CPUs. Only load on the mask's own CPUs counts: a host
-// busy on CPUs this process may not use leaves it every CPU it may.
-// `/proc/stat`'s `procs_running` counts the runnable threads at this
-// instant, this thread among them; when no other runs, the host is quiet
-// and nothing more is read. Otherwise each runnable thread of another
-// process counts against the CPU it runs on (jet_cli_busy_cpus). An
-// unreadable file leaves `logical`.
-jet_cli_default_threads: fn(logical: Int) -[FS]> Int Never! {
-    stat: cli_files.read("/proc/stat") ?? return logical
-    running: jet_cli_procs_running(stat) ?? return logical
-    if running <= 1 -> return logical
+// the CPUs of that mask other work kept busy since the last load sample. A
+// compile runs faster on every hardware thread than on one per physical
+// core, so SMT siblings count as CPUs. Only load on the mask's own CPUs
+// counts: a host busy on CPUs this process may not use leaves it every CPU
+// it may.
+// A compile of fewer than JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD source bytes
+// (`work`) parses on the calling thread and its other pools stay small, so
+// it reads nothing. Otherwise the window runs from the last sample (a
+// compiling verb takes one at startup, jet_cli_load_start) to a second read
+// of `/proc/stat` now: the work of reading the sources fills it, and nothing
+// waits. jet_cli_load_window measures it, and this read starts the next
+// window.
+jet_cli_default_threads: fn(logical: Int, work: Int) -[FS, Time]> Int Never! {
+    if work < JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD -> return logical
     allowed: jet_cli_allowed_cpus() ?? return logical
-    busy: jet_cli_busy_cpus(allowed) ?? return logical
+    jet_cli_load_window(logical, allowed, jet_cli_load_sample())
+}
+
+// One end of a load window: `/proc/stat`'s text (`""` when unread), this
+// process's CPU time (`own_ns`, -1 when unread) and the instant of the read.
+JetCLILoadSample: struct {
+    stat: String
+    own_ns: Int
+    at_ns: Int
+}
+
+// The process's last load sample: a compiling verb's at startup, then each
+// measurement's second read.
+JET_CLI_LOAD_SAMPLE: Shared{JetCLILoadSample{stat: "", own_ns: -1, at_ns: 0}}
+
+// The shortest window jet_cli_window_threads reads: one clock tick (USER_HZ
+// 100) per CPU.
+JET_CLI_LOAD_MIN_WINDOW_NS: 10000000
+
+jet_cli_load_sample: fn() -[FS, Time]> JetCLILoadSample Never! {
+    stat: cli_files.read("/proc/stat") ?? ""
+    JetCLILoadSample{stat: stat, own_ns: jet_cli_trace_process_usage().proc_cpu_ns, at_ns: cli_time.instant().start_ns}
+}
+
+// A compiling verb's first load sample, taken before it reads its sources.
+jet_cli_load_start: fn() -[FS, Time]> {
+    held := JET_CLI_LOAD_SAMPLE.guard_edit()
+    held.value = jet_cli_load_sample()
+}
+
+// The thread default over the window from the process's last load sample to
+// `now` (jet_cli_window_threads); `now` becomes the last sample.
+jet_cli_load_window: fn(logical: Int, allowed: [Int], now: &&JetCLILoadSample) -> Int Never! {
+    held := JET_CLI_LOAD_SAMPLE.guard_edit()
+    threads: jet_cli_window_threads(logical, allowed, held.value, now)
+    held.value = now
+    threads
+}
+
+// The thread default over the window from `start` to `end`: `logical` when
+// either read failed or the window is under JET_CLI_LOAD_MIN_WINDOW_NS (too
+// short to hold a tick of every CPU), else the mask (`allowed`) less the CPUs
+// other work kept busy over it (jet_cli_busy_cpus, this process's own CPU
+// time taken out).
+jet_cli_window_threads: fn(logical: Int, allowed: [Int], start: JetCLILoadSample, end: JetCLILoadSample) -> Int Never! {
+    if start.stat == "" || end.stat == "" || start.own_ns < 0 || end.own_ns < 0 -> return logical
+    if end.at_ns - start.at_ns < JET_CLI_LOAD_MIN_WINDOW_NS -> return logical
+    own_ticks: (end.own_ns - start.own_ns) /% JET_CLI_TRACE_NS_PER_TICK
+    busy: jet_cli_busy_cpus(allowed, start.stat, end.stat, own_ticks) ?? return logical
     jet_cli_threads_left(logical, allowed.len(), busy)
 }
 
-// The runnable-thread count `stat` (the text of `/proc/stat`) holds in its
-// `procs_running` line, this thread among them; `None` without one.
-jet_cli_procs_running: fn(stat: String) -> Int? Never! {
+// One CPU's time in a `/proc/stat` `cpuN` line, in clock ticks: `total` is
+// its first eight fields (user, nice, system, idle, iowait, irq, softirq,
+// steal; guest time is inside user and nice) and `busy` all of them but idle
+// and iowait. A CPU without a line (offline) has `total` -1.
+JetCLICPUTicks: struct {
+    busy: Int
+    total: Int
+}
+
+// Each CPU's ticks in `stat`, the text of `/proc/stat`, indexed by CPU
+// number. The `cpu` lines open the file, so the read stops at the first
+// other line.
+jet_cli_cpu_ticks: fn(stat: String) -> [JetCLICPUTicks] Never! {
+    rows := [JetCLICPUTicks]{}
     loop line in stat.lines() {
-        if line.starts_with("procs_running ") {
-            running: Int.parse(line.slice(14..<line.len()).trim()) ?? return None
-            return Val(running)
+        if !line.starts_with("cpu") -> break
+        parts: line.partition(" ")
+        cpu: Int.parse(parts.head.slice(3..<parts.head.len())) ?? next
+        busy := 0
+        total := 0
+        field := 0
+        loop word in parts.tail.split(" ") {
+            if word == "" -> next
+            if field == 8 -> break
+            ticks: Int.parse(word) ?? break
+            total += ticks
+            if field != 3 && field != 4 -> busy += ticks
+            field += 1
         }
+        if field < 8 -> next
+        loop rows.len() <= cpu -> rows.push(JetCLICPUTicks{busy: 0, total: -1})
+        rows[cpu] = JetCLICPUTicks{busy: busy, total: total}
     }
-    None
+    rows
 }
 
-// How many runnable threads of other processes sit on the CPUs of `allowed`
-// at this instant: each `/proc/<pid>/task/<tid>/stat` in state `R` counts
-// against the CPU it last ran on, the one whose run queue holds it. This
-// process's own threads don't count. `None` when `/proc` can't be listed.
-jet_cli_busy_cpus: fn(allowed: [Int]) -[FS]> Int? Never! {
-    own_stat: cli_files.read("/proc/self/stat") ?? return None
-    own: own_stat.partition(" ").head
-    in_mask := [Bool]{}
+// How many CPUs of `allowed` other work kept busy between two reads of
+// `/proc/stat`, `before` and `after`: the busy ticks of the mask's CPUs over
+// the window, less this process's own `own_ticks`, in CPUs (one CPU's ticks
+// over the window, the mask's ticks spread over its CPUs), rounded to the
+// nearest. `None` when a CPU of the mask has no line in either read or the
+// window holds no tick.
+jet_cli_busy_cpus: fn(allowed: [Int], before: String, after: String, own_ticks: Int) -> Int? Never! {
+    start: jet_cli_cpu_ticks(before)
+    end: jet_cli_cpu_ticks(after)
+    busy := 0 - own_ticks
+    window := 0
     loop cpu in allowed {
-        loop in_mask.len() <= cpu -> in_mask.push(false)
-        in_mask[cpu] = true
-    }
-    processes: cli_files.listdir("/proc") ?? return None
-    busy := 0
-    loop process in processes {
-        if process == own -> next
-        _ := Int.parse(process) ?? next
-        tasks: cli_files.listdir("/proc/{process}/task") ?? next
-        loop task in tasks {
-            text: cli_files.read("/proc/{process}/task/{task}/stat") ?? next
-            cpu: jet_cli_task_runnable_cpu(text) ?? next
-            if cpu < in_mask.len() && in_mask[cpu] -> busy += 1
+        if cpu >= start.len() || cpu >= end.len() || start[cpu].total < 0 || end[cpu].total < 0 {
+            return None
         }
+        busy += end[cpu].busy - start[cpu].busy
+        window += end[cpu].total - start[cpu].total
     }
-    Val(busy)
-}
-
-// The CPU a runnable thread waits or runs on, from the text of its
-// `/proc/<pid>/task/<tid>/stat`: after the parenthesized command name, the
-// state (field 3) is `R` and the CPU is field 39. `None` for a thread in any
-// other state, or text that is not such a line.
-jet_cli_task_runnable_cpu: fn(text: String) -> Int? Never! {
-    close: text.rfind(")")
-    if close < 0 -> return None
-    fields: text.slice(close + 1, text.len()).trim().split(" ").to_list()
-    if fields.len() < 37 || fields[0] != "R" -> return None
-    cpu: Int.parse(fields[36]) ?? return None
-    Val(cpu)
+    if window <= 0 -> return None
+    if busy <= 0 -> return Val(0)
+    Val((2 * busy * allowed.len() + window) /% (2 * window))
 }
 
 // At most the `logical` CPUs this process may use, and at most the
-// `allowed` CPUs of its mask less the `busy` ones other processes' runnable
-// threads hold; at least one.
+// `allowed` CPUs of its mask less the `busy` ones other work holds; at least
+// one.
 jet_cli_threads_left: fn(logical: Int, allowed: Int, busy: Int) -> Int Never! {
     free: allowed - busy
     if free < 1 -> return 1
@@ -1539,6 +1596,7 @@ JetCLIToolchainPackages: struct {
 jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sources: [JetDriverCoreSource], threads: Int?, mode: JetDriverCompileMode) -> JetDriverCompileRequest Never! {
     os: cli_sys.name()
     cores: cli_sys.cpu_count()
+    work: jet_cli_snapshot_bytes(snapshot)
     stamp := BuildStamp?{None}
     contributions := [LockedBuildContribution]{}
     lock: jet_cli_entry_lock(snapshot)
@@ -1558,7 +1616,7 @@ jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sou
         record_store: None,
         core_interface: Val(JetCLICoreInterface{}),
         trace_sink: None,
-        compiler_threads: CompilerThreads{cap: Val(threads ?? jet_cli_default_threads(cores)), cores: cores, memory_available: jet_cli_memory_available()},
+        compiler_threads: CompilerThreads{cap: Val(threads ?? jet_cli_default_threads(cores, work)), cores: cores, memory_available: jet_cli_memory_available()},
         mode: mode,
         eval_entry: eval_entry,
         tests_optional: mode == JetDriverCompileMode.Test && (cli_sys.get(JET_CLI_TEST_SUITE_ENV) != None || cli_sys.get(JET_CLI_TEST_PROFILE_ENV) != None),
@@ -1569,6 +1627,16 @@ jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sou
         toolchain_tree: jet_cli_toolchain_tree(snapshot.entry_path),
         recheck_verify: cli_sys.get(ENV_JET_RECHECK_VERIFY) == Val("1"),
     }
+}
+
+// The source bytes of `snapshot`'s files: the compile's work, which decides
+// whether its thread default measures the host's load.
+jet_cli_snapshot_bytes: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> Int Never! {
+    bytes := 0
+    loop root in snapshot.roots {
+        loop file in root.files -> bytes += file.source.len()
+    }
+    bytes
 }
 
 // The entry root's `.jet/lock`, whose `[build.stamp]` and

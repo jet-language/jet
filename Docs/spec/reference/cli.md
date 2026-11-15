@@ -650,10 +650,13 @@ none is E2102 too, never ignored: a switch takes no `=value`
 - `--threads N` caps the compiler at N threads on `build`, `run`, `check`,
   `test`, `dev`, and `inspect` (D-JOBS1=A); without it the compiler admits
   threads automatically up to one per CPU its affinity mask lets it run on
-  (SMT siblings count as CPUs), fewer when other processes' runnable threads
-  already sit on those CPUs at start (load on CPUs outside the mask doesn't
-  count). It never limits the
-  threads of the program jet
+  (SMT siblings count as CPUs), fewer when other work keeps those CPUs busy:
+  a compiling verb reads `/proc/stat` at startup and again when it sizes its
+  thread pool, after reading its sources, and each CPU of the mask's busy
+  time over that window, less the compiler's own, counts against it (load
+  on CPUs outside the mask doesn't count). Nothing waits for the window; one
+  under 10 ms counts no load. A compile of under 256 KiB of source reads
+  no second sample. It never limits the threads of the program jet
   builds or runs, every value gives the same diagnostics and output bytes,
   and `build --verbose` reports the cap it used. No
   environment variable sets it. `--jobs` and `-j` are usage errors (E2102)
