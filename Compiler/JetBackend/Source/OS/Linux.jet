@@ -122,8 +122,16 @@ os_write: fn(fd: Int, address: Int, count: Int) -> Int {
 // Map `size` bytes (rounded up to whole pages) of fresh zeroed private memory
 // with `protection` (a sum of OS_PROT_*). Returns the address.
 os_map: fn(size: Int, protection: Int) -> Int {
-    #Unsafe("an anonymous mapping aliases no existing memory") {
-        return os_syscall(OS_SYS_MMAP, 0, os_page_round(size), protection, OS_MAP_PRIVATE_ANONYMOUS, -1, 0)
+    os_map_with(0, size, protection, OS_MAP_PRIVATE_ANONYMOUS, -1, 0)
+}
+
+// mmap(2) of `size` bytes (rounded up to whole pages) at `address` (0: the
+// kernel picks), with `protection` and `flags` (OS_MAP_*), of `fd` from
+// `offset` (-1 and 0: anonymous memory). Returns the address, or -errno.
+// With os_map and os_unmap, the kernel's one way to map and unmap memory.
+os_map_with: fn(address: Int, size: Int, protection: Int, flags: Int, fd: Int, offset: Int) -> Int {
+    #Unsafe("the caller owns `address .. address + size` when it names one, so a fixed mapping replaces only its own pages; the pages mapped are the caller's alone") {
+        return os_syscall(OS_SYS_MMAP, address, os_page_round(size), protection, flags, fd, offset)
     }
 }
 
@@ -134,6 +142,7 @@ os_protect: fn(address: Int, size: Int, protection: Int) -> Int {
     }
 }
 
+// munmap(2) of the whole pages in `address .. address + size`.
 os_unmap: fn(address: Int, size: Int) -> Int {
     #Unsafe("the caller owns the mapping and nothing uses it any more") {
         return os_syscall(OS_SYS_MUNMAP, address, os_page_round(size), 0, 0, 0, 0)

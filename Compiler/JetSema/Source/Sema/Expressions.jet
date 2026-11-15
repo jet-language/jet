@@ -4040,7 +4040,7 @@ sema_expr_try_core_module_method: fn(receiver: Expr, method: String, method_span
 // a `mem.<operation>(…)` call is E3101; Core also marks them `#Unsafe`, and
 // the call's fact (`audited_operation`) keeps the effect pass's E3103 off it,
 // so the call reports once. A directly imported `copy(…)` stays E3103.
-SEMA_CORE_MEM_AUDITED: #run { [String]{"volatile_read", "volatile_write", "copy", "fill", "list_append", "list_copy", "alloc_raw", "free_raw", "window"} }
+SEMA_CORE_MEM_AUDITED: #run { [String]{"volatile_read", "volatile_write", "copy", "fill", "list_append", "list_copy", "alloc_raw", "free_raw", "mapped", "unmapping", "window"} }
 
 sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, unbuilt: &SemaCoreUnbuiltCall?, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     path: sema_expr_core_module_receiver_path(receiver) ?? return SemaMethodSpecialCheck{handled: false, value: None}

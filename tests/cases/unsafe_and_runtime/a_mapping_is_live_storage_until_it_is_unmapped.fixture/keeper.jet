@@ -1,0 +1,9 @@
+// Only the kernel's mapping primitives keep the sentry's account of a
+// mapping; a program that calls `mem.mapped` itself is refused.
+use core.mem
+
+run: fn() {
+    #Unsafe("the program claims pages it never mapped") {
+        mem.mapped(4096, 4096)
+    }
+}

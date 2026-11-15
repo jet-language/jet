@@ -56,6 +56,15 @@ run: fn() Never! {
     unsafe_test_require(moves_refused.diagnostics.len() == 2 && moves_refused.diagnostics[0].diagnostic.what.contains("`list_append`") && moves_refused.diagnostics[1].diagnostic.what.contains("`list_copy`"), "each bulk List move outside the kernel is refused: {moves_refused.diagnostics:Debug}")
     moved: moves_refused.gates[0].memory_operations
     unsafe_test_require(moved.len() == 2 && moved[0].address.len() == 1 && moved[0].address[0] == "p" && moved[1].address.len() == 1 && moved[1].address[0] == "q", "a bulk List move's address is its raw pointer")
+    // The sentry's mapping account stands only in the kernel's mapping
+    // primitives: even a kernel file or a single program elsewhere is refused.
+    account: parse_source("run: fn() {{ #Unsafe(\"fresh\") {{ mem.mapped(p, n)\nmem.unmapping(p, n) }} }}".bytes())
+    keeper: sema_unsafe_inspect([SemaGateModule{source: "Linux.jet", program: account.program, policy_path: Val("Source/OS/Linux.jet"), memory_kernel: Val([String]{"Source/OS/Linux.jet"}), package_identity: "package:11:jet_backend:0.0.1"}], GateSet{})
+    unsafe_test_require(keeper.diagnostics.len() == 0 && keeper.gates[0].memory_operations.len() == 2 && keeper.gates[0].memory_operations[0].address.len() == 0, "the mapping primitives keep the sentry's account: {keeper.diagnostics:Debug}")
+    loader: sema_unsafe_inspect([SemaGateModule{source: "Loader.jet", program: account.program, policy_path: Val("Source/Image/Loader.jet"), memory_kernel: Val([String]{"Source/Image/Loader.jet"}), package_identity: "package:11:jet_backend:0.0.1"}], GateSet{})
+    unsafe_test_require(loader.diagnostics.len() == 2 && loader.diagnostics[0].diagnostic.code == "E3113" && loader.diagnostics[0].diagnostic.what.contains("`mapped`") && loader.diagnostics[1].diagnostic.what.contains("`unmapping`"), "another kernel file is refused: {loader.diagnostics:Debug}")
+    lone: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: account.program, policy_path: Val("app.jet")}], GateSet{})
+    unsafe_test_require(lone.diagnostics.len() == 2, "a single program is refused too: {lone.diagnostics:Debug}")
     no_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: parsed.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{})}], GateSet{})
     // The raw pointer `*cell` and the dereference `p.*`.
     unsafe_test_require(no_kernel.diagnostics.len() == 2 && no_kernel.diagnostics[0].diagnostic.code == "E3113", "a package naming no kernel refuses raw pointers")

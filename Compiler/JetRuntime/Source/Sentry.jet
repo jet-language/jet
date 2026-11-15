@@ -239,6 +239,54 @@ sentry_register: fn(owner: I64, frame: I64, start: I64, bytes: I64) {
     }
     sync_mutex_unlock(sentry_root)
 }
+// `core.mem.unmapping`'s route: the pages `start ..< start + bytes` of a
+// mapping about to be unmapped leave the live heap storage. A live range
+// inside them goes, and one that overlaps them keeps only its parts
+// outside, so a partial unmap leaves the rest live. Nothing is quarantined
+// or written: the pages are going, a read-only view must not be written,
+// and a reservation must not be committed. A later access through them is
+// therefore a provenance fault (R0801), and the kernel may map the
+// addresses again.
+#Export(c) jet_rt_sentry_unmap: fn(start: I64, bytes: I64) {
+    if (!sentry_available() || start == I64{0} || bytes <= I64{0}) -> return
+    end: sentry_range_end(start, bytes)
+    sync_mutex_lock(sentry_root)
+    heap: wrapping(sentry_root + I64{40})
+    at := I64{0}
+    loop at < sync_load(heap) {
+        row: wrapping(sync_load(wrapping(heap + I64{16})) + at * I64{8})
+        begin: sync_load(row)
+        limit: sentry_range_end(begin, sync_load(wrapping(row + I64{8})))
+        live: sync_load(wrapping(row + I64{16})) != I64{0}
+        if !live || !world_unsigned_before(begin, end) || !world_unsigned_before(start, limit) {
+            at += I64{5}
+            next
+        }
+        head: world_unsigned_before(begin, start)
+        tail: world_unsigned_before(end, limit)
+        if !head && !tail {
+            sentry_words_remove(heap, at, I64{5})
+            next
+        }
+        if head {
+            sync_store(wrapping(row + I64{8}), wrapping(start - begin))
+            if tail {
+                owner: sync_load(wrapping(row + I64{24}))
+                sequence: sync_load(wrapping(row + I64{32}))
+                scheduler_words_push(heap, end)
+                scheduler_words_push(heap, wrapping(limit - end))
+                scheduler_words_push(heap, I64{1})
+                scheduler_words_push(heap, owner)
+                scheduler_words_push(heap, sequence)
+            }
+        } else {
+            sync_store(row, end)
+            sync_store(wrapping(row + I64{8}), wrapping(limit - end))
+        }
+        at += I64{5}
+    }
+    sync_mutex_unlock(sentry_root)
+}
 sentry_range_end: fn(start: I64, length: I64) -> I64 {
     end: wrapping(start + length)
     if world_unsigned_before(end, start) -> I64{-1} else -> end

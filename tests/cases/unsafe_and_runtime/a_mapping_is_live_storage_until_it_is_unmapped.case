@@ -1,0 +1,40 @@
+# An OS mapping is live storage for the memory sentry from the moment the
+# kernel's mapping primitive makes it until the one that unmaps it runs: a
+# checked `mem.list_copy` into a block of a fresh `Region` passes on every
+# tier, and the same copy after the region closed is a located R0801 fault
+# that stops before any byte moves. Only those primitives keep the account:
+# a program calling `mem.mapped` itself is refused.
+fixture: a_mapping_is_live_storage_until_it_is_unmapped.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "3 4 5\n1 block kept\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "3 4 5\n1 block kept\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "3 4 5\n1 block kept\n"
+step closednone: jet run -O0 after_close.jet
+exit: 70
+stdout: = "closed\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "after_close.jet:22:" # the fault is located at the copy's line
+stderr: ~ "raw `list_copy` outside" # the gate's audit text follows
+step closedsome: jet run -O1 after_close.jet
+exit: 70
+stdout: = "closed\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "after_close.jet:22:" # the fault is located at the copy's line
+step closedfull: jet run -O2 after_close.jet
+exit: 70
+stdout: = "closed\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "after_close.jet:22:" # the fault is located at the copy's line
+stderr: ~ "raw `list_copy` outside" # the gate's audit text follows
+step keeper: jet check keeper.jet
+exit: nonzero
+stderr: ~ "E3113" # the mapping account outside the kernel's mapping primitives
+stderr: ~ "`mapped` keeps the memory sentry's account of a mapping outside the kernel's mapping primitives"

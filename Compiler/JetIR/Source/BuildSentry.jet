@@ -475,6 +475,32 @@ ir_core_free_raw: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], spa
     return -1
 }
 
+// `core.mem.mapped(address, bytes)` (`fresh`) and `unmapping(address,
+// bytes)`: under the sentry, the whole 4 KiB pages over `bytes` at
+// `address` become a live heap allocation (jet_rt_sentry_register_allocation)
+// or leave the live storage without a write (jet_rt_sentry_unmap). An image
+// without the sentry only evaluates the arguments.
+ir_core_mapping: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, fresh: Bool, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 2 -> return ir_fail_slot(b, span, "core.mem.mapped or unmapping without its checked arguments")
+    if !p.sentries {
+        loop arg in args {
+            value: ir_expr(m, p, b, arg)
+            if ir_failed(b) -> return -1
+            if value >= 0 -> ir_release(m, b, value)
+        }
+        return -1
+    }
+    words: ir_core_native_words(m, p, b, args, span)
+    if ir_failed(b) -> return -1
+    below: ir_word_const(m, b, 4095)
+    mask: ir_word_const(m, b, -4096)
+    over: ir_word_op(m, b, IROp.Add, words[1], below)
+    pages: ir_word_op(m, b, IROp.BitAnd, over, mask)
+    symbol: if fresh -> "jet_rt_sentry_register_allocation" else -> "jet_rt_sentry_unmap"
+    _: ir_runtime(m, b, symbol, [Int]{words[0], pages}, -1)
+    return -1
+}
+
 // The bytes ahead of a raw heap allocation's payload: its alignment, and at
 // least 16 for the size and align words, so the payload keeps the alignment.
 ir_core_raw_head: fn(m: &IRModule, b: &IRBuilder, align: Int) -> Int Never! {

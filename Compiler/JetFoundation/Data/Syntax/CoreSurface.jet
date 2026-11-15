@@ -747,6 +747,16 @@ MEM_ALLOC_RAW: "alloc_raw"
 /// pointer. Needs `#Unsafe`.
 MEM_FREE_RAW: "free_raw"
 
+/// `mem.mapped(address, bytes)` — the memory sentry counts the whole pages
+/// of a fresh OS mapping as live storage; nothing without the sentry. Needs
+/// `#Unsafe`, and only the kernel's mapping primitives call it.
+MEM_MAPPED: "mapped"
+
+/// `mem.unmapping(address, bytes)` — the memory sentry drops the pages of a
+/// mapping about to be unmapped from its live storage; nothing without the
+/// sentry. Needs `#Unsafe`, and only the kernel's mapping primitives call it.
+MEM_UNMAPPING: "unmapping"
+
 /// `mem.window(owner, pointer, count)` — a `View<T>` over the `count`
 /// elements at a raw pointer, which lives no longer than `owner`. Needs
 /// `#Unsafe`.
@@ -823,6 +833,8 @@ CORE_MEM_GATE_TIERS: [(field_0: String, field_1: CoreMemGate)]{
     (field_0: MEM_LIST_COPY, field_1: CoreMemGate.Audit),
     (field_0: MEM_ALLOC_RAW, field_1: CoreMemGate.Audit),
     (field_0: MEM_FREE_RAW, field_1: CoreMemGate.Audit),
+    (field_0: MEM_MAPPED, field_1: CoreMemGate.Audit),
+    (field_0: MEM_UNMAPPING, field_1: CoreMemGate.Audit),
     (field_0: MEM_WINDOW, field_1: CoreMemGate.Audit),
     (field_0: "__view_from_raw", field_1: CoreMemGate.Audit),
     (field_0: MEM_ADDRESS_OF, field_1: CoreMemGate.Import),

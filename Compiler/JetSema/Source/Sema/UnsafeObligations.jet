@@ -115,6 +115,10 @@ SEMA_UNSAFE_RAW_OPERATIONS: [SemaRawOperation]{
     {name: "cast_ptr", form: SEMA_RAW_METHOD, prefix: false, kind: "pointer_cast", required: [String]{"valid_ptr", "aligned"}, pointers: 0, syscalls: [String]{}},
     {name: "alloc_raw", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
     {name: "free_raw", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    // The memory sentry's account of an OS mapping: only the kernel's mapping
+    // primitives keep it (SEMA_MAPPING_KEEPERS).
+    {name: "mapped", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "unmapping", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
     {name: "offset", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
     {name: "byte_offset", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
     {name: "copy", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
@@ -137,6 +141,7 @@ SEMA_UNSAFE_RAW_OPERATIONS: [SemaRawOperation]{
     // Mappings: the wrappers, and a raw system call of the memory family
     // (mmap 9, mprotect 10, munmap 11, mremap 25, madvise 28, memfd_create 319).
     {name: "os_map", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "os_map_with", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
     {name: "os_unmap", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
     {name: "os_protect", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
     {name: "os_syscall", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{"9", "10", "11", "25", "28", "319", "OS_SYS_MMAP", "OS_SYS_MPROTECT", "OS_SYS_MUNMAP", "OS_SYS_MREMAP", "OS_SYS_MADVISE", "OS_SYS_MEMFD_CREATE", "OS_SYS_BRK"}},
@@ -201,6 +206,7 @@ sema_unsafe_diagnostic: fn(result: &UnsafeInspection, source: String, code: Stri
 
 sema_unsafe_package_surface: fn(modules: [SemaGateModule], result: &UnsafeInspection) Never! {
     loop row in modules {
+        sema_unsafe_mapping_keepers(row, result)
         path: row.policy_path ?? next
         if row.unsafe_paths == .Val(allowed) {
             if !sema_unsafe_path_within(path, allowed) {
@@ -258,6 +264,42 @@ sema_unsafe_memory_refusal: fn(result: &UnsafeInspection, source: String, path: 
     field: if no_kernel -> "name the package's kernel files in `package.jet`: `policy: {{ memory: .Kernel([\"{path}\"]) }}`" else -> "add `{path}` to `policy.memory` in `package.jet`"
     site: if at == "" -> "" else -> " at {at}"
     result.diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error_optional("E3113", Val(span), "`{kind}`{site} is a raw memory operation outside the package's memory kernel", "Raw memory operations stand only in the kernel files `policy.memory` names, so the package's memory safety is audited in one place.", "Outside the kernel, {safe}; to make `{path}` a kernel file, {field}.")})
+}
+
+// The only sources outside Core that may keep the memory sentry's account of
+// an OS mapping (`mem.mapped`, `mem.unmapping`): a package's identity prefix
+// and the package-relative path of its mapping primitives, and that file's
+// checkout path, as a composed runtime unit's source marks name it (the
+// runtime unit holds the OS layer too). Core's Region keeps its own; Core
+// is never inspected.
+SEMA_MAPPING_KEEPERS: [(package: String, path: String, checkout: String)]{
+    (package: "package:11:jet_backend:", path: "Source/OS/Linux.jet", checkout: "Compiler/JetBackend/Source/OS/Linux.jet"),
+}
+
+// E3113 for each `mem.mapped` / `mem.unmapping` in `row`'s gates that does
+// not stand in one of SEMA_MAPPING_KEEPERS, whether or not its file is a
+// kernel file: a mapping the sentry counts live must be one a mapping
+// primitive just made, so every other mapping goes through those
+// primitives.
+sema_unsafe_mapping_keepers: fn(row: SemaGateModule, result: &UnsafeInspection) Never! {
+    loop keeper in SEMA_MAPPING_KEEPERS {
+        if row.package_identity.starts_with(keeper.package) && row.policy_path == (Val(keeper.path)) -> return
+    }
+    starts: if row.unit == .Val(unit) -> (loop source in unit.sources -> source.start) else -> [Int]{}
+    loop gate in result.gates {
+        if gate.source != row.source -> next
+        loop operation in gate.memory_operations {
+            if operation.kind != "mapped" && operation.kind != "unmapping" -> next
+            if row.unit == .Val(unit) && sema_unsafe_last_at(starts, operation.span.start) == .Val(index) {
+                kept := false
+                loop keeper in SEMA_MAPPING_KEEPERS {
+                    if unit.sources[index].path == keeper.checkout -> kept = true
+                }
+                if kept -> next
+            }
+            result.diagnostics.push(UnsafeDiagnostic{source: row.source, diagnostic: sema_error_optional("E3113", Val(operation.span), "`{operation.kind}` keeps the memory sentry's account of a mapping outside the kernel's mapping primitives", "Only a mapping primitive knows the pages it just mapped or is about to unmap, so only it may tell the sentry they are live or gone.", "Map and unmap through the kernel's primitives (`Region.reserve`, or JetBackend's `os_map`, `os_map_with` and `os_unmap`) instead.")})
+        }
+    }
 }
 
 // The `// [unit source: PATH]` line a composed runtime unit
@@ -567,11 +609,13 @@ sema_unsafe_mem_receiver: fn(receiver: Expr) -> Bool Never! {
 // The address roots of a raw operation's pointer operand: `copy(to, from,
 // count)` has two, `fill(to, value, count)` and `list_copy(to, values,
 // start, count)` one, `list_append(values, from, count)` reads its pointer
-// after the List, and `window` takes its pointer before its count.
+// after the List, and `window` takes its pointer before its count. The
+// sentry's mapping account (`mapped`, `unmapping`) reads and writes no
+// memory, so it has none.
 sema_unsafe_operation_roots: fn(method: String, receiver: Expr, args: [CallArg]) -> [String] Never! {
     roots := [String]{}
     pointers: if method == {
-        "alloc_raw" | "address_of" -> 0
+        "alloc_raw" | "address_of" | "mapped" | "unmapping" -> 0
         "copy" -> 2
         "fill" | "list_copy" -> 1
         "window" -> args.len() - 1

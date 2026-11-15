@@ -90,6 +90,22 @@ Pin: struct<T> {}
     core.mem.free_raw(pointer)
 }
 
+// The memory sentry's account of an OS mapping, kept by the kernel's mapping
+// primitives alone (Region's reserve and close here, and JetBackend's
+// os_map, os_map_with and os_unmap; E3113 refuses any other caller).
+// `mapped` makes the whole pages over `bytes` at `address` live storage, as
+// `alloc_raw` does its block, so a checked access inside them passes;
+// `unmapping`, just before the pages go, takes them out of the live storage
+// without writing them, so a checked access after is R0801. An image
+// without the sentry builds neither call.
+#Unsafe("`address` starts a mapping of `bytes` that the caller just made and alone owns") mapped: fn(address: Int, bytes: Int) Never! {
+    core.mem.mapped(address, bytes)
+}
+
+#Unsafe("`address` and `bytes` name pages of a mapping the caller owns, which it unmaps next, so nothing reads or writes them after") unmapping: fn(address: Int, bytes: Int) Never! {
+    core.mem.unmapping(address, bytes)
+}
+
 // The `View<T>` over the `count` Ts at `pointer`, which lives no longer than
 // `owner`: sema ties the View to `owner` as it ties any declared view to its
 // source, so the View cannot be read after `owner` is moved, consumed or
@@ -124,8 +140,8 @@ stream_store: fn<T>(dst: &T, value: T) Never! {
 // allocation fails). Reserved `__` names, never public.
 //
 // Each operation here, and `volatile_read`, `volatile_write`, `copy`, `fill`,
-// `list_append`, `list_copy`, `alloc_raw`, `free_raw` and `stream_store`
-// above, is a compiler intrinsic:
+// `list_append`, `list_copy`, `alloc_raw`, `free_raw`, `mapped`, `unmapping`
+// and `stream_store` above, is a compiler intrinsic:
 // the compiler builds every call inline (JetIR Build.jet IR_CORE_INTRINSICS)
 // and never builds the body, so a body names only the declaration's own
 // operation.
@@ -184,6 +200,7 @@ Region: struct {
         address := 0
         #Unsafe("the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close") {
             address = __region_reserve(bytes)
+            if address != 0 -> mapped(address, bytes)
         }
         if address == 0 -> return Err(AllocError{requested_bytes: bytes, allocator: "Region"})
         Ok(Region{base: address, size: bytes, cursor: 0, mapped: true})
@@ -222,6 +239,7 @@ Region: struct {
         close: fn(&&self) {
             if !self.mapped -> return
             #Unsafe("the region mapped these pages at reserve, and no block of it is used after close") {
+                unmapping(self.base, self.size)
                 __region_release(self.base, self.size)
             }
         }

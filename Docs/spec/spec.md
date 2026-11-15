@@ -3261,6 +3261,19 @@ through a kept copy of the pointer is a located R0802 fault. See
 `tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.case`.
 (D-RAWPTR2=A)
 
+`mem.mapped(address, bytes)` and `mem.unmapping(address, bytes)` keep the
+memory sentry's account of an OS mapping. `mapped` makes the whole pages over
+`bytes` at `address` live storage, as `alloc_raw` does its block, so a checked
+raw access into a fresh mapping passes. `unmapping`, called just before the
+pages are unmapped, takes them out of the live storage without writing them,
+so a checked access after the unmap is a located R0801 fault. An image
+without the sentry builds neither call. Both are E3101 outside `#Unsafe`, and
+only the kernel's mapping primitives may call them: `Region.reserve` and
+`close`, and JetBackend's `os_map`, `os_map_with` and `os_unmap`
+(`Source/OS/Linux.jet`). Any other caller, a kernel file or a single program
+included, is E3113. See
+`tests/cases/unsafe_and_runtime/a_mapping_is_live_storage_until_it_is_unmapped.case`.
+
 `mem.window(owner, p, len)` gives a `View<T>` over the `len` `T`s at `p`,
 tied to `owner` as a declared view is tied to its source (`-> View<T> from
 owner`); a `len` below zero gives an empty View. It reads like any View:

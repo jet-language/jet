@@ -950,9 +950,9 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
 // runs. The core.mem rows (Core/Mem/Mem.jet) are the raw List layout and
 // bulk List moves, volatile and streaming access, the raw pointer steps,
 // and the raw block copy and fill at the call's one type argument, and the
-// raw heap allocation and release, a region's reserve and release of fresh
-// pages, and `context.allocator`'s take, give and room of a block, which
-// take none.
+// raw heap allocation and release, the memory sentry's account of an OS
+// mapping, a region's reserve and release of fresh pages, and
+// `context.allocator`'s take, give and room of a block, which take none.
 IRCoreIntrinsicRow: struct {
     module_name: String
     name: String
@@ -977,6 +977,8 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{module_name: "core.mem", name: "fill", intrinsic: IRRuntimeIntrinsic.MemFill},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "alloc_raw", intrinsic: IRRuntimeIntrinsic.AllocRaw},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "free_raw", intrinsic: IRRuntimeIntrinsic.FreeRaw},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "mapped", intrinsic: IRRuntimeIntrinsic.Mapped},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "unmapping", intrinsic: IRRuntimeIntrinsic.Unmapping},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "__region_reserve", intrinsic: IRRuntimeIntrinsic.RegionReserve},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "__region_release", intrinsic: IRRuntimeIntrinsic.RegionRelease},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "__context_take", intrinsic: IRRuntimeIntrinsic.ContextTake},
@@ -1013,7 +1015,7 @@ ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) ->
         .ViewFromRaw -> function.generic_params.len() == 2
         .AllocRaw | .FreeRaw -> function.generic_params.len() == 0
         .RegionReserve | .ContextGive | .ContextRoom -> ir_intrinsic_signature(function, 1)
-        .RegionRelease | .ContextTake -> ir_intrinsic_signature(function, 2)
+        .RegionRelease | .ContextTake | .Mapped | .Unmapping -> ir_intrinsic_signature(function, 2)
         .FunctionAddress(_) | .StaticText | .FaultReport -> false
     }
 }

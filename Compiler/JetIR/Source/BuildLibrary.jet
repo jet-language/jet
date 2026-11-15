@@ -58,7 +58,8 @@ IRRuntimeIntrinsic: enum {
     // pointer, a volatile load or store, a streaming store,
     // a raw pointer's step by elements or by bytes, a raw block copy or fill;
     // a View over raw elements, at its element and owner type arguments;
-    // and, with no type argument, a raw heap allocation and its release, a
+    // and, with no type argument, a raw heap allocation and its release, the
+    // memory sentry's account of a fresh and of a going OS mapping, a
     // region's reserve and release of fresh pages, and `context.allocator`'s
     // take, give and room of a block.
     TypeSize
@@ -76,6 +77,8 @@ IRRuntimeIntrinsic: enum {
     MemFill
     AllocRaw
     FreeRaw
+    Mapped
+    Unmapping
     RegionReserve
     RegionRelease
     ContextTake
@@ -734,6 +737,7 @@ ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRu
         .MemFill -> ir_core_mem_block(m, p, b, "fill", ir_intrinsic_nodes(args), type_args, span)
         .AllocRaw -> ir_core_alloc_raw(m, p, b, ir_intrinsic_nodes(args), span)
         .FreeRaw -> ir_core_free_raw(m, p, b, ir_intrinsic_nodes(args), span)
+        .Mapped | .Unmapping -> ir_core_mapping(m, p, b, intrinsic == IRRuntimeIntrinsic.Mapped, ir_intrinsic_nodes(args), span)
         .RegionReserve | .RegionRelease -> ir_core_region(m, p, b, intrinsic, ir_intrinsic_nodes(args), span)
         .ContextTake | .ContextGive | .ContextRoom -> ir_core_context_block(m, p, b, intrinsic, ir_intrinsic_nodes(args), span)
     }

@@ -1,0 +1,25 @@
+// The same copy after the region closed: its pages left the live storage
+// before they were unmapped, so the sentry stops the copy before any byte
+// moves.
+use core.mem
+
+// Keeps the block this program claims; a block is single use.
+Shelf: struct {
+    blocks: [mem.Block]
+}
+
+run: fn() {
+    shelf := Shelf{blocks: [mem.Block]{}}
+    region := mem.Region.reserve(8192) ?? panic("reserve")
+    block: region.claim(24, 8) ?? panic("claim")
+    at: block.address()
+    values := [Int]{3, 4, 5}
+    shelf.blocks.push(block)
+    region.close()
+    #Unsafe("the copy writes into pages the region unmapped, so the sentry stops it before any byte moves") {
+        to: mem.Ptr<Int>.from_addr(at)
+        print("closed")
+        mem.list_copy<Int>(to, values, 0, 3)
+        print("copied")
+    }
+}
