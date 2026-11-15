@@ -1169,7 +1169,9 @@ jet_cli_check_prelude: fn(args: [String], color: Bool, quiet: Bool, threads: Int
 // conflicting writer, or a profile no member declares, is refused here too
 // (jet_cli_build_options). `--style` adds the opt-in style checks. A
 // `--target` naming a machine without an OS checks one file for that machine,
-// as `jet build --target` does; any other value leaves the host's.
+// as `jet build --target` does, and `--target web` checks it for the
+// browser's machine, which `jet build --target web` builds for; any other
+// value leaves the host's.
 jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     settings := [BuildSettingOverride]{}
     if jet_cli_setting_flags(jet_argv, color) == {
@@ -1178,7 +1180,12 @@ jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet
     }
     style: jet_argv.contains("--style")
     machine := ""
-    if jet_cli_target_flag(jet_argv) == .Named(name) && jet_cli_no_os_machine(name) -> machine = name
+    if jet_cli_target_flag(jet_argv) == .Named(name) {
+        if {
+            name == "web" -> machine = "wasm.browser"
+            jet_cli_no_os_machine(name) -> machine = name
+        }
+    }
     planned: jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)
     if planned == {
         .Check(file, source, _, _, _, project, notice, _, verbose, _, _, _, _) -> {
