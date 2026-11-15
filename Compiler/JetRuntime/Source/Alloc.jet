@@ -137,6 +137,23 @@ alloc_class: fn(size: I64, align: I64, limit: I64) -> I64 Never! {
     if (needed <= I64{4096}) -> I64{4096} else -> I64{0}
 }
 
+// The thread cache row of a block of `needed` bytes (1 through 7680): row k
+// (TCB @320 + 16 k, alloc_cache_row) holds class 32 << k, k the bit length
+// of (needed - 1) >> 5, and 8 is a block above every class. The fast paths
+// below take it from two packed nibble rows instead of a ladder of
+// comparisons, which a mix of sizes mispredicts: the high nibble h of that
+// value reads 0 for 0, 4 + bits(h) up to 7 and 8 above, more than any low
+// nibble's bits(l) <= 4, so the row is the high entry unless it is 0, and
+// then the low entry. It is alloc_class's choice, as a row.
+ALLOC_ROW_LOW: I64{0x4444444433332210}
+ALLOC_ROW_HIGH: I64{0x888888877776650}
+alloc_row: fn(needed: I64) -> I64 Never! {
+    k: wrapping(needed - I64{1}) >> I64{5}
+    high: (ALLOC_ROW_HIGH >> ((k >> I64{4}).bit_and(I64{15}) << I64{2})).bit_and(I64{15})
+    low: (ALLOC_ROW_LOW >> (k.bit_and(I64{15}) << I64{2})).bit_and(I64{15})
+    high.bit_or(low.bit_and(wrapping(high - I64{1}) >> I64{63}))
+}
+
 // Metadata bytes before a payload: [count][slab][block-start] for align >= 8,
 // [slab][block-start] below that.
 alloc_header: fn(align: I64) -> I64 Never! {
@@ -2136,11 +2153,12 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
 // The allocation fast path (#5476): jet_rt_alloc, jet_rt_alloc_try and
 // jet_rt_free serve a small request of a plainly valid layout (size below
 // alloc_class_limit, align 1, 2, 4 or 8) on the calling thread's cache row,
-// calling nothing but an empty row's refill (the runtime is not inlined,
-// and a call costs more than the work): the block, header and count word
-// alloc_try_validated writes, and the push alloc_free_validated makes. The
-// class row (0..7, class 32 << row) is alloc_class's comparisons spelled
-// out. The checks that stay on it:
+// calling nothing, so it needs no saved registers: an empty row takes the
+// full path, whose alloc_try_validated refills it. It writes the block,
+// header and count word alloc_try_validated writes (an align-8 block's
+// slab word already sits where its payload header wants it), and makes the
+// push alloc_free_validated makes. The class row is alloc_row's. The checks
+// that stay on it:
 // - the layout: a size and power-of-two align in the range, so the full
 //   path's alloc_layout_valid accepts it and its trap is never skipped;
 // - checked mode: alloc_class_limit 0 admits no size, so every request takes
@@ -2157,36 +2175,40 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
 //   count's line while no region exists), and a block a region holds takes
 //   the full path;
 // - an ending process frees nothing (#5478, Main.jet).
-// Anything else (a direct mapping, over-alignment, an empty row whose refill
-// finds no slab, a row holding 64 blocks) takes the full path, unchanged.
+// Anything else (a direct mapping, over-alignment, an empty row, a row
+// holding 64 blocks) takes the full path, unchanged.
 #Export(c) jet_rt_alloc: fn(size: I64, align: I64) -> I64 {
     if (size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0}) {
         header: if (align == I64{8}) -> I64{24} else -> I64{16}
-        needed: wrapping((if (size == I64{0}) -> I64{1} else -> size) + header + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})))
-        index := I64{-1}
-        if (needed <= I64{256}) {
-            if (needed <= I64{64}) { index = if (needed <= I64{32}) -> I64{0} else -> I64{1} } else { index = if (needed <= I64{128}) -> I64{2} else -> I64{3} }
-        } else if (needed <= I64{1024}) { index = if (needed <= I64{512}) -> I64{4} else -> I64{5} } else if (needed <= I64{2048}) { index = I64{6} } else if (needed <= I64{4096}) { index = I64{7} }
-        if (index >= I64{0}) {
+        index: alloc_row(wrapping(wrapping((if (size == I64{0}) -> I64{1} else -> size) + header) + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1}))))
+        if (index < I64{8}) {
             #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned") {
                 base: os_tls_base_i64()
                 if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{144})) == I64{0}) {
-                    row: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
-                    block := os_load_i64(row)
-                    if (block == I64{0} && alloc_cache_refill(row, I64{32} << index)) { block = os_load_i64(row) }
+                    row: wrapping(base + wrapping(I64{320} + (index << I64{4})))
+                    block: os_load_i64(row)
                     if (block != I64{0}) {
-                        pointer: wrapping(block + header)
                         os_store_i64(row, os_load_i64(block))
                         os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - I64{1}))
-                        os_store_i64(wrapping(pointer - I64{16}), os_load_i64(wrapping(block + I64{8})))
-                        os_store_i64(wrapping(pointer - I64{8}), block)
-                        if (align == I64{8}) { os_store_i64(block, I64{1}) }
-                        return pointer
+                        if (align == I64{8}) {
+                            os_store_i64(wrapping(block + I64{16}), block)
+                            os_store_i64(block, I64{1})
+                        } else {
+                            os_store_i64(block, os_load_i64(wrapping(block + I64{8})))
+                            os_store_i64(wrapping(block + I64{8}), block)
+                        }
+                        return wrapping(block + header)
                     }
                 }
             }
         }
     }
+    alloc_need(size, align)
+}
+
+// jet_rt_alloc beyond its fast path, a call of its own so the fast path
+// stays a leaf.
+alloc_need: fn(size: I64, align: I64) -> I64 {
     if !alloc_layout_valid(size, align) {
         rt_trap_invalid_box_layout()
         return I64{0}
@@ -2205,30 +2227,24 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
 #Export(c) jet_rt_alloc_try: fn(size: I64, align: I64) -> I64 {
     if (fault_check_code == I64{0} && size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0}) {
         header: if (align == I64{8}) -> I64{24} else -> I64{16}
-        needed: wrapping((if (size == I64{0}) -> I64{1} else -> size) + header + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})))
-        index: if {
-            needed <= (I64{64}) -> if (needed <= I64{32}) -> I64{0} else -> I64{1}
-            needed <= (I64{256}) -> if (needed <= I64{128}) -> I64{2} else -> I64{3}
-            needed <= (I64{1024}) -> if (needed <= I64{512}) -> I64{4} else -> I64{5}
-            needed <= (I64{2048}) -> I64{6}
-            needed <= (I64{4096}) -> I64{7}
-            else -> I64{-1}
-        }
-        if (index >= I64{0}) {
+        index: alloc_row(wrapping(wrapping((if (size == I64{0}) -> I64{1} else -> size) + header) + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1}))))
+        if (index < I64{8}) {
             #Unsafe("as in jet_rt_alloc: GS:0 is the attached thread's TCB or the readable zero word; the aligned mode word is read atomically on x86; row is this thread's private cache row and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned") {
                 base: os_tls_base_i64()
                 if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{144})) == I64{0}) {
-                    row: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
-                    block := os_load_i64(row)
-                    if (block == I64{0} && alloc_cache_refill(row, I64{32} << index)) { block = os_load_i64(row) }
+                    row: wrapping(base + wrapping(I64{320} + (index << I64{4})))
+                    block: os_load_i64(row)
                     if (block != I64{0}) {
-                        pointer: wrapping(block + header)
                         os_store_i64(row, os_load_i64(block))
                         os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - I64{1}))
-                        os_store_i64(wrapping(pointer - I64{16}), os_load_i64(wrapping(block + I64{8})))
-                        os_store_i64(wrapping(pointer - I64{8}), block)
-                        if (align == I64{8}) { os_store_i64(block, I64{1}) }
-                        return pointer
+                        if (align == I64{8}) {
+                            os_store_i64(wrapping(block + I64{16}), block)
+                            os_store_i64(block, I64{1})
+                        } else {
+                            os_store_i64(block, os_load_i64(wrapping(block + I64{8})))
+                            os_store_i64(wrapping(block + I64{8}), block)
+                        }
+                        return wrapping(block + header)
                     }
                 }
             }
@@ -2242,20 +2258,15 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
     if (pointer == I64{0}) {
         return
     }
-    if (align >= I64{8}) -> alloc_zero_marked(pointer, size)
-    if (size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0}) {
+    if (size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0} && alloc_unmarked(pointer, align)) {
         // An ending process leaves its heap to the kernel (#5478, Main.jet).
         if (main_process_ending != I64{0}) -> return
-        needed: wrapping((if (size == I64{0}) -> I64{1} else -> size) + (if (align == I64{8}) -> I64{24} else -> wrapping(I64{15} + align)))
-        index := I64{-1}
-        if (needed <= I64{256}) {
-            if (needed <= I64{64}) { index = if (needed <= I64{32}) -> I64{0} else -> I64{1} } else { index = if (needed <= I64{128}) -> I64{2} else -> I64{3} }
-        } else if (needed <= I64{1024}) { index = if (needed <= I64{512}) -> I64{4} else -> I64{5} } else if (needed <= I64{2048}) { index = I64{6} } else if (needed <= I64{4096}) { index = I64{7} }
-        if (index >= I64{0}) {
+        index: alloc_row(wrapping((if (size == I64{0}) -> I64{1} else -> size) + (if (align == I64{8}) -> I64{24} else -> wrapping(I64{15} + align))))
+        if (index < I64{8}) {
             #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it") {
                 base: os_tls_base_i64()
                 if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{200})) == I64{0} && (os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP)) == I64{0} || alloc_page_region(pointer) == I64{0})) {
-                    row: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
+                    row: wrapping(base + wrapping(I64{320} + (index << I64{4})))
                     count: os_load_i64(wrapping(row + I64{8}))
                     if (count < I64{64}) {
                         block: os_load_i64(wrapping(pointer - I64{8}))
@@ -2270,6 +2281,22 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
             }
         }
     }
+    alloc_give(pointer, size, align)
+}
+
+// False for an align-8 payload whose count word carries the zero-at-free
+// mark, which only alloc_give's wipe may free (alloc_zero_marked).
+alloc_unmarked: fn(pointer: I64, align: I64) -> Bool {
+    if (align < I64{8}) -> return true
+    #Unsafe("pointer is an align-8 payload being freed; its block reserved the count word 24 bytes before it") {
+        return os_load_i64(wrapping(pointer - I64{24})).bit_and(RC_ZERO_MARK) == I64{0}
+    }
+}
+
+// jet_rt_free beyond its fast path, a call of its own so the fast path
+// stays a leaf.
+alloc_give: fn(pointer: I64, size: I64, align: I64) {
+    if (align >= I64{8}) -> alloc_zero_marked(pointer, size)
     if !alloc_layout_valid(size, align) {
         rt_trap_invalid_box_layout()
         return
@@ -2291,18 +2318,14 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
 // ir_x64_alloc_entry), the align every box, record and word buffer has.
 // With the align known, the fast path needs no layout validation but the
 // size's range and no header choice, and the entry has a small frame. The
-// class row is alloc_class's comparisons for align 8 (size + 24 bytes, so
-// row k of class 32 << k serves the sizes above (16 << k) - 24 and at most
-// (32 << k) - 24, row 0 from 0), as the TCB offset of the row
-// (alloc_cache_row). Everything else takes the general entry.
+// class row is alloc_row's for size + 24 bytes. Everything else takes the
+// general entry.
 #Export(c) jet_rt_alloc_8: fn(size: I64) -> I64 {
     if (size >= I64{0}) {
         if (size < alloc_class_limit) {
-            offset := I64{0}
-            if (size <= I64{232}) {
-                if (size <= I64{40}) { offset = if (size <= I64{8}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{104}) -> I64{352} else -> I64{368} }
-            } else if (size <= I64{1000}) { offset = if (size <= I64{488}) -> I64{384} else -> I64{400} } else if (size <= I64{2024}) { offset = I64{416} } else if (size <= I64{4072}) { offset = I64{432} }
-            if (offset != I64{0}) {
+            index: alloc_row(wrapping(size + I64{24}))
+            if (index < I64{8}) {
+                offset: wrapping(I64{320} + (index << I64{4}))
                 #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned") {
                     base: os_tls_base_i64()
                     if (base != I64{0}) {
@@ -2331,19 +2354,16 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
             if (size < alloc_class_limit) {
                 // An ending process leaves its heap to the kernel (#5478, Main.jet).
                 if (main_process_ending != I64{0}) -> return
-                offset := I64{0}
-                if (size <= I64{232}) {
-                    if (size <= I64{40}) { offset = if (size <= I64{8}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{104}) -> I64{352} else -> I64{368} }
-                } else if (size <= I64{1000}) { offset = if (size <= I64{488}) -> I64{384} else -> I64{400} } else if (size <= I64{2024}) { offset = I64{416} } else if (size <= I64{4072}) { offset = I64{432} }
-                if (offset != I64{0}) {
-                    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word") {
+                index: alloc_row(wrapping(size + I64{24}))
+                if (index < I64{8}) {
+                    offset: wrapping(I64{320} + (index << I64{4}))
+                    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word; a count word with the zero-at-free mark takes the general entry, which wipes the payload") {
                         base: os_tls_base_i64()
-                        if (base != I64{0}) {
+                        if (base != I64{0} && os_load_i64(wrapping(pointer - I64{24})).bit_and(RC_ZERO_MARK) == I64{0}) {
                             if (os_load_i64(wrapping(alloc_root + I64{200})) == I64{0} && (os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP)) == I64{0} || alloc_page_region(pointer) == I64{0})) {
                                 row: wrapping(base + offset)
                                 count: os_load_i64(wrapping(row + I64{8}))
                                 if (count < I64{64}) {
-                                    alloc_zero_marked(pointer, size)
                                     block: os_load_i64(wrapping(pointer - I64{8}))
                                     os_store_i64(block, os_load_i64(row))
                                     os_store_i64(row, block)
@@ -2371,31 +2391,35 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
 #Export(c) jet_rt_alloc_value: fn(size: I64, align: I64) -> I64 {
     if (size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0}) {
         header: if (align == I64{8}) -> I64{24} else -> I64{16}
-        needed: wrapping((if (size == I64{0}) -> I64{1} else -> size) + header + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})))
-        index := I64{-1}
-        if (needed <= I64{256}) {
-            if (needed <= I64{64}) { index = if (needed <= I64{32}) -> I64{0} else -> I64{1} } else { index = if (needed <= I64{128}) -> I64{2} else -> I64{3} }
-        } else if (needed <= I64{1024}) { index = if (needed <= I64{512}) -> I64{4} else -> I64{5} } else if (needed <= I64{2048}) { index = I64{6} } else if (needed <= I64{4096}) { index = I64{7} }
-        if (index >= I64{0}) {
+        index: alloc_row(wrapping(wrapping((if (size == I64{0}) -> I64{1} else -> size) + header) + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1}))))
+        if (index < I64{8}) {
             #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned") {
                 base: os_tls_base_i64()
                 if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{144})) == I64{0}) {
-                    row: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
-                    block := os_load_i64(row)
-                    if (block == I64{0} && alloc_cache_refill(row, I64{32} << index)) { block = os_load_i64(row) }
+                    row: wrapping(base + wrapping(I64{320} + (index << I64{4})))
+                    block: os_load_i64(row)
                     if (block != I64{0}) {
-                        pointer: wrapping(block + header)
                         os_store_i64(row, os_load_i64(block))
                         os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - I64{1}))
-                        os_store_i64(wrapping(pointer - I64{16}), os_load_i64(wrapping(block + I64{8})))
-                        os_store_i64(wrapping(pointer - I64{8}), block)
-                        if (align == I64{8}) { os_store_i64(block, I64{1}) }
-                        return pointer
+                        if (align == I64{8}) {
+                            os_store_i64(wrapping(block + I64{16}), block)
+                            os_store_i64(block, I64{1})
+                        } else {
+                            os_store_i64(block, os_load_i64(wrapping(block + I64{8})))
+                            os_store_i64(wrapping(block + I64{8}), block)
+                        }
+                        return wrapping(block + header)
                     }
                 }
             }
         }
     }
+    alloc_value_need(size, align)
+}
+
+// jet_rt_alloc_value beyond its fast path, a call of its own so the fast
+// path stays a leaf.
+alloc_value_need: fn(size: I64, align: I64) -> I64 {
     if !alloc_layout_valid(size, align) {
         rt_trap_invalid_box_layout()
         return I64{0}
@@ -2411,11 +2435,9 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
 #Export(c) jet_rt_alloc_value_8: fn(size: I64) -> I64 {
     if (size >= I64{0}) {
         if (size < alloc_class_limit) {
-            offset := I64{0}
-            if (size <= I64{232}) {
-                if (size <= I64{40}) { offset = if (size <= I64{8}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{104}) -> I64{352} else -> I64{368} }
-            } else if (size <= I64{1000}) { offset = if (size <= I64{488}) -> I64{384} else -> I64{400} } else if (size <= I64{2024}) { offset = I64{416} } else if (size <= I64{4072}) { offset = I64{432} }
-            if (offset != I64{0}) {
+            index: alloc_row(wrapping(size + I64{24}))
+            if (index < I64{8}) {
+                offset: wrapping(I64{320} + (index << I64{4}))
                 #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned") {
                     base: os_tls_base_i64()
                     if (base != I64{0}) {
@@ -2450,19 +2472,15 @@ alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
 // jet_rt_alloc(size, 1) and free_bytes(pointer, size) is
 // jet_rt_free(pointer, size, 1), with the align known as the align-8 entries
 // know theirs. The payload sits 16 bytes into its block (the slab word, then
-// the block's address), and the class row is alloc_class's comparisons for
-// align 1 (size, or 1 for 0, plus 16 bytes: row k of class 32 << k serves the
-// sizes above (16 << k) - 16 and at most (32 << k) - 16). The fast paths
-// write and read exactly the words jet_rt_alloc's and jet_rt_free's do for
-// align 1; everything else (an empty row's refill included) takes the
-// general entry.
+// the block's address), and the class row is alloc_row's for size + 16
+// bytes. The fast paths write and read exactly the words jet_rt_alloc's and
+// jet_rt_free's do for align 1; everything else (an empty row's refill
+// included) takes the general entry.
 alloc_bytes: fn(size: I64) -> I64 {
     if (size >= I64{0} && size < alloc_class_limit) {
-        offset := I64{0}
-        if (size <= I64{240}) {
-            if (size <= I64{48}) { offset = if (size <= I64{16}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{112}) -> I64{352} else -> I64{368} }
-        } else if (size <= I64{1008}) { offset = if (size <= I64{496}) -> I64{384} else -> I64{400} } else if (size <= I64{2032}) { offset = I64{416} } else if (size <= I64{4080}) { offset = I64{432} }
-        if (offset != I64{0}) {
+        index: alloc_row(wrapping(size + I64{16}))
+        if (index < I64{8}) {
+            offset: wrapping(I64{320} + (index << I64{4}))
             #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose two cached words are read before the payload header overwrites them; an align-1 payload at block + 16 needs no alignment") {
                 base: os_tls_base_i64()
                 if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{144})) == I64{0}) {
@@ -2486,11 +2504,9 @@ free_bytes: fn(pointer: I64, size: I64) {
     if (pointer != I64{0} && size >= I64{0} && size < alloc_class_limit) {
         // An ending process leaves its heap to the kernel (#5478, Main.jet).
         if (main_process_ending != I64{0}) -> return
-        offset := I64{0}
-        if (size <= I64{240}) {
-            if (size <= I64{48}) { offset = if (size <= I64{16}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{112}) -> I64{352} else -> I64{368} }
-        } else if (size <= I64{1008}) { offset = if (size <= I64{496}) -> I64{384} else -> I64{400} } else if (size <= I64{2032}) { offset = I64{416} } else if (size <= I64{4080}) { offset = I64{432} }
-        if (offset != I64{0}) {
+        index: alloc_row(wrapping(size + I64{16}))
+        if (index < I64{8}) {
+            offset: wrapping(I64{320} + (index << I64{4}))
             #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the caller frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it") {
                 base: os_tls_base_i64()
                 if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{200})) == I64{0} && (os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP)) == I64{0} || alloc_page_region(pointer) == I64{0})) {

@@ -58,6 +58,22 @@ alloc_test_boundaries: fn(align: I64) {
     }
 }
 
+// The fast paths' row of every size and small align is alloc_class's class:
+// row k for class 32 << k, and a row of 8 or more for a size no class holds.
+alloc_test_row_classes: fn() {
+    align := I64{1}
+    loop align <= (I64{8}) {
+        size := I64{0}
+        loop size < (I64{4200}) {
+            slot: alloc_class(size, align, ALLOC_CLASS_LIMIT)
+            row: alloc_row(wrapping(wrapping((if (size == I64{0}) -> I64{1} else -> size) + alloc_header(align)) + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1}))))
+            alloc_test_require(if (slot == I64{0}) -> row >= I64{8} else -> row < I64{8} && (I64{32} << row) == slot)
+            size = wrapping(size + I64{1})
+        }
+        align = wrapping(align * I64{2})
+    }
+}
+
 alloc_test_reuse: fn() {
     // Every refill below runs from this frame, so one stack band and with it
     // one arena (alloc_arena) serves them all. A block an earlier test left
@@ -607,6 +623,7 @@ alloc_tests: fn() {
     // Null must remain a no-op even with an otherwise-invalid layout.
     jet_rt_free(I64{0}, I64{-1}, I64{0})
     alloc_test_nullable()
+    alloc_test_row_classes()
     alloc_test_boundaries(I64{1})
     alloc_test_boundaries(I64{8})
     alloc_test_boundaries(I64{16})
