@@ -1,4 +1,4 @@
-// Return slots (O1, O2, pass "retslot", first of the passes, programs
+// Return slots (every level, pass "retslot", first of the passes, programs
 // only): a function whose every value Return gives a fresh box of at most
 // IR_FRAME_BOX_BYTES (`jet_rt_alloc(size, 8)` or a program value's
 // `jet_rt_alloc_value(size, 8)`, then written only with values without a
@@ -653,9 +653,9 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
 }
 
 #Test("A function returning a small fresh box writes it into its caller's frame storage") {
-    loop step in 0..<4 {
-        level: 1 + step % 2
-        bytes: if step < 2 -> 16 else -> IR_FRAME_BOX_BYTES
+    loop step in 0..<6 {
+        level: step % 3
+        bytes: if step < 3 -> 16 else -> IR_FRAME_BOX_BYTES
         m := ir_opt_slot_test_module(false, bytes)
         options := ir_opt_options(level)
         options.inline = IROptInline.Off
@@ -689,9 +689,9 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
 }
 
 #Test("A struct payload moved in and out through its field's address uses the return slot") {
-    loop step in 0..<3 {
-        level: 1 + step % 2
-        glued: step == 2
+    loop step in 0..<4 {
+        level: step % 3
+        glued: step == 3
         m := ir_opt_slot_test_quad(if glued -> "test_quad_drop" else -> "")
         options := ir_opt_options(level)
         options.inline = IROptInline.Off

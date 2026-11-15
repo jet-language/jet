@@ -1501,8 +1501,9 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     }
     // The memory term is read now: the compile before this holds most of it.
     threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
-    // At O0 only the inline Int facts run (Opt.jet ir_opt_module_facts). The
-    // span is named by the level it optimizes at (`O2`).
+    // At O0 only the return slots and the inline Int facts run (Opt.jet
+    // ir_optimize_module). The span is named by the level it optimizes at
+    // (`O2`).
     if trace_sink == .Val(sink) -> sink.begin("ir.opt", "O{level}", -1, -1)
     report: ir_optimize_module(built.program, jet_cli_opt_options(level, options), threads)
     // With `--opt-verify`, the lint of each body as the passes get it
@@ -1510,8 +1511,9 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     loop finding in report.lint -> jet_cli_ice_trap(census, built.program, finding.key, finding.pass, finding.rule, finding.message)
     if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
     // IR Lint (Lint.jet) runs once, over the module x86-64 selection reads:
-    // the built module with its inline Int facts at O0, the optimized one at
-    // O1 and O2. Each finding is an ICE row and traps its function.
+    // the built module with its return slots and inline Int facts at O0,
+    // the optimized one at O1 and O2. Each finding is an ICE row and traps
+    // its function.
     if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
     lint: ir_lint_module(built.program, if level > 0 -> "ir.opt" else -> "ir.build", threads)
     loop finding in lint -> jet_cli_ice_trap(census, built.program, finding.key, finding.pass, finding.rule, finding.message)

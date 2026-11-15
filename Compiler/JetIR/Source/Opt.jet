@@ -1,9 +1,10 @@
 // Optimization levels over the slot IR: IR in, IR out, between the builder
-// and x86-64 selection. Level 0 (`jet run`, `jet dev`, compile-time code)
-// leaves the module as built; level 1 (`jet build`) first has a program's
-// functions that return a small fresh box (a `T E!` Result) write it into
-// frame storage their callers pass (`retslot`,
-// OptReturnSlot.jet), hoists calls making a list's buffer its own out of
+// and x86-64 selection. Every level first has a program's functions that
+// return a small fresh box (a `T E!` Result) write it into frame storage
+// their callers pass (`retslot`, OptReturnSlot.jet), a calling convention,
+// the same on every tier. Beyond that level 0 (`jet run`, `jet dev`,
+// compile-time code) leaves the module as built; level 1 (`jet build`)
+// hoists calls making a list's buffer its own out of
 // Loops and, for a `&` parameter only direct calls reach, into the callers
 // (`unique`, OptUnique.jet), turns a recursive function that ends by
 // combining its own call with a value through an associative operation,
@@ -217,21 +218,21 @@ IR_FRAME_BOX_BYTES: 64
 // final bodies of its non-recursive callees, so a function runs once those
 // callees are done (ir_opt_scheduled) and every body is the one the
 // single-threaded bottom-up walk produces, for any thread count. At O0 only
-// the inline Int facts run (ir_opt_module_facts). The report's instruction
+// the return slots (a calling convention, the same at every level) and the
+// inline Int facts run (ir_opt_module_facts). The report's instruction
 // counts stay 0; ir_optimize_module_measured fills them.
 ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThreads) -> IROptReport Never! {
     level: options.level
     report := ir_opt_report(level)
     names: ir_opt_dump_names(options)
+    ir_opt_dump(m, names, "before", report)
+    // Before IR Lint reads the signatures: a return slot is a parameter.
+    if ir_opt_enabled(options, "retslot") -> _ := ir_opt_return_slots(m, threads)
     if level <= 0 {
-        ir_opt_dump(m, names, "before", report)
         ir_opt_module_facts(m, options, report, threads)
         ir_opt_dump(m, names, "after", report)
         return report
     }
-    ir_opt_dump(m, names, "before", report)
-    // Before IR Lint reads the signatures: a return slot is a parameter.
-    if ir_opt_enabled(options, "retslot") -> _ := ir_opt_return_slots(m, threads)
     // IR Lint reads every callee's signature while the bodies are out.
     lint: if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
     entry_lint := if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()

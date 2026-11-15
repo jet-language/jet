@@ -369,12 +369,13 @@ Result boxes reserve at least one eight-byte payload word after the tag,
 including zero-sized payloads. Runtime marshaling uses the same minimum,
 alignment and size as native construction and drop glue.
 
-At O1 and O2 a program function whose every value return is a fresh box of
-at most 64 bytes (JetIR `IR_FRAME_BOX_BYTES`, the bound local boxes share)
-stored only with drop-free payloads (a `T E!` whose payloads are up to seven
-words of Floats, words, Bools, payload-free error enums or structs of those,
-moved in and out through the payload field's address; an Option's None is
-null, not a box) takes the box's storage as a
+At every level (O0 too: it is a calling convention, so every tier lowers a
+Result the same way) a program function whose every value return is a fresh
+box of at most 64 bytes (JetIR `IR_FRAME_BOX_BYTES`, the bound local boxes
+share) stored only with drop-free payloads (a `T E!` whose payloads are up
+to seven words of Floats, words, Bools, payload-free error enums or structs
+of those, moved in and out through the payload field's address; an Option's
+None is null, not a box) takes the box's storage as a
 hidden last parameter instead (`retslot`, JetIR `OptReturnSlot.jet`): each
 direct call passes frame storage of that size, and the caller's unique test,
 free and Drop of the box disappear, so an `Ok` costs no allocation. The
