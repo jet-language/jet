@@ -122,12 +122,16 @@ runs and one 39-minute full test pass. These rules bind every train:
    train. Set the failing submission aside and land the rest on the same build.
    Rebuild only when a set-aside submission changed compiler, runtime or Core
    build inputs, and then only once for all of them.
-3. **Affected rows only, sharded.** Each submission's own `tests` lines run
-   first. Then the rows its paths reach: a `Compiler/` submission reaches the
-   ui and golden profiles, and any other package reaches its own tests. Run
-   them in parallel shards sized to MemAvailable minus 12 GiB, with each jet
-   capped at 16 GiB. Full suites belong to milestones. The test stage aims at
-   under ten minutes.
+3. **Affected rows first, then the whole suite.** Each submission's own
+   `tests` lines run first. Then the rows its paths reach: a `Compiler/`
+   submission reaches the ui and golden profiles, and any other package
+   reaches its own tests. Run them in parallel shards sized to MemAvailable
+   minus 12 GiB, with each jet capped at 16 GiB. The submissions that pass
+   land. Then, on the train's compiler, the whole suite runs in collect-all
+   mode (the cases profile beside ui, golden and core) while the next train
+   composes and gates. Its failing rows are compared with the previous train's
+   run, and every new one goes back at once to that train's submissions, so a
+   regression is found within one train, never across several.
 4. **Fail fast.** The moment one of a submission's rows is red, mark it set
    aside and keep testing the others. Triage never waits for the whole pass.
 5. **Independent trains.** Compose the next train on `dev` plus its own

@@ -572,9 +572,10 @@ repository. Follow the orchestration resource reference for bounded,
 checkout-owned targets and shared artifacts.
 Rebuild with `jet build --profile dev Compiler` (the fast build) before compiler
 smoke tests. After integration, run the exact narrow proof the criteria name.
-Broad suites, unfiltered censuses, and
-`Tools/agent/VerifyFull.jet` are milestone or release operations and need the
-required token. A worker's type-check is not proof of runtime behavior, tier
+Outside the landing cycle's full suite on each batch compiler (Delegation),
+broad suites, unfiltered censuses, and `Tools/agent/VerifyFull.jet` are
+milestone or release operations and need the required token. A worker's
+type-check is not proof of runtime behavior, tier
 parity, goldens, snapshots, or generated artifacts.
 
 **The owner's machine stays responsive.** This is a standing owner order:
