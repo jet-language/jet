@@ -8,10 +8,12 @@ use {
     core.reactive.loadable.[Loadable]
 }
 
-// The server side of one connection: it joins the live hub on upgrade and
-// stays open until the client closes it.
-handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
+// The server side of one connection: it binds the caller's live query under
+// the caller's scope, watches it, and stays open until the client closes it.
+handle: fn(req: HTTPRequest, scope: db.DBScope) -> HTTPResponse HTTPError! {
     sock: ws.upgrade(req) ?? panic("upgrade")
+    mine: scope.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("live")
+    app.watch(sock, mine)
     loop {
         message: sock.recv() ?? break
         if message.is_close() -> break
@@ -55,7 +57,7 @@ run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr() ?? panic("address")
     mux: web.app()
-    mux.get("/live", fn(req: HTTPRequest) { handle(req) })
+    mux.get("/live", fn(req: HTTPRequest) { handle(req, alice) })
     serving: task { mux.serve_once(listener) ?? panic("serve") }
     client: ws.connect("ws://{addr}/live") ?? panic("connect")
     print("replayed {next_text(client)}")
@@ -69,7 +71,7 @@ run: fn() {
     again_listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen again")
     again_addr: again_listener.local_addr() ?? panic("address again")
     again_mux: web.app()
-    again_mux.get("/live", fn(req: HTTPRequest) { handle(req) })
+    again_mux.get("/live", fn(req: HTTPRequest) { handle(req, alice) })
     again_serving: task { again_mux.serve_once(again_listener) ?? panic("serve again") }
     again: ws.connect("ws://{again_addr}/live") ?? panic("reconnect")
     print("reconnect replayed {next_text(again)}")

@@ -17,6 +17,8 @@ use {
     crypto: core.crypto
     live_json: core.encoding.json
     core.reactive.loadable.[Loadable]
+    ws: core.net.ws
+    core.net.ws.[WsConn]
     rt: jet.runtime.time
     rt_web: jet.runtime.web
     world_rt: jet.runtime.testing
@@ -428,8 +430,18 @@ state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Load
     Loadable.Loaded(value)
 }
 
+// `socket`, a server-side WebSocket connection, receives
+// `{"live":"invalidate","binding":<id>}` each time `binding` is invalidated,
+// starting with the latest such event when there was one. A connection
+// receives only the bindings its handler watches; the handler holds
+// `binding` because it read it for its own caller under that caller's policy.
+watch: fn<T: [Encode, Decode], E: [Encode, Decode]>(socket: WsConn, binding: Live<T, E>) Never! -[Net]> {
+    ws.__live_watch(socket, "live:{binding.id}")
+}
+
 // `changes` counts stored results that differed from the one before;
-// `ws_pushes` counts the invalidations published to the WebSocket live hub.
+// `ws_pushes` counts the invalidations published to the WebSocket live hub,
+// one per `invalidate` that marked a binding.
 live_stats: fn() -> String Never! {
     registry: live_decode(live_cell_load()) ?? return "LiveStats(error=live registry unavailable)"
     "LiveStats(queries={live_query_count(registry)}, limit={LIVE_MAX_QUERIES}, evictions={registry.evictions}, invalidations={registry.invalidations}, changes={registry.changes}, ws_pushes={registry.ws_pushes})"
@@ -602,31 +614,31 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
 }
 
 // Marks dirty every binding of `source`, or only the one whose key is `key`,
-// then publishes the invalidation to the WebSocket live hub:
-// topic `live:<source>`, a JSON event every joined server connection receives
-// and a connection that joins later gets replayed as the topic's latest.
+// then publishes each marked binding's invalidation to the WebSocket live
+// hub: topic `live:<id>`, the event `{"live":"invalidate","binding":<id>}`.
+// Only connections that watch that binding (`watch`) receive it; one that
+// starts watching later first receives the topic's latest.
 live_invalidate: fn(source: String, key: String?) {
     loop {
         seen: live_cell_load()
         registry := live_decode(seen) ?? return
-        hit := 0
+        hits := [Int]{}
         loop index in 0..<registry.records.len() {
             if registry.records[index].source != source -> next
             if key == .Val(only) && registry.records[index].key != only -> next
             registry.records[index].dirty = true
             registry.records[index].generation += 1
-            hit += 1
+            hits.push(registry.records[index].id)
         }
-        if hit == 0 {
+        if hits.len() == 0 {
             return
         }
-        registry.invalidations += hit
+        registry.invalidations += hits.len()
         registry.ws_pushes += 1
         if live_cell_replace(seen, live_encode(registry)) {
-            key_json := "null"
-            if key == .Val(only) -> key_json = live_json.to_string<String>(only) ?? "null"
-            source_json: live_json.to_string<String>(source) ?? "null"
-            rt_web.live_publish("live:{source}", "{{\"live\":\"invalidate\",\"source\":{source_json},\"key\":{key_json},\"invalidations\":{registry.invalidations}}}")
+            loop id in hits {
+                rt_web.live_publish("live:{id}", "{{\"live\":\"invalidate\",\"binding\":{id}}}")
+            }
             return
         }
     }

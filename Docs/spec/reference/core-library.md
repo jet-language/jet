@@ -5433,6 +5433,7 @@ tasks never read or change the process registry. The module source is
 | `state(binding: Live<T, E>) -> Loadable<T, E>` | state | Read the binding's snapshot: `Loaded(value)` or `Failed(reason)`, running the source first when the binding is new, invalidated, or due to poll. |
 | `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list without running the source. |
 | `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. |
+| `watch(socket: WsConn, binding: Live<T, E>) -[Net]>` | — | Send `{"live":"invalidate","binding":<id>}` to the server-side WebSocket `socket` each time `binding` is invalidated, starting with the latest such event when there was one. |
 | `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations and value changes. |
 | `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
 | `remote_at<S>(address: String) -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. |
@@ -5449,8 +5450,11 @@ the source again and an older value is never kept as current.
 `Live<T, E>` is an identity, not a snapshot: reads, invalidation and
 statistics always use the one registry. A full registry evicts its oldest
 binding. A signature names the type after `use app.[Live]`. The registry
-lives in one module `Shared` cell of `app`'s source, and an invalidation goes
-to the WebSocket live hub as topic `live:<source>`.
+lives in one module `Shared` cell of `app`'s source. Each invalidated binding
+goes to the WebSocket live hub as topic `live:<id>`, an event that names the
+binding and carries no source or argument; only connections that `watch` the
+binding receive it, so a handler watches only a binding it read for its own
+caller, and a WebSocket route that watches nothing receives no live event.
 
 `Remote<S>` is the client of a service `S`. It offers only the methods of `S`
 that `#App.SignedIn` (a signed-in caller) or `#App.Public` (any caller)
@@ -6328,8 +6332,9 @@ returns the same binding, and another user's gets its own. `app.state`
 runs the query on first read and again, with the policy applied anew, after a
 scope write (`execute`, `transaction`, `migrate`) to the table it reads, or
 after a rollback that undid one. A write to another table leaves it current.
-Each invalidation also goes to the WebSocket live hub, and `app.live_stats()`
-counts it as `ws_pushes`.
+Each invalidation also goes to the WebSocket live hub, reaching only the
+connections that `app.watch` the binding, and `app.live_stats()` counts it as
+`ws_pushes`.
 
 `DBPool.acquire(deadline:)` admits waiters first come, first served. A waiter
 leaves the queue when it gets a lease, when its deadline passes, when the pool

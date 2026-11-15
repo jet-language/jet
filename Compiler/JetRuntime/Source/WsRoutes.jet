@@ -467,27 +467,32 @@ ws_accept_key: fn(key: I64) -> I64 {
     I64{1}
 }
 
-// The live transport hub (#1158). Every server-side connection
-// joins it once its upgrade response is written and leaves when dropped.
-// core.web's live registry publishes each invalidation as one text event on a
-// topic: the event becomes the topic's latest and goes to every joined
-// connection as a text frame, and a joining connection first receives every
-// topic's latest event, oldest topic first. The hub lock serializes
-// publishing, joining and leaving, so no connection is freed under a send;
-// each connection's write lock keeps a published frame whole beside its
-// owner's own sends. A send that fails leaves the connection joined until its
-// owner drops it.
-// Hub40: lock0, connections8 (WS_HUB_MAX_CONNECTIONS words), count16,
-// topics24 (WS_HUB_MAX_TOPICS [topic, event] text pairs, oldest first),
-// topic count32.
+// The live transport hub. Every server-side connection joins it once its
+// upgrade response is written and leaves when dropped, but a joined
+// connection receives nothing until its handler watches a topic
+// (`app.watch`): app's live registry publishes each invalidation of a
+// binding as one text event on that binding's own topic, the event becomes
+// the topic's latest, and it goes only to the connections watching that
+// topic. A connection that starts watching a topic first receives that
+// topic's latest event. The handler holds the binding it watches because it
+// read it under its own caller and policy, so a connection never receives
+// another caller's events, and a WebSocket route that watches nothing
+// receives no live event. The hub lock serializes publishing, watching and
+// leaving, so no connection is freed under a send; each connection's write
+// lock keeps a published frame whole beside its owner's own sends. A send
+// that fails leaves the connection's watches in place until its owner drops
+// it.
+// Hub40: lock0, topics8 (WS_HUB_MAX_TOPICS [topic, event] text pairs, oldest
+// first), topic count16, watches24 (WS_HUB_MAX_WATCHES [connection, topic]
+// pairs), watch count32.
 WS_HUB_BYTES: I64{40}
-WS_HUB_CONNECTIONS: I64{8}
-WS_HUB_COUNT: I64{16}
-WS_HUB_TOPICS: I64{24}
-WS_HUB_TOPIC_COUNT: I64{32}
-WS_HUB_MAX_CONNECTIONS: I64{1024}
+WS_HUB_TOPICS: I64{8}
+WS_HUB_TOPIC_COUNT: I64{16}
+WS_HUB_WATCHES: I64{24}
+WS_HUB_WATCH_COUNT: I64{32}
 WS_HUB_MAX_TOPICS: I64{2048}
 WS_HUB_MAX_TOPIC: I64{512}
+WS_HUB_MAX_WATCHES: I64{8192}
 ws_hub_root := I64{0}
 
 // runtime-init: 3 when ws_hub_root
@@ -495,8 +500,8 @@ ws_hub_root := I64{0}
     if (ws_hub_root != I64{0}) -> return
     root: jet_rt_alloc(WS_HUB_BYTES, I64{8})
     thread_zero(root, WS_HUB_BYTES)
-    net_put(root, WS_HUB_CONNECTIONS, jet_rt_alloc(WS_HUB_MAX_CONNECTIONS * I64{8}, I64{8}))
     net_put(root, WS_HUB_TOPICS, jet_rt_alloc(WS_HUB_MAX_TOPICS * I64{16}, I64{8}))
+    net_put(root, WS_HUB_WATCHES, jet_rt_alloc(WS_HUB_MAX_WATCHES * I64{16}, I64{8}))
     #Unsafe("runtime-init runs before any other thread exists") {
         ws_hub_root = root
     }
@@ -512,37 +517,43 @@ ws_hub_send: fn(conn: I64, event: I64) {
     jet_rt_free(error, I64{8}, I64{8})
 }
 
-// Joins `conn` and replays every topic's latest event to it; a full hub
-// leaves it out.
+// Joins `conn`, watching nothing yet.
 ws_hub_join: fn(conn: I64) {
     root: ws_hub_root
     if (root == I64{0}) -> return
     sync_mutex_lock(root)
-    count: net_word(root, WS_HUB_COUNT)
-    if (count < WS_HUB_MAX_CONNECTIONS) {
-        net_put(net_word(root, WS_HUB_CONNECTIONS), count * I64{8}, conn)
-        net_put(root, WS_HUB_COUNT, count + I64{1})
-        net_put(conn, WS_CONN_HUB, I64{1})
-        topics: net_word(root, WS_HUB_TOPICS)
-        at := I64{0}
-        loop at < net_word(root, WS_HUB_TOPIC_COUNT) {
-            ws_hub_send(conn, net_word(topics, at * I64{16} + I64{8}))
-            at += I64{1}
-        }
-    }
+    net_put(conn, WS_CONN_HUB, I64{1})
     sync_mutex_unlock(root)
 }
 
-// jet_web_live_watch: joined `conn` receives `topic`'s latest event. Every
-// joined connection already receives each event published after it joined.
-// A connection that has not joined (a client connection) or an empty or
-// oversized topic receives nothing.
+// Whether joined `conn` watches `topic`. The caller holds the hub lock.
+ws_hub_watches: fn(root: I64, conn: I64, topic: I64) -> Bool {
+    watches: net_word(root, WS_HUB_WATCHES)
+    at := I64{0}
+    loop at < net_word(root, WS_HUB_WATCH_COUNT) {
+        if (net_word(watches, at * I64{16}) == conn) {
+            if jet_rt_string_eq(net_word(watches, at * I64{16} + I64{8}), topic) -> return true
+        }
+        at += I64{1}
+    }
+    false
+}
+
+// jet_web_live_watch: joined `conn` receives `topic`'s events from now on,
+// starting with its latest one. A connection that has not joined (a client
+// connection), an empty or oversized topic, or a full watch table watches
+// nothing.
 #Export(c) jet_web_live_watch: fn(conn: I64, topic: I64) {
     root: ws_hub_root
     if (root == I64{0}) -> return
     if (rt_text_len(topic) == I64{0} || rt_text_len(topic) > WS_HUB_MAX_TOPIC) -> return
     sync_mutex_lock(root)
-    if (net_word(conn, WS_CONN_HUB) != I64{0}) {
+    count: net_word(root, WS_HUB_WATCH_COUNT)
+    if (net_word(conn, WS_CONN_HUB) != I64{0} && count < WS_HUB_MAX_WATCHES && !ws_hub_watches(root, conn, topic)) {
+        watches: net_word(root, WS_HUB_WATCHES)
+        net_put(watches, count * I64{16}, conn)
+        net_put(watches, count * I64{16} + I64{8}, jet_rt_string_clone(topic))
+        net_put(root, WS_HUB_WATCH_COUNT, count + I64{1})
         topics: net_word(root, WS_HUB_TOPICS)
         at := I64{0}
         loop at < net_word(root, WS_HUB_TOPIC_COUNT) {
@@ -553,22 +564,26 @@ ws_hub_join: fn(conn: I64) {
     sync_mutex_unlock(root)
 }
 
+// Drops `conn`'s watches, keeping the others in order.
 ws_hub_leave: fn(conn: I64) {
     if (net_word(conn, WS_CONN_HUB) == I64{0}) -> return
     root: ws_hub_root
     sync_mutex_lock(root)
-    connections: net_word(root, WS_HUB_CONNECTIONS)
-    count: net_word(root, WS_HUB_COUNT)
-    at := I64{0}
-    loop at < count {
-        if (net_word(connections, at * I64{8}) == conn) {
-            net_put(connections, at * I64{8}, net_word(connections, (count - I64{1}) * I64{8}))
-            net_put(root, WS_HUB_COUNT, count - I64{1})
-            at = count
+    watches: net_word(root, WS_HUB_WATCHES)
+    watched: net_word(root, WS_HUB_WATCH_COUNT)
+    kept := I64{0}
+    index := I64{0}
+    loop index < watched {
+        if (net_word(watches, index * I64{16}) == conn) {
+            jet_rt_string_drop(net_word(watches, index * I64{16} + I64{8}))
         } else {
-            at += I64{1}
+            net_put(watches, kept * I64{16}, net_word(watches, index * I64{16}))
+            net_put(watches, kept * I64{16} + I64{8}, net_word(watches, index * I64{16} + I64{8}))
+            kept += I64{1}
         }
+        index += I64{1}
     }
+    net_put(root, WS_HUB_WATCH_COUNT, kept)
     net_put(conn, WS_CONN_HUB, I64{0})
     sync_mutex_unlock(root)
 }
@@ -586,8 +601,9 @@ ws_hub_topic_remove: fn(topics: I64, at: I64, count: I64) {
     }
 }
 
-// jet.runtime.web.live_publish: `event` becomes `topic`'s latest and goes to every
-// joined connection. An empty or oversized topic or event is dropped.
+// jet.runtime.web.live_publish: `event` becomes `topic`'s latest and goes to
+// every connection watching `topic`. An empty or oversized topic or event is
+// dropped.
 #Export(c) jet_web_live_publish: fn(topic: I64, event: I64) {
     root: ws_hub_root
     if (root == I64{0}) -> return
@@ -613,11 +629,11 @@ ws_hub_topic_remove: fn(topics: I64, at: I64, count: I64) {
     net_put(topics, count * I64{16}, jet_rt_string_clone(topic))
     net_put(topics, count * I64{16} + I64{8}, jet_rt_string_clone(event))
     net_put(root, WS_HUB_TOPIC_COUNT, count + I64{1})
-    connections: net_word(root, WS_HUB_CONNECTIONS)
-    joined: net_word(root, WS_HUB_COUNT)
+    watches: net_word(root, WS_HUB_WATCHES)
+    watched: net_word(root, WS_HUB_WATCH_COUNT)
     index := I64{0}
-    loop index < joined {
-        ws_hub_send(net_word(connections, index * I64{8}), event)
+    loop index < watched {
+        if jet_rt_string_eq(net_word(watches, index * I64{16} + I64{8}), topic) -> ws_hub_send(net_word(watches, index * I64{16}), event)
         index += I64{1}
     }
     sync_mutex_unlock(root)
