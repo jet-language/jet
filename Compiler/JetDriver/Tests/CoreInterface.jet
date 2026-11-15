@@ -1,0 +1,90 @@
+// The Core interface (CoreInterface.jet): each Core unit's load rows and
+// body spans, encoded once and read back unit by unit.
+use {
+    fs: core.files
+    jet_driver.[
+        JetDriverCoreInterfaceEntry, JetDriverCoreInterfaceUnit, JetDriverCoreSource, jet_driver_core_interface_bytes,
+        jet_driver_core_interface_entries, jet_driver_core_interface_text_hash, jet_driver_core_interface_unit,
+        jet_driver_core_interface_unit_bytes, jet_driver_core_interface_units, jet_driver_core_text,
+    ]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, compiler_threads_single]
+}
+
+INTERFACE_FIXTURE: "Sized: trait {{\n    size: fn(self) -> Int Never! {{ 1 }}\n}}\n\nShape: struct {{\n    width: Int\n    area: fn(self) -> Int Never! {{ self.width * 2 }}\n    impl Sized {{\n        size: fn(self) -> Int Never! {{ self.width }}\n    }}\n}}\n\ntwice: fn(value: Int) -> Int Never! {{\n    value * 2\n}}\n\nnothing: fn() Never! {{}}\n\nLIMIT: 3\n"
+
+// The fixture as the one Core unit `core.devtools`.
+interface_test_fixture_rows: fn() -> [JetDriverCoreSource] {
+    [JetDriverCoreSource]{
+        {module_name: "core.devtools", alias: "core_devtools", path: "Core/interface-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(INTERFACE_FIXTURE)},
+    }
+}
+
+// The text of `start..<end` in `text`.
+interface_test_slice: fn(text: String, start: Int, end: Int) -> String {
+    String.from_bytes(text.bytes()[start..<end]) ?? panic("the span {start}..{end} cuts a character")
+}
+
+// Each unit of `units` encoded, decoded through the directory and encoded
+// again, block for block; and each body span a `{`..`}` of its text.
+interface_test_round_trip: fn(units: [JetDriverCoreInterfaceUnit], texts: [String]) {
+    bytes: jet_driver_core_interface_bytes(units)
+    entries: jet_driver_core_interface_entries(bytes) ?? panic("the interface has no directory")
+    assert_eq(entries.len(), units.len())
+    loop (index, unit) in units {
+        assert_eq(entries[index].path, unit.path)
+        read: jet_driver_core_interface_unit(bytes, entries[index]) ?? panic("{unit.path}: its block does not decode")
+        assert(jet_driver_core_interface_unit_bytes(read) == jet_driver_core_interface_unit_bytes(unit))
+        assert_eq(read.module_name, unit.module_name)
+        assert(read.text_hash == jet_driver_core_interface_text_hash(texts[index]))
+        source: texts[index].bytes()
+        assert_eq(read.text_bytes, source.len())
+        assert_eq(read.words.words, unit.words.words)
+        assert_eq(read.demand.bare_names, unit.demand.bare_names)
+        loop body in read.bodies {
+            if body.start >= body.end || body.end > source.len() -> panic("{unit.path}: the body span {body.start}..{body.end} is not inside its {source.len()} bytes")
+            // `{` and `}`.
+            braced: source[body.start] == U8{123} && source[body.end - 1] == U8{125}
+            if !braced -> panic("{unit.path}: the body span {body.start}..{body.end} is not a braced body")
+        }
+    }
+}
+
+#Test("a Core unit's interface keeps its held declarations and the body of each function with statements") {
+    units: jet_driver_core_interface_units(interface_test_fixture_rows(), compiler_threads_single())
+    assert_eq(units.len(), 1)
+    unit: units[0]
+    bodies: loop body in unit.bodies -> interface_test_slice(INTERFACE_FIXTURE, body.start, body.end)
+    // The trait's default, the struct's method and its trait block's method,
+    // and `twice`; `nothing` has no statements.
+    assert_eq(bodies, [String]{"{{ 1 }}", "{{ self.width * 2 }}", "{{ self.width }}", "{{\n    value * 2\n}}"})
+    held: loop declaration in unit.words.held -> declaration.name
+    assert_eq(held, [String]{"LIMIT"})
+    assert(unit.tokens > 0)
+    assert_eq(unit.lines, 19)
+    interface_test_round_trip(units, [String]{INTERFACE_FIXTURE})
+}
+
+#Test("every built-in Core unit's interface reads back as written") {
+    rows := [JetDriverCoreSource]{}
+    texts := [String]{}
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        text: fs.read(row.path) ?? panic("cannot read {row.path}: {err}")
+        rows.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text(text)})
+        texts.push(rows[rows.len() - 1].source())
+    }
+    units: jet_driver_core_interface_units(rows.move(), compiler_threads_single())
+    bodies := 0
+    loop unit in units -> bodies += unit.bodies.len()
+    assert(bodies > 5000)
+    interface_test_round_trip(units, texts)
+}
+
+#Test("a cut or foreign interface file reads as none") {
+    bytes: jet_driver_core_interface_bytes(jet_driver_core_interface_units(interface_test_fixture_rows(), compiler_threads_single()))
+    entries: jet_driver_core_interface_entries(bytes) ?? panic("the interface has no directory")
+    assert(jet_driver_core_interface_entries(bytes[0..<8]) == None)
+    assert(jet_driver_core_interface_entries([U8]{U8{0}, U8{0}, U8{0}, U8{0}}) == None)
+    assert(jet_driver_core_interface_entries(bytes[0..<bytes.len() - 1]) == None)
+    cut: JetDriverCoreInterfaceEntry{path: entries[0].path, at: entries[0].at, size: entries[0].size - 1}
+    assert(jet_driver_core_interface_unit(bytes, cut) == None)
+}

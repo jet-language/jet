@@ -231,8 +231,11 @@ jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String
     // each phase of a library build reads it (jet_cli_runtime_ir).
     core_threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
     building: task jet_cli_core_library_ir(core_threads, trace_sink)
+    interfacing: task jet_cli_core_interface_made(core_prefix, core_threads, trace_sink)
     runtime: jet_cli_runtime_ir(jet_cli_lowering_inputs(request, trace_sink), prefix, lifecycle, compiler_threads, trace_sink)
     core_ir: building.join() ?? return jet_driver_compile_escaped_failure("the Core library build stopped: {compiler_threads_failure_text(err)}")
+    interface_problem: interfacing.join() ?? return jet_driver_compile_escaped_failure("the Core interface stopped: {compiler_threads_failure_text(err)}")
+    if interface_problem != "" -> return jet_driver_compile_escaped_failure(interface_problem)
     if runtime.move() == {
         .Stopped(result) -> result
         .Built(result, library, interface_text, threads, receipt) -> {
@@ -1258,16 +1261,23 @@ jet_cli_core_sources: fn(input: String) -> JetCLICoreSources Never! {
             core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(core_path, JetCLICoreSourceReader{})})
         }
     } else {
-        // Each row's file is its repository path, so a Core file's comptime
-        // inputs (`Core/<dir>/<asset>`) resolve among the built-in assets.
-        loop row in CORE_SOURCE_OWNED_ROWS {
-            core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(row.path, JetCLIBuiltinCoreSourceReader{})})
-        }
+        core_sources.extend(jet_cli_builtin_core_rows())
     }
     // The jet.runtime interface modules ride with Core: they are embedded in
     // jet whether or not a toolchain tree is present (RuntimeInterface.jet).
     core_sources.extend(jet_driver_runtime_interface_sources())
     JetCLICoreSources.Loaded{sources: core_sources}
+}
+
+// The Core built into this jet, one row per unit. Each row's file is its
+// repository path, so a Core file's comptime inputs (`Core/<dir>/<asset>`)
+// resolve among the built-in assets.
+jet_cli_builtin_core_rows: fn() -> [JetDriverCoreSource] Never! {
+    rows := [JetDriverCoreSource]{}
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        rows.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(row.path, JetCLIBuiltinCoreSourceReader{})})
+    }
+    rows
 }
 
 // The Core rows a compile of the toolchain tree `toolchain` reads

@@ -246,13 +246,19 @@ threads through the runtime. A Core build failure fails the step with
 section of its own, past the 16-bit section indices through section 0 and
 `.symtab_shndx`. The step installs `jet-runtime/` beside the compiler:
 `native.key`, `jet_runtime.pack.o`, the library `jet_core.o` and its four
-lists, and `jet_runtime.image`, the runtime object and the Core object
+lists, `core.interface`, and `jet_runtime.image`, the runtime object and the Core object
 linked once at the run base (`LINK_RUN_BASE`), with its symbol table, a
 `.jet.bind` section naming where it calls `main`, and a `.jet.exports` hash
-index of its defined global symbols. jet carries `jet_core.o` and the four
-lists as parts; `jet self devtools embed` refuses Core facts that disagree
+index of its defined global symbols. jet carries `jet_core.o`, the four
+lists and `core.interface` as parts; `jet self devtools embed` refuses Core facts that disagree
 with the export list (an export without a facts row, or a facts row of a
-function the exports lack). A `jet run` whose Core is jet's built-in Core sources (a
+function the exports lack). `core.interface` (`JetDriver/Driver/CoreInterface.jet`)
+holds, for each unit of the Core built into jet, what a load learns from
+lexing and parsing its whole text (its spellings and held declarations,
+its identifier demand, its line and token counts), the text's length and
+64-bit FNV-1a hash, and the `{`..`}` span of each function body; the
+runtime step writes it beside the Core library from jet's built-in Core
+sources. A `jet run` whose Core is jet's built-in Core sources (a
 compile outside a toolchain tree) binds its Core calls to that Core code
 (`JetCli/Cli/Host.jet` `jet_cli_native_executable`, `IRChecks.core`): a
 call of a non-generic Core function whose bounds checks are the stock ones

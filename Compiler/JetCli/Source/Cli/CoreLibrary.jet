@@ -12,11 +12,17 @@
 // CoreSeal.jet) and `{prefix}.threads`, the exports whose call can start a
 // second thread (ir_thread_exports over the runtime's own receipt, since Core
 // starts threads through the runtime; jet_cli_core_library). The runtime
-// image links the object beside the runtime (jet_cli_runtime_pack).
+// image links the object beside the runtime (jet_cli_runtime_pack). Beside
+// them, `{prefix}.interface` holds the Core interface of the Core built
+// into this jet (jet_cli_core_interface_made).
 use {
     core_library_files: core.files
     core_library_sys: core.sys
-    jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, jet_driver_check_outcome, jet_driver_checked_declarations, jet_driver_lowering_inputs, jet_driver_present_diagnostics]
+    jet_driver.[
+        JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, jet_driver_check_outcome, jet_driver_checked_declarations,
+        jet_driver_core_interface_bytes, jet_driver_core_interface_units, jet_driver_lowering_inputs, jet_driver_present_diagnostics,
+        jet_driver_runtime_interface_sources,
+    ]
     jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_transfer_rows, symbol_table]
     jet_ir.[IRCoreLibrary, ir_build_core_library, ir_core_exports_text, ir_core_facts_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[JET_VERSION]
@@ -156,6 +162,22 @@ jet_cli_core_library: fn(prefix: String, library: &&IRCoreLibrary, found: &&[Str
     }
     core_library_files.write("{prefix}.issues", issues.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core library findings: {err}"}
     JetCLICoreLibrary{bytes: [U8]{}, problem: "Core library lowering failed; see {prefix}.issues"}
+}
+
+// The Core interface (JetDriver CoreInterface.jet) of each unit of the Core
+// built into this jet and of the runtime interface modules that ride with
+// it, written as `{prefix}.interface`, as the `runtime.core.interface` span.
+// It reads no Core check, so the runtime library build runs it on its own
+// task (Request.jet jet_cli_runtime_with_core). Else the problem that
+// stopped it.
+jet_cli_core_interface_made: fn(prefix: String, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> String {
+    if trace_sink == .Val(sink) -> sink.begin("runtime.core.interface", "", -1, -1)
+    rows := jet_cli_builtin_core_rows()
+    rows.extend(jet_driver_runtime_interface_sources())
+    bytes: jet_driver_core_interface_bytes(jet_driver_core_interface_units(rows.move(), compiler_threads))
+    if trace_sink == .Val(sink) -> sink.end("runtime.core.interface", bytes.len())
+    core_library_files.write_bytes("{prefix}.interface", bytes) ?? return "cannot write the Core interface: {err}"
+    ""
 }
 
 // The Core check the library is built from: the `jet check Core` compile
