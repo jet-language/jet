@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106087,
+    "rev": 106088,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101599,6 +101599,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c14 decision (Main, within approved scope): the sentry tracks live storage precisely. (1) The allocator's own slab, large-object and page-map mappings are the heap; per-block MemStorage registration covers them, and registering whole slabs would make freed blocks look live. They still go through the kernel map primitive, in its untracked form, not a raw mmap. (2) Mappings on paths that must not allocate (Fault, auxv and Secret pages) and the ProductionReceipt scratch also use the untracked kernel form, each with a stated reason. The comptime reply mapping named in c14 stays tracked; only a separate refused-frame scratch on the dying path may be untracked. (3) Done means: a grep of Compiler/ and JetRuntime for raw mmap/munmap finds only the kernel primitive, and the c14 R0801 case passes on every tier. Owner: CardCloser-3."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "p164 (dev 8cf16ffb9e): memory_kernel/ PASS 10, FAIL 1: a_mapping_is_live_storage_until_it_is_unmapped (exit 1). Its runtime-mappings-sentry change (3852240eb4) is in the runtime, which a compiler links from its seed, so it shows one batch later; recheck on p165 before c7. Separately, single-use-holders (df9300826a) broke 6 context_allocator cases (E0140/E0142 on a counter allocator); CardCloser-3 owns the fix and the sweep of every source the rule reaches."
         },
         {
@@ -101828,7 +101833,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T10:03:57.488Z",
+      "updated": "2026-11-15T10:04:58.544Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -217774,6 +217779,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T10:04:58.544Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T10:03:58.386Z",
       "by": "Main",
