@@ -60,10 +60,14 @@ ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
     texts: OptTextRoutes{clone: name_rows_value(m.name_rows, "jet_rt_string_clone") ?? -2, scalars: name_rows_value(m.name_rows, "jet_char_len") ?? -2}
     // The facts stay true until a sweep changes the function, so they are
     // computed again (in place, their buffers reused) only after one does
-    // (most sweeps change nothing, and the last round none).
+    // (most sweeps change nothing, and the last round none). `fresh` says
+    // they describe the function as it is: every sweep up to dead leaves
+    // them so, dead included (it refills after each sweep that removes
+    // something), and the compaction keeps them so (ir_opt_compact_facts).
     facts := ir_opt_facts(f)
+    fresh := true
     loop round < IR_OPT_SIMPLIFY_ROUNDS {
-        if round > 0 -> ir_opt_facts_refill(f, facts)
+        if !fresh -> ir_opt_facts_refill(f, facts)
         changed := ir_opt_fold(m, f, facts, fixed, texts, report)
         changed += ir_opt_unreachable(f, report)
         if changed > 0 -> ir_opt_facts_refill(f, facts)
@@ -83,12 +87,18 @@ ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
         if step > 0 -> ir_opt_facts_refill(f, facts)
         changed += step
         changed += ir_opt_dead(m, f, facts, report)
-        changed += ir_opt_structure(f, report)
-        changed += ir_opt_unwrap(f)
+        reshaped := ir_opt_structure(f, report)
+        reshaped += ir_opt_unwrap(f)
+        changed += reshaped
+        fresh = reshaped == 0
         // A later round that changed nothing up to here finds the function
         // as the last round's compaction (or short circuits) left it.
-        if changed > 0 || round == 0 -> ir_opt_compact(f)
-        changed += ir_opt_short_circuits(f, facts, report)
+        if changed > 0 || round == 0 {
+            if fresh -> ir_opt_compact_facts(f, facts) else -> ir_opt_compact(f)
+        }
+        step = ir_opt_short_circuits(f, facts, fresh, report)
+        if step > 0 -> fresh = false
+        changed += step
         if changed == 0 -> break
         round += 1
     }
@@ -597,12 +607,13 @@ ir_opt_fused_def: fn(f: IRFunction, at: Int) -> Int Never! {
 // the ones those rewrites made. Each later pass takes just the short
 // circuits the one before exposed, until it exposes none.
 // `facts` is ir_opt_simplify's buffer: each pass that finds a candidate
-// refills it in place (ir_opt_facts_refill).
-ir_opt_short_circuits: fn(f: &IRFunction, facts: &OptFacts, report: &IROptReport) -> Int Never! {
+// refills it in place (ir_opt_facts_refill), the first one only when they
+// are not `fresh` (the function as it is).
+ir_opt_short_circuits: fn(f: &IRFunction, facts: &OptFacts, fresh: Bool, report: &IROptReport) -> Int Never! {
     exposed := [Int]{}
-    total := ir_opt_short_pass(f, facts, report, exposed, true)
+    total := ir_opt_short_pass(f, facts, report, exposed, true, fresh)
     loop exposed.len() > 0 {
-        found: ir_opt_short_pass(f, facts, report, exposed, false)
+        found: ir_opt_short_pass(f, facts, report, exposed, false, false)
         if found == 0 -> break
         total += found
     }
@@ -613,7 +624,7 @@ ir_opt_short_circuits: fn(f: &IRFunction, facts: &OptFacts, report: &IROptReport
 // those whose negated branch tests an r in `exposed`. `exposed` comes back
 // as the r of each rewritten short circuit whose c2 is a Not of the short
 // circuit ending right before it.
-ir_opt_short_pass: fn(f: &IRFunction, facts: &OptFacts, report: &IROptReport, exposed: &[Int], first: Bool) -> Int Never! {
+ir_opt_short_pass: fn(f: &IRFunction, facts: &OptFacts, report: &IROptReport, exposed: &[Int], first: Bool, fresh: Bool) -> Int Never! {
     count: f.op.len()
     // A short circuit's If has the Copy or Move of its test right before
     // it (ir_opt_short_circuit_copy): without one there is nothing to find,
@@ -629,7 +640,7 @@ ir_opt_short_pass: fn(f: &IRFunction, facts: &OptFacts, report: &IROptReport, ex
         exposed.clear()
         return 0
     }
-    ir_opt_facts_refill(f, facts)
+    if !fresh -> ir_opt_facts_refill(f, facts)
     nesting: ir_opt_nesting(f)
     wanted := [Bool]{}
     if !first {

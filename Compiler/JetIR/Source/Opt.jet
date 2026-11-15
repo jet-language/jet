@@ -1522,6 +1522,27 @@ ir_opt_compact: fn(f: &IRFunction) Never! {
     }
 }
 
+// ir_opt_compact over a function `facts` describe as it is (ir_opt_facts):
+// they come out describing the compacted function, as a refill would. A
+// Nop reads, writes and opens nothing, so the counts and the regions'
+// nesting stay; only rows move down, each with its region and, for the
+// write a slot's def_at names, that position.
+ir_opt_compact_facts: fn(f: &IRFunction, facts: &OptFacts) Never! {
+    count: facts.defs.len()
+    kept := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Nop -> next
+        if kept != at {
+            facts.region[kept] = facts.region[at]
+            written: ir_x64_write(f, at)
+            if written >= 0 && written < count && facts.def_at[written] == at -> facts.def_at[written] = kept
+        }
+        kept += 1
+    }
+    loop facts.region.len() > kept -> _ := facts.region.pop()
+    ir_opt_compact(f)
+}
+
 // Turns instruction `at` into a Nop.
 ir_opt_kill: fn(f: &IRFunction, at: Int) Never! {
     f.op[at] = .Nop
@@ -1733,6 +1754,48 @@ ir_opt_tarjan_visit: fn(t: &OptTarjan, calls: OptCalls, root: Int) Never! {
     assert_eq(f.op.len(), ops.len())
     loop (at, op) in ops -> assert(f.op[at] == op)
     assert_eq(f.c[step], IR_OVERFLOW_WRAP)
+}
+
+// count() writes i twice, with Nops before, between and inside its nested
+// constructs: compacting it with its facts leaves the facts a fresh count
+// of the compacted function gives.
+#Test("Compacting with facts leaves the facts a refill gives") {
+    m := ir_module_new()
+    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    g := ir_function_new("count", "test:count.jet::count", "", "count.jet", 1)
+    n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    gone := [Int]{}
+    gone.push(ir_emit(g, IROp.Const, one, 7, -1, -1, 2))
+    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    gone.push(ir_emit(g, IROp.Const, done, 0, -1, -1, 3))
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    _ := ir_open_if(g, done, 4)
+    gone.push(ir_emit(g, IROp.Add, one, one, one, IR_OVERFLOW_TRAP, 4))
+    ir_else(g, 4)
+    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
+    ir_end(g, 4)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ir_end(g, 5)
+    ir_end(g, 5)
+    _ := ir_emit(g, IROp.Return, -1, i, -1, -1, 6)
+    loop at in gone -> ir_opt_kill(g, at)
+    facts := ir_opt_facts(g)
+    ir_opt_compact_facts(g, facts)
+    assert_eq(g.op.len(), 14)
+    fresh: ir_opt_facts(g)
+    assert_eq(facts.defs, fresh.defs)
+    assert_eq(facts.def_at, fresh.def_at)
+    assert_eq(facts.uses, fresh.uses)
+    assert_eq(facts.region, fresh.region)
+    assert_eq(facts.parent, fresh.parent)
 }
 
 // count() counts i from 0 up to 10 and divides i, then i - 10, by 7. Both
