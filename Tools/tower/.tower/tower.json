@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6915,
-    "rev": 104200,
+    "nextNum": 6918,
+    "rev": 104225,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41781,12 +41781,12 @@
         },
         {
           "n": 8,
-          "text": "[#3025] Each registered code has exactly one useful generated guide page: concrete causes, pitfalls, an exercised example or an honest N/A, and truthful status-specific text for retired or internal codes. The registry stays authoritative. jet explain stays concise. Existing SSG output is used, with no second renderer. Route and link checks pass.",
+          "text": "Each registered code has exactly one generated guide page. The page gives concrete causes, pitfalls, and an exercised example or an honest N/A, and retired or internal codes get truthful status text. The registry stays the authority, `jet explain` stays concise, and the existing site generator renders the pages with no second renderer. Proof: `jet test tests/guards --filter diagnostic_guide_pages`, with route and link checks passing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:59:58.743Z"
+          "at": "2026-11-15T04:06:34.974Z"
         },
         {
           "n": 9,
@@ -41817,12 +41817,12 @@
         },
         {
           "n": 13,
-          "text": "[#4210] For each #Todo, the checker lists a bounded, ranked set of in-scope locals, params and imported functions that fit the goal type, and the LSP exposes the same candidates.",
+          "text": "For each #Todo, the checker lists a bounded, ranked set of in-scope locals, parameters and imported functions that fit the goal type, and the LSP shows the same candidates. Proof: `jet test Compiler --profile ui --filter todo_candidates` and `jet test Compiler --profile cases --filter lsp/lsp_todo_candidates`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:00:04.183Z"
+          "at": "2026-11-15T04:06:36.194Z"
         },
         {
           "n": 14,
@@ -41853,21 +41853,21 @@
         },
         {
           "n": 17,
-          "text": "Unknown-method and unknown-item reports (E0311, E0102) list up to three nearest names from the receiver's real surface, or say \"no similar method\"; `c.abs()` on I32, `n.to_float()` and `buf.as_mut_ptr()` each get a ranked suggestion; UI snapshots.",
+          "text": "Unknown-method and unknown-item reports (E0311, E0102) list up to three nearest names from the receiver's real surface, or say 'no similar method'. `c.abs()` on I32, `n.to_float()` and `buf.as_mut_ptr()` each get a ranked suggestion. Proof: `jet test Compiler --profile ui --filter unknown_method_suggest`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:03:24.397Z"
+          "at": "2026-11-15T04:06:37.233Z"
         },
         {
           "n": 18,
-          "text": "No Fix line tells the user to edit a Core type or declare a built-in name: `BigInt.parse(...)`, `conn.execute(...)` on DBConnection, `x: null` and `println(\"hi\")` point to the real API (`None`, `print`).",
+          "text": "No Fix line tells the user to edit a Core type or declare a built-in name. `BigInt.parse(...)`, `conn.execute(...)` on DBConnection, `x: null` and `println(\"hi\")` each point to the real API (`None`, `print`). Proof: `jet test Compiler --profile ui --filter fix_points_to_real_api`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:03:25.566Z"
+          "at": "2026-11-15T04:06:38.262Z"
         },
         {
           "n": 19,
@@ -41880,12 +41880,12 @@
         },
         {
           "n": 20,
-          "text": "A ratchet test over the diagnostic registry prints and enforces three counts that may only fall: active rows without a UI snapshot (179 on 2026-10-28), rows with the generic Why (192), rows with a decision ID in a user-facing column (497). Each reaches 0 before this card closes.",
+          "text": "A ratchet test over the diagnostic registry prints and enforces three counts that may only fall: active rows without a UI snapshot (179 on 2026-10-28), rows with the generic Why (192), and rows with a decision ID in a user-facing column (497). Each count is 0 before this card closes. Proof: `jet test tests/guards --filter diagnostic_text_ratchet`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:57:13.540Z"
+          "at": "2026-11-15T04:06:39.226Z"
         },
         {
           "n": 21,
@@ -42416,8 +42416,8 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-14T23:34:32.529Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:06:39.226Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ],
@@ -86609,8 +86609,8 @@
     {
       "id": "c02vsnvm",
       "num": 6618,
-      "title": "Canvas: the `jet dev --canvas` browser workbench",
-      "body": "The Canvas product surface: graph view, edit protocol, debugger overlay, breakpoints, live values and the --canvas CLI lifecycle. Moved out of #6418 and #6419 by owner ruling 2026-11-06; the JetDevserver code port continues under #6582.",
+      "title": "Canvas runs on the self-hosted toolchain: its scenarios restored, parser spans, the shared Core-call record and one edit-transaction seam",
+      "body": "Destination: `jet dev --canvas` (Compiler/JetDevserver/Source/Canvas) runs on the self-hosted toolchain on solid foundations. The 88 browser scenarios deleted in the #6035 c3 cutover are back. Functions and spans come from the parser, Core names come from the shared Core-call record, and every edit crosses one transaction seam. Plain `jet dev` stays terminal-first (D-CANVAS-CMD1=A).\n\nState on dev 699e07d4c6 with gate-p141: `jet test Compiler --profile cases --filter canvas` gives 6 PASS, 6 KNOWN-FAILING and 3 SKIP-HOST.\n\nScenario proof (used here and on the Canvas cards): `jet run --allow=Env,Exec,FS,IO,Net,Time Tools/canvas-test/Run.jet -- scenario --scenario <name> --port <P>`, run against a running `jet dev <fixture> --canvas`, prints PASS.\n\nThe Canvas product moved out of #6418 and #6419 by owner ruling 2026-11-06. It runs inside JetDevserver, so it waits on #5931.\n\nRelated cards (2026-11-15 split): workspace and session #6908, debugger #6909, graph edits #6910, source truth #6911, projection parity #6912, workbench UX #6913, previews #6914.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
@@ -86626,6 +86626,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Split 2026-11-15. Workspace and session went to #6908, the debugger to #6909, graph edits to #6910, source truth to #6911, projection parity to #6912, workbench UX and the Code Map to #6913, and previews to #6914. c13 and c14 are met on dev 699e07d4c6. This card keeps the foundations: the 88-scenario restore (c66), parser spans (c63-c64), the Core-call record (c43-c44) and the edit-transaction seam (c55-c57)."
+        },
         {
           "at": "2026-11-09",
           "by": "Main",
@@ -86666,11 +86671,12 @@
         {
           "n": 4,
           "text": "(was #282) Canvas search refactor and source navigation (moved from #6418 c46)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T23:23:58.274Z"
+          "evidence": "Moved to #6913 c3: workbench UX has its own card",
+          "at": "2026-11-15T04:04:28.423Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
@@ -86842,11 +86848,12 @@
         {
           "n": 22,
           "text": "(was #284) Canvas extensibility API and node providers Proof: a Tools/canvas-test/Harness.jet scenario or a tests/cases row (precut audit 2026-11: unproven at 9c7ddf1359). (was #6386 c28)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:23:28.467Z"
+          "evidence": "Moved to #6913 c4: workbench UX has its own card",
+          "at": "2026-11-15T04:04:29.341Z",
+          "closure": "obsolete"
         },
         {
           "n": 23,
@@ -86861,11 +86868,12 @@
         {
           "n": 24,
           "text": "(was #287) Canvas Blueprint parity UX closeout Proof: a Tools/canvas-test/Harness.jet scenario or a tests/cases row (precut audit 2026-11: unproven at 9c7ddf1359). (was #6386 c30)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:23:33.643Z"
+          "evidence": "Moved to #6913 c5: workbench UX has its own card",
+          "at": "2026-11-15T04:04:30.318Z",
+          "closure": "obsolete"
         },
         {
           "n": 25,
@@ -86890,11 +86898,12 @@
         {
           "n": 27,
           "text": "(was #318) Canvas: node documentation hover + first-run learn overlay Proof: a Tools/canvas-test/Harness.jet scenario or a tests/cases row (precut audit 2026-11: unproven at 9c7ddf1359). (was #6386 c33)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:23:40.349Z"
+          "evidence": "Moved to #6913 c6: workbench UX has its own card",
+          "at": "2026-11-15T04:04:31.260Z",
+          "closure": "obsolete"
         },
         {
           "n": 28,
@@ -86919,20 +86928,22 @@
         {
           "n": 30,
           "text": "(was #365) Studio and Canvas UX integration hardening Proof: a Tools/canvas-test/Harness.jet scenario or a tests/cases row (precut audit 2026-11: unproven at 9c7ddf1359). (was #6386 c36)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:23:47.140Z"
+          "evidence": "Moved to #6913 c7: workbench UX has its own card (Canvas side of the Studio integration: D-CANVAS-ACTIONAUTH1=C)",
+          "at": "2026-11-15T04:04:32.275Z",
+          "closure": "obsolete"
         },
         {
           "n": 31,
           "text": "(was #372) Canvas M1: error surfacing — persistent diagnostics, results panel, node bubbles Proof: a Tools/canvas-test/Harness.jet scenario or a tests/cases row (precut audit 2026-11: unproven at 9c7ddf1359). (was #6386 c37)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:23:49.335Z"
+          "evidence": "Moved to #6913 c8: workbench UX has its own card",
+          "at": "2026-11-15T04:04:33.207Z",
+          "closure": "obsolete"
         },
         {
           "n": 32,
@@ -87192,47 +87203,52 @@
         {
           "n": 58,
           "text": "(was #2464 c1) D-DX-PREVIEW1's declaration, variant and shared-context rules are implemented without an unratified syntax spelling, proven by tests/cases rows. (was #6386 c80)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:24:54.841Z"
+          "evidence": "Moved to #6914 c1: previews have their own card",
+          "at": "2026-11-15T04:04:35.128Z",
+          "closure": "obsolete"
         },
         {
           "n": 59,
           "text": "(was #2464 c2) A source file renders two named variants in Canvas, and switching variants does not restart the full app or alter another variant's output, proven by a tests/cases row. (was #6386 c81)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:24:57.326Z"
+          "evidence": "Moved to #6914 c2: previews have their own card",
+          "at": "2026-11-15T04:04:36.096Z",
+          "closure": "obsolete"
         },
         {
           "n": 60,
           "text": "(was #2464 c3) Expensive fixture setup runs once for multiple variants, and changing one preview does not leak mutable state to another, proven by a tests/cases row. (was #6386 c82)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:25:00.408Z"
+          "evidence": "Moved to #6914 c3: previews have their own card",
+          "at": "2026-11-15T04:04:37.000Z",
+          "closure": "obsolete"
         },
         {
           "n": 61,
           "text": "(was #2464 c4) A malformed preview reports source diagnostics while keeping the last-good preview visible, proven by a tests/cases row. (was #6386 c83)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:25:02.995Z"
+          "evidence": "Moved to #6914 c4: previews have their own card",
+          "at": "2026-11-15T04:04:37.900Z",
+          "closure": "obsolete"
         },
         {
           "n": 62,
           "text": "(was #2464 c5) A playground path runs the same checked source through Canvas and `jet dev`, with output and console diagnostics tied to the source revision, proven by tests/cases rows. (was #6386 c84)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:25:05.265Z"
+          "evidence": "Moved to #6914 c5: previews have their own card",
+          "at": "2026-11-15T04:04:38.800Z",
+          "closure": "obsolete"
         },
         {
           "n": 63,
@@ -87294,11 +87310,12 @@
         {
           "n": 70,
           "text": "The Code Map view in Canvas (D-CODEMAP-VIEW1=A) draws a treemap of the code-map rows with every metric plus Blend and all four border choices, click-to-source and zoom, live rectangle updates in the dev loop, and a saved --json snapshot opening in the same view; first-render and hover latency on Compiler/ are logged; a test proves sizes, colours and hover values come unchanged from the --json rows. Proof: `jet test Compiler --profile cases --filter canvas/code_map_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:58:33.274Z"
+          "evidence": "Moved to #6913 c9: the Code Map is a workbench view",
+          "at": "2026-11-15T04:04:34.170Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -87309,7 +87326,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:23:54.761Z",
-      "updated": "2026-11-15T04:04:27.289Z",
+      "updated": "2026-11-15T04:04:51.932Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 70
     },
@@ -94060,6 +94077,15 @@
           "verifiedBy": null,
           "evidence": "db372838b3 (on dev). On the gate-p55 jet (tree dev 9623399213), Lander5 holds run: `jet test Compiler/JetDebug/Tests` 38/0, with Snapshot.jet pinning the capitalized readouts (Locals:, the --> ... in fn line, <Unavailable> and the (Jet) prompt). The lldb-driven debug cases need lldb, which this host lacks.",
           "at": "2026-11-14T06:44:52.688Z"
+        },
+        {
+          "n": 4,
+          "text": "Machine output does not change with the case rules: the JSON from every machine door is byte-identical before and after. Proof: `jet test tests/guards --filter machine_doors_unchanged_by_case_law`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:33.873Z"
         }
       ],
       "refs": [],
@@ -94070,9 +94096,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:53.397Z",
-      "updated": "2026-11-14T06:44:52.688Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3
+      "updated": "2026-11-15T04:06:33.873Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 4
     },
     {
       "id": "c03obxd3",
@@ -98952,11 +98978,11 @@
         {
           "n": 12,
           "text": "A `#Codable(only: .Decode)` struct whose field has a declared default decodes without the field type's Encode: an absent key takes the default value directly, in both the tree decode and the streaming read, never through `default.encode()`. Proof: `jet test Compiler --profile cases --filter codable_options/decode_only_default_field_needs_no_encode`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:28:21.286Z"
+          "evidence": "dev 658a9327de (GoalsB-5-8). p143 batch compiler (built from dev 6f82527b17), 2026-11-14 22:50: jet test Compiler --profile cases --filter codable_options/decode_only_default_field_needs_no_encode -> PASS 1; jet check Tools/perf/asm-parity/asm-parity/run.jet -> no errors (only: .Decode restored).",
+          "at": "2026-11-15T04:05:36.570Z"
         }
       ],
       "refs": [],
@@ -98967,7 +98993,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:27.015Z",
-      "updated": "2026-11-15T03:40:33.941Z",
+      "updated": "2026-11-15T04:05:36.570Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -107606,6 +107632,216 @@
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:23.494Z",
       "updated": "2026-11-15T04:03:23.494Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0zlqnvv",
+      "num": 6915,
+      "title": "Stops show where they happened: compile-time stop trails, panic traces on every tier, and one division-by-zero and list-position stop",
+      "body": "Destination: every stop names where it happened and how execution got there.\n- A compile-time stop points at its `panic` and lists every compile-time call, innermost first, in the same Trail format runtime failures print. In a derive or marker body it names both the body line and the use site.\n- A runtime panic prints its frames innermost first on O0, O1 and O2, as `backtrace: full|brief|off` selects.\n- A zero divisor for `/`, `/%` and `%` gives one shared E3010 stop.\n- Every list-position stop goes through one message owner.\n\nWhy it matters: learnability probes t04 and t06 found stops that point at the wrong place or print no path.\n\nState: tests/cases/runtime_stops/every_division_by_zero_stops_at_its_line passes on dev 104ee83c5a with gate-p141. It pins the shared stop and its line on all three tiers, and it asserts that no source line is quoted.\n\nSource: #3720 c31-c35, c41, c44 (from #6398, #6399, #4627).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "t04_comptime_panic.jet gets one E3010 whose primary location is the `panic` call at line 4, with a second label on the `check_size(400)` call at line 10. Proof: `jet test Compiler --profile ui --filter t04_comptime_panic`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:30.758Z"
+        },
+        {
+          "n": 2,
+          "text": "A compile-time stop three calls deep lists every compile-time call, innermost first, in the same Trail format runtime failures print. Proof: `jet test Compiler --profile ui --filter comptime_stop_trail`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:30.758Z"
+        },
+        {
+          "n": 3,
+          "text": "A compile-time stop inside a derive or marker body names the line inside that body and the use site that ran it. Proof: `jet test Compiler --profile ui --filter comptime_stop_in_marker_body`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:30.758Z"
+        },
+        {
+          "n": 4,
+          "text": "t06_panic_trace.jet prints the panic, then `inner` (line 4), `middle` (line 9), `outer` (line 13) and `run` (line 17), each with its file and line and innermost first. This holds under `jet run` and under `jet build` with the stock `backtrace: full`, on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter runtime_stops/t06_panic_trace`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:30.758Z"
+        },
+        {
+          "n": 5,
+          "text": "`backtrace: brief` prints only the panicking frame and `backtrace: off` prints none, and a failed `assert` and `assert_eq` follow the same rule. Proof: `jet test Compiler --profile cases --filter runtime_stops/backtrace_brief_and_off`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:30.758Z"
+        },
+        {
+          "n": 6,
+          "text": "`/`, `/%` and `%` with a zero divisor at run time all give the same E3010 'divided by zero' stop with the division's file, line and column and a caret under the divisor, on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter runtime_stops/every_division_by_zero_stops_at_its_line`. On dev 104ee83c5a it passes for the shared stop and the line; the column and caret are owed and wait on the owner gate.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:30.758Z"
+        },
+        {
+          "n": 7,
+          "text": "Every list-position stop site calls one shared message owner. Proof: `git grep -n 'is out of range (length ' -- Compiler` lists only that owner (on dev 104ee83c5a it finds two sites, Dyn.jet:599 and :877).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:30.758Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "runtime"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:06:30.758Z",
+      "updated": "2026-11-15T04:06:30.758Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0hicd7a",
+      "num": 6916,
+      "title": "A handled Core error prints and names its type: ParseError is declared, and {err}, {err:Debug}, err.message and the E0915 and E0112 fixes all work",
+      "body": "Destination: inside a `??` handler, a Core error value such as Int.parse's ParseError has a declaration a program can name. It prints with `{err}` and `{err:Debug}`, and `err.message` works, on O0, O1 and O2. The fixes E0915 and E0112 suggest for such values compile.\n\nWhy it matters: G5DevX-2 found on 2026-11-13 that `{err}` gives E0915, `{err:Debug}` gives E0112 and `err.message` gives E0302, so a learner cannot even print the error they caught.\n\nSource: #3720 c47, c49, c84 (from #3703).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Int.parse's error type, ParseError, has a declaration in Core, so a `??` handler can name it. Proof: `jet test Compiler --profile cases --filter errors/parse_error_named_in_handler` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:31.841Z"
+        },
+        {
+          "n": 2,
+          "text": "Inside a `??` handler, `{err}`, `{err:Debug}` and `err.message` all render a Core error value on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter errors/core_error_renders_in_handler`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:31.841Z"
+        },
+        {
+          "n": 3,
+          "text": "The fixes suggested by E0915 and E0112 never propose a spelling that fails for the same value, and each suggested fix compiles. Proof: `jet test Compiler --profile ui --filter E0915_fix_compiles` and `--filter E0112_fix_compiles`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:31.841Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "errors"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:06:31.841Z",
+      "updated": "2026-11-15T04:06:31.841Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0yhga63",
+      "num": 6917,
+      "title": "Progress and errors never tear: one bottom status region on a terminal, plain sequential output elsewhere",
+      "body": "Destination: realization progress (jetpack env, jet build) renders in one bottom-anchored status region, and errors print atomically above it through one writer. Non-TTY, NO_COLOR and CI output is plain and sequential, with no cursor movement.\n\nWhy it matters: torn progress lines mid-error were seen in a real session. The Rust-era fix (#2215) went with the Rust code and is unproven on the self-hosted toolchain.\n\nSource: #3720 c68, c69 (from #2215).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Realization progress renders in a single bottom-anchored status region, and errors print atomically above it with no interleaved or torn lines. Proof: `jet test Compiler --profile cases --filter cli_output/progress_region_no_torn_lines` (pty).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:32.867Z"
+        },
+        {
+          "n": 2,
+          "text": "Non-TTY, NO_COLOR and CI runs use the plain sequential fallback, and a test asserts no ANSI cursor movement in that mode. Proof: `jet test Compiler --profile cases --filter cli_output/plain_fallback_no_cursor_moves`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:06:32.867Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "cli",
+        "output"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:06:32.867Z",
+      "updated": "2026-11-15T04:06:32.867Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -213025,6 +213261,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:06:39.226Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#20: proof; was: A ratchet test over the diagnostic registry prints and enforces three counts that may only fall: active rows without a UI snapshot (179 on 2026-10-28), rows with the generic Why (192), rows with a dec"
+    },
+    {
+      "at": "2026-11-15T04:06:38.262Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#18: proof; was: No Fix line tells the user to edit a Core type or declare a built-in name: `BigInt.parse(...)`, `conn.execute(...)` on DBConnection, `x: null` and `println(\"hi\")` point to the real API (`None`, `print"
+    },
+    {
+      "at": "2026-11-15T04:06:37.233Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#17: proof; was: Unknown-method and unknown-item reports (E0311, E0102) list up to three nearest names from the receiver's real surface, or say \"no similar method\"; `c.abs()` on I32, `n.to_float()` and `buf.as_mut_ptr"
+    },
+    {
+      "at": "2026-11-15T04:06:36.195Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#13: strip debris; proof; was: [#4210] For each #Todo, the checker lists a bounded, ranked set of in-scope locals, params and imported functions that fit the goal type, and the LSP exposes the same candidates."
+    },
+    {
+      "at": "2026-11-15T04:06:34.974Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#8: strip debris; proof; was: [#3025] Each registered code has exactly one useful generated guide page: concrete causes, pitfalls, an exercised example or an honest N/A, and truthful status-specific text for retired or internal co"
+    },
+    {
+      "at": "2026-11-15T04:06:33.873Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0cnf5w8",
+      "note": "#4 Machine output does not change with the case rules: the JSON"
+    },
+    {
+      "at": "2026-11-15T04:06:32.867Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0yhga63",
+      "note": "Progress and errors never tear: one bottom status region on a terminal, plain sequential output elsewhere"
+    },
+    {
+      "at": "2026-11-15T04:06:31.841Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0hicd7a",
+      "note": "A handled Core error prints and names its type: ParseError is declared, and {err}, {err:Debug}, err.message and the E0915 and E0112 fixes all work"
+    },
+    {
+      "at": "2026-11-15T04:06:30.758Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0zlqnvv",
+      "note": "Stops show where they happened: compile-time stop trails, panic traces on every tier, and one division-by-zero and list-position stop"
+    },
+    {
+      "at": "2026-11-15T04:05:36.570Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ue0hua",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T04:04:51.932Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02vsnvm",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T04:04:41.317Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02vsnvm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:04:40.414Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02vsnvm",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T04:04:38.800Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#62"
+    },
+    {
+      "at": "2026-11-15T04:04:37.900Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#61"
+    },
+    {
+      "at": "2026-11-15T04:04:37.001Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#60"
+    },
+    {
+      "at": "2026-11-15T04:04:36.096Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#59"
+    },
+    {
+      "at": "2026-11-15T04:04:35.128Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#58"
+    },
+    {
+      "at": "2026-11-15T04:04:34.171Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#70"
+    },
+    {
+      "at": "2026-11-15T04:04:33.207Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#31"
+    },
+    {
+      "at": "2026-11-15T04:04:32.275Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-15T04:04:31.260Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-15T04:04:30.318Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-15T04:04:29.341Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-15T04:04:28.423Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#4"
+    },
     {
       "at": "2026-11-15T04:04:27.289Z",
       "by": "TowerKeeper-1",
