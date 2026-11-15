@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6968,
-    "rev": 105800,
+    "rev": 105804,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75685,39 +75685,39 @@
         },
         {
           "n": 27,
-          "text": "Web wasm artifact size (#5201): (was #2867) The harness reports artifact_bytes for every web rail. Jet's wasm artifact is no larger than the Rust wasm artifact for the same program. (Re-homed 2026-11-04 by the #6563 c1 audit: this requirement was merged into a card that was later deleted and survived on no card.) (was #5201 c9)",
+          "text": "Web wasm artifact size (#5201): The harness reports artifact_bytes for every web rail. Jet's wasm artifact is no larger than the Rust wasm artifact for the same program. Proof: `node Tools/gauntlet/harness/run.mjs --rail web` artifact_bytes column against Rust.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:51:48.359Z"
+          "at": "2026-11-15T05:38:20.825Z"
         },
         {
           "n": 28,
-          "text": "Hash reach: a program calling only crypto.sha256 links only SHA-256. Measured by Main on seed-b13, 2026-11-12 ($JET_SCRATCH_ROOT/lanes/Main/bin14/sha): 229,680 B with 183 KB .text, of which __core_crypto_md_compress (21.6 KB), md_hash_finish (16.5 KB), ripemd160_blocks (11.8 KB), md_hash (9.3 KB), sha512_blocks (6.7 KB) and keccak_absorb (6.7 KB) are other algorithms or a generic dispatch over all of them. The fix is in the general mechanism (a call whose algorithm is known statically reaches only that algorithm, through every Core layer), proven on sha256 alone and on a second program using a different hash family member.",
+          "text": "Hash reach: a program calling only crypto.sha256 links only SHA-256. Measured by Main on seed-b13, 2026-11-12 ($JET_SCRATCH_ROOT/lanes/Main/bin14/sha): 229,680 B with 183 KB .text, of which __core_crypto_md_compress (21.6 KB), md_hash_finish (16.5 KB), ripemd160_blocks (11.8 KB), md_hash (9.3 KB), sha512_blocks (6.7 KB) and keccak_absorb (6.7 KB) are other algorithms or a generic dispatch over all of them. The fix is in the general mechanism (a call whose algorithm is known statically reaches only that algorithm, through every Core layer), proven on sha256 alone and on a second program using a different hash family member. Proof: `jet test Compiler --profile cases --filter size/sha256_links_only_sha256` and a second hash-family program.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T18:44:37.062Z"
+          "at": "2026-11-15T05:38:22.024Z"
         },
         {
           "n": 29,
-          "text": "Per-function code size: no Core or generated function carries code its callers cannot reach or expansion a hand-written version would not. Measured by Main on seed-b13, 2026-11-12, default jet build: core_encoding_json_parse_string 21,323 B, __core_encoding_stream_jcs_number 37,759 B, core_regex_scan 35,189 B, unit_unicode_upper_mapping and lower_mapping 28-29 KB each, and MemorySafetyFuzz_run_memory_safety_fuzz_axis 58,080 B. A dated breakdown names, for each function over 4 KB in the tool-twin binaries, what the bytes are (inlined callees, unrolled loops, tables as code, checks) and the general codegen or Core rule that shrinks it; each fix shows the gain on two programs.",
+          "text": "Per-function code size: no Core or generated function carries code its callers cannot reach or expansion a hand-written version would not. Measured by Main on seed-b13, 2026-11-12, default jet build: core_encoding_json_parse_string 21,323 B, __core_encoding_stream_jcs_number 37,759 B, core_regex_scan 35,189 B, unit_unicode_upper_mapping and lower_mapping 28-29 KB each, and MemorySafetyFuzz_run_memory_safety_fuzz_axis 58,080 B. A dated breakdown names, for each function over 4 KB in the tool-twin binaries, what the bytes are (inlined callees, unrolled loops, tables as code, checks) and the general codegen or Core rule that shrinks it; each fix shows the gain on two programs. Proof: the committed dated per-function breakdown, each fix with its two-program receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T18:44:37.916Z"
+          "at": "2026-11-15T05:38:23.216Z"
         },
         {
           "n": 30,
-          "text": "Tool twins as binaries: every landed #5072 tool twin is recorded with its default jet build size, its function count and its run wall and peak against its original, beside the hand-written reference of c6. Baseline by Main on seed-b13, 2026-11-12: memory-safety-fuzz 1,850,952 B (1,141 functions, 1.51 MB .text), run-policy 757,008 B (700), timer 752,464 B (848 functions; it links base64, SHA-2 and JSON writers it does not need for a process timer); the hello floor is 37,648 B (56 functions, 24 KB .text, of which the production receipt renderer, writer and publisher are 3.5 KB).",
+          "text": "Tool twins as binaries: every landed #5072 tool twin is recorded with its default jet build size, its function count and its run wall and peak against its original, beside the hand-written reference of c6. Baseline by Main on seed-b13, 2026-11-12: memory-safety-fuzz 1,850,952 B (1,141 functions, 1.51 MB .text), run-policy 757,008 B (700), timer 752,464 B (848 functions; it links base64, SHA-2 and JSON writers it does not need for a process timer); the hello floor is 37,648 B (56 functions, 24 KB .text, of which the production receipt renderer, writer and publisher are 3.5 KB). Proof: the committed tool-twin size table.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T18:44:38.806Z"
+          "at": "2026-11-15T05:38:24.421Z"
         },
         {
           "n": 31,
@@ -75800,7 +75800,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T05:38:19.315Z",
+      "updated": "2026-11-15T05:38:24.421Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 38
     },
@@ -217600,6 +217600,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:38:24.421Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#30: proof; was: Tool twins as binaries: every landed #5072 tool twin is recorded with its default jet build size, its function count and its run wall and peak against its original, beside the hand-written reference o"
+    },
+    {
+      "at": "2026-11-15T05:38:23.216Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#29: proof; was: Per-function code size: no Core or generated function carries code its callers cannot reach or expansion a hand-written version would not. Measured by Main on seed-b13, 2026-11-12, default jet build: "
+    },
+    {
+      "at": "2026-11-15T05:38:22.024Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#28: proof; was: Hash reach: a program calling only crypto.sha256 links only SHA-256. Measured by Main on seed-b13, 2026-11-12 ($JET_SCRATCH_ROOT/lanes/Main/bin14/sha): 229,680 B with 183 KB .text, of which __core_cry"
+    },
+    {
+      "at": "2026-11-15T05:38:20.825Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#27: strip debris; proof; was: Web wasm artifact size (#5201): (was #2867) The harness reports artifact_bytes for every web rail. Jet's wasm artifact is no larger than the Rust wasm artifact for the same program. (Re-homed 2026-11-"
+    },
     {
       "at": "2026-11-15T05:38:19.315Z",
       "by": "TowerKeeper-1",
