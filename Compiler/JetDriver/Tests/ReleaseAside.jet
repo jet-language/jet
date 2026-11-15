@@ -58,3 +58,18 @@ release_aside_rows: fn(front: JetDriverLoweringInputsResult) -> [String] {
         if in_place.len() <= 4 + steps || in_place[0] != "complete true internal None held false" -> panic("the fixture did not compile: {in_place:Debug}")
     }
 }
+
+// The lowering inputs' modules hold only what lowering reads: the call, name
+// and copy facts only sema's whole-program passes read are freed before the
+// IR build, while the functions that made them still lower.
+#Test("the lowering inputs hold no sema-only module facts") {
+    front: release_aside_front(false, 0)
+    if front.inputs == .Val(checked) {
+        if checked.modules.len() == 0 || checked.functions.len() == 0 -> panic("the fixture checked no modules")
+        loop graph_module in checked.modules {
+            assert_eq("{graph_module.module_name}: {graph_module.call_facts.len()} {graph_module.name_references.len()} {graph_module.copy_events.len()} {graph_module.comptime_requests.len()} {graph_module.failure_facts.len()}", "{graph_module.module_name}: 0 0 0 0 0")
+        }
+    } else {
+        panic("the fixture did not compile")
+    }
+}

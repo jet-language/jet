@@ -338,6 +338,25 @@ SemaGraphModuleResult: struct {
     core_check_ns: [Int]{[Int]{}}
 }
 
+// Drops the facts of a checked module that only sema's whole-program passes
+// read: its call, name and copy facts, compute and failure facts, comptime
+// sites and registration impl, export and import rows. Past sema a module is
+// read only for its identity, declarations, constants, tests, injected keys
+// and foreign rows, so a driver frees the rest before it copies the module on
+// to the IR build. The nominals stay, with the positions that index them.
+sema_graph_module_release_checked_facts: fn(graph_module: &SemaGraphModuleResult) {
+    graph_module.name_references = [SemaNameReferenceFact]{}
+    graph_module.call_facts = [SemaCallSiteFact]{}
+    graph_module.comptime_requests = [SemaComptimeRequest]{}
+    graph_module.comptime_body_sources = [SemaComptimeBodySource]{}
+    graph_module.compute_facts = [SemaComputeFunctionFacts]{}
+    graph_module.copy_events = [SemaCopyEvent]{}
+    graph_module.failure_facts = [SemaFunctionFailureFacts]{}
+    graph_module.impls = [SemaRegistrationImpl]{}
+    graph_module.exports = [SemaRegistrationExport]{}
+    graph_module.imports = [SemaRegistrationImport]{}
+}
+
 // #3708: what one checked function body propagates: the keys of the declared
 // functions whose failures pass up ("" for a source of its own) and whether a
 // statement or returned value is a direct failure source.
