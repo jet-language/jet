@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6933,
-    "rev": 104900,
+    "rev": 104905,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65848,39 +65848,39 @@
         },
         {
           "n": 2,
-          "text": "`./wc.jet notes.txt`, where wc.jet takes a #CLI struct with a `Path` field, reads notes.txt with no prompt and no flag; reading any other file still prompts (pty test).",
+          "text": "`./wc.jet notes.txt`, where wc.jet takes a #CLI struct with a `Path` field, reads notes.txt with no prompt and no flag, while reading any other file still prompts. Proof: `jet test Compiler --profile cases --filter authority/cli_path_designates_read` (a pty case).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:57:09.798Z"
+          "at": "2026-11-15T04:47:41.410Z"
         },
         {
           "n": 3,
-          "text": "The grant covers exactly the passed path after resolving `..` and symlinks, and only for reading: writing the passed path still prompts (tests for both).",
+          "text": "The grant covers exactly the passed path after resolving `..` and symlinks, and only for reading: writing the passed path still prompts. Proof: `jet test Compiler --profile cases --filter authority/cli_path_designation_exact_`, one case for the resolution and one for the write.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:57:09.798Z"
+          "at": "2026-11-15T04:47:42.308Z"
         },
         {
           "n": 4,
-          "text": "A script that calls `files.temp_dir(prefix)` gets a fresh directory under a per-run root with no prompt, and the root is removed at exit, also after a failure (test).",
+          "text": "A script that calls `files.temp_dir(prefix)` gets a fresh directory under a per-run root with no prompt, and the root is removed at exit, also after a failure. Proof: `jet test Compiler --profile cases --filter authority/private_temp_dir_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:57:09.798Z"
+          "at": "2026-11-15T04:47:43.221Z"
         },
         {
           "n": 5,
-          "text": "`jet run --verbose -A` and the prompt list designated paths as granted by argument; the spec and the #5949 basics list are updated in the same change.",
+          "text": "`jet run --verbose -A` and the prompt list designated paths as granted by argument, and the spec and the #5949 basics list are updated in the same change. Proof: `jet test Compiler --profile cases --filter authority/verbose_lists_designated_paths`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:57:09.798Z"
+          "at": "2026-11-15T04:47:44.110Z"
         }
       ],
       "refs": [
@@ -65898,8 +65898,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:09.798Z",
-      "updated": "2026-11-14T02:25:16.743Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-15T04:47:44.110Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ]
@@ -101281,12 +101281,12 @@
         },
         {
           "n": 13,
-          "text": "#Policy(sentries: .Off) takes effect or is removed: sema builds TStmt.SentryPolicy so a nested #Unsafe { #Policy(sentries: .Off) { mem.list_copy ... } } runs without the R0801 sentry check, with a case that proves it on every tier; or, if the policy should not exist, the spelling, the dead Core/Mem/Mem.jet wrapper and every caller are removed in one cutover. (Found by Speed-3 on 2026-11-14: nothing constructs TStmt.SentryPolicy.)",
+          "text": "#Policy(sentries: .Off) takes effect or is removed: sema builds TStmt.SentryPolicy so a nested #Unsafe { #Policy(sentries: .Off) { mem.list_copy ... } } runs without the R0801 sentry check, with a case that proves it on every tier; or, if the policy should not exist, the spelling, the dead Core/Mem/Mem.jet wrapper and every caller are removed in one cutover. (Found by Speed-3 on 2026-11-14: nothing constructs TStmt.SentryPolicy.) Proof: `jet test Compiler --profile cases --filter memory/sentry_policy_off_skips_r0801` on every tier, or git grep finds no `sentries: .Off` after the removal.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:36:06.586Z"
+          "at": "2026-11-15T04:47:52.685Z"
         },
         {
           "n": 14,
@@ -101306,7 +101306,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T04:47:40.346Z",
+      "updated": "2026-11-15T04:47:52.685Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 14
     },
@@ -215210,6 +215210,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:47:52.685Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0oo8eeq",
+      "note": "#13: proof (live plan card: in-place edit); was: #Policy(sentries: .Off) takes effect or is removed: sema builds TStmt.SentryPolicy so a nested #Unsafe { #Policy(sentries: .Off) { mem.list_copy ... } } runs without the R0801 sentry check, with a cas"
+    },
+    {
+      "at": "2026-11-15T04:47:44.110Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w8kkg9",
+      "note": "#5: proof; was: `jet run --verbose -A` and the prompt list designated paths as granted by argument; the spec and the #5949 basics list are updated in the same change."
+    },
+    {
+      "at": "2026-11-15T04:47:43.221Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w8kkg9",
+      "note": "#4: proof; was: A script that calls `files.temp_dir(prefix)` gets a fresh directory under a per-run root with no prompt, and the root is removed at exit, also after a failure (test)."
+    },
+    {
+      "at": "2026-11-15T04:47:42.308Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w8kkg9",
+      "note": "#3: proof; was: The grant covers exactly the passed path after resolving `..` and symlinks, and only for reading: writing the passed path still prompts (tests for both)."
+    },
+    {
+      "at": "2026-11-15T04:47:41.410Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w8kkg9",
+      "note": "#2: proof; was: `./wc.jet notes.txt`, where wc.jet takes a #CLI struct with a `Path` field, reads notes.txt with no prompt and no flag; reading any other file still prompts (pty test)."
+    },
     {
       "at": "2026-11-15T04:47:40.347Z",
       "by": "TowerKeeper-1",
