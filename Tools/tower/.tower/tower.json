@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6844,
-    "rev": 102627,
+    "rev": 102636,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23,7 +23,6 @@
         "radar:e12",
         "radar:e5",
         "radar:e4",
-        "board-ideas",
         "radar:e10",
         "radar:e13",
         "radar:e9",
@@ -32,10 +31,11 @@
         "radar:e16",
         "radar:e17",
         "radar:e14",
-        "radar:e11"
+        "radar:e11",
+        "radar-sq"
       ]
     },
-    "completionCursor": "2026-11-15T01:17:55.455Z"
+    "completionCursor": "2026-11-15T01:20:02.401Z"
   },
   "epochs": [
     {
@@ -42761,7 +42761,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "After ratification: add the ratified debt declaration, express #MustUse, #SingleUse, and task join as instances, unify the diagnostic sentence, and make `.drop(\"reason\")` the single abandon gate per the ratified option.",
       "checkSteps": null,
@@ -42823,8 +42823,9 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): tower.json: D-OWES1 status=ratified outcome=A ratifiedAt=2026-10-02 (card #4139)",
-          "at": "2026-10-31T14:23:53.850Z"
+          "evidence": "D-OWES1 ratified A on 2026-10-02 on Tower.",
+          "at": "2026-11-15T01:18:42.932Z",
+          "closure": "decision"
         },
         {
           "n": 2,
@@ -42850,8 +42851,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: w12 (14:08 jet). tests/cases/gate_law/lint_gate_keeps_the_source_reason.case PASS in cases-w12-base (pins $.gates.entries[?kind=\"lint_allow\"][0] detail=unit_scalar_rewrap, source, location 1:12, span 11-63, reason, status). Suppression probe: `jet check p/sup4139a.jet` (process.argv().skip(1)) -> \"Warning [L0515] (process_args_view)\" at 4:26 [exit 0]; p/sup4139b.jet, the same line under #allow(process_args_view, \"argv view kept on purpose\"), -> \"ok: `sup4139b.jet` has no problems\" [exit 0]; both run and print n=0. `jet inspect gates sup4139b.jet` -> \"lint_allow: 1 / sup4139b.jet:4:5 #allow process_args_view status=recorded reason=argv view kept on purpose\". The gate ledger is the Jet `jet inspect gates`; gate_law/allow_reason_cannot_suppress_itself also PASS",
-          "at": "2026-10-31T21:20:16.812Z"
+          "evidence": "dev e6097d14bb added tests/cases/gate_law/lint_gate_keeps_the_source_reason.case, which pins every #allow(lint) site in jet inspect gates (lint name, span, source, reason, status) and PASSes; suppression behaviour unchanged (L0515 still reported at its site).",
+          "at": "2026-11-15T01:18:44.392Z"
         }
       ],
       "refs": [
@@ -42865,12 +42866,13 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-01T12:23:21.776Z",
-      "updated": "2026-11-15T01:18:22.753Z",
+      "updated": "2026-11-15T01:18:46.473Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 5
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-15T01:18:46.472Z"
     },
     {
       "id": "c0qc1icb",
@@ -93613,6 +93615,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "Main 2026-11-14: precompiled Core slice 0 is GO. Gate-p136 (built from dev c76cea49dd), the core-bound-counters measurement, median of 3 cold runs: Summarize 750 ms cold, with bound Core bodies 131 ms = 17.5%; RunColdContext 2280 ms cold, with bound and behind bodies 1484 ms = 65.1%; hello 30 ms, no Core demand. Both are over the 15% stop line, so PrecompiledCore-4 builds slice (a): per-key facts from the jet_core.o sema run, a refusal on mismatch, and Core demand stopping at bound keys. Removing the record (5ec0838a3f) already took a dev compiler build from 2:18 (p134) to 1:02 (p136)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Main 2026-11-14: c13 (6 E1012 rows in Core/Encoding) is blocked on ballot D-BYTE-TRAITS2. The codec writers (Stream json/jsonl, CborStream, Cbor, Json, Jsonl, Xml; Csv has the same shape) call rt.write_bytes/write_text/flush on FileWriter. Moving them to the Prelude Writer per c11 would drop flush, which D-BYTE-TRAITS2 adds. Census disposition: selfcheck-core's E1012 rows predate the check that reports them (c10, 58bb6aa526) and are tracked here; they don't hold back stack landings."
         },
         {
@@ -93842,7 +93849,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-15T00:04:07.134Z",
+      "updated": "2026-11-15T01:20:10.125Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -205677,6 +205684,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T01:20:10.125Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T01:20:02.401Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-15T01:20:02.401Z"
+    },
+    {
+      "at": "2026-11-15T01:18:46.473Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0kz2hdf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T01:18:44.392Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0kz2hdf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T01:18:42.932Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0kz2hdf",
+      "note": "#1"
+    },
     {
       "at": "2026-11-15T01:18:28.766Z",
       "by": "Main",
