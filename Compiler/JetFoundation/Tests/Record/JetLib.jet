@@ -156,11 +156,12 @@ jetlib_test_artifact: fn(payload: [U8]) -> JetLibArtifact Never! from payload {
 }
 #Test("jetlib scalar access tags and C symbols") {
     scalars: [JetLibScalar]{JetLibScalar.Int, JetLibScalar.Float, JetLibScalar.Bool, JetLibScalar.Text}
-    loop value in scalars -> assert_eq(JetLibScalar.from_tag(value.tag()) ?? panic("scalar"), value)
+    loop value in scalars -> assert_eq(JetLibScalar.from_int(value.to_int()) ?? panic("scalar"), value)
     accesses: [JetLibAccess]{JetLibAccess.Read, JetLibAccess.Write, JetLibAccess.Move}
-    loop value in accesses -> assert_eq(JetLibAccess.from_tag(value.tag()) ?? panic("access"), value)
-    assert(JetLibScalar.from_tag(4) == .Err(_))
-    assert(JetLibAccess.from_tag(3) == .Err(_))
+    loop value in accesses -> assert_eq(JetLibAccess.from_int(value.to_int()) ?? panic("access"), value)
+    assert(JetLibScalar.from_int(4) == .Err(_))
+    assert(JetLibAccess.from_int(3) == .Err(_))
+    assert(JetLibScalar.from_int(256) == .Err(_))
     assert_eq(JetLibExport.new("9é.foo", JetLibScalar.Int, 0).symbol, "_9__foo")
     assert_eq(JetLibExport.new("", JetLibScalar.Int, 0).symbol, "_")
 }

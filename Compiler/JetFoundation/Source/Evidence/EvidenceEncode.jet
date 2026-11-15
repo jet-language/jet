@@ -61,10 +61,10 @@ evidence_encode_record_body: fn(record: EvidenceRecord, out: &[U8]) EvidenceCode
         .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
         .Ok(_) -> {}
     }
-    out.push(U8{evidence_kind_code(record.kind)})
-    out.push(U8{evidence_producer_code(record.producer)})
-    out.push(U8{evidence_facet_code(record.facet)})
-    out.push(U8{evidence_outcome_code(record.outcome).bit_or((evidence_expectation_code(record.expectation) * 128))})
+    out.push(U8{record.kind.to_int()})
+    out.push(U8{record.producer.to_int()})
+    out.push(U8{record.facet.to_int()})
+    out.push(U8{record.outcome.to_int().bit_or((evidence_expectation_code(record.expectation) * 128))})
     out.push(U8{evidence_completeness_code(record.completeness)})
     evidence_put_number(out, record.count, 8)
     evidence_put_number(out, U64{Int{record.source.line}}, 4)
@@ -147,7 +147,7 @@ evidence_encode_derivation: fn(value: DerivationRecord, out: &[U8]) EvidenceCode
     evidence_put_string(out, value.subject)
     evidence_put_string(out, value.claim)
     evidence_put_string(out, value.producer)
-    out.push(U8{evidence_derivation_method_code(value.method)})
+    out.push(U8{value.method.to_int()})
     evidence_put_string(out, value.rule)
     evidence_put_len(out, value.premises.len())
     loop premise in value.premises -> evidence_put_string(out, premise)
@@ -157,7 +157,7 @@ evidence_encode_derivation: fn(value: DerivationRecord, out: &[U8]) EvidenceCode
     evidence_put_string(out, value.identity.target)
     evidence_put_len(out, value.assumptions.len())
     loop assumption in value.assumptions -> evidence_put_string(out, assumption)
-    out.push(U8{evidence_derivation_disposition_code(value.disposition)})
+    out.push(U8{value.disposition.to_int()})
     if value.observation == {
         .None -> { out.push(U8{0}) }
         .Val(observation) -> {

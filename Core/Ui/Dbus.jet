@@ -103,12 +103,13 @@ DbusValue: enum {
     Entry(key: DbusValue, value: DbusValue)
 }
 
-// The four message types.
+// The four message types, numbered as the header's type byte.
+#[Specified, Layout(U8)]
 DbusKind: enum {
-    Call
-    Return
-    Error
-    Signal
+    Call = 1
+    Return = 2
+    Error = 3
+    Signal = 4
 }
 
 // One message. Empty strings and a zero reply serial are header fields
@@ -385,7 +386,7 @@ encode: fn(message: DbusMessage, serial: Int) -> [U8] DbusError! {
     if message.destination != "" -> fields.push(header_field(6, DbusValue.Text(message.destination.copy())))
     if message.sender != "" -> fields.push(header_field(7, DbusValue.Text(message.sender.copy())))
     if signature != "" -> fields.push(header_field(8, DbusValue.Signature(signature)))
-    out := [U8]{U8{108}, U8{kind_code(message.kind)}, U8{message.flags.bit_and(255)}, U8{1}}
+    out := [U8]{U8{108}, U8{message.kind.to_int()}, U8{message.flags.bit_and(255)}, U8{1}}
     put_word(out, body.len(), 4)
     put_word(out, serial, 4)
     marshal(out, DbusValue.Array{signature: "(yv)", items: fields})
@@ -397,15 +398,6 @@ encode: fn(message: DbusMessage, serial: Int) -> [U8] DbusError! {
 
 header_field: fn(code: Int, value: DbusValue) -> DbusValue {
     DbusValue.Struct([DbusValue]{DbusValue.Byte(code), DbusValue.Variant(value)})
-}
-
-kind_code: fn(kind: DbusKind) -> Int {
-    if kind == {
-        .Call -> 1
-        .Return -> 2
-        .Error -> 3
-        .Signal -> 4
-    }
 }
 
 // The signature of one value.
@@ -551,14 +543,7 @@ decode: fn(bytes: [U8]) -> Decoded DbusError! {
         at = type_end(sig, at, 0, 0)
     }
     if r.at != total -> return Err(DbusError.Protocol("a body is {total - r.at} bytes longer than its signature {m.signature}"))
-    code: Int{bytes[1]}
-    if code < 1 || code > 4 -> return Ok(Decoded{used: total, message: None})
-    m.kind = if code == {
-        1 -> DbusKind.Call
-        2 -> DbusKind.Return
-        3 -> DbusKind.Error
-        else -> DbusKind.Signal
-    }
+    m.kind = DbusKind.from_int(Int{bytes[1]}) ?? return Ok(Decoded{used: total, message: None})
     missing: required_field(m)
     if missing != "" -> return Err(DbusError.Protocol("{kind_name(m.kind)} has no {missing}"))
     Ok(Decoded{used: total, message: Val(m)})

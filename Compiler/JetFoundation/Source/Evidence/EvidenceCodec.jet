@@ -84,7 +84,8 @@ evidence_decode_derivation: fn(cursor: &EvidenceCursor) -> DerivationRecord Evid
     subject: evidence_get_string(cursor)
     claim: evidence_get_string(cursor)
     producer: evidence_get_string(cursor)
-    method: evidence_derivation_method_from_code(evidence_get_byte(cursor))
+    method_code: evidence_get_byte(cursor)
+    method: DerivationMethod.from_int(method_code) ?? return Err(evidence_codec_error("unknown derivation method {method_code}"))
     rule: evidence_get_string(cursor)
     premises := [String]{}
     premise_count: evidence_get_len(cursor)
@@ -96,7 +97,8 @@ evidence_decode_derivation: fn(cursor: &EvidenceCursor) -> DerivationRecord Evid
     assumptions := [String]{}
     assumption_count: evidence_get_len(cursor)
     loop _ in 0..<assumption_count -> assumptions.push(evidence_get_string(cursor))
-    disposition: evidence_derivation_disposition_from_code(evidence_get_byte(cursor))
+    disposition_code: evidence_get_byte(cursor)
+    disposition: DerivationDisposition.from_int(disposition_code) ?? return Err(evidence_codec_error("unknown derivation disposition {disposition_code}"))
     observation_marker: evidence_get_byte(cursor)
     observation: if observation_marker == {
         0 -> None
@@ -143,11 +145,11 @@ evidence_decode_record: fn(cursor: &EvidenceCursor) -> EvidenceDecodedRecord Evi
     if completeness > 2 {
         return Err(evidence_codec_error("unknown evidence completeness {completeness}"))
     }
-    kind: evidence_kind_from_code(kind_code) ?? return Err(evidence_codec_error("unknown evidence kind {kind_code}"))
-    producer: evidence_producer_from_code(producer_code) ?? return Err(evidence_codec_error("unknown evidence producer {producer_code}"))
-    facet: evidence_facet_from_code(facet_code) ?? return Err(evidence_codec_error("unknown evidence facet {facet_code}"))
+    kind: EvidenceKind.from_int(kind_code) ?? return Err(evidence_codec_error("unknown evidence kind {kind_code}"))
+    producer: EvidenceProducerKind.from_int(producer_code) ?? return Err(evidence_codec_error("unknown evidence producer {producer_code}"))
+    facet: EvidenceFacet.from_int(facet_code) ?? return Err(evidence_codec_error("unknown evidence facet {facet_code}"))
     outcome_code: encoded_outcome.bit_and(127)
-    outcome: evidence_outcome_from_code(outcome_code) ?? return Err(evidence_codec_error("unknown evidence outcome {outcome_code}"))
+    outcome: EvidenceOutcome.from_int(outcome_code) ?? return Err(evidence_codec_error("unknown evidence outcome {outcome_code}"))
     expectation: if (encoded_outcome.bit_and(128)) != 0 -> EvidenceExpectation.ExpectedFailure else -> EvidenceExpectation.Ordinary
     if evidence_expectation_validate(expectation, outcome) == {
         .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))

@@ -17,7 +17,7 @@ use {
         EVIDENCE_REVISION_ENV, EVIDENCE_SOURCE_REVISION_ENV, EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV,
         DIAGNOSTIC_ERROR, canonical_json_bytes, canonical_json_value, derivation_identity, derivation_record,
         derivation_record_json, diagnostic_column_at, diagnostic_from_registry, diagnostic_line_at,
-        diagnostic_more_line, diagnostic_registry_row, diagnostic_render_all, diagnostic_stop_line, evidence_kind_code, evidence_outcome_is_incomplete,
+        diagnostic_more_line, diagnostic_registry_row, diagnostic_render_all, diagnostic_stop_line, evidence_outcome_is_incomplete,
         evidence_outcome_test_state, evidence_report_encode, evidence_report_read, expr_span, foundation_json_quote,
     ]
     jet_parser.[parse_source]
@@ -882,7 +882,7 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
     }
     loop record in records {
         if record.kind == EvidenceKind.Runtime || record.kind == EvidenceKind.Contract -> next
-        kind: evidence_kind_code(record.kind)
+        kind: record.kind.to_int()
         known: evidence_outcome_test_state(record.outcome)
         state := if evidence_outcome_is_incomplete(record.outcome) -> 3 else -> 0
         if known == .Val(found) -> state = found

@@ -50,31 +50,14 @@ HangarArchiveReport: struct {
     }
 }
 
-// The kind of one archived output node, with its one-byte wire tag.
+// The kind of one archived output node. Each case number is its one-byte
+// wire tag.
+#[Specified, Layout(U8)]
 HangarArchiveNodeKind: enum {
-    Directory
-    File
-    Symlink
-    Hardlink
-
-    wire_tag: fn(self) -> Int Never! {
-        if self == {
-            .Directory -> 0
-            .File -> 1
-            .Symlink -> 2
-            .Hardlink -> 3
-        }
-    }
-
-    from_wire_tag: fn(code: Int) -> HangarArchiveNodeKind? Never! {
-        if code == {
-            0 -> Val(HangarArchiveNodeKind.Directory)
-            1 -> Val(HangarArchiveNodeKind.File)
-            2 -> Val(HangarArchiveNodeKind.Symlink)
-            3 -> Val(HangarArchiveNodeKind.Hardlink)
-            else -> None
-        }
-    }
+    Directory = 0
+    File = 1
+    Symlink = 2
+    Hardlink = 3
 }
 
 // One node of an archived output tree. `bytes` holds file contents or the
@@ -88,7 +71,7 @@ HangarArchiveNode: struct {
     // The node's wire bytes, shared by the archive body and the canonical
     // Nix object bytes.
     encode_into: fn(self, out: &[U8]) StoreError! {
-        out.push(U8{self.kind.wire_tag()})
+        out.push(U8{self.kind.to_int()})
         store_archive_put_string(out, self.path)
         store_archive_put_raw_u32(out, self.mode)
         store_archive_put_u64(out, self.bytes.len())
@@ -275,7 +258,7 @@ HangarArchive: struct {
                 mode: reader.u32()
                 size: reader.u64()
                 if size < 0 || size > STORE_ARCHIVE_MAX_NODE_BYTES -> return Err(StoreError.InvalidData("archive node exceeds the 512 MiB limit"))
-                kind: HangarArchiveNodeKind.from_wire_tag(kind_code) ?? return Err(StoreError.InvalidData("archive contains an unknown node kind"))
+                kind: HangarArchiveNodeKind.from_int(kind_code) ?? return Err(StoreError.InvalidData("archive contains an unknown node kind"))
                 payload: if kind == {
                     .Directory -> {
                         if size != 0 -> return Err(StoreError.InvalidData("archive directory node has a payload"))

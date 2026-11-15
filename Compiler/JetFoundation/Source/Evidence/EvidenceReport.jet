@@ -49,52 +49,12 @@ EvidenceCodecError: struct {
     message: String
 }
 
-evidence_producer_code: fn(value: EvidenceProducerKind) -> Int Never! {
-    if value == {
-        .Test -> 0
-        .Prove -> 1
-        .Compile -> 2
-        .Runtime -> 3
-    }
-}
-
-evidence_producer_from_code: fn(code: Int) -> EvidenceProducerKind? Never! {
-    if code == {
-        0 -> Val(EvidenceProducerKind.Test)
-        1 -> Val(EvidenceProducerKind.Prove)
-        2 -> Val(EvidenceProducerKind.Compile)
-        3 -> Val(EvidenceProducerKind.Runtime)
-        else -> None
-    }
-}
-
 evidence_producer_name: fn(value: EvidenceProducerKind) -> String Never! {
     if value == {
         .Test -> "jet-test"
         .Prove -> "jet-prove"
         .Compile -> "jet-compile"
         .Runtime -> "jet-runtime"
-    }
-}
-
-evidence_kind_code: fn(value: EvidenceKind) -> Int Never! {
-    if value == {
-        .Unit -> 0
-        .Contract -> 1
-        .Runtime -> 2
-        .Property -> 3
-        .Doctest -> 4
-    }
-}
-
-evidence_kind_from_code: fn(code: Int) -> EvidenceKind? Never! {
-    if code == {
-        0 -> Val(EvidenceKind.Unit)
-        1 -> Val(EvidenceKind.Contract)
-        2 -> Val(EvidenceKind.Runtime)
-        3 -> Val(EvidenceKind.Property)
-        4 -> Val(EvidenceKind.Doctest)
-        else -> None
     }
 }
 
@@ -105,35 +65,6 @@ evidence_kind_name: fn(value: EvidenceKind) -> String Never! {
         .Runtime -> "runtime"
         .Property -> "property"
         .Doctest -> "doctest"
-    }
-}
-
-evidence_facet_code: fn(value: EvidenceFacet) -> Int Never! {
-    if value == {
-        .All -> 0
-        .Refinements -> 1
-        .Effects -> 2
-        .Taint -> 3
-        .Contracts -> 4
-        .Tests -> 5
-        .Budgets -> 6
-        .Replay -> 7
-        .Solver -> 8
-    }
-}
-
-evidence_facet_from_code: fn(code: Int) -> EvidenceFacet? Never! {
-    if code == {
-        0 -> Val(EvidenceFacet.All)
-        1 -> Val(EvidenceFacet.Refinements)
-        2 -> Val(EvidenceFacet.Effects)
-        3 -> Val(EvidenceFacet.Taint)
-        4 -> Val(EvidenceFacet.Contracts)
-        5 -> Val(EvidenceFacet.Tests)
-        6 -> Val(EvidenceFacet.Budgets)
-        7 -> Val(EvidenceFacet.Replay)
-        8 -> Val(EvidenceFacet.Solver)
-        else -> None
     }
 }
 
@@ -153,39 +84,6 @@ evidence_facet_name: fn(value: EvidenceFacet) -> String Never! {
 
 evidence_facet_for_kind: fn(kind: EvidenceKind) -> EvidenceFacet Never! {
     if kind == EvidenceKind.Contract -> EvidenceFacet.Contracts else -> EvidenceFacet.Tests
-}
-
-evidence_outcome_code: fn(value: EvidenceOutcome) -> Int Never! {
-    if value == {
-        .Proved -> 0
-        .Generated -> 1
-        .Passed -> 2
-        .Failed -> 3
-        .Checked -> 4
-        .Unchecked -> 5
-        .Unavailable -> 6
-        .Incomplete -> 7
-        .NotObserved -> 8
-        .Skipped -> 9
-        .Error -> 10
-    }
-}
-
-evidence_outcome_from_code: fn(code: Int) -> EvidenceOutcome? Never! {
-    if code == {
-        0 -> Val(EvidenceOutcome.Proved)
-        1 -> Val(EvidenceOutcome.Generated)
-        2 -> Val(EvidenceOutcome.Passed)
-        3 -> Val(EvidenceOutcome.Failed)
-        4 -> Val(EvidenceOutcome.Checked)
-        5 -> Val(EvidenceOutcome.Unchecked)
-        6 -> Val(EvidenceOutcome.Unavailable)
-        7 -> Val(EvidenceOutcome.Incomplete)
-        8 -> Val(EvidenceOutcome.NotObserved)
-        9 -> Val(EvidenceOutcome.Skipped)
-        10 -> Val(EvidenceOutcome.Error)
-        else -> None
-    }
 }
 
 evidence_outcome_from_test_state: fn(state: Int) -> EvidenceOutcome? Never! {
@@ -457,11 +355,11 @@ evidence_source_order: fn(left: EvidenceSource, right: EvidenceSource) -> Orderi
 evidence_record_order: fn(left: EvidenceRecord, right: EvidenceRecord) -> Ordering Never! {
     source: evidence_source_order(left.source, right.source)
     if source != Ordering.Equal -> return source
-    producer: evidence_producer_code(left.producer) <=> evidence_producer_code(right.producer)
+    producer: left.producer.to_int() <=> right.producer.to_int()
     if producer != Ordering.Equal -> return producer
-    kind: evidence_kind_code(left.kind) <=> evidence_kind_code(right.kind)
+    kind: left.kind.to_int() <=> right.kind.to_int()
     if kind != Ordering.Equal -> return kind
-    facet: evidence_facet_code(left.facet) <=> evidence_facet_code(right.facet)
+    facet: left.facet.to_int() <=> right.facet.to_int()
     if facet != Ordering.Equal -> return facet
     left.identity.evidence_id <=> right.identity.evidence_id
 }
@@ -469,9 +367,9 @@ evidence_record_order: fn(left: EvidenceRecord, right: EvidenceRecord) -> Orderi
 evidence_projection_order: fn(left: EvidenceProjection, right: EvidenceProjection) -> Ordering Never! {
     source: evidence_source_order(left.source, right.source)
     if source != Ordering.Equal -> return source
-    producer: evidence_producer_code(left.producer) <=> evidence_producer_code(right.producer)
+    producer: left.producer.to_int() <=> right.producer.to_int()
     if producer != Ordering.Equal -> return producer
-    facet: evidence_facet_code(left.facet) <=> evidence_facet_code(right.facet)
+    facet: left.facet.to_int() <=> right.facet.to_int()
     if facet != Ordering.Equal -> return facet
     left.evidence_id <=> right.evidence_id
 }
@@ -514,7 +412,7 @@ evidence_sorted_record_indices: fn(report: EvidenceReport) -> [Int] Never! {
 // record_from_test_codes, with the host's environment-derived provenance
 // supplied explicitly. Encoding/inspection needs no Core.files.
 evidence_record_from_test_codes: fn(kind_code: Int, state: Int, name: String, message: String, file: String, line: U32, report_id: String, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceRecord EvidenceCodecError! {
-    kind: evidence_kind_from_code(kind_code) ?? return Err(evidence_codec_error("unknown evidence kind {kind_code}"))
+    kind: EvidenceKind.from_int(kind_code) ?? return Err(evidence_codec_error("unknown evidence kind {kind_code}"))
     outcome: if kind == EvidenceKind.Property && state == 0 -> EvidenceOutcome.Generated else -> evidence_outcome_from_test_state(state) ?? return Err(evidence_codec_error("unknown evidence state {state}"))
     source: EvidenceSource{path: file, line: if kind == EvidenceKind.Property -> U32{0} else -> line, column: U32{1}}
     count: if kind == EvidenceKind.Property -> (U64{Int{line}}) else -> (U64{1})

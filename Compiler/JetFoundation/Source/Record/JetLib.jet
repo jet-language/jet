@@ -31,56 +31,24 @@ JetLibParseFailure: struct {
     field: String
 }
 
-// The one scalar vocabulary admits for native Library rows.
+// The one scalar vocabulary admits for native Library rows. Each case number
+// is the byte a .jetlib header stores for it.
+#[Specified, Layout(U8)]
 JetLibScalar: enum {
-    Int
-    Float
-    Bool
-    Text
-
-    tag: fn(self) -> Int Never! {
-        if self == {
-            .Int -> 0
-            .Float -> 1
-            .Bool -> 2
-            .Text -> 3
-        }
-    }
-
-    from_tag: fn(code: Int) -> JetLibScalar Err! {
-        if code == {
-            0 -> Ok(JetLibScalar.Int)
-            1 -> Ok(JetLibScalar.Float)
-            2 -> Ok(JetLibScalar.Bool)
-            3 -> Ok(JetLibScalar.Text)
-            else -> Err("unknown .jetlib scalar tag {code}")
-        }
-    }
+    Int = 0
+    Float = 1
+    Bool = 2
+    Text = 3
 }
 
 // The access convention carried with each native parameter: the C scalar
 // representation stays homogeneous while the Jet ownership contract survives.
+// Each case number is the byte a .jetlib header stores for it.
+#[Specified, Layout(U8)]
 JetLibAccess: enum {
-    Read
-    Write
-    Move
-
-    tag: fn(self) -> Int Never! {
-        if self == {
-            .Read -> 0
-            .Write -> 1
-            .Move -> 2
-        }
-    }
-
-    from_tag: fn(code: Int) -> JetLibAccess Err! {
-        if code == {
-            0 -> Ok(JetLibAccess.Read)
-            1 -> Ok(JetLibAccess.Write)
-            2 -> Ok(JetLibAccess.Move)
-            else -> Err("unknown .jetlib access-convention tag {code}")
-        }
-    }
+    Read = 0
+    Write = 1
+    Move = 2
 }
 
 // One exact C ABI row: `symbol` is the emitted foreign name; access
@@ -194,9 +162,9 @@ JetLibStamp: struct {
         loop export in self.exports {
             out.push_text(export.name)
             out.push_text(export.symbol)
-            out.bytes.push(U8{export.scalar.tag()})
+            out.bytes.push(U8{export.scalar.to_int()})
             out.push_u32(Int{export.params})
-            loop convention in export.conventions -> out.bytes.push(U8{convention.tag()})
+            loop convention in export.conventions -> out.bytes.push(U8{convention.to_int()})
         }
         effects: jetlib_effects_canonical(self.declared_effects)
         out.push_u32(effects.len().bit_and(4294967295))
@@ -241,13 +209,13 @@ JetLibStamp: struct {
             name: reader.take_string("export name") ?? return Err(err)
             symbol: reader.take_string("export symbol") ?? return Err(err)
             scalar_code: reader.take_byte() ?? return Err("truncated .jetlib header (export scalar)")
-            scalar: JetLibScalar.from_tag(scalar_code) ?? return Err(err)
+            scalar: JetLibScalar.from_int(scalar_code) ?? return Err("unknown .jetlib scalar tag {scalar_code}")
             params: reader.take_u32("export parameter count") ?? return Err(err)
             if params > JETLIB_MAX_EXPORT_PARAMS -> return Err(".jetlib export has too many parameters")
             conventions := [JetLibAccess]{}
             loop _ in 0..<params {
                 convention: reader.take_byte() ?? return Err("truncated .jetlib header (access convention)")
-                conventions.push(JetLibAccess.from_tag(convention) ?? return Err(err))
+                conventions.push(JetLibAccess.from_int(convention) ?? return Err("unknown .jetlib access-convention tag {convention}"))
             }
             exports.push(JetLibExport{name: name, symbol: symbol, scalar: scalar, params: U32{params}, conventions: conventions})
         }

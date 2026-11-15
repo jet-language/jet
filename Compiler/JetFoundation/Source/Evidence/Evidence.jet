@@ -1,13 +1,52 @@
 // Canonical typed evidence: the record shape and its outcome/expectation law.
 // Evidence never implies a stronger claim than the producer actually observed.
+// Each case number is the byte the evidence codec writes for it, and the
+// generated `to_int` and `from_int` are its encoder and decoder.
 
-EvidenceProducerKind: enum { Test Prove Compile Runtime }
+#[Specified, Layout(U8)]
+EvidenceProducerKind: enum {
+    Test = 0
+    Prove = 1
+    Compile = 2
+    Runtime = 3
+}
 
-EvidenceKind: enum { Unit Contract Runtime Property Doctest }
+#[Specified, Layout(U8)]
+EvidenceKind: enum {
+    Unit = 0
+    Contract = 1
+    Runtime = 2
+    Property = 3
+    Doctest = 4
+}
 
-EvidenceFacet: enum { All Refinements Effects Taint Contracts Tests Budgets Replay Solver }
+#[Specified, Layout(U8)]
+EvidenceFacet: enum {
+    All = 0
+    Refinements = 1
+    Effects = 2
+    Taint = 3
+    Contracts = 4
+    Tests = 5
+    Budgets = 6
+    Replay = 7
+    Solver = 8
+}
 
-EvidenceOutcome: enum { Proved Generated Passed Failed Checked Unchecked Unavailable Incomplete NotObserved Skipped Error }
+#[Specified, Layout(U8)]
+EvidenceOutcome: enum {
+    Proved = 0
+    Generated = 1
+    Passed = 2
+    Failed = 3
+    Checked = 4
+    Unchecked = 5
+    Unavailable = 6
+    Incomplete = 7
+    NotObserved = 8
+    Skipped = 9
+    Error = 10
+}
 
 EvidenceExpectation: enum { Ordinary ExpectedFailure }
 
