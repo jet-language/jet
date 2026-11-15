@@ -14,9 +14,9 @@ step: jet run --trace main.jet
 exit: 0
 stdout: = "17 18\n"
 stderr: count "> comptime.check x (main.jet)" = 1 # `x` does not wait on `base`
-stderr: count "> comptime.closure x (main.jet)" = 1
+stderr: count "> comptime.closure x (main.jet)" = 1 # its closure is checked once
 stderr: count "> comptime.check z (main.jet)" = 1 # `z` does not land the batch early
-stderr: count "> comptime.closure z (main.jet)" = 1
+stderr: count "> comptime.closure z (main.jet)" = 1 # its closure is checked once
 stderr: ~ "comptime.build x, base, z (main.jet)" # one program for the three
-stderr: ~ "# comptime.programs_built = 1\n"
+stderr: ~ "# comptime.programs_built = 1\n" # the batch lands once
 stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's
