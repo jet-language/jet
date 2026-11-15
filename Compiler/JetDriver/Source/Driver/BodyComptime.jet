@@ -28,6 +28,7 @@ use {
         SemaRegistrationGraph,
         sema_comptime_body_item_source,
         sema_comptime_function_diagnostics,
+        sema_comptime_local_values_ahead,
         sema_comptime_graph_apply_values,
         SemaGraphTrail,
         sema_graph_trail_init,
@@ -94,9 +95,10 @@ jet_driver_comptime_body_failure: fn(
     result
 }
 
-jet_driver_comptime_trace_append: fn(target: &JetDriverCompileTrace, addition: JetDriverCompileTrace) Never! {
-    loop text in addition.stdout -> target.stdout.push(text.copy())
-    loop text in addition.stderr -> target.stderr.push(text.copy())
+// Moves the text of `addition` onto `target`.
+jet_driver_comptime_trace_append: fn(target: &JetDriverCompileTrace, addition: &JetDriverCompileTrace) Never! {
+    target.stdout.extend(addition.stdout.move())
+    target.stderr.extend(addition.stderr.move())
     if addition.exit_code != None -> target.exit_code = addition.exit_code
     target.soft_stop = target.soft_stop || addition.soft_stop
 }
@@ -709,10 +711,36 @@ jet_driver_land_local_values: fn(
             tried[site] = true
         }
         if again -> break
+        // The sites whose values the comptime phase computed ahead land
+        // those (sema_comptime_local_values_ahead); a run computes the rest,
+        // and none runs when no site is left.
+        ahead := sema_comptime_local_values_ahead(values, pending)
         body_sources := [SemaComptimeItemSource]{}
+        run_sources := [SemaComptimeItemSource]{}
         known := [String:Bool]{}
-        loop source in pending -> jet_driver_comptime_body_source_add(body_sources, known, source)
+        loop index in 0..<pending.len() {
+            added: body_sources.len()
+            jet_driver_comptime_body_source_add(body_sources, known, pending[index])
+            if body_sources.len() > added && !ahead.covered[index] {
+                run_sources.push(sema_comptime_body_item_source(pending[index]))
+            }
+        }
         if !jet_driver_local_sources_only(body_sources) -> break
+        if run_sources.len() == 0 {
+            jet_driver_trace_step_begin(request.trace_sink, "comptime.land.splice")
+            // copy: the splice checks the owners with the values before the
+            // pass and with these.
+            landed_values := values.copy()
+            landed_values.extend(ahead.values.move())
+            trail := sema_graph_trail_init()
+            splice := sema_local_value_land(registration, trail, bodies.modules, into, body_sources, values, functions, landed_values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies.carried)
+            registration = splice.graph.move()
+            jet_driver_trace_step_end(request.trace_sink, "comptime.land.splice", body_sources.len())
+            sema_graph_trail_undo(registration, trail)
+            if !splice.spliced -> break
+            values = landed_values.move()
+            next
+        }
         run_diagnostics := [Diagnostic]{}
         // The run's checks record the codecs and derived methods they reach
         // into the graph's demand, which the Core demand after an
@@ -731,7 +759,7 @@ jet_driver_land_local_values: fn(
             registration,
             [SemaGraphModuleResult]{},
             graph_facts,
-            body_sources,
+            run_sources,
             values,
             functions,
             request,
@@ -751,6 +779,7 @@ jet_driver_land_local_values: fn(
             sema_graph_trail_undo(registration, run.trail)
             break
         }
+        run.values.extend(ahead.values.move())
         jet_driver_trace_step_begin(request.trace_sink, "comptime.land.splice")
         splice := sema_local_value_land(registration, run.trail, bodies.modules, into, body_sources, values, functions, run.values, run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies.carried)
         registration = splice.graph.move()

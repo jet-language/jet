@@ -1,0 +1,140 @@
+// Assemble with the Compiler source unit. A local value whose initializer
+// names none of its function's parameters or locals is computed ahead, in
+// the comptime run of the module's items (JetSema Comptime/LocalValues.jet):
+// its landing builds no program of its own, and under recheck_verify the
+// landed result is the full recheck's.
+use {
+    ahead_files: core.files
+    ahead_sys: core.sys
+    ahead_process: core.process
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        JetDriverCoreSource,
+        jet_driver_has_errors,
+        jet_driver_lowering_inputs,
+    ]
+    jet_cli.[jet_cli_driver_request, jet_cli_native_session_at]
+    jet_foundation.[CompilerTraceSink]
+    jet_sema.[SchemaSnapshot]
+}
+
+// A trace sink that appends each span's open and close, each counter and
+// each progress report to `path`, one line each.
+AheadTrace: struct {
+    path: String
+
+    impl CompilerTraceSink {
+        begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS, Time]> {
+            ahead_files.append_all(self.path, "> {name} {detail} ({index}/{total})\n") ?? panic("cannot write the trace: {err}")
+        }
+
+        begin_item: fn(self, name: String, file: String, item: String) Never! -[FS, Time]> {
+            ahead_files.append_all(self.path, "> {name} {item} ({file})\n") ?? panic("cannot write the trace: {err}")
+        }
+
+        end: fn(self, name: String, items: Int) Never! -[FS, Time]> {
+            ahead_files.append_all(self.path, "< {name} items={items}\n") ?? panic("cannot write the trace: {err}")
+        }
+
+        progress: fn(self, name: String, done: Int, total: Int) Never! -[FS, Time]> {
+            line: if name.starts_with("counters.") -> "{name} = {done}\n" else -> "~ {name} {done}/{total}\n"
+            ahead_files.append_all(self.path, line) ?? panic("cannot write the trace: {err}")
+        }
+
+        functions: fn(self) -[]> Bool Never! { false }
+
+        cpu_ns: fn(self) -[Time]> Int Never! { 0 }
+    }
+}
+
+ahead_sink: fn(trace: &&AheadTrace) -> CompilerTraceSink Never! { trace.move() }
+
+// The compiler under test, never this test binary, owns the runtime pack
+// the local values run on.
+ahead_runtime_dir: fn() -> String {
+    jet: ahead_sys.get("JET") ?? (ahead_process.which("jet") ?? panic("set JET to the compiler under test"))
+    parts := jet.split("/").to_list()
+    _ := parts.pop()
+    "{parts.join("/")}/jet-runtime"
+}
+
+// Every local value names only module functions: each is computed ahead,
+// in the build that computes `NINE`.
+AHEAD_SOURCE: "square: fn(n: Int) -> Int {{\n    n * n\n}}\n\nrepeat: fn(word: String, times: Int) -> String {{\n    out := \"\"\n    loop _ in 0..<times -> out = \"{{out}}{{word}}\"\n    out\n}}\n\nNINE: #run square(3)\n\nshow: fn(count: Int) -> String {{\n    label: repeat(\"=\", 2)\n    \"{{label}}{{count}}\"\n}}\n\nrun: fn() {{\n    four: square(2)\n    word: repeat(\"ab\", 3)\n    print(\"{{four}} {{word}} {{show(four)}} {{NINE}}\")\n}}\n"
+
+// `pick`'s `if` is not read ahead: the landing of `four` and `pick` builds
+// a program that computes only `pick`.
+AHEAD_MIXED_SOURCE: "square: fn(n: Int) -> Int {{\n    n * n\n}}\n\nrun: fn() {{\n    four: square(2)\n    pick: if square(1) > 0 -> square(3) else -> square(4)\n    print(\"{{four}} {{pick}}\")\n}}\n"
+
+// The request that compiles `source`, its trace going to `path`.
+ahead_request: fn(path: String, source: String) -> JetDriverCompileRequest {
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/local-values-ahead",
+                identity: "local-values-ahead-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/local-values-ahead/main.jet", relative_path: "main.jet", identity: "local-values-ahead-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
+        entry_root_identity: "local-values-ahead-root",
+        entry_path: "/local-values-ahead/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Program)
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request.eval_config.native = Val(jet_cli_native_session_at(ahead_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
+    request.trace_sink = Val(ahead_sink(AheadTrace{path: path}))
+    request
+}
+
+// The comptime runs of `trace` that built a program.
+ahead_programs_built: fn(trace: String) -> Int {
+    built := 0
+    loop line in trace.split("\n") {
+        if line.starts_with("counters.comptime.programs_built = ") && line != "counters.comptime.programs_built = 0" {
+            built += 1
+        }
+    }
+    built
+}
+
+// Compiles `source` with `verify`, its trace going to `path`; returns the trace.
+ahead_compile: fn(path: String, source: String, verify: Bool) -> String {
+    ahead_files.write(path, "") ?? panic("cannot start the trace: {err}")
+    request := ahead_request(path, source)
+    request.recheck_verify = verify
+    front: jet_driver_lowering_inputs(request, None)
+    trace: ahead_files.read(path) ?? panic("cannot read the trace: {err}")
+    problems := [String]{}
+    loop diagnostic in front.compile.diagnostics {
+        problems.push("{diagnostic.code} {diagnostic.what}")
+    }
+    assert(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics) && front.inputs != None, "recheck_verify {verify}: the program did not compile: {front.compile.internal_problem:Debug} {problems:Debug}")
+    assert(trace.contains("counters.sema.local_values_spliced = "), "recheck_verify {verify}: the local values did not land:\n{trace}")
+    assert(!trace.contains("counters.sema.local_values_refused"), "recheck_verify {verify}: a pass fell back to the full recheck:\n{trace}")
+    trace
+}
+
+#Test("local_values_computed_ahead_land_without_a_build") {
+    path: ahead_files.join(ahead_sys.temp_dir(), "jet-local-values-ahead-{ahead_process.current_pid()}.trace")
+    loop verify in ([Bool]{false, true}) {
+        trace: ahead_compile(path, AHEAD_SOURCE, verify)
+        assert(ahead_programs_built(trace) == 1, "recheck_verify {verify}: the landing built a program of its own:\n{trace}")
+    }
+    ahead_files.remove(path) ?? panic("cannot remove the trace: {err}")
+}
+
+#Test("a_landing_computes_the_values_not_computed_ahead") {
+    path: ahead_files.join(ahead_sys.temp_dir(), "jet-local-values-mixed-{ahead_process.current_pid()}.trace")
+    loop verify in ([Bool]{false, true}) {
+        trace: ahead_compile(path, AHEAD_MIXED_SOURCE, verify)
+        assert(trace.contains("< comptime.land.splice items=2"), "recheck_verify {verify}: `four` and `pick` did not land together:\n{trace}")
+        assert(ahead_programs_built(trace) == 2, "recheck_verify {verify}: `pick` did not land in a build of its own:\n{trace}")
+    }
+    ahead_files.remove(path) ?? panic("cannot remove the trace: {err}")
+}

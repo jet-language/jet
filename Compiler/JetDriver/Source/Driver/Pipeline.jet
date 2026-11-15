@@ -74,6 +74,7 @@ use {
         sema_comptime_environment_publish_body_values,
         sema_comptime_fold_in,
         sema_comptime_local_value_failure,
+        sema_comptime_local_value_unstorable,
         sema_comptime_shared_payload,
         sema_comptime_graph_apply_sites,
         sema_comptime_graph_apply_values,
@@ -2300,6 +2301,12 @@ jet_driver_module_value_check_refusal: fn(program: SemaProgramTables, checked: S
     jet_driver_comptime_impurity(program, request.call_facts, local_value)
 }
 
+// Whether item check `checked` passed whole: complete, with its typed
+// request and no error.
+jet_driver_comptime_checked_whole: fn(checked: SemaComptimeItemCheck) -> Bool Never! {
+    checked.complete && checked.request != None && jet_driver_first_error_since(checked.diagnostics, 0) == None
+}
+
 // The `what` of the first error of `diagnostics` from position `start` on.
 jet_driver_first_error_since: fn(diagnostics: [Diagnostic], start: Int) -> String? Never! {
     loop index in start..<diagnostics.len() {
@@ -3319,10 +3326,14 @@ jet_driver_comptime_run: fn(
                     }
                 }
                 // A local value whose compile-time check fails, or that calls
-                // anything impure, stays run-time code untried.
+                // anything impure, stays run-time code untried. One computed
+                // ahead keeps only an impurity: a check that fails ahead
+                // leaves no value, and its site is computed when it lands.
                 if source.local_value {
                     if jet_driver_module_value_check_refusal(programs[0], checked_item, true) == .Val(reason) {
-                        jet_driver_comptime_local_value_runs(values, source, reason)
+                        if !source.ahead || jet_driver_comptime_checked_whole(checked_item) {
+                            jet_driver_comptime_local_value_runs(values, source, reason)
+                        }
                         made_progress = true
                         next
                     }
@@ -3347,6 +3358,11 @@ jet_driver_comptime_run: fn(
                     diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "a complete comptime item check returned no typed evaluation request", "each staged value is evaluated only from its complete checked expression", "retain the canonical Sema comptime request"))
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                }
+                // A value computed ahead that no build could keep has no site.
+                if source.ahead && sema_comptime_local_value_unstorable(body_type(comptime_request.expression.tree, comptime_request.expression.root)) {
+                    made_progress = true
+                    next
                 }
                 // A comptime input with a literal path that is the item's whole
                 // value (`TEXT: #run embed_file("x")`) is read here, as
@@ -3434,7 +3450,9 @@ jet_driver_comptime_run: fn(
                     failure: jet_driver_first_error_since(diagnostics, closure_diagnostic_start) ?? "a function it calls does not check completely"
                     loop diagnostics.len() > closure_diagnostic_start -> _ := diagnostics.pop()
                     if closure.waiting_dependencies.len() == 0 && (closure_failed || closure.impurity != None) {
-                        jet_driver_comptime_local_value_runs(values, source, closure.impurity ?? "a function it calls fails its compile-time check ({failure})")
+                        if !source.ahead || closure.impurity != None {
+                            jet_driver_comptime_local_value_runs(values, source, closure.impurity ?? "a function it calls fails its compile-time check ({failure})")
+                        }
                         made_progress = true
                         next
                     }
@@ -3588,7 +3606,9 @@ jet_driver_comptime_run: fn(
         if next_pending.len() > 0 && !made_progress {
             loop waiting in next_pending {
                 if waiting.local_value {
-                    jet_driver_comptime_local_value_runs(values, waiting, "it waits on a value compiling never computes")
+                    if !waiting.ahead {
+                        jet_driver_comptime_local_value_runs(values, waiting, "it waits on a value compiling never computes")
+                    }
                     made_progress = true
                 }
             }
