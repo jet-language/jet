@@ -10,13 +10,16 @@
 // its spellings and held declarations (JetDriverUnitWords), its identifier
 // demand, its line count. Beside them are the text's length, a
 // 64-bit FNV-1a hash of its bytes (jet_driver_core_interface_text_hash), the
-// `{`..`}` span of each function body (jet_driver_core_body_spans), and the
-// program its declaration heads parse to. A load whose unit text hashes the
-// same can then take the rows as the unit's own, and needs only the
-// declaration heads of the text, not its bodies: a load that reaches Core
-// by use reads the unit's heads from its rows, never lexing them
-// (jet_driver_parse_core_source), then parses back the bodies of the
-// functions it keeps (jet_driver_core_restore_bodies).
+// `{`..`}` span of each function body (jet_driver_core_body_spans), the
+// program its declaration heads parse to, and the unit's ready parses
+// (jet_driver_core_ready_write): per region of its text that holds a body,
+// what parsing that region gives, and per held declaration, what parsing
+// that declaration alone gives. A load whose unit text hashes the same can
+// then take the rows as the unit's own and lexes none of its text: a load
+// that reaches Core by use reads the unit's heads from its rows
+// (jet_driver_parse_core_source), then reads the ready parses of the held
+// declarations it reaches (jet_driver_reach_parse_held) and of the regions
+// whose bodies it keeps (jet_driver_core_restore_bodies).
 //
 // Encoding: little-endian u32 words. The header is the magic, the version,
 // the unit count, the header's size in bytes, and one directory entry per
@@ -26,16 +29,17 @@
 // string is its byte length then its UTF-8 bytes. A list is its length then
 // its elements. An Int is an i32 in two's complement (an owner row may be
 // -1). A flag is 0 or 1. The heads' program is its byte length, then its
-// bytes in the syntax codec (JetFoundation Facts/SyntaxCodec.jet).
+// bytes in the syntax codec (JetFoundation Facts/SyntaxCodec.jet). A ready
+// parse is a program in the syntax codec too; the block lists where each
+// sits (JetDriverCoreFragment), and the parses' bytes follow the block, so
+// a load reads only the parses it takes, each in place from the lent part.
 use {
     jet_foundation.[
         AppliedRuleApplication,
         BodyCodecIn,
         CompilerThreads,
-        DIAGNOSTIC_LINT,
         DebugTraceSite,
         DeclID,
-        Diagnostic,
         ElseArmSpan,
         FencedStatement,
         Func,
@@ -47,10 +51,10 @@ use {
         SymbolID,
         TraitImplBlock,
         TraitMethodSig,
+        ast_program,
         body_codec_get_program,
         body_codec_out,
         body_codec_put_program,
-        diagnostic_with_source_path,
         name_table,
     ]
     jet_lexer.[TOKEN_LBRACE, TOKEN_RBRACE, lex_generated_threads]
@@ -60,7 +64,7 @@ use {
 // "JTCI" in little-endian byte order.
 JET_DRIVER_CORE_INTERFACE_MAGIC: 0x4943544A
 
-JET_DRIVER_CORE_INTERFACE_VERSION: 3
+JET_DRIVER_CORE_INTERFACE_VERSION: 4
 
 // One Core unit's interface rows (see above). `path` and `module_name` are
 // its JetDriverCoreSource row's. `bodies` lists each function body with
@@ -69,6 +73,13 @@ JET_DRIVER_CORE_INTERFACE_VERSION: 3
 // encoded (jet_driver_core_heads_bytes), and `holds` whether that parse's
 // hold held or dropped a declaration; `heads` is empty when the parse gave
 // a diagnostic, so a load parses the heads from the text and reports it.
+// `regions` and `held_parses` say where the unit's ready parses sit
+// (jet_driver_core_ready_write), from the end of its block, and
+// `used_import_names` are the import names its whole text spells, which a
+// lazy load's program takes; a unit a load parses whole has none.
+// `fragments` are the ready parses' bytes as the build writes them after
+// the block, and `fragments_at` where they start in the interface file a
+// load reads them from.
 JetDriverCoreInterfaceUnit: struct {
     path: String
     module_name: String
@@ -80,6 +91,33 @@ JetDriverCoreInterfaceUnit: struct {
     bodies: [Span]
     heads: [U8]
     holds: Bool
+    regions: [JetDriverCoreFragment]{[JetDriverCoreFragment]{}}
+    held_parses: [JetDriverCoreFragment]{[JetDriverCoreFragment]{}}
+    used_import_names: [String]{[String]{}}
+    fragments: [U8]{[U8]{}}
+    fragments_at: Int{0}
+}
+
+// Where one ready parse sits among its unit's: `size` bytes from byte `at`;
+// a size of 0 for a region the unit's parses leave out (it holds no body).
+JetDriverCoreFragment: struct {
+    at: Int
+    size: Int
+}
+
+// What a load reads one table of its lazy Core unit's ready parses by (the
+// regions' for its bodies, the held declarations' for those): where the
+// unit's ready parses start in the interface file, and where each of the
+// table's sits among them.
+JetDriverCoreReady: struct {
+    at: Int
+    fragments: [JetDriverCoreFragment]
+}
+
+// One ready parse a load read: its program and its size in bytes.
+JetDriverCoreReadyPart: struct {
+    program: Program
+    size: Int
 }
 
 // A unit's directory entry: its block starts at byte `at` and is `size`
@@ -107,7 +145,8 @@ jet_driver_core_interface_bytes_hash: fn(bytes: [U8]) -> U64 Never! {
 // The interface rows of each Core unit of `rows`, parsed as a load parses
 // it (a Core job of jet_driver_parse_one, not a `jet test` entry), then
 // parsed from its declaration heads over those rows as a load reading them
-// parses it, for the program it keeps (`heads`).
+// parses it, for the program it keeps (`heads`), and, for a unit a load
+// reads lazily, its ready parses (jet_driver_core_ready_write).
 jet_driver_core_interface_units: fn(rows: &&[JetDriverCoreSource], threads: CompilerThreads) -> [JetDriverCoreInterfaceUnit] {
     units := [JetDriverCoreInterfaceUnit]{}
     loop row in rows.move() {
@@ -131,12 +170,17 @@ jet_driver_core_interface_units: fn(rows: &&[JetDriverCoreSource], threads: Comp
         // A heads parse gives back the rows it took; one that fell back to
         // the whole text gave the same words, demand and lines, but no
         // bodies.
+        words: parsed.words.move() ?? jet_driver_unit_no_words()
+        bodies := parsed.lazy.move()
+        if !parsed.from_heads -> bodies = jet_driver_core_body_spans(text, threads)
+        ready := JetDriverCoreReadyWrite{regions: [JetDriverCoreFragment]{}, held: [JetDriverCoreFragment]{}, bytes: [U8]{}, used_import_names: [String]{}}
+        if parsed.from_heads {
+            ready = jet_driver_core_ready_write(row, text, parsed.parsed.program.items, parsed.holds, bodies, words.held, threads)
+        }
         heads := [U8]{}
         if parsed.from_heads && parsed.parsed.diagnostics.len() == 0 {
             heads = jet_driver_core_heads_bytes(parsed.parsed.program)
         }
-        bodies := parsed.lazy.move()
-        if !parsed.from_heads -> bodies = jet_driver_core_body_spans(text, threads)
         units.push(
             JetDriverCoreInterfaceUnit{
                 path: row.path.move(),
@@ -145,14 +189,170 @@ jet_driver_core_interface_units: fn(rows: &&[JetDriverCoreSource], threads: Comp
                 text_hash: text_hash,
                 lines: parsed.lines,
                 demand: parsed.demand.move(),
-                words: parsed.words.move() ?? jet_driver_unit_no_words(),
+                words: words.move(),
                 bodies: bodies.move(),
                 heads: heads.move(),
                 holds: parsed.holds,
+                regions: ready.regions.move(),
+                held_parses: ready.held.move(),
+                used_import_names: ready.used_import_names.move(),
+                fragments: ready.bytes.move(),
             },
         )
     }
     units
+}
+
+// A lazy Core unit's ready parses as the build writes them: where each
+// region's and each held declaration's sits in `bytes`, and the import
+// names its whole text spells.
+JetDriverCoreReadyWrite: struct {
+    regions: [JetDriverCoreFragment]
+    held: [JetDriverCoreFragment]
+    bytes: [U8]
+    used_import_names: [String]
+}
+
+// The ready parses of the Core unit `row` (its text `text`), which a load
+// that parses it from its declaration heads (`heads`, held when `holds`)
+// takes in place of parsing its text again. The text, its inline package
+// carrier blanked as the load blanks it, parses whole twice: held as the
+// heads were, and holding nothing. The items of the heads cut the text
+// into regions (jet_driver_core_item_ends); each region that holds a body
+// of `bodies` gets what the held parse gives in it: its items (an item a
+// hold dropped among them) and the side-table rows whose anchors fall in
+// it (a rule with no target only when the heads cut no regions), as a
+// parse of that region alone gives them (jet_driver_core_restore_bodies).
+// Each held declaration of `held` gets what the parse holding nothing
+// gives inside its span: its one item and its block spans, else arms and
+// debug sites, as a parse of that span alone gives them
+// (jet_driver_reach_parse_held). A Core text that doesn't parse cleanly, or
+// a held declaration that isn't one item, stops the build.
+jet_driver_core_ready_write: fn(row: JetDriverCoreSource, text: String, heads: [Item], holds: Bool, bodies: [Span], held: [JetDriverReachDeclaration], threads: CompilerThreads) -> JetDriverCoreReadyWrite {
+    hold: if holds -> Val(JetDriverReachHoldRow{module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime}) else -> JetDriverReachHoldRow?{None}
+    whole := jet_driver_reach_parse_source(jet_driver_core_ready_source(text, threads), hold, threads).parsed
+    open: jet_driver_reach_parse_source(jet_driver_core_ready_source(text, threads), None, threads).parsed
+    if jet_driver_has_errors(whole.diagnostics) || jet_driver_has_errors(open.diagnostics) {
+        panic("the Core unit {row.path} does not parse cleanly whole, so its interface has no ready parses")
+    }
+    ends: jet_driver_core_item_ends(heads)
+    parts := [Program]{}
+    has_body := [Bool]{}
+    loop _ in 0..<ends.len() + 1 {
+        parts.push(ast_program())
+        has_body.push(false)
+    }
+    loop body in bodies -> has_body[jet_driver_core_region(ends, body.end - 1)] = true
+    loop item in whole.program.items.move() {
+        end: jet_driver_core_item_end(item) ?? 0
+        if end == 0 && ends.len() > 0 {
+            panic("an item of the Core unit {row.path} has no span, though its heads cut regions")
+        }
+        parts[jet_driver_core_region(ends, end - 1)].items.push(item)
+    }
+    loop span in whole.program.block_spans {
+        parts[jet_driver_core_region(ends, span.start)].block_spans.push(span)
+    }
+    loop arm in whole.program.else_arms {
+        parts[jet_driver_core_region(ends, arm.table.start)].else_arms.push(arm)
+    }
+    loop site in whole.program.debug_sites {
+        parts[jet_driver_core_region(ends, site.name_start)].debug_sites.push(site)
+    }
+    loop fenced in whole.program.fenced_statements {
+        parts[jet_driver_core_region(ends, fenced.span.start)].fenced_statements.push(fenced)
+    }
+    loop policy in whole.program.policy_declarations {
+        parts[jet_driver_core_region(ends, policy.span.start)].policy_declarations.push(policy)
+    }
+    loop rule in whole.program.applied_rules {
+        if rule.target == .Val(target) {
+            parts[jet_driver_core_region(ends, target.start)].applied_rules.push(rule)
+        } else if ends.len() == 0 { parts[0].applied_rules.push(rule) }
+    }
+    loop fact in whole.program.rule_facts {
+        if fact.target == .Val(target) {
+            parts[jet_driver_core_region(ends, target.start)].rule_facts.push(fact)
+        } else if ends.len() == 0 { parts[0].rule_facts.push(fact) }
+    }
+    write := JetDriverCoreReadyWrite{regions: [JetDriverCoreFragment]{}, held: [JetDriverCoreFragment]{}, bytes: [U8]{}, used_import_names: whole.program.used_import_names.move()}
+    loop (region, part) in parts {
+        if !has_body[region] {
+            write.regions.push(JetDriverCoreFragment{at: write.bytes.len(), size: 0})
+            next
+        }
+        fragment: jet_driver_core_ready_put(write.bytes, part, row.path)
+        write.regions.push(fragment)
+    }
+    loop declaration in held {
+        part := ast_program()
+        loop item in open.program.items {
+            end: jet_driver_core_item_end(item) ?? next
+            if end > declaration.span.start && end <= declaration.span.end -> part.items.push(item)
+        }
+        if part.items.len() != 1 {
+            panic("the held declaration `{declaration.name}` of the Core unit {row.path} parses as {part.items.len()} items")
+        }
+        from: declaration.span.start
+        to: declaration.span.end
+        loop span in open.program.block_spans {
+            if span.start >= from && span.start < to -> part.block_spans.push(span)
+        }
+        loop arm in open.program.else_arms {
+            if arm.table.start >= from && arm.table.start < to -> part.else_arms.push(arm)
+        }
+        loop site in open.program.debug_sites {
+            if site.name_start >= from && site.name_start < to -> part.debug_sites.push(site)
+        }
+        fragment: jet_driver_core_ready_put(write.bytes, part, row.path)
+        write.held.push(fragment)
+    }
+    write
+}
+
+// The bytes of the Core text `text` with its inline-package carrier blanked,
+// as each of jet_driver_core_ready_write's parses reads them.
+jet_driver_core_ready_source: fn(text: String, threads: CompilerThreads) -> [U8] {
+    source := text.bytes()
+    carrier: jet_driver_inline_package_threads(text, source, threads)
+    if carrier.found -> jet_driver_blank_bytes(source, carrier.start, carrier.end)
+    source
+}
+
+// Appends `part`, one ready parse of the Core unit at `path`, to `bytes` in
+// the syntax codec, and returns where it sits. A parse that names an id of
+// one compile's own tables, which no other compile reads back, stops the
+// build.
+jet_driver_core_ready_put: fn(bytes: &[U8], part: Program, path: String) -> JetDriverCoreFragment {
+    out := body_codec_out()
+    body_codec_put_program(out, part)
+    if out.symbols.len() > 0 || out.decls.len() > 0 || out.modules.len() > 0 {
+        panic("a ready parse of the Core unit {path} names one compile's own ids")
+    }
+    at: bytes.len()
+    bytes.extend(out.bytes)
+    JetDriverCoreFragment{at: at, size: out.bytes.len()}
+}
+
+// The ready parse at `index` of the table `ready`, read in place from the
+// interface file of `reader`; None when there is no table or no reader, the
+// unit's parses leave that one out, or it doesn't read back as one whole
+// program.
+jet_driver_core_ready_program: fn(reader: JetDriverCoreInterfaceReader?, ready: JetDriverCoreReady?, index: Int) -> JetDriverCoreReadyPart? {
+    if ready == .Val(table) {
+        if reader == .Val(file) {
+            if index < table.fragments.len() && table.fragments[index].size > 0 {
+                at: table.at + table.fragments[index].at
+                size: table.fragments[index].size
+                bytes: file.read(at, size) ?? return None
+                input := BodyCodecIn{at: 0, end: bytes.len(), failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
+                program: body_codec_get_program(bytes, input)
+                if input.failed || input.at != input.end -> return None
+                return Val(JetDriverCoreReadyPart{program: program, size: size})
+            }
+        }
+    }
+    None
 }
 
 // The syntax codec's bytes of `program`, a Core unit's heads, or none when
@@ -369,11 +569,22 @@ jet_driver_core_interface_unit_bytes: fn(unit: JetDriverCoreInterfaceUnit) -> [U
     jet_driver_core_interface_put_flag(out, unit.holds)
     jet_driver_core_interface_put(out, unit.heads.len())
     out.extend(unit.heads)
+    jet_driver_core_interface_put_fragments(out, unit.regions)
+    jet_driver_core_interface_put_fragments(out, unit.held_parses)
+    jet_driver_core_interface_put_strings(out, unit.used_import_names)
     out
 }
 
+jet_driver_core_interface_put_fragments: fn(out: &[U8], fragments: [JetDriverCoreFragment]) Never! {
+    jet_driver_core_interface_put(out, fragments.len())
+    loop fragment in fragments {
+        jet_driver_core_interface_put(out, fragment.at)
+        jet_driver_core_interface_put(out, fragment.size)
+    }
+}
+
 // The `core.interface` file of `units`: the header with its directory, then
-// each unit's block.
+// each unit's block followed by its ready parses.
 jet_driver_core_interface_bytes: fn(units: [JetDriverCoreInterfaceUnit]) -> [U8] Never! {
     blocks := [[U8]]{}
     header := 16
@@ -391,9 +602,12 @@ jet_driver_core_interface_bytes: fn(units: [JetDriverCoreInterfaceUnit]) -> [U8]
         jet_driver_core_interface_put_string(out, unit.path)
         jet_driver_core_interface_put(out, at)
         jet_driver_core_interface_put(out, blocks[index].len())
-        at += blocks[index].len()
+        at += blocks[index].len() + unit.fragments.len()
     }
-    loop block in blocks.move() -> out.extend(block)
+    loop (index, block) in blocks.move() {
+        out.extend(block)
+        out.extend(units[index].fragments)
+    }
     out
 }
 
@@ -529,6 +743,14 @@ jet_driver_core_interface_block: fn(reader: JetDriverCoreInterfaceReader, index:
     reader.read(index.entries[at].at, index.entries[at].size) ?? [U8]{}
 }
 
+// Where the ready parses of the unit at the request's core_sources row `at`
+// start in the interface: right after its block
+// (jet_driver_core_interface_block, which read the entries).
+jet_driver_core_interface_fragments_at: fn(index: JetDriverCoreInterfaceIndex, at: Int) -> Int Never! {
+    if at < 0 || at >= index.entries.len() -> return 0
+    index.entries[at].at + index.entries[at].size
+}
+
 // The rows a unit with no interface takes: they match no text.
 jet_driver_core_interface_none: fn() -> JetDriverCoreInterfaceUnit Never! {
     JetDriverCoreInterfaceUnit{path: "", module_name: "", text_bytes: -1, text_hash: U64{0}, lines: 0, demand: jet_driver_empty_core_identifier_demand(), words: jet_driver_unit_no_words(), bodies: [Span]{}, heads: [U8]{}, holds: false}
@@ -621,7 +843,8 @@ jet_driver_core_interface_read_words: fn(bytes: [U8], cursor: &JetDriverCoreInte
 }
 
 // The unit of the interface file `bytes` whose directory entry is `entry`;
-// None when its block is malformed.
+// None when its block is malformed. Its ready parses start where its block
+// ends.
 jet_driver_core_interface_unit: fn(bytes: [U8], entry: JetDriverCoreInterfaceEntry) -> JetDriverCoreInterfaceUnit? Never! {
     if entry.at < 0 || entry.size < 0 || entry.at + entry.size > bytes.len() -> return None
     cursor := JetDriverCoreInterfaceCursor{at: entry.at, end: entry.at + entry.size, failed: false}
@@ -643,6 +866,9 @@ jet_driver_core_interface_unit: fn(bytes: [U8], entry: JetDriverCoreInterfaceEnt
     size: jet_driver_core_interface_count(bytes, cursor, 1)
     heads_at: cursor.at
     if !cursor.failed -> cursor.at = heads_at + size
+    regions: jet_driver_core_interface_fragments(bytes, cursor)
+    held_parses: jet_driver_core_interface_fragments(bytes, cursor)
+    used_import_names: jet_driver_core_interface_strings(bytes, cursor)
     if cursor.failed || cursor.at != cursor.end || path != entry.path -> return None
     Val(JetDriverCoreInterfaceUnit{
         path: path,
@@ -655,15 +881,39 @@ jet_driver_core_interface_unit: fn(bytes: [U8], entry: JetDriverCoreInterfaceEnt
         bodies: bodies,
         heads: bytes[heads_at..<heads_at + size],
         holds: holds,
+        regions: regions,
+        held_parses: held_parses,
+        used_import_names: used_import_names,
+        fragments_at: entry.at + entry.size,
     })
+}
+
+jet_driver_core_interface_fragments: fn(bytes: [U8], cursor: &JetDriverCoreInterfaceCursor) -> [JetDriverCoreFragment] Never! {
+    fragments := [JetDriverCoreFragment]{}
+    loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 8) {
+        at: jet_driver_core_interface_u32(bytes, cursor)
+        size: jet_driver_core_interface_u32(bytes, cursor)
+        fragments.push(JetDriverCoreFragment{at: at, size: size})
+    }
+    fragments
+}
+
+// The unit of `block`, the block of the unit at `path` a load read alone
+// (jet_driver_core_interface_block), whose ready parses start at byte
+// `fragments_at` of the interface file.
+jet_driver_core_interface_block_unit: fn(block: [U8], path: String, fragments_at: Int) -> JetDriverCoreInterfaceUnit? Never! {
+    unit := jet_driver_core_interface_unit(block, JetDriverCoreInterfaceEntry{path: path, at: 0, size: block.len()}) ?? return None
+    unit.fragments_at = fragments_at
+    Val(unit)
 }
 
 // A Core module the load parsed from its declaration heads
 // (jet_driver_parse_core_source with matching interface rows): its place
 // in the load's modules, its blanked `bodies`, where each item of its parse
 // ends (`item_ends`, jet_driver_core_item_ends), whether its hold held or
-// dropped any declaration, and how many block spans, else arms and debug
-// sites its own parse gave it (its held declarations' parse appends more).
+// dropped any declaration, how many block spans, else arms and debug
+// sites its own parse gave it (its held declarations' parse appends more),
+// and where its ready parses sit in the interface.
 JetDriverCoreLazyModule: struct {
     loaded: Int
     bodies: [Span]
@@ -672,6 +922,7 @@ JetDriverCoreLazyModule: struct {
     block_spans: Int
     else_arms: Int
     debug_sites: Int
+    ready: JetDriverCoreReady?
 }
 
 // Where each of a parse's `items` ends, in order. The ends cut the text
@@ -762,110 +1013,127 @@ jet_driver_core_side_order: fn(own: [Int], restored: [Bool], fresh: [Int]) -> [I
 }
 
 // The load is done: the blanked bodies of the functions each lazy module
-// kept parse back. The module's text parses again, held as its heads were
-// (jet_driver_reach_hold), with the interior of every body it doesn't keep
-// blanked, and so is every region of its text (jet_driver_core_item_ends)
-// whose item keeps no body, so the parse reads only the items it restores.
-// Each kept function and trait method whose body was blanked takes its
-// place from the new parse. The module's side tables become those of a
-// whole parse, but for the bodies reach stripped: its own parse's rows,
-// with the new parse's in place of those of the regions it read, then its
-// held declarations'. A module whose items cut no regions parses whole
-// but for the bodies, and its side tables become the new parse's, then its
-// held declarations'. The modules parse on the admitted threads
-// (jet_driver_reach_parse_sources). Returns how many bodies came back
-// (-1 when a parse failed: its diagnostics are in `diagnostics`), how
-// many tokens the parses lexed, and the internal problem of a kept body
-// that didn't come back (jet_driver_core_restore_check).
-jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetDriverCoreLazyModule], modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic]) -> JetDriverCoreRestore {
-    lazy_at := [Int]{}
-    restored_at := [[Bool]]{}
-    // The end of each body each restoring parse is to bring back.
-    wanted_ends := [[Int]]{}
-    sources := [JetDriverReachSource]{}
-    loop (at, row) in lazy {
+// kept come back from the module's ready parses (jet_driver_core_ready_write),
+// read in place from the interface: the parse of each region of its text
+// (jet_driver_core_item_ends) whose item keeps a body. Each kept function
+// and trait method whose body was blanked takes its place from them. The
+// module's side tables become those of a whole parse, but for the bodies
+// reach stripped: its own parse's rows, with the ready parses' in place of
+// those of the regions it read, then its held declarations'. A module whose
+// items cut no regions has one region, the whole text, and its side tables
+// become its parse's, then its held declarations'. Either way the rows
+// inside a body the module doesn't keep leave with it. Returns how many
+// bodies came back, how many ready parses it read and their bytes, and the
+// internal problem of a ready parse missing or unreadable, or of a kept
+// body that didn't come back (jet_driver_core_restore_check). The
+// interface is part of the compiler, so either is a defect of the build.
+jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetDriverCoreLazyModule], modules: &[JetDriverLoadedModule]) -> JetDriverCoreRestore {
+    done := JetDriverCoreRestore{bodies: 0, fragments: 0, fragment_bytes: 0, problem: None}
+    loop row in lazy {
+        name: modules[row.loaded].module_name
         kept := [Int:Bool]{}
         loop item in modules[row.loaded].program.items -> jet_driver_core_blanked_ends(item, kept)
-        unit: source_units[modules[row.loaded].source_unit_index]
-        text: jet_driver_source_unit_text(request, unit) ?? next
-        source := text.bytes()
-        carrier: jet_driver_inline_package_threads(text, source, request.compiler_threads)
-        if carrier.found -> jet_driver_blank_bytes(source, carrier.start, carrier.end)
-        regions: row.item_ends.len() > 0
         read := [Bool]{}
-        if regions {
-            loop _ in 0..<row.item_ends.len() + 1 -> read.push(false)
-        }
+        loop _ in 0..<row.item_ends.len() + 1 -> read.push(false)
+        // The end of a kept body that comes back from each region read.
         wanted := [Int]{}
+        loop _ in 0..<row.item_ends.len() + 1 -> wanted.push(-1)
+        wanted_ends := [Int]{}
+        // The interior of each body the module doesn't keep, in text order.
+        stripped := [Span]{}
         loop body in row.bodies {
             if kept.get(body.end) != None {
-                wanted.push(body.end)
-                if regions -> read[jet_driver_core_region(row.item_ends, body.end - 1)] = true
+                region: jet_driver_core_region(row.item_ends, body.end - 1)
+                read[region] = true
+                wanted[region] = body.end
+                wanted_ends.push(body.end)
                 next
             }
-            jet_driver_blank_bytes(source, body.start + 1, body.end - 1)
+            stripped.push(Span{start: body.start + 1, end: body.end - 1})
         }
-        if wanted.len() == 0 -> next
-        if regions {
-            loop region in 0..<read.len() {
-                if read[region] -> next
-                from: if region == 0 -> 0 else -> row.item_ends[region - 1]
-                to: if region == row.item_ends.len() -> source.len() else -> row.item_ends[region]
-                jet_driver_blank_bytes(source, from, to)
-            }
-        }
-        core: request.core_sources[unit.file_index]
-        lazy_at.push(at)
-        restored_at.push(read.move())
-        wanted_ends.push(wanted.move())
-        hold: if row.holds -> Val(JetDriverReachHoldRow{module_name: core.module_name, owned_members: core.owned_members, runtime: core.runtime}) else -> JetDriverReachHoldRow?{None}
-        sources.push(JetDriverReachSource{bytes: source, hold: hold})
-    }
-    parses := jet_driver_reach_parse_sources(request.compiler_threads, sources)
-    restored := 0
-    tokens := 0
-    failed := false
-    problem := String?{None}
-    loop (index, at) in lazy_at {
-        done: parses.pop() ?? panic("a lazy Core module lost its parse")
-        tokens += done.tokens
-        parsed := done.parsed.move()
-        loaded: lazy[at].loaded
-        loop diagnostic in parsed.diagnostics {
-            if diagnostic.severity != DIAGNOSTIC_LINT {
-                diagnostics.push(diagnostic_with_source_path(diagnostic, source_units[modules[loaded].source_unit_index].path, 0))
-            }
-        }
-        if jet_driver_has_errors(parsed.diagnostics) {
-            failed = true
-            next
+        if wanted_ends.len() == 0 -> next
+        fresh := ast_program()
+        loop region in 0..<read.len() {
+            if !read[region] -> next
+            part := jet_driver_core_ready_program(request.core_interface, row.ready, region) ?? return jet_driver_core_restore_missing(done, name, modules[row.loaded].program.items, wanted[region])
+            done.fragments += 1
+            done.fragment_bytes += part.size
+            jet_driver_core_restore_join(fresh, part.program.move(), stripped)
         }
         funcs := [Int:Func]{}
         sigs := [Int:TraitMethodSig]{}
-        items: parsed.program.items.move()
-        parsed.program.items = [Item]{}
+        items: fresh.items.move()
+        fresh.items = [Item]{}
         loop item in items.move() -> jet_driver_core_restore_index(item, funcs, sigs)
-        restored += jet_driver_core_restore_items(modules[loaded].program.items, funcs, sigs)
-        if problem == None {
-            problem = jet_driver_core_restore_check(modules[loaded], wanted_ends[index])
-        }
-        names: parsed.program.used_import_names.move()
-        parsed.program.used_import_names = [String]{}
-        loop name in names.move() {
-            if !modules[loaded].program.used_import_names.contains(name) {
-                modules[loaded].program.used_import_names.push(name)
-            }
-        }
+        done.bodies += jet_driver_core_restore_items(modules[row.loaded].program.items, funcs, sigs)
+        done.problem = jet_driver_core_restore_check(modules[row.loaded], wanted_ends)
+        if done.problem != None -> return done
         if {
-            lazy[at].item_ends.len() > 0 -> {
-                jet_driver_core_restore_regions(modules[loaded].program, parsed.program.move(), lazy[at], lazy[at].item_ends, restored_at[index])
+            row.item_ends.len() > 0 -> {
+                jet_driver_core_restore_regions(modules[row.loaded].program, fresh.move(), row, row.item_ends, read)
             }
-            else -> {
-                jet_driver_core_restore_whole(modules[loaded].program, parsed.program.move(), lazy[at])
-            }
+            else -> jet_driver_core_restore_whole(modules[row.loaded].program, fresh.move(), row)
         }
     }
-    JetDriverCoreRestore{bodies: if failed -> -1 else -> restored, tokens: tokens, problem: problem.move()}
+    done
+}
+
+// `done`, stopped on the internal problem of a lazy Core module `name`
+// whose ready parse holding the kept body that ends at `end` is missing or
+// doesn't read back.
+jet_driver_core_restore_missing: fn(done: JetDriverCoreRestore, name: String, items: [Item], end: Int) -> JetDriverCoreRestore Never! {
+    stopped := done
+    stopped.problem = Val("the Core interface holds no readable parse of the kept function `{jet_driver_core_blank_name(items, end)}` of Core module `{name}`")
+    stopped
+}
+
+// Appends the items and side-table rows of `part`, one region's ready
+// parse, to `fresh`, but for the rows inside a body of `stripped` (the
+// interiors of the bodies the module doesn't keep, in text order).
+jet_driver_core_restore_join: fn(fresh: &Program, part: &&Program, stripped: [Span]) Never! {
+    loop item in part.items.move() -> fresh.items.push(item)
+    loop span in part.block_spans {
+        if !jet_driver_core_stripped(stripped, span.start) -> fresh.block_spans.push(span)
+    }
+    loop arm in part.else_arms {
+        if !jet_driver_core_stripped(stripped, arm.table.start) -> fresh.else_arms.push(arm)
+    }
+    loop site in part.debug_sites {
+        if !jet_driver_core_stripped(stripped, site.name_start) -> fresh.debug_sites.push(site)
+    }
+    loop fenced in part.fenced_statements {
+        if !jet_driver_core_stripped(stripped, fenced.span.start) {
+            fresh.fenced_statements.push(fenced)
+        }
+    }
+    loop policy in part.policy_declarations {
+        if !jet_driver_core_stripped(stripped, policy.span.start) {
+            fresh.policy_declarations.push(policy)
+        }
+    }
+    loop rule in part.applied_rules {
+        if rule.target == .Val(target) && jet_driver_core_stripped(stripped, target.start) -> next
+        fresh.applied_rules.push(rule)
+    }
+    loop fact in part.rule_facts {
+        if fact.target == .Val(target) && jet_driver_core_stripped(stripped, target.start) -> next
+        fresh.rule_facts.push(fact)
+    }
+}
+
+// Whether byte `at` lies inside a span of `stripped` (in text order, none
+// overlapping).
+jet_driver_core_stripped: fn(stripped: [Span], at: Int) -> Bool Never! {
+    low := 0
+    high := stripped.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if {
+            stripped[middle].start <= at -> low = middle + 1
+            else -> high = middle
+        }
+    }
+    low > 0 && at < stripped[low - 1].end
 }
 
 // None when each body of `ends` that a restoring parse was to bring back is
@@ -922,12 +1190,13 @@ jet_driver_core_method_name: fn(methods: [Func], blocks: [TraitImplBlock], end: 
     None
 }
 
-// What jet_driver_core_restore_bodies did: the bodies that came back (-1
-// when a parse failed), the tokens its parses lexed, and the internal
-// problem of a kept body that didn't come back.
+// What jet_driver_core_restore_bodies did: the bodies that came back, the
+// ready parses it read and their bytes, and the internal problem of a kept
+// body that didn't come back.
 JetDriverCoreRestore: struct {
     bodies: Int
-    tokens: Int
+    fragments: Int
+    fragment_bytes: Int
     problem: String?
 }
 

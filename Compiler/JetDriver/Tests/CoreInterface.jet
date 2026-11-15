@@ -1,5 +1,6 @@
 // The Core interface (CoreInterface.jet): each Core unit's load rows, body
-// spans and declaration heads, encoded once and read back unit by unit.
+// spans, declaration heads and ready parses, encoded once and read back
+// unit by unit.
 use {
     fs: core.files
     interface_process: core.process
@@ -11,6 +12,7 @@ use {
         JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode,
         JetDriverCompileRequest,
+        JetDriverCoreFragment,
         JetDriverCoreInterfaceEntry,
         JetDriverCoreInterfaceReader,
         JetDriverCoreInterfaceUnit,
@@ -46,7 +48,8 @@ interface_test_slice: fn(text: String, start: Int, end: Int) -> String {
 }
 
 // Each unit of `units` encoded, decoded through the directory and encoded
-// again, block for block; and each body span a `{`..`}` of its text.
+// again, block for block; each body span a `{`..`}` of its text; and each
+// ready parse one program, read from where its block says it sits.
 interface_test_round_trip: fn(units: [JetDriverCoreInterfaceUnit], texts: [String]) {
     bytes: jet_driver_core_interface_bytes(units)
     entries: jet_driver_core_interface_entries(bytes) ?? panic("the interface has no directory")
@@ -68,6 +71,9 @@ interface_test_round_trip: fn(units: [JetDriverCoreInterfaceUnit], texts: [Strin
             program: jet_driver_core_heads_program(read.heads) ?? panic("{unit.path}: its heads do not read back")
             assert(jet_driver_core_heads_bytes(program) == read.heads)
         }
+        interface_test_fragments_read(bytes, unit.path, read.fragments_at, read.regions)
+        interface_test_fragments_read(bytes, unit.path, read.fragments_at, read.held_parses)
+        assert_eq(read.held_parses.len(), if unit.fragments.len() > 0 -> unit.words.held.len() else -> 0)
         loop body in read.bodies {
             if body.start >= body.end || body.end > source.len() {
                 panic("{unit.path}: the body span {body.start}..{body.end} is not inside its {source.len()} bytes")
@@ -77,6 +83,18 @@ interface_test_round_trip: fn(units: [JetDriverCoreInterfaceUnit], texts: [Strin
             if !braced {
                 panic("{unit.path}: the body span {body.start}..{body.end} is not a braced body")
             }
+        }
+    }
+}
+
+// Each ready parse of `fragments`, from byte `at` of the interface file
+// `bytes`, reads back as one program.
+interface_test_fragments_read: fn(bytes: [U8], path: String, at: Int, fragments: [JetDriverCoreFragment]) {
+    loop fragment in fragments {
+        if fragment.size == 0 -> next
+        from: at + fragment.at
+        if jet_driver_core_heads_program(bytes[from..<from + fragment.size]) == None {
+            panic("{path}: the ready parse at {from} does not read back")
         }
     }
 }
@@ -370,8 +388,8 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
 }
 
 // A lazy load reads each Core module's declaration heads from the
-// interface, then parses only the bodies reach keeps: the program is the one
-// the whole parse gives.
+// interface, then the ready parses of the bodies reach keeps: the program
+// is the one the whole parse gives.
 #Test("a load that reads the Core interface gives the program and spans of one that parses Core whole") {
     source: "use {{\n    files: core.files\n    sys: core.sys\n    process: core.process\n}}\n\nrun: fn() {{\n    path: files.join(sys.temp_dir(), \"probe-{{process.current_pid()}}\")\n    text: files.read(path) ?? \"none\"\n    print(\"{{text.len()}} {{path}} {{[Int]{{3, 1, 2}}.sorted()}}\")\n}}\n"
     units: jet_driver_core_interface_units(interface_test_core_rows(), compiler_threads_single())
@@ -390,10 +408,26 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     // The same bodies stay; the lazy load parsed fewer.
     assert_eq(lazy.counters.get("counters.load.core_bodies"), eager.counters.get("counters.load.core_bodies"))
     assert((lazy.counters.get("counters.load.core_bodies_parsed") ?? 0) < (eager.counters.get("counters.load.core_bodies_parsed") ?? 0))
-    // The lazy load counts the tokens it lexed: the bodies it parsed back,
-    // fewer than the whole texts.
-    assert((lazy.counters.get("counters.parse.core_tokens") ?? 0) > 0)
+    // The lazy load read the ready parses of the bodies it kept and the
+    // held declarations it reached, and lexed fewer Core tokens.
+    assert_eq(eager.counters.get("counters.load.core_fragments"), Val(0))
+    assert((lazy.counters.get("counters.load.core_fragments") ?? 0) > 0)
+    assert((lazy.counters.get("counters.load.core_fragment_bytes") ?? 0) > 0)
     assert((lazy.counters.get("counters.parse.core_tokens") ?? 0) < (eager.counters.get("counters.parse.core_tokens") ?? 0))
+}
+
+// The interface is part of the compiler: a lazy load whose ready parses
+// are cut off stops as an internal compiler error naming the module and the
+// declaration, never parsing the text again.
+#Test("a Core unit whose ready parses are cut off stops the load as an internal problem") {
+    source: "use d: core.devtools\nrun: fn() {{ print(d.twice(d.Shape{{width: 2}}.area())) }}\n"
+    units := jet_driver_core_interface_units(interface_test_fixture_rows(), compiler_threads_single())
+    assert(units[0].fragments.len() > 0)
+    units[0].fragments = [U8]{}
+    cut: interface_test_load(source, interface_test_fixture_rows(), jet_driver_core_interface_bytes(units))
+    problem: cut.load.internal_problem ?? panic("the load with no ready parses has no internal problem")
+    assert(problem.contains("core.devtools"), problem)
+    assert(problem.contains("the Core interface holds no readable parse"), problem)
 }
 
 // An interface written for other text parses the unit whole.
@@ -431,8 +465,8 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
 
 // A unit whose first item's marker shares its line (`#SingleUse Token: …`),
 // then a function, a type with a method and a second function. The unit
-// holds a declaration either way, so the parse that reads its kept bodies
-// back holds too.
+// holds a declaration either way, so the ready parses of its kept bodies
+// come from a parse that holds too.
 interface_test_marked_rows: fn() -> [JetDriverCoreSource] {
     text: "#SingleUse Token: struct {{\n    id: Int\n}}\n\ntwice: fn(value: Int) -> Int Never! {{\n    value * 2\n}}\n\nShape: struct {{\n    width: Int\n    area: fn(self) -> Int Never! {{ self.width * 2 }}\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
     [JetDriverCoreSource]{
@@ -441,9 +475,9 @@ interface_test_marked_rows: fn() -> [JetDriverCoreSource] {
 }
 
 // A declaration whose marker shares its line marks nothing below it: the
-// unit's own parse holds the function under it, and so does the parse that
-// reads back the bodies a lazy load keeps with the marked item's text
-// blanked, so the function parses whole as in a load that parses Core whole.
+// unit's own parse holds the function under it, and so does the parse its
+// ready parses come from, so the function comes back whole as in a load
+// that parses Core whole.
 #Test("a function below a declaration whose marker shares its line parses whole in a load that reads the Core interface") {
     source: "use d: core.devtools\nrun: fn() {{ print(d.twice(d.Shape{{width: 2}}.area())) }}\n"
     units: jet_driver_core_interface_units(interface_test_marked_rows(), compiler_threads_single())

@@ -1,12 +1,13 @@
-# A Core body whose kind still checks from text gets its body by parsing
-# only its own declaration's text back, and the program runs. A DateTime's
-# display is a lowering root, a kind checked from text until checked bodies
-# ship for it. core.time loads through the interface: its parse blanks every
-# body, the reached top-level declarations it held parse alone
-# (jet_driver_reach_parse_held), and the bodies it keeps parse back with every
-# other body still blank (jet_driver_core_restore_bodies). The design note's
-# section "Bodies that stay on text after A2" states the path, and A2's proof
-# adds its 0 bytes of parse.core_input_bytes to this case.
+# A Core body whose kind still checks from text gets its body from its
+# unit's ready parses in the Core interface, and the program runs. A
+# DateTime's display is a lowering root, a kind checked from text until
+# checked bodies ship for it. core.time loads through the interface: its
+# heads come from the interface with every body blank, the reached
+# top-level declarations it held come back from their ready parses
+# (jet_driver_reach_parse_held), and so do the bodies it keeps
+# (jet_driver_core_restore_bodies). The design note's section "Bodies that
+# stay on text after A2" states the path, and A2's proof adds its 0 bytes
+# of parse.core_input_bytes to this case.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_PHASE_COUNTERS=1
@@ -17,7 +18,7 @@ exit: 0
 stdout: = "2024-03-15 11:30:45 UTC\n"
 stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"load\",\"core_lazy_modules\":" # the load counts its lazy Core modules
 stderr: !~ "\"core_lazy_modules\":0}" # and core.time is one
-stderr: !~ "\"core_held_parsed\":0}" # from_timestamp, held, parses alone
-stderr: !~ "\"core_bodies_restored\":0}" # the kept bodies parse back from text
+stderr: !~ "\"core_held_parsed\":0}" # from_timestamp, held, comes back from its ready parse
+stderr: !~ "\"core_bodies_restored\":0}" # the kept bodies come back from theirs
 stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"core.bodies_from_text\",\"root\":" # the count of lowering roots checked from text
 stderr: !~ "\"root\":0}" # takes in the display

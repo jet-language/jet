@@ -1,10 +1,11 @@
 # core.log's `format` sits right below `#ContextKey logger: …`, a constant
-# whose marker shares its line. A load that reads the Core interface parses
-# back the bodies it keeps with every other item's text blanked
-# (jet_driver_core_restore_bodies); that parse must hold `format` as the
-# whole unit's parse does, or `format` keeps a blank body and the check says
-# its block produces no value (jet.MissingBlockValue at Log.jet). Both
-# `jet inspect choices` and `jet run` reach the formatter here.
+# whose marker shares its line. A load that reads the Core interface takes
+# the bodies it keeps from the unit's ready parses
+# (jet_driver_core_restore_bodies); the parse they come from must hold
+# `format` as the whole unit's parse does, or `format` keeps a blank body
+# and the check says its block produces no value (jet.MissingBlockValue at
+# Log.jet). Both `jet inspect choices` and `jet run` reach the formatter
+# here.
 env: NO_COLOR=1
 write: shown.jet = "use log: core.log\n\n#Target(JS)\nview: fn() -> String {\n    \"page\"\n}\n\nrun: fn() {\n    text: log.format(log.formatter(\"text\"), log.record(.Info, \"m\", [log.LogField]{}))\n    print(\"{view()} {text}\")\n}\n"
 step: jet inspect choices shown.jet
