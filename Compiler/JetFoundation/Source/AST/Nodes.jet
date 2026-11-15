@@ -1,0 +1,279 @@
+// The AST's node handles and the tables they index. A reader reaches a node
+// through its tables: `ast_expr`, `ast_stmt` and `ast_pattern` give its view
+// (the `Expr`, `Stmt` or `Pattern` value, whose children are handles again),
+// the `_kind` readers give only its tag, and `ast_expr_span`/`ast_expr_id`
+// read one field. A builder files a node it made with `ast_add_expr`,
+// `ast_add_stmt` or `ast_add_pattern` and keeps the handle.
+//
+// Until the parser writes the AST as columns (Docs/spec/compiler-data.md), a
+// handle is the tree node itself and the tables hold nothing. Then a handle
+// becomes the node's id into its file's columns and a view is built from
+// them, and no reader or builder changes. The nodes' own child fields keep
+// their `Expr`, `Stmt` and `Pattern` types until then: a type's derived
+// equality does not look through an alias.
+
+ExprNode: Expr
+StmtNode: Stmt
+PatternNode: Pattern
+
+ASTTables: struct {}
+
+ast_tables: fn() -> ASTTables Never! {
+    ASTTables{}
+}
+
+ast_expr: fn(_tables: ASTTables, node: ExprNode) -> Expr Never! {
+    node.copy()
+}
+
+ast_stmt: fn(_tables: ASTTables, node: StmtNode) -> Stmt Never! {
+    node.copy()
+}
+
+ast_pattern: fn(_tables: ASTTables, node: PatternNode) -> Pattern Never! {
+    node.copy()
+}
+
+// The span a diagnostic about the expression points at (`expr_span`).
+ast_expr_span: fn(_tables: ASTTables, node: ExprNode) -> Span Never! {
+    expr_span(node)
+}
+
+// The expression's NodeId (`expr_node_id`).
+ast_expr_id: fn(_tables: ASTTables, node: ExprNode) -> Int Never! {
+    expr_node_id(node)
+}
+
+ast_add_expr: fn(_tables: &ASTTables, view: &&Expr) -> ExprNode Never! {
+    view
+}
+
+ast_add_stmt: fn(_tables: &ASTTables, view: &&Stmt) -> StmtNode Never! {
+    view
+}
+
+ast_add_pattern: fn(_tables: &ASTTables, view: &&Pattern) -> PatternNode Never! {
+    view
+}
+
+ASTExprKind: enum {
+    Str
+    StrMatchLit
+    BinMatchLit
+    Int
+    Float
+    Bool
+    Unit
+    Char
+    ListLit
+    MemberSpread
+    Spread
+    MapLit
+    Index
+    Slice
+    Range
+    Ident
+    Call
+    Unary
+    Binary
+    CompareChain
+    UnitLit
+    Deref
+    RawOf
+    Copy
+    Place
+    Field
+    OptField
+    MethodCall
+    OptMethodCall
+    StructLit
+    TypedLit
+    EnumLit
+    Tainted
+    Present
+    Absent
+    Todo
+    NoElse
+    PatternTest
+    Ok
+    Err
+    Try
+    OrFallback
+    If
+    TupleLit
+    Lambda
+    CallValue
+    PtrFromAddr
+    ComptimeName
+    TypeValue
+    Paren
+    Pipe
+}
+
+ASTStmtKind: enum {
+    Expr
+    Val
+    Assign
+    Return
+    While
+    For
+    Switch
+    Break
+    BreakValue
+    Continue
+    BreakLabel
+    BreakLabelValue
+    ContinueLabel
+    Loop
+    CountedLoop
+    Unsafe
+    Impure
+    Reactive
+    Shield
+    Switched
+    Region
+    Policy
+    TaskGroup
+    Layout
+    AuthorityScope
+    ComptimeIf
+    ComptimeSwitch
+    ComptimeBlock
+    ContextBlock
+    Live
+    AssumeDet
+    Transact
+    Yield
+    ScopeMember
+    DeferClose
+    Defer
+}
+
+ASTPatternKind: enum {
+    Variant
+    Present
+    Absent
+    Ok
+    Err
+    Range
+    Or
+    Struct
+    List
+    Map
+    StrMatch
+    BinMatch
+}
+
+ast_expr_kind: fn(_tables: ASTTables, node: ExprNode) -> ASTExprKind Never! {
+    if node == {
+        .Str(_, _, _) -> .Str
+        .StrMatchLit(_, _, _) -> .StrMatchLit
+        .BinMatchLit(_, _, _) -> .BinMatchLit
+        .Int(_, _, _, _, _) -> .Int
+        .Float(_, _, _, _, _) -> .Float
+        .Bool(_, _, _) -> .Bool
+        .Unit(_, _) -> .Unit
+        .Char(_, _, _) -> .Char
+        .ListLit(_, _, _) -> .ListLit
+        .MemberSpread(_, _, _, _) -> .MemberSpread
+        .Spread(_, _, _) -> .Spread
+        .MapLit(_, _, _) -> .MapLit
+        .Index(_, _, _, _, _) -> .Index
+        .Slice(_, _, _, _, _, _) -> .Slice
+        .Range(_, _, _, _, _) -> .Range
+        .Ident(_, _, _) -> .Ident
+        .Call(_, _) -> .Call
+        .Unary(_, _, _, _) -> .Unary
+        .Binary(_, _, _, _, _) -> .Binary
+        .CompareChain(_, _, _, _, _) -> .CompareChain
+        .UnitLit(_, _, _, _, _, _, _) -> .UnitLit
+        .Deref(_, _, _) -> .Deref
+        .RawOf(_, _, _) -> .RawOf
+        .Copy(_, _, _) -> .Copy
+        .Place(_, _, _, _) -> .Place
+        .Field(_, _, _, _) -> .Field
+        .OptField(_, _, _, _, _, _) -> .OptField
+        .MethodCall(_, _, _, _, _, _, _) -> .MethodCall
+        .OptMethodCall(_, _, _, _, _, _, _) -> .OptMethodCall
+        .StructLit(_, _, _, _, _, _, _, _) -> .StructLit
+        .TypedLit(_, _, _, _) -> .TypedLit
+        .EnumLit(_, _, _, _, _, _, _) -> .EnumLit
+        .Tainted(_, _, _, _) -> .Tainted
+        .Present(_, _, _) -> .Present
+        .Absent(_, _) -> .Absent
+        .Todo(_, _, _) -> .Todo
+        .NoElse(_, _) -> .NoElse
+        .PatternTest(_, _, _, _) -> .PatternTest
+        .Ok(_, _, _) -> .Ok
+        .Err(_, _, _) -> .Err
+        .Try(_, _, _, _, _) -> .Try
+        .OrFallback(_, _, _, _, _) -> .OrFallback
+        .If(_, _, _, _, _, _, _) -> .If
+        .TupleLit(_, _, _, _) -> .TupleLit
+        .Lambda(_, _) -> .Lambda
+        .CallValue(_, _, _, _) -> .CallValue
+        .PtrFromAddr(_, _, _, _, _, _) -> .PtrFromAddr
+        .ComptimeName(_, _, _, _) -> .ComptimeName
+        .TypeValue(_, _, _) -> .TypeValue
+        .Paren(_, _, _) -> .Paren
+        .Pipe(_, _, _, _) -> .Pipe
+    }
+}
+
+ast_stmt_kind: fn(_tables: ASTTables, node: StmtNode) -> ASTStmtKind Never! {
+    if node == {
+        .Expr(_) -> .Expr
+        .Val(_) -> .Val
+        .Assign(_, _, _, _) -> .Assign
+        .Return(_, _) -> .Return
+        .While(_, _, _, _, _) -> .While
+        .For(_, _, _, _, _, _, _, _, _) -> .For
+        .Switch(_, _, _, _) -> .Switch
+        .Break(_) -> .Break
+        .BreakValue(_, _) -> .BreakValue
+        .Continue(_) -> .Continue
+        .BreakLabel(_, _) -> .BreakLabel
+        .BreakLabelValue(_, _, _, _) -> .BreakLabelValue
+        .ContinueLabel(_, _) -> .ContinueLabel
+        .Loop(_, _, _, _) -> .Loop
+        .CountedLoop(_, _, _, _, _, _, _) -> .CountedLoop
+        .Unsafe(_, _, _, _) -> .Unsafe
+        .Impure(_, _, _, _) -> .Impure
+        .Reactive(_, _) -> .Reactive
+        .Shield(_, _) -> .Shield
+        .Switched(_, _, _) -> .Switched
+        .Region(_, _, _, _) -> .Region
+        .Policy(_, _, _) -> .Policy
+        .TaskGroup(_, _, _, _, _) -> .TaskGroup
+        .Layout(_, _, _, _) -> .Layout
+        .AuthorityScope(_, _, _, _, _) -> .AuthorityScope
+        .ComptimeIf(_, _, _, _, _, _) -> .ComptimeIf
+        .ComptimeSwitch(_, _, _, _) -> .ComptimeSwitch
+        .ComptimeBlock(_, _, _) -> .ComptimeBlock
+        .ContextBlock(_, _, _) -> .ContextBlock
+        .Live(_, _) -> .Live
+        .AssumeDet(_, _, _, _) -> .AssumeDet
+        .Transact(_, _, _, _, _) -> .Transact
+        .Yield(_, _) -> .Yield
+        .ScopeMember(_, _, _, _, _, _, _, _) -> .ScopeMember
+        .DeferClose(_, _) -> .DeferClose
+        .Defer(_, _) -> .Defer
+    }
+}
+
+ast_pattern_kind: fn(_tables: ASTTables, node: PatternNode) -> ASTPatternKind Never! {
+    if node == {
+        .Variant(_, _, _, _) -> .Variant
+        .Present(_, _, _, _) -> .Present
+        .Absent(_) -> .Absent
+        .Ok(_, _, _, _) -> .Ok
+        .Err(_, _, _, _) -> .Err
+        .Range(_, _, _) -> .Range
+        .Or(_, _) -> .Or
+        .Struct(_, _, _, _) -> .Struct
+        .List(_, _, _) -> .List
+        .Map(_, _, _) -> .Map
+        .StrMatch(_, _) -> .StrMatch
+        .BinMatch(_, _) -> .BinMatch
+    }
+}
