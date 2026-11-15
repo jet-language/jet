@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 106527,
+    "rev": 106546,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60486,6 +60486,177 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:13:32.034Z"
+        },
+        {
+          "n": 12,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P1+P2 load: Core reach sources are parsed once, on the parse threads. Today: `CoreReach jet_driver_reach_parse_sources` runs serially on the lead twice, once from `reach_parse_held` and once from `core_restore_bodies`. That is 205 of load_reach's 635 lead samples, about 0.4 s. Measured on the p189 trace: the load span takes 1116 ms, and only 509 ms of it is the threaded file batches. Done when: the batch trace's load lead drops by ≥300 ms, with byte-identical output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:42.648Z"
+        },
+        {
+          "n": 13,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P3 register: registration's serial passes become visible to the gate. Today: the `register` span (845 ms in p189, process CPU 4.8× its wall in tp170) has no child spans. The 240 lead samples of `sema_registration_prepare_graph` spread over about 30 serial sub-passes. The largest are qualified-name canonicalize (18), units mentions scan (15) and marker modules (12+7). Done when: each pass over 20 ms is a trace span, and the gate's register row names the largest one.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:44.069Z"
+        },
+        {
+          "n": 14,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P4 comptime: the land splice's owners run on threads. Today: `LocalSplice sema_local_splice_owners` is serial on the lead: 260 lead samples, about 0.5 s. Measured on the p189 trace: `comptime.land.splice` takes 603 ms (sema.local_values 288 + 161, compare 113). Done when: the splice's owner pass is partitioned per module on CompilerThreads, and the splice span drops by ≥250 ms with identical output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:45.394Z"
+        },
+        {
+          "n": 15,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P4 sema.check: Core bodies are decoded off the lead. Today: `CoreBodies sema_core_body_load` → `sema_core_body_decode` runs serially inside `sema_check_registration_top_level`: 222 lead samples, about 0.45 s. The sema.check span is 325 ms in p189, and the rest of the decode lands in comptime. Done when: the decode runs on threads, or beside load, and the lead samples drop by ≥150.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:47.040Z"
+        },
+        {
+          "n": 16,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P5a+P5b sema.bodies: direct calls stop resolving their callee by key text. Today: `Direct sema_call_direct_checked_from_target` and `sema_call_check_direct_target_owned` take 315 of the 1743 lead body-stream samples. String clone, hash and eq are the top three self symbols of the whole build (2.0%, 1.7% and 1.4% of all cycles). The bodies span is 2386 ms in p189, at 8.8× CPU. Done when: the callee is held as its symbol id, and the body stream's CPU drops by ≥10%.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:48.651Z"
+        },
+        {
+          "n": 17,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P5c sema.effects: the graph is read in place on threads, and each function's node is looked up once. Today: `compiler_transfer_rows` fill/take moves every module and node twice, serially (about 35 ms). Three serial per-function key lookups (collect 8, stack 9 and stamp 12 ms) and resolve_edges (23 ms) run on the lead. The sema.effects span is 664 ms in p189. Speed-3 has SUB effects-threads-read-in-place for this.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:50.004Z"
+        },
+        {
+          "n": 18,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P5c sema.effects: `sema_effect_node_index` stops looking nodes up by key text. Today: the effect graph keys nodes by function-key strings (`NameRows node_by_key`). Solve (26 ms), resolve_type_params (19 ms) and node_key_table (12 ms) each look keys up serially. Done when: nodes are indexed by symbol id, and the sema.effects lead drops by ≥50 ms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:51.285Z"
+        },
+        {
+          "n": 19,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P5d sema.failure: candidates and union rows are built on threads. The span is 148 ms in p189. Candidate collection (about 38 ms) and union rows (about 30 ms) were serial. Speed-3 has SUB sema-failure-on-threads for this, in cycle p192.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:52.560Z"
+        },
+        {
+          "n": 20,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P6 other finalize: Core demand reads and keys run on threads. Today: `sema_core_demand_named` reads, keys and resolves symbol keys on the lead: 55 + 36 + 34 + 6 lead samples. Measured on the p189 trace: `sema.core_demand.name` takes 149 ms and `sema.core_demand` takes 458 + 70 ms. Done when: the named demand runs per module on threads, and `sema.core_demand.name` drops to ≤50 ms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:53.922Z"
+        },
+        {
+          "n": 21,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P7 lower: driver lowering becomes visible to the gate. Today: the `lower` span (186 ms in p189; 0.19 s wall, 0.96 s CPU in tp170 O0) has no child spans. Done when: its serial passes over 20 ms are trace spans, so a root can be named.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:55.015Z"
+        },
+        {
+          "n": 22,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P8 ir.build: the IR merge stops running serially on the lead. Today: `BuildMerge ir_merge` takes 232 lead samples, about 0.46 s. `ir_merge_new`/`group`, `ir_merge_scan` and `key_rows` are serial; only `rewrite_parts` is threaded. The ir.build span is 2195 ms in p189. Done when: the scan and key rows run per wave on threads, and the merge lead samples drop by ≥100.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:56.078Z"
+        },
+        {
+          "n": 23,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P9 ir.opt + ir.lint: lint's static rows are built once, off the lead. Today: `Lint ir_lint_context` → `ir_lint_static_rows` takes 37 lead samples (about 75 ms). The p189 trace has ir.lint at 90 ms and O0 at 135 + 717 ms. Done when: the rows are built beside opt or on threads, and the ir.lint span is ≤20 ms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:57.264Z"
+        },
+        {
+          "n": 24,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P10 ir.x64: the reached-only scan and release stop running serially. Today: `X64Module ir_x64_reached_only` (32 lead samples) and `ir_x64_release_fill`/`run` run on the lead around the threaded selection. The selection itself is 4351 worker samples. The ir.x64 span is 1050 ms in p189. Done when: the reached-only scan is partitioned and the release goes aside, so the lead drops by ≥60 ms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:58.241Z"
+        },
+        {
+          "n": 25,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P11 ir.object: object layout copies stop. Today: `Object x64_object_lay` (141 lead samples, of which 25 are `jet_rt_mem_move`) and `x64_object_file` (72 lead samples, of which 36 are `mem_move`) copy section bytes serially. The ir.object span is 636 ms in p189. Done when: the sections are written in place, with no whole-section moves, and the lead samples drop by ≥60.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:15:59.208Z"
+        },
+        {
+          "n": 26,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P14 native.link: link sections are written on threads. Today: `StaticLink link_write_sections` takes 64 of the link's 143 lead samples, and `link_collect` takes 34. Both are serial. The native.link span is 409 ms in p189. Done when: the sections are written per piece on CompilerThreads, and native.link drops by ≥100 ms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:16:00.155Z"
+        },
+        {
+          "n": 27,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P15 residual: build.plan stops compiling build.jet through the full driver. Today: `BuildQueries jet_driver_query_build_plan` takes 502 lead samples: `lowering_inputs_selection` 281 and a whole `load_reach` 189. The build.plan span is 550 ms in p189. Done when: the plan loads only build.jet's own closure, and build.plan is ≤150 ms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:16:01.132Z"
+        },
+        {
+          "n": 28,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): P15 residual: the compile's target state is dropped aside. Today: `cli.target.drop` takes 1.05 s wall at 1.03 s CPU (tp170 O0), serially at exit. Speed-3 has SUB target-drop-aside for this.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:16:02.121Z"
+        },
+        {
+          "n": 29,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): outside: build steps hash their inputs once, on tasks. Today: `Cache build_snapshot_declared_inputs` takes 221 lead samples, 153 of them sha256. `action_output_lock_rows` takes 178 lead samples, all of them sha256. Together that is about 0.8 s of serial input hashing. Speed-3 has SUBs step-inputs-on-tasks and runtime-pack-digests-on-tasks for this.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:16:03.147Z"
+        },
+        {
+          "n": 30,
+          "text": "Phase root (c2 budget overrun, measured on the p189 gate trace, tp170 and the rec187 perf profile): outside: the runtime step's Core check runs on more threads. Today: the `runtime` step is 9.55 s of the 30.2 s p189 build, and it sits on the critical path after native.link. Inside it, `runtime.core` takes 6.6 s with `sema.finalize` at 2.7 s (`sema.bodies` 1.2 s) and an `ir.opt` span of 1.27 s. Done when: the largest serial share of `runtime.core`'s ir.opt is partitioned on CompilerThreads, and the runtime step drops by ≥1 s.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:16:04.156Z"
         }
       ],
       "refs": [],
@@ -60495,12 +60666,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T22:02:03.613Z",
+      "updated": "2026-11-15T22:16:04.156Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 11
+      "criteriaLastN": 30
     },
     {
       "id": "c0fo37ov",
@@ -218570,6 +218741,139 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T22:16:04.156Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#30 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:16:03.147Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#29 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:16:02.121Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#28 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:16:01.132Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#27 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:16:00.155Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#26 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:59.208Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#25 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:58.241Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#24 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:57.264Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#23 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:56.078Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#22 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:55.015Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#21 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:53.922Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#20 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:52.560Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#19 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:51.285Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#18 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:50.004Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#17 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:48.651Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#16 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:47.040Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#15 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:45.395Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#14 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:44.069Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#13 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
+    {
+      "at": "2026-11-15T22:15:42.648Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#12 Phase root (c2 budget overrun, measured on the p189 gate tra"
+    },
     {
       "at": "2026-11-15T22:02:03.613Z",
       "by": "Main",
