@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6882,
-    "rev": 103453,
+    "nextNum": 6883,
+    "rev": 103475,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30989,39 +30989,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Each stable Rust inventory row has a semantic Jet disposition, including positive and negative capability bounds.",
+          "text": "Each row of the stable Rust iterator inventory (Docs/research/mine-for-jet-2026-09-12.md, finding iter-f005) has a Jet disposition, with positive and negative capability bounds, in one table in the Core collections spec. Proof: the table covers every inventory row.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-12T14:48:12.936Z"
+          "at": "2026-11-15T03:17:07.912Z"
         },
         {
           "n": 4,
-          "text": "A permanently exhausted wrapper remains exhausted, while a source that can resume after an empty poll is not mislabeled fused.",
+          "text": "fuse() latches the first true end: a permanently exhausted wrapper stays exhausted, and a source that can resume after an empty poll is not labelled fused (D-ITER-FUSED1=A). Proof: `jet test Compiler --profile golden --filter collections/iter_capabilities` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-12T14:48:12.936Z"
+          "at": "2026-11-15T03:17:09.394Z"
         },
         {
           "n": 5,
-          "text": "The representation and lowering preserve these facts without a separate public iterator hierarchy or mandatory dynamic allocation.",
+          "text": "Capability facts are carried by the existing Iterable protocol and storage representations, with no public iterator hierarchy and no mandatory dynamic allocation. Proof: `jet test Compiler --profile cases --filter iter_capabilities_allocate_nothing` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-12T14:48:12.936Z"
+          "at": "2026-11-15T03:17:10.830Z"
         },
         {
           "n": 6,
-          "text": "Golden collections/iter_capabilities passes with identical output on O0, O1 and O2, and tests/ui/iter_by_ref_overlap.jet matches its snapshot, for the size_hint, fuse and by_ref slices.",
+          "text": "size_hint, fuse and by_ref ship (D-ITER-SIZE1=A, D-ITER-FUSED1=A, D-ITER-BORROW1=A; none exists in Core on dev 168e1e9e92): golden collections/iter_capabilities gives the same output on O0, O1 and O2, and tests/ui/iter_by_ref_overlap.jet matches its snapshot. Proof: `jet test Compiler --profile golden --filter collections/iter_capabilities` and `jet test Compiler --profile ui --filter iter_by_ref_overlap`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:52:22.952Z"
+          "at": "2026-11-15T03:17:12.292Z"
         },
         {
           "n": 7,
@@ -31043,84 +31043,84 @@
         },
         {
           "n": 9,
-          "text": "[#3331]  • A callback failure stops at the triggering item; the next pull starts at the exact next item. • Accumulator and partial-output ownership is explicit. The source is neither replayed nor destroyed. • Infallible, propagating and error-as-data callbacks stay type-distinct through shared IR. • JP: `collections/fail_remainder`.",
+          "text": "A failing callback stops at the triggering item and the next pull starts at the exact next item; accumulator and partial-output ownership is explicit; the source is neither replayed nor destroyed; infallible, propagating and error-as-data callbacks stay distinct types (D-ITER-FAILCONSUME1=A). Proof: `jet test Compiler --profile golden --filter collections/fail_remainder`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:27.229Z"
+          "at": "2026-11-15T03:17:13.928Z"
         },
         {
           "n": 10,
-          "text": "[#3333]  • A repeated peek does not pull again, and the first peek's side effects are documented. • A rejected conditional consume keeps the pending item, or the replacement returned by the rejection branch. • An accepted consume advances once with no item copy. • Peeked mutation targets the buffered item. Loans cannot outlive or overlap a cursor mutation. • JP: `collections/peekable`; `peek_loan_across_next`.",
+          "text": "peek never pulls twice and its first side effects are documented; a rejected conditional consume keeps the pending item (or the rejection branch's replacement); an accepted consume advances once with no copy; peeked mutation targets the buffered item, and a loan cannot outlive or overlap a cursor mutation (D-ITER-LOOKAHEAD1=A). Proof: `jet test Compiler --profile golden --filter collections/peekable` and `jet test Compiler --profile ui --filter peek_loan_across_next`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:27.895Z"
+          "at": "2026-11-15T03:17:15.526Z"
         },
         {
           "n": 11,
-          "text": "[#3334]  • Non-consuming bounds and exact remaining length are distinguishable. • filter drops exactness; map keeps it; chain checks representability. • Hints never authorize unchecked access. Unknown, infinite and over-range sizes stay honest. • JP: `collections/size_hint`.",
+          "text": "size_hint tells a bound from an exact remaining length (equal bounds mean exact): filter drops exactness, map keeps it, chain checks representability, unknown, infinite and over-range sizes stay honest, and a hint never authorizes unchecked access (D-ITER-SIZE1=A). Proof: `jet test Compiler --profile golden --filter collections/size_hint`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:28.553Z"
+          "at": "2026-11-15T03:17:17.042Z"
         },
         {
           "n": 12,
-          "text": "[#3335]  • Mixed front/back pulls never duplicate or skip an item and meet exactly at exhaustion. • Reverse search reports the original index. • Adapters forward exact bounds. Forward-only streams are never collected to fake the capability. • Golden `collections/iter_back`; UI `next_back_one_way_source` (Stream, and after filter).",
+          "text": "Mixed front and back pulls never duplicate or skip an item and meet exactly at exhaustion; reverse search reports the original index; adapters forward exact bounds; a forward-only stream is refused, never collected to fake the capability (D-ITER-BACK1=A). Proof: `jet test Compiler --profile golden --filter collections/iter_back` and `jet test Compiler --profile ui --filter next_back_one_way_source`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:29.174Z"
+          "at": "2026-11-15T03:17:18.214Z"
         },
         {
           "n": 13,
-          "text": "[#3341]  • A custom BagIter `map` runs without a second map implementation. • User sources, built-in Iter, Stream and ViewIter compose the same adapters, with no hidden collection, replay or lifetime extension. • JP: `collections/iter_interop`.",
+          "text": "A custom source's `map` runs without a second map implementation, and user sources, built-in Iter, Stream and ViewIter compose the same adapters with no hidden collection, replay or lifetime extension (D-ITER-INTEROP1=A). Proof: `jet test Compiler --profile golden --filter collections/iter_interop`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:29.841Z"
+          "at": "2026-11-15T03:17:19.330Z"
         },
         {
           "n": 14,
-          "text": "[#3355]  • A short final group keeps every value read (typed partial result, or returned to the cursor). • Too few is distinguished from too many, with no overconsumption. • Width zero, move-only values and remainder lifetime have explicit contracts. • Golden `collections/read_exact`.",
+          "text": "Fixed-width group reads keep every value of a short final group (typed partial result, or returned to the cursor), tell too few from too many without overconsuming, and state width zero, move-only values and remainder lifetime (D-ITER-EXACTGROUP1=A). Proof: `jet test Compiler --profile golden --filter collections/read_exact`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:30.499Z"
+          "at": "2026-11-15T03:17:20.543Z"
         },
         {
           "n": 15,
-          "text": "[#3362]  • Too-many detection reads only the documented extra item and keeps the remainder. • Equality keeps the representative policy and short-circuits. • Existing compositions are shown before any new alias is proposed (aliases need a ballot). • Golden `collections/cardinality_search`.",
+          "text": "Cardinality checks read only the documented extra item and keep the remainder; equality keeps the representative policy and short-circuits. Proof: `jet test Compiler --profile golden --filter collections/cardinality_search`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:31.508Z"
+          "at": "2026-11-15T03:17:21.678Z"
         },
         {
           "n": 16,
-          "text": "[#3375]  • The remainder reflects mixed front/back advancement without copying. • A mutable projection is exclusive. `into_remainder` keeps the source lifetime. • UTF-8 byte units are preserved. Opaque and filter sources do not expose a contiguous remainder. • JP: `collections/iter_remaining`; `iter_remaining_filter`, `iter_remaining_mut_overlap`.",
+          "text": "The unread remainder reflects mixed front and back advancement without copying; a mutable projection is exclusive; `into_remainder` keeps the source lifetime; UTF-8 byte units are kept; opaque and filter sources expose no contiguous remainder (D-ITER-REMAINDER1=A). Proof: `jet test Compiler --profile golden --filter collections/iter_remaining` and `jet test Compiler --profile ui --filter iter_remaining_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:33.093Z"
+          "at": "2026-11-15T03:17:22.849Z"
         },
         {
           "n": 17,
-          "text": "[#3394]  • A copied borrowed slice iterator starts at the same position, advances independently and keeps its loan. • One-shot and exclusive cursors are not copyable. Shared external state stays shared. • Assigning from an explicit copy gives `clone_from` semantics with no alias. • JP: `collections/iter_copy`; `iter_copy_one_shot`.",
+          "text": "A copied borrowed slice iterator starts at the same position, advances independently and keeps its loan; one-shot and exclusive cursors are not copyable; shared external state stays shared; assigning from an explicit copy has clone_from meaning (D-ITER-COPY1=A). Proof: `jet test Compiler --profile golden --filter collections/iter_copy` and `jet test Compiler --profile ui --filter iter_copy_one_shot`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:33.778Z"
+          "at": "2026-11-15T03:17:24.050Z"
         },
         {
           "n": 18,
@@ -31133,12 +31133,12 @@
         },
         {
           "n": 19,
-          "text": "Proven endless normal production that is fully drained is a registered error listed by jet check (never stopping jet run); `take(n)` removes it, and effectful infinite loops are not flagged. The message explains demand, buffering and cancellation without inserting a bound (`tests/ui_lint/endless_full_drain`, re-registered from a warning).",
+          "text": "Fully draining a provably endless normal producer is a registered error from jet check (never a stop in jet run); `take(n)` removes it; effectful infinite loops are not flagged; the message explains demand, buffering and cancellation without inserting a bound (D-ITER-ENDLESS1=A). Proof: `jet test Compiler --profile ui --filter endless_full_drain`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:19:30.501Z"
+          "at": "2026-11-15T03:17:25.203Z"
         },
         {
           "n": 21,
@@ -31402,7 +31402,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:12.936Z",
-      "updated": "2026-11-15T03:03:41.117Z",
+      "updated": "2026-11-15T03:17:25.203Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 37,
       "goals": [
@@ -102316,6 +102316,69 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:03:06.731Z"
+        },
+        {
+          "n": 3,
+          "text": "Owned, shared-borrowed and exclusive-borrowed iteration have distinct observable contracts: mutating a yielded element through ViewMut updates the original collection, replaced slots drop exactly once, and illegal overlap is refused before execution (D-ITER-BORROW1=A). Proof: `jet test Compiler --profile golden --filter collections/borrowed_iteration` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:16:58.818Z"
+        },
+        {
+          "n": 4,
+          "text": "Chunks and windows state width-zero, remainder, direction, overlap and mutability: non-overlapping mutable chunks update the source, and overlapping mutable windows are never built from ordinary references (D-ITER-SLICEPRODUCERS1=A). Proof: `jet test Compiler --profile golden --filter collections/slice_producers`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:17:00.004Z"
+        },
+        {
+          "n": 5,
+          "text": "Borrowed windows and chunks, and text split and lines views, allocate nothing per output where the source storage permits a view, and print their text, not handles. Proof: `jet test Compiler --profile golden --filter collections/borrowed_iteration` with its allocation count on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:17:01.250Z"
+        },
+        {
+          "n": 6,
+          "text": "A loan cannot escape its owner: an escaping loan, overlapping mutable windows and a resize during iteration are refused before execution, mutable-view escapes stay refused, and default read-view stores keep D-MEM-COPYSEM1 semantic copies (explicit borrowed aggregates are F083). Proof: `jet test Compiler --profile ui --filter view_loan_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:17:02.710Z"
+        },
+        {
+          "n": 7,
+          "text": "A mapper over owned items moves each move-only item exactly once; a shared view cannot move its items; exclusive-view mutation reaches the original storage; escaping callbacks respect their loans (D-ITER-MAPOWN1=A). Proof: `jet test Compiler --profile golden --filter collections/map_owned_items` and `jet test Compiler --profile ui --filter map_move_from_shared_view`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:17:03.979Z"
+        },
+        {
+          "n": 8,
+          "text": "No `.view()` special case remains in the formatter (Compiler/JetParser/Source/Formatter/Expressions.jet:2595) or sema (Compiler/JetSema/Source/Sema/Ownership/Checks.jet:2255 on dev 168e1e9e92); `values[range]`, `&values[range]` and `~values[range]` keep their contracts, and `.view()` is an ordinary unknown-method error. Proof: `git grep -n '\"view\"' -- Compiler/JetParser Compiler/JetSema` prints nothing and `jet test Compiler --profile ui --filter view_method_unknown` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:17:05.250Z"
+        },
+        {
+          "n": 9,
+          "text": "An explicit `[View<T>]` collect is rooted in live storage with no payload copy; temporaries cannot escape, invalidating mutation is refused, and default `to_list` keeps D-MEM-COPYSEM1 copies (D-ITER-VIEWCOLLECT1=A). Proof: `jet test Compiler --profile golden --filter collections/borrowed_collect` and `jet test Compiler --profile ui --filter view_collect_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:17:06.516Z"
         }
       ],
       "refs": [],
@@ -102330,8 +102393,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:06.731Z",
-      "updated": "2026-11-15T03:03:06.731Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:17:06.516Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 9
     },
     {
       "id": "c0w8b7vb",
@@ -103144,6 +103208,131 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:14:07.479Z",
       "updated": "2026-11-15T03:14:07.479Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c00zrgpr",
+      "num": 6882,
+      "title": "Lazy adapters read only what they need: early stop, bounded state, flatten, intersperse, replay and cycle",
+      "body": "Destination: every lazy adapter pulls only up to its semantic stop, keeps only its minimum state, and never builds a hidden whole-source list; replay, fork and cycle say exactly what they buffer and refuse a one-shot source they cannot repeat.\n\nWhy it matters: an adapter that reads past its stop runs effects the program did not ask for and breaks on endless or failing sources; hidden lists cost memory proportional to the input.\n\nDecisions: D-ITER-NESTED1=A (flatten the existing iterable protocol), D-ITER-SEPARATOR1=A (separators only when demanded), D-ITER-KEYRUNS1=A (adjacent groups), D-ITER-REPLAY1=A (repeat a replayable source lazily), D-ITER-RESUME1=A. Related: #3317 (iterator capabilities), #6875 (progress counts follow pulls).\n\nSource: #3317 c18, c36-c39, c41-c44, c46, c47 (archived #3320, #3106, #3358, #3384, #3350, via #4284).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Early-exit consumers stop at their semantic stop: pull traces stop at each adapter's stop, and a source that panics at its tail is never read past it. Proof: `jet test Compiler --profile golden --filter collections/iter_demand` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:16:57.357Z"
+        },
+        {
+          "n": 2,
+          "text": "Each lazy adapter documents its minimum state and peak live memory, and no lazy path builds a whole-source list. Proof: `jet test Compiler --profile cases --filter iter_adapters_keep_minimum_state` (allocation counts per adapter on O0, O1 and O2).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:16:57.357Z"
+        },
+        {
+          "n": 3,
+          "text": "is_sorted and lexicographic comparison stop at the first decisive item. Proof: `jet test Compiler --profile golden --filter collections/iter_demand` shows the pull count.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:16:57.357Z"
+        },
+        {
+          "n": 4,
+          "text": "Adjacent groups and dedup keep item order and never merge nonadjacent equal keys (D-ITER-KEYRUNS1=A). Proof: `jet test Compiler --profile golden --filter collections/adjacent_groups` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:16:57.357Z"
+        },
+        {
+          "n": 5,
+          "text": "A consumer can start and stop before the whole source is materialized on the read_lines, JSON and CSV paths; buffers and size limits are explicit, and oversize or malformed input stops predictably. Proof: `jet test Compiler --profile golden --filter io/streaming_consumers` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:16:57.357Z"
+        },
+        {
+          "n": 6,
+          "text": "flatten composes nested user, view and suspended children with no intermediate List; empty children, an unbounded first child, child failure and early stop keep pull order and cleanup; move-only and borrowed items keep their provenance (D-ITER-NESTED1=A). Proof: `jet test Compiler --profile golden --filter collections/flatten_iterable`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:16:57.357Z"
+        },
+        {
+          "n": 7,
+          "text": "intersperse_with runs its factory only when a separator is demanded: empty and singleton sources emit none and an odd prefix runs no unneeded factory, and the constant form needs lawful repeated ownership (D-ITER-SEPARATOR1=A). Proof: `jet test Compiler --profile golden --filter collections/intersperse_with` shows factory counts 0, 0 and 1.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:16:57.357Z"
+        },
+        {
+          "n": 8,
+          "text": "A fork or replay of a source measures retained items and cleanup on the fast and slow branches, a finite capacity backpressures or fails explicitly, and cloned replayable sources are compared with buffered one-shot sources. Proof: `jet test Compiler --profile golden --filter collections/fork_replay`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:16:57.357Z"
+        },
+        {
+          "n": 9,
+          "text": "`[1,2].lazy().cycle().take(5)` prints [1,2,1,2,1], an empty replayable source ends, an effectful map runs once per source item per pass, `cycle(5)` is unchanged, and replay of an effectful source is never silent or unbounded (D-ITER-REPLAY1=A). Proof: `jet test Compiler --profile golden --filter collections/lazy_cycle` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:16:57.357Z"
+        },
+        {
+          "n": 10,
+          "text": "Zero-argument `cycle()` on a Stream or other one-shot source is refused with a registered error. Proof: `jet test Compiler --profile ui --filter cycle_one_shot_source`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:16:57.357Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "iterators",
+        "collections"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:16:57.357Z",
+      "updated": "2026-11-15T03:16:57.357Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -208563,6 +208752,160 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:17:25.204Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#19: decision; proof; no warnings (D-NO-WARNINGS1=A); was: Proven endless normal production that is fully drained is a registered error listed by jet check (never stopping jet run); `take(n)` removes it, and effectful infinite loops are not flagged. The messa"
+    },
+    {
+      "at": "2026-11-15T03:17:24.050Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#17: strip debris; decision; proof; was: [#3394]  • A copied borrowed slice iterator starts at the same position, advances independently and keeps its loan. • One-shot and exclusive cursors are not copyable. Shared external state stays share"
+    },
+    {
+      "at": "2026-11-15T03:17:22.849Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#16: strip debris; decision; proof; was: [#3375]  • The remainder reflects mixed front/back advancement without copying. • A mutable projection is exclusive. `into_remainder` keeps the source lifetime. • UTF-8 byte units are preserved. Opaqu"
+    },
+    {
+      "at": "2026-11-15T03:17:21.678Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#15: strip debris; proof; alias proposals need a ballot, not a criterion; was: [#3362]  • Too-many detection reads only the documented extra item and keeps the remainder. • Equality keeps the representative policy and short-circuits. • Existing compositions are shown before any "
+    },
+    {
+      "at": "2026-11-15T03:17:20.544Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#14: strip debris; decision; proof; was: [#3355]  • A short final group keeps every value read (typed partial result, or returned to the cursor). • Too few is distinguished from too many, with no overconsumption. • Width zero, move-only valu"
+    },
+    {
+      "at": "2026-11-15T03:17:19.330Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#13: strip debris; decision; proof; was: [#3341]  • A custom BagIter `map` runs without a second map implementation. • User sources, built-in Iter, Stream and ViewIter compose the same adapters, with no hidden collection, replay or lifetime "
+    },
+    {
+      "at": "2026-11-15T03:17:18.214Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#12: strip debris; decision; proof; was: [#3335]  • Mixed front/back pulls never duplicate or skip an item and meet exactly at exhaustion. • Reverse search reports the original index. • Adapters forward exact bounds. Forward-only streams are"
+    },
+    {
+      "at": "2026-11-15T03:17:17.043Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#11: strip debris; decision; proof; was: [#3334]  • Non-consuming bounds and exact remaining length are distinguishable. • filter drops exactness; map keeps it; chain checks representability. • Hints never authorize unchecked access. Unknown"
+    },
+    {
+      "at": "2026-11-15T03:17:15.526Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#10: strip debris; decision; proof; was: [#3333]  • A repeated peek does not pull again, and the first peek's side effects are documented. • A rejected conditional consume keeps the pending item, or the replacement returned by the rejection "
+    },
+    {
+      "at": "2026-11-15T03:17:13.929Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#9: strip debris; decision; proof; was: [#3331]  • A callback failure stops at the triggering item; the next pull starts at the exact next item. • Accumulator and partial-output ownership is explicit. The source is neither replayed nor dest"
+    },
+    {
+      "at": "2026-11-15T03:17:12.293Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#6: state and decisions; was: Golden collections/iter_capabilities passes with identical output on O0, O1 and O2, and tests/ui/iter_by_ref_overlap.jet matches its snapshot, for the size_hint, fuse and by_ref slices."
+    },
+    {
+      "at": "2026-11-15T03:17:10.830Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#5: add proof; was: The representation and lowering preserve these facts without a separate public iterator hierarchy or mandatory dynamic allocation."
+    },
+    {
+      "at": "2026-11-15T03:17:09.394Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#4: cite decision; add proof; was: A permanently exhausted wrapper remains exhausted, while a source that can resume after an empty poll is not mislabeled fused."
+    },
+    {
+      "at": "2026-11-15T03:17:07.912Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m83e3n",
+      "note": "#1: one observable outcome with a proof; was: Each stable Rust inventory row has a semantic Jet disposition, including positive and negative capability bounds."
+    },
+    {
+      "at": "2026-11-15T03:17:06.516Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fyhb2p",
+      "note": "#9 An explicit `[View<T>]` collect is rooted in live storage wi"
+    },
+    {
+      "at": "2026-11-15T03:17:05.251Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fyhb2p",
+      "note": "#8 No `.view()` special case remains in the formatter (Compiler"
+    },
+    {
+      "at": "2026-11-15T03:17:03.980Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fyhb2p",
+      "note": "#7 A mapper over owned items moves each move-only item exactly "
+    },
+    {
+      "at": "2026-11-15T03:17:02.710Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fyhb2p",
+      "note": "#6 A loan cannot escape its owner: an escaping loan, overlappin"
+    },
+    {
+      "at": "2026-11-15T03:17:01.250Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fyhb2p",
+      "note": "#5 Borrowed windows and chunks, and text split and lines views,"
+    },
+    {
+      "at": "2026-11-15T03:17:00.004Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fyhb2p",
+      "note": "#4 Chunks and windows state width-zero, remainder, direction, o"
+    },
+    {
+      "at": "2026-11-15T03:16:58.818Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fyhb2p",
+      "note": "#3 Owned, shared-borrowed and exclusive-borrowed iteration have"
+    },
+    {
+      "at": "2026-11-15T03:16:57.358Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c00zrgpr",
+      "note": "Lazy adapters read only what they need: early stop, bounded state, flatten, intersperse, replay and cycle"
+    },
     {
       "at": "2026-11-15T03:14:56.860Z",
       "by": "TowerKeeper-1",
