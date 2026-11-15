@@ -26,6 +26,7 @@ Run a lesson from the repository root, for example `jet run Examples/Apps/<Lesso
 
 ## UI
 
+- [AsyncCommand](UI/AsyncCommand.jet) — An async command (a Save button) on the task contract alone.
 - [CoordinateSpaces](UI/CoordinateSpaces.jet) — F04: nominal spaces reject accidental mixing while frame ids keep dynamic scene identity checks at runtime.
 - [Events](UI/Events.jet)
 - [LayoutBasic](UI/LayoutBasic.jet) — Constraint layout — a Cassowary-style solver.
