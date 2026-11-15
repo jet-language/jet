@@ -3349,10 +3349,14 @@ exit_code_rows: fn(source: String) -> [ExitCode] GeneratorError! {
 }
 
 // The rows as constants named `prefix` and the row's name, each a runtime
-// word when `word`, between the generated region's two lines.
-render_exit_codes: fn(rows: [ExitCode], prefix: String, word: Bool) -> String Never! {
+// word when `word`, between the generated region's two lines; with `spaced`,
+// a blank line parts one row from the next.
+render_exit_codes: fn(rows: [ExitCode], prefix: String, word: Bool, spaced: Bool) -> String Never! {
     lines := [String]{EXIT_CODES_BEGIN}
+    first := true
     loop row in rows {
+        if spaced && !first -> lines.push("")
+        first = false
         loop line in row.doc -> lines.push("// {line}")
         value: if word -> "I64{{{row.value}}}" else -> row.value.copy()
         lines.push("{prefix}{row.name}: {value}")
@@ -3373,19 +3377,19 @@ render_exit_code_table: fn(rows: [ExitCode]) -> String Never! {
 }
 
 // The runtime's copy as runtime words, the test kit's as KIT_ constants,
-// Core's as `__` constants, internal to Core, in its generated region, and
-// the release policy's table in its generated region.
+// Core's as file-private constants in its generated region, and the release
+// policy's table in its generated region.
 read_exit_codes: fn() -[FS]> [GeneratedFile] GeneratorError! {
     source: files.read(EXIT_CODES_SOURCE_PATH) ?? return Err(generator_fail("cannot read {EXIT_CODES_SOURCE_PATH}: {err}"))
     rows: exit_code_rows(source) ?? return Err(err)
     core: files.read(EXIT_CODES_CORE_PATH) ?? return Err(generator_fail("cannot read {EXIT_CODES_CORE_PATH}: {err}"))
-    core_text: splice_region(EXIT_CODES_CORE_PATH, core, EXIT_CODES_BEGIN, EXIT_CODES_END, "exit-code", render_exit_codes(rows, "__", false)) ?? return Err(err)
+    core_text: splice_region(EXIT_CODES_CORE_PATH, core, EXIT_CODES_BEGIN, EXIT_CODES_END, "exit-code", render_exit_codes(rows, "priv ", false, true)) ?? return Err(err)
     doc: files.read(EXIT_CODES_DOC_PATH) ?? return Err(generator_fail("cannot read {EXIT_CODES_DOC_PATH}: {err}"))
     doc_text: splice_region(EXIT_CODES_DOC_PATH, doc, EXIT_CODES_DOC_BEGIN, EXIT_CODES_DOC_END, "exit-code", render_exit_code_table(rows)) ?? return Err(err)
     Ok(
         [GeneratedFile]{
-            GeneratedFile{path: EXIT_CODES_RUNTIME_PATH, text: "{render_exit_codes(rows, "", true)}\n"},
-            GeneratedFile{path: EXIT_CODES_KIT_PATH, text: "{render_exit_codes(rows, "KIT_", false)}\n"},
+            GeneratedFile{path: EXIT_CODES_RUNTIME_PATH, text: "{render_exit_codes(rows, "", true, false)}\n"},
+            GeneratedFile{path: EXIT_CODES_KIT_PATH, text: "{render_exit_codes(rows, "KIT_", false, false)}\n"},
             GeneratedFile{path: EXIT_CODES_CORE_PATH, text: core_text},
             GeneratedFile{path: EXIT_CODES_DOC_PATH, text: doc_text},
         },
@@ -3544,8 +3548,9 @@ exit_guard: fn() -[FS]> [String] GeneratorError! {
 #Test("the exit codes are the table's rows, as runtime words, kit constants and a Core region") {
     rows: exit_code_rows("// Header.\n\n// Fine.\nEXIT_OK: 0\n// A stop.\nEXIT_RUNTIME_PANIC: 70\n") ?? panic("rows did not parse: {err.message}")
     assert_eq(rows.len(), 2)
-    assert_eq(render_exit_codes(rows, "KIT_", false), "{EXIT_CODES_BEGIN}\n// Fine.\nKIT_EXIT_OK: 0\n// A stop.\nKIT_EXIT_RUNTIME_PANIC: 70\n{EXIT_CODES_END}")
-    assert(render_exit_codes(rows, "", true).contains("\nEXIT_RUNTIME_PANIC: I64{{70}}\n"))
+    assert_eq(render_exit_codes(rows, "KIT_", false, false), "{EXIT_CODES_BEGIN}\n// Fine.\nKIT_EXIT_OK: 0\n// A stop.\nKIT_EXIT_RUNTIME_PANIC: 70\n{EXIT_CODES_END}")
+    assert(render_exit_codes(rows, "", true, false).contains("\nEXIT_RUNTIME_PANIC: I64{{70}}\n"))
+    assert_eq(render_exit_codes(rows, "priv ", false, true), "{EXIT_CODES_BEGIN}\n// Fine.\npriv EXIT_OK: 0\n\n// A stop.\npriv EXIT_RUNTIME_PANIC: 70\n{EXIT_CODES_END}")
     assert_eq(render_exit_code_table(rows), "{EXIT_CODES_DOC_BEGIN}\n| Code | Name | Meaning |\n|---:|---|---|\n| 0 | `OK` | Fine. |\n| 70 | `RUNTIME_PANIC` | A stop. |\n{EXIT_CODES_DOC_END}")
     if exit_code_rows("EXIT_ICE: 1o1\n") == {
         .Ok(_) -> { assert(false) }
