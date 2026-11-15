@@ -2221,7 +2221,7 @@ body_codec_put_bodytree: fn(out: &BodyCodecOut, value: BodyTree) Never! {
     body_codec_put_typetable(out, value.types)
     body_codec_put_int(out, value.node_base)
     body_codec_put_int(out, value.stmt_base)
-    body_codec_put_symbolkeys(out, value.symbols)
+    body_codec_put_symbollocalkeys(out, value.symbols)
 }
 
 body_codec_get_bodytree: fn(bytes: [U8], input: &BodyCodecIn) -> BodyTree Never! {
@@ -2231,7 +2231,7 @@ body_codec_get_bodytree: fn(bytes: [U8], input: &BodyCodecIn) -> BodyTree Never!
     f3: body_codec_get_typetable(bytes, input)
     f4: body_codec_get_int(bytes, input)
     f5: body_codec_get_int(bytes, input)
-    f6: body_codec_get_symbolkeys(bytes, input)
+    f6: body_codec_get_symbollocalkeys(bytes, input)
     BodyTree{nodes: f0, stmts: f1, expr_types: f2, types: f3, node_base: f4, stmt_base: f5, symbols: f6}
 }
 
@@ -9120,34 +9120,21 @@ body_codec_get_typetable: fn(bytes: [U8], input: &BodyCodecIn) -> TypeTable Neve
     TypeTable{types: f0, hashes: f1, slots: f2}
 }
 
-body_codec_put_symbolkeys: fn(out: &BodyCodecOut, value: SymbolKeys) Never! {
-    body_codec_put_int(out, value.base)
-    body_codec_put_int(out, value.bound)
-    body_codec_put_symbolkeyrows(out, value.keys)
-    body_codec_put_moduleid(out, value.module_identity)
-}
-
-body_codec_get_symbolkeys: fn(bytes: [U8], input: &BodyCodecIn) -> SymbolKeys Never! {
-    f0: body_codec_get_int(bytes, input)
-    f1: body_codec_get_int(bytes, input)
-    f2: body_codec_get_symbolkeyrows(bytes, input)
-    f3: body_codec_get_moduleid(bytes, input)
-    SymbolKeys{base: f0, bound: f1, keys: f2, module_identity: f3}
-}
-
-body_codec_put_symbolkeyrows: fn(out: &BodyCodecOut, value: SymbolKeyRows) Never! {
-    body_codec_put_list_string(out, value.texts)
+body_codec_put_symbollocalkeys: fn(out: &BodyCodecOut, value: SymbolLocalKeys) Never! {
+    body_codec_put_list_u8(out, value.bytes)
+    body_codec_put_list_int(out, value.ends)
     body_codec_put_list_int(out, value.hashes)
     body_codec_put_list_int(out, value.slots)
     body_codec_put_int(out, value.mask)
 }
 
-body_codec_get_symbolkeyrows: fn(bytes: [U8], input: &BodyCodecIn) -> SymbolKeyRows Never! {
-    f0: body_codec_get_list_string(bytes, input)
+body_codec_get_symbollocalkeys: fn(bytes: [U8], input: &BodyCodecIn) -> SymbolLocalKeys Never! {
+    f0: body_codec_get_list_u8(bytes, input)
     f1: body_codec_get_list_int(bytes, input)
     f2: body_codec_get_list_int(bytes, input)
-    f3: body_codec_get_int(bytes, input)
-    SymbolKeyRows{texts: f0, hashes: f1, slots: f2, mask: f3}
+    f3: body_codec_get_list_int(bytes, input)
+    f4: body_codec_get_int(bytes, input)
+    SymbolLocalKeys{bytes: f0, ends: f1, hashes: f2, slots: f3, mask: f4}
 }
 
 body_codec_put_bodyexpr: fn(out: &BodyCodecOut, value: BodyExpr) Never! {

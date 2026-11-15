@@ -97,6 +97,7 @@ use {
         owned_trait_for_operator_hook,
         symbol_is_local,
         symbol_key_text,
+        symbol_local_keys_count,
         symbol_table_key,
         pipe_value_name,
         checked_symbol_local,
@@ -161,7 +162,7 @@ sema_arena_take_back: fn(context: &SemaCheckContext, rows: &&BodyFlat) Never! {
     if nested.tree.node_base != context.arena.tree.node_base + context.arena.tree.nodes.len() || nested.tree.stmt_base != context.arena.tree.stmt_base + context.arena.tree.stmts.len() {
         panic("sema_arena_take_back: the enclosing check built nodes while a nested check ran")
     }
-    if nested.tree.symbols.keys.texts.len() < context.arena.tree.symbols.keys.texts.len() {
+    if symbol_local_keys_count(nested.tree.symbols) < symbol_local_keys_count(context.arena.tree.symbols) {
         panic("sema_arena_take_back: the enclosing check minted symbols while a nested check ran")
     }
     compiler_transfer_rows<BodyNode>(context.arena.tree.nodes, nested.tree.nodes)

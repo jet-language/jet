@@ -2,7 +2,7 @@
 // with one active scope. SymbolId remains the stable declaration identity;
 // vector positions are only local lookup accelerators.
 use jet_foundation.[
-    symbol_keys_find,
+    symbol_local_keys_find,
     AccessConvention,
     AST_NODE_GENERATED,
     ArithmeticPolicyFact,
@@ -36,8 +36,8 @@ use jet_foundation.[
     symbol_find,
     symbol_is_local,
     symbol_key_text,
-    symbol_keys_intern,
-    symbol_keys_text,
+    symbol_local_keys_intern,
+    symbol_local_keys_text,
     symbol_table,
     symbol_table_key,
     TComptimeValue,
@@ -1148,19 +1148,21 @@ sema_symbol_id: fn(program: SemaProgramTables, context: &SemaCheckContext, kind:
 // The id of the declaration keyed `key` (symbol_key_text), as sema_symbol_id.
 sema_symbol_id_of: fn(program: SemaProgramTables, context: &SemaCheckContext, key: String) -> SymbolID Never! {
     if sema_symbol_find(program, key) == .Val(found) -> return found
-    symbol_keys_intern(context.arena.tree.symbols, key)
+    symbol_local_keys_intern(context.arena.tree.symbols, key)
 }
 
 // The id keyed `key`, a run-wide one or one of the checking body's own; None
 // for a key no declaration holds.
 sema_symbol_lookup: fn(program: SemaProgramTables, context: SemaCheckContext, key: String) -> SymbolID? Never! {
     if sema_symbol_find(program, key) == .Val(found) -> return Val(found)
-    symbol_keys_find(context.arena.tree.symbols, key)
+    symbol_local_keys_find(context.arena.tree.symbols, key)
 }
 
-// The key text of `id`, a run-wide id or one of the checking body's own.
+// The key text of `id`, a run-wide id or one of the checking body's own. A
+// body's own key is built from its bytes, for a reader that names it by text
+// (an ownership binding key).
 sema_symbol_key: fn(program: SemaProgramTables, context: SemaCheckContext, id: SymbolID) -> String Never! {
-    if symbol_is_local(id) -> return symbol_keys_text(context.arena.tree.symbols, id)
+    if symbol_is_local(id) -> return symbol_local_keys_text(context.arena.tree.symbols, id)
     sema_program_symbol_key(program, id)
 }
 

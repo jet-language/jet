@@ -73,6 +73,7 @@ use jet_foundation.[
     Symbol,
     SymbolID,
     SymbolKeys,
+    SymbolLocalKeys,
     SymbolKind,
     TComptimeValue,
     TConstantDef,
@@ -110,8 +111,8 @@ use jet_foundation.[
     symbol_is_local,
     symbol_is_none,
     symbol_key_text,
-    symbol_keys_intern,
-    symbol_keys_text_at,
+    symbol_local_keys_intern,
+    symbol_local_keys_text_at,
     symbol_mint,
     symbol_none,
     symbol_table,
@@ -702,7 +703,7 @@ SemaFunctionResult: struct {
     prelude_demands: [SemaPreludeConversionDemand]?{None}
     // The symbols of a check that built no `value`: the local ids its name
     // references carry are rows of these (sema_keep_going_trap_references).
-    failed_locals: SymbolKeys?{None}
+    failed_locals: SymbolLocalKeys?{None}
 }
 
 sema_function_compute_facts: fn(function_key: String, context: SemaCheckContext) -> SemaComputeFunctionFacts Never! {
@@ -2766,11 +2767,11 @@ sema_keep_going_drop_local_references: fn(references: &[SemaNameReferenceFact], 
 // Re-keys the local references from `start` on that body `owner` recorded,
 // minted in `from`, into `into` (sema_keep_going_trap_references). A local
 // `from` does not hold keeps its id.
-sema_keep_going_rekey_references: fn(references: &[SemaNameReferenceFact], start: Int, owner: String, from: SymbolKeys, into: &SymbolKeys) Never! {
+sema_keep_going_rekey_references: fn(references: &[SemaNameReferenceFact], start: Int, owner: String, from: SymbolLocalKeys, into: &SymbolLocalKeys) Never! {
     loop index in start..<references.len() {
         if !symbol_is_local(references[index].symbol.id) || references[index].body != owner -> next
-        key: symbol_keys_text_at(from, references[index].symbol.id) ?? next
-        references[index].symbol.id = symbol_keys_intern(into, key)
+        key: symbol_local_keys_text_at(from, references[index].symbol.id) ?? next
+        references[index].symbol.id = symbol_local_keys_intern(into, key)
     }
 }
 

@@ -1,6 +1,6 @@
 // Production stored-view bookkeeping and return checking; no host view carrier.
 use {
-    jet_foundation.[AST_NODE_GENERATED, AccessConvention, Binding, DIAGNOSTIC_ERROR, Diagnostic, Expr, ExprField, Marker, Span, Symbol, SymbolKeys, SymbolKind, Type, ViewSource, ViewSourceProjection, module_none, symbol_key_text, symbol_keys_intern, symbol_local_keys]
+    jet_foundation.[AST_NODE_GENERATED, AccessConvention, Binding, DIAGNOSTIC_ERROR, Diagnostic, Expr, ExprField, Marker, Span, Symbol, SymbolKind, SymbolLocalKeys, Type, ViewSource, ViewSourceProjection, module_none, symbol_key_text, symbol_local_keys, symbol_local_keys_intern]
     jet_parser.[parse_source]
     jet_sema.[SemaOwnershipMoveOrigin, SemaOwnershipMovedPlace, SemaSourceSegment, check_program, sema_check_context_init, sema_has_error_since, sema_ownership_clear_moved, sema_ownership_declare_binding, sema_ownership_place_exact, sema_ownership_place_from_expr_inner, sema_ownership_state_init, sema_scope_declare_local, sema_scope_init, sema_stmt_local_view_facts_for_expr, sema_stmt_record_binding_views, sema_stmt_record_return_views]
 }
@@ -18,8 +18,8 @@ view_field_key: fn(name: String, kind: SymbolKind) -> String Never! {
 }
 
 // A body symbol of the fixture's `window`, interned in the body's `keys`.
-view_field_symbol: fn(keys: &SymbolKeys, name: String, kind: SymbolKind, ty: Type, span: Span) -> Symbol Never! {
-    Symbol{id: symbol_keys_intern(keys, view_field_key(name, kind)), kind: kind, name: name, module_identity: module_none(), owner: Val("window"), span: span, ty: Val(ty), visibility: 0}
+view_field_symbol: fn(keys: &SymbolLocalKeys, name: String, kind: SymbolKind, ty: Type, span: Span) -> Symbol Never! {
+    Symbol{id: symbol_local_keys_intern(keys, view_field_key(name, kind)), kind: kind, name: name, module_identity: module_none(), owner: Val("window"), span: span, ty: Val(ty), visibility: 0}
 }
 
 view_field_window: fn(value: Expr, span: Span) -> Expr Never! {

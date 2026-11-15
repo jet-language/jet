@@ -427,10 +427,10 @@ SymbolKind: enum {
 
 // A declaration's identity (#6793 S2, Docs/spec/compiler-data.md): a U32 row
 // of the run's `SymbolTable`, or, with SYMBOL_LOCAL_BIT, a row of the
-// checking body's own `SymbolKeys` (its locals and the keys it minted that
-// no registration holds). Equal ids are equal keys. Id 0 is no symbol, the
-// empty key. The key text (`symbol_key_text`) is resolved only at an edge:
-// a diagnostic, an IR function name, a record.
+// checking body's own `SymbolLocalKeys` (its locals and the keys it minted
+// that no registration holds). Equal ids are equal keys. Id 0 is no symbol,
+// the empty key. The key text (`symbol_key_text`) is resolved only at an
+// edge: a diagnostic, an IR function name, a record.
 SymbolID: struct {
     id: U32
 }
@@ -501,9 +501,116 @@ symbol_keys_empty: fn() -> SymbolKeys Never! {
 
 SYMBOL_LOCAL_INITIAL_SLOTS: 16
 
-// A checking body's own keys: few, so the table starts small.
-symbol_local_keys: fn() -> SymbolKeys Never! {
-    SymbolKeys{base: SYMBOL_LOCAL_BASE, bound: SYMBOL_LOCAL_BOUND, keys: symbol_key_rows(SYMBOL_LOCAL_INITIAL_SLOTS)}
+// A checking body's own keys (BodyTree.symbols): local id
+// `SYMBOL_LOCAL_BASE + n` is row `n`, and row 0 is the empty key. A body
+// mints a key for every local it declares, so no row holds a String: each
+// key's bytes are stored once, back to back, as a NameTable stores its
+// spellings, and every reader inside the body compares ids. A key's text is
+// built only where it leaves the body (symbol_local_keys_text).
+SymbolLocalKeys: struct {
+    // Row `n` ends at `ends[n]` and starts where row `n - 1` ends.
+    bytes: [U8]
+    ends: [Int]
+    // Each row's `name_rows_hash`: a probe compares bytes only with a row of
+    // the same hash, and a grow never hashes a key again.
+    hashes: [Int]
+    // Open-addressing slots: 0 is empty, otherwise the row plus one.
+    slots: [Int]
+    mask: Int
+}
+
+// A body's keys: few, so the table starts small.
+symbol_local_keys: fn() -> SymbolLocalKeys Never! {
+    keys := SymbolLocalKeys{bytes: [U8]{}, ends: [Int]{}, hashes: [Int]{}, slots: (loop _ in 0..<SYMBOL_LOCAL_INITIAL_SLOTS -> 0), mask: SYMBOL_LOCAL_INITIAL_SLOTS - 1}
+    _ := symbol_local_keys_intern(keys, "")
+    keys
+}
+
+// How many rows `keys` holds, the empty key's included.
+symbol_local_keys_count: fn(keys: SymbolLocalKeys) -> Int Never! { keys.ends.len() }
+
+symbol_local_id: fn(row: Int) -> SymbolID Never! {
+    SymbolID{id: checked(U32{SYMBOL_LOCAL_BASE + row}) ?? panic("local symbol row {row} is out of range")}
+}
+
+// The row of local `id` in its body's keys.
+symbol_local_row: fn(id: SymbolID) -> Int Never! { Int{id.id} - SYMBOL_LOCAL_BASE }
+
+symbol_local_keys_start: fn(keys: SymbolLocalKeys, row: Int) -> Int Never! {
+    if row == 0 -> 0 else -> keys.ends[row - 1]
+}
+
+// Whether row `row` of `keys` spells `bytes`.
+symbol_local_keys_spells: fn(keys: SymbolLocalKeys, row: Int, bytes: [U8]) -> Bool Never! {
+    first: symbol_local_keys_start(keys, row)
+    if keys.ends[row] - first != bytes.len() -> return false
+    loop offset in 0..<bytes.len() {
+        if keys.bytes[first + offset] != bytes[offset] -> return false
+    }
+    true
+}
+
+// The row of `key`, whose `name_rows_hash` is `hash`, when `keys` holds it.
+symbol_local_keys_row: fn(keys: SymbolLocalKeys, key: String, hash: Int) -> Int? Never! {
+    slot := hash.bit_and(keys.mask)
+    loop keys.slots[slot] != 0 {
+        row: keys.slots[slot] - 1
+        if keys.hashes[row] == hash && symbol_local_keys_spells(keys, row, key.bytes()) {
+            return Val(row)
+        }
+        slot = (slot + 1).bit_and(keys.mask)
+    }
+    None
+}
+
+// The id of `key` in `keys`, added when it is new.
+symbol_local_keys_intern: fn(keys: &SymbolLocalKeys, key: String) -> SymbolID Never! {
+    hash: name_rows_hash(key)
+    if symbol_local_keys_row(keys, key, hash) == .Val(found) -> return symbol_local_id(found)
+    row: keys.ends.len()
+    if row >= SYMBOL_LOCAL_BOUND {
+        panic("a body's symbol keys are full ({SYMBOL_LOCAL_BOUND} keys)")
+    }
+    keys.bytes.extend(key.bytes())
+    keys.ends.push(keys.bytes.len())
+    keys.hashes.push(hash)
+    if (row + 1) * 2 > keys.mask {
+        capacity: (keys.mask + 1) * 2
+        mask: capacity - 1
+        slots := (loop _ in 0..<capacity -> 0)
+        loop index in 0..<keys.hashes.len() {
+            slot := keys.hashes[index].bit_and(mask)
+            loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+            slots[slot] = index + 1
+        }
+        keys.slots = slots.move()
+        keys.mask = mask
+        return symbol_local_id(row)
+    }
+    slot := hash.bit_and(keys.mask)
+    loop keys.slots[slot] != 0 -> slot = (slot + 1).bit_and(keys.mask)
+    keys.slots[slot] = row + 1
+    symbol_local_id(row)
+}
+
+// The id of `key` when `keys` holds it; never interns.
+symbol_local_keys_find: fn(keys: SymbolLocalKeys, key: String) -> SymbolID? Never! {
+    row: symbol_local_keys_row(keys, key, name_rows_hash(key)) ?? return None
+    Val(symbol_local_id(row))
+}
+
+// The key text of local `id`, which `keys` holds.
+symbol_local_keys_text: fn(keys: SymbolLocalKeys, id: SymbolID) -> String Never! {
+    symbol_local_keys_text_at(keys, id) ?? panic("local symbol row {symbol_local_row(id)} is outside its body's {keys.ends.len()} keys")
+}
+
+// The key text of local `id` when `keys` holds its row, else None: a reader
+// that can't prove `id` came from `keys` refuses it instead of reading past
+// the keys.
+symbol_local_keys_text_at: fn(keys: SymbolLocalKeys, id: SymbolID) -> String? Never! {
+    row: symbol_local_row(id)
+    if row < 0 || row >= keys.ends.len() -> return None
+    Val(String.from_bytes(keys.bytes.slice(symbol_local_keys_start(keys, row), keys.ends[row])) ?? "")
 }
 
 // Rows whose row 0 is the empty key, with at least `slots` slots to start
@@ -644,22 +751,9 @@ symbol_keys_intern: fn(keys: &SymbolKeys, key: String) -> SymbolID Never! {
     SymbolID{id: checked(U32{keys.base + row}) ?? panic("symbol id out of range")}
 }
 
-symbol_keys_find: fn(keys: SymbolKeys, key: String) -> SymbolID? Never! {
-    row: symbol_key_rows_find(keys.keys, key, name_rows_hash(key)) ?? return None
-    Val(SymbolID{id: checked(U32{keys.base + row}) ?? return None})
-}
-
 // The key of `id`, which `keys` holds.
 symbol_keys_text: fn(keys: SymbolKeys, id: SymbolID) -> String Never! {
     keys.keys.texts[Int{id.id} - keys.base]
-}
-
-// The key of `id` when `keys` holds its row, else None: a reader that can't
-// prove `id` came from `keys` refuses it instead of reading past the keys.
-symbol_keys_text_at: fn(keys: SymbolKeys, id: SymbolID) -> String? Never! {
-    row: Int{id.id} - keys.base
-    if row < 0 || row >= keys.keys.texts.len() -> return None
-    Val(keys.keys.texts[row])
 }
 
 // A table of the builtin range (symbol_builtin_keys) and one open range
@@ -761,7 +855,7 @@ symbol_mint: fn(table: &SymbolTable, kind: SymbolKind, module_name: String, owne
     }
     assert_eq(Int{symbol_keys_intern(module_keys, "local:m:f:v7").id}, 1008)
     assert_eq(module_keys.keys.texts.len(), 41)
-    assert(symbol_keys_find(module_keys, "local:m:f:v40") == None)
+    assert(symbol_key_rows_find(module_keys.keys, "local:m:f:v40", name_rows_hash("local:m:f:v40")) == None)
     table := symbol_table_of([SymbolKeys]{symbol_builtin_keys(), module_keys})
     assert_eq(Int{(symbol_find(table, "local:m:f:v39") ?? symbol_none()).id}, 1040)
     assert(symbol_find(table, "") != None)
@@ -770,6 +864,20 @@ symbol_mint: fn(table: &SymbolTable, kind: SymbolKind, module_name: String, owne
     assert(symbol_intern(table, "function:m::g") == fresh)
     assert_eq(symbol_table_key(table, fresh), "function:m::g")
     assert_eq(symbol_table_key(table, SymbolID{id: U32{1001}}), "local:m:f:v0")
+}
+
+#Test("a body's symbol keys intern once, grow past their slots, and spell each key back") {
+    keys := symbol_local_keys()
+    loop index in 0..<40 {
+        assert_eq(Int{symbol_local_keys_intern(keys, "local:m:f:v{index}").id}, SYMBOL_LOCAL_BASE + 1 + index)
+    }
+    assert_eq(Int{symbol_local_keys_intern(keys, "local:m:f:v7").id}, SYMBOL_LOCAL_BASE + 8)
+    assert_eq(symbol_local_keys_count(keys), 41)
+    assert(symbol_local_keys_find(keys, "local:m:f:v40") == None)
+    assert_eq(Int{(symbol_local_keys_find(keys, "local:m:f:v39") ?? symbol_none()).id}, SYMBOL_LOCAL_BASE + 40)
+    assert_eq(symbol_local_keys_text(keys, symbol_local_id(1)), "local:m:f:v0")
+    assert_eq(symbol_local_keys_text(keys, symbol_local_id(40)), "local:m:f:v39")
+    assert(symbol_local_keys_text_at(keys, symbol_local_id(41)) == None)
 }
 
 // The range of `id`: the last one whose base is at most `id`.
@@ -789,8 +897,8 @@ symbol_table_range_of: fn(table: SymbolTable, value: Int) -> Int Never! {
 }
 
 // The key of `id`; `locals` holds a local one.
-symbol_key: fn(table: SymbolTable, locals: SymbolKeys, id: SymbolID) -> String Never! {
-    if symbol_is_local(id) -> return symbol_keys_text(locals, id)
+symbol_key: fn(table: SymbolTable, locals: SymbolLocalKeys, id: SymbolID) -> String Never! {
+    if symbol_is_local(id) -> return symbol_local_keys_text(locals, id)
     symbol_table_key(table, id)
 }
 

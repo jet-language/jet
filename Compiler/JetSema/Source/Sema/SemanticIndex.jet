@@ -3,7 +3,9 @@
 // finalized checked result so imported modules and solved effects stay intact.
 use jet_foundation.[
     symbol_is_local,
-    symbol_keys_text_at,
+    symbol_local_keys_count,
+    symbol_local_keys_text_at,
+    symbol_local_row,
     symbol_table_key,
     authority_grantable_roots,
     name_find,
@@ -2044,10 +2046,10 @@ sema_compiler_index_append_definition: fn(registration: SemaRegistrationGraph, c
 // in the body's own `locals`. A local id outside `locals` names some other
 // body's row: it is refused as one row of `refused` (every one is listed) and
 // has no key, never read past the keys.
-sema_compiler_index_body_key: fn(symbols: SymbolTable, locals: SymbolKeys, id: SymbolID, name: String, span: Span, owner: String, refused: &[String]) -> String? Never! {
+sema_compiler_index_body_key: fn(symbols: SymbolTable, locals: SymbolLocalKeys, id: SymbolID, name: String, span: Span, owner: String, refused: &[String]) -> String? Never! {
     if !symbol_is_local(id) -> return Val(symbol_table_key(symbols, id))
-    if symbol_keys_text_at(locals, id) == .Val(key) -> return Val(key)
-    refused.push("`{name}` at offset {span.start} in `{owner}`: local row {Int{id.id} - locals.base} is outside the body's {locals.keys.texts.len()} keys")
+    if symbol_local_keys_text_at(locals, id) == .Val(key) -> return Val(key)
+    refused.push("`{name}` at offset {span.start} in `{owner}`: local row {symbol_local_row(id)} is outside the body's {symbol_local_keys_count(locals)} keys")
     None
 }
 
@@ -2066,7 +2068,7 @@ sema_compiler_index_body_row: fn(keys: NameTable, rows: [Int], body: String, nam
 }
 
 // A checked body's local, keyed in the body's own symbols `locals`.
-sema_compiler_index_append_checked_local: fn(local: TLocal, locals: SymbolKeys, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool], refused: &[String]) {
+sema_compiler_index_append_checked_local: fn(local: TLocal, locals: SymbolLocalKeys, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool], refused: &[String]) {
     local_id: local.symbol_id ?? return
     key: sema_compiler_index_body_key(registration.symbols, locals, local_id, local.name, local.span, owner, refused) ?? return
     symbol := Symbol{id: local_id, kind: SymbolKind.Local, name: local.name, module_identity: module_identity, owner: Val(owner), span: local.span, ty: None, visibility: 0}
