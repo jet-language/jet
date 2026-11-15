@@ -5454,7 +5454,7 @@ tasks never read or change the process registry. The module source is
 | `state(binding: Live<T, E>) -> Loadable<T, E>` | state | Read the binding's snapshot: `Loaded(value)` or `Failed(reason)`, running the source first when the binding is new, invalidated, or due to poll. |
 | `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list without running the source. |
 | `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. |
-| `watch(socket: WsConn, binding: Live<T, E>) -[Net]>` | — | Send `{"live":"invalidate","binding":<id>}` to the server-side WebSocket `socket` each time `binding` is invalidated, starting with the latest such event when there was one. |
+| `watch(socket: WsConn, binding: Live<T, E>) -[Net]>` | — | Send `{"live":"invalidate","binding":<id>}` to the server-side WebSocket `socket` each time `binding` is invalidated, starting with the latest such event when there was one. While the binding is held, the event carries `"after_ms":<n>`: read it again after `n` milliseconds. |
 | `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations and value changes. |
 | `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
 | `remote_at<S>(address: String) -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. |
@@ -5471,7 +5471,12 @@ the source again and an older value is never kept as current. Under writes
 that keep overtaking it, a binding settles instead of running on every read:
 from its second overtaken run in a row, reads serve its stale result for a
 hold as long as that run took, and at least 100 ms, and the first read after
-the hold runs the source again.
+the hold runs the source again. A held result is never served as current:
+the hold's start publishes the binding's live event with `"after_ms":<n>`,
+the rest of the hold, as does every invalidation during it, so a watching
+client that read the held result reads again once the hold ends, and the
+binding's first current result after a hold publishes its event again, so
+every watcher reads it.
 `Live<T, E>` is an identity, not a snapshot: reads, invalidation and
 statistics always use the one registry. A full registry evicts its oldest
 binding. A signature names the type after `use app.[Live]`. The registry

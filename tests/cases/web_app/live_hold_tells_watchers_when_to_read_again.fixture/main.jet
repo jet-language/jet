@@ -1,0 +1,133 @@
+use {
+    app
+    core.reactive.loadable.[Loadable]
+    ws: core.net.ws
+    server: core.http.server
+    web: core.web
+    time: core.time
+}
+
+#Error
+CountError: enum {
+    NoProject
+}
+
+Tasks: struct {
+    count: Int
+    busy: Bool
+}
+
+TASKS: Shared{Tasks{count: 1, busy: true}}
+
+// One run's read of the tasks. While the table is busy, another request
+// commits a new task right after every read, as a writer loop does.
+read_tasks: fn() -> Tasks {
+    tasks := TASKS.guard_edit()
+    read: tasks.value.copy()
+    if read.busy -> tasks.value.count += 1
+    read
+}
+
+// Every run of the source while the table is busy is overtaken by the
+// write's invalidation of the project's count.
+task_count: fn(project: String) -[DB.Read]> Int CountError! {
+    if project == "" -> return Err(CountError.NoProject)
+    read: read_tasks()
+    if read.busy -> app.invalidate(task_count, "jet")
+    read.count
+}
+
+shown: fn(state: Loadable<Int, CountError>) -> String {
+    if state == {
+        .Loaded(value) -> "loaded {value}"
+        .Failed(reason) -> if reason == {
+            .NoProject -> "failed: no project"
+        }
+        .Idle | .Loading -> "pending"
+    }
+}
+
+stop_writes: fn() {
+    tasks := TASKS.guard_edit()
+    tasks.value.busy = false
+}
+
+// The server side of a device's connection: it binds the project's count,
+// watches it and, for each text the device sends, reads the count for it and
+// sends what it read.
+watch_count: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    sock: ws.upgrade(req) ?? panic("upgrade")
+    count: app.live(task_count, "jet")
+    app.watch(sock, count)
+    sock.send_text("ready") ?? panic("ready")
+    loop {
+        message: sock.recv() ?? break
+        if message.is_close() -> break
+        if message.is_text() -> sock.send_text(shown(app.state(count))) ?? break
+    }
+    Ok(server.response(500, "unused"))
+}
+
+// The hold, in milliseconds, that a live event asks the device to wait out
+// before it reads again; None when the event asks for a read now.
+after_ms: fn(event: String) -> Int? {
+    parts: event.split("\"after_ms\":").to_list()
+    if parts.len() < 2 -> return None
+    Val(Int.parse(parts[1].split("}}").to_list()[0]) ?? return None)
+}
+
+// Every text the device receives up to its read's answer, in order, with a
+// hold's length shown as N; the hold the last of those events asked for.
+Received: struct {
+    texts: String
+    after_ms: Int?
+}
+
+read_once: fn(device: WsConn) -> Received {
+    device.send_text("read") ?? panic("send")
+    out := [String]{}
+    hold := Int?{None}
+    loop {
+        message: device.recv() ?? panic("device recv")
+        if !message.is_text() -> next
+        text: message.text() ?? panic("text")
+        if !text.starts_with("{{") {
+            out.push(text)
+            return Received{texts: out.join(" "), after_ms: hold}
+        }
+        hold = after_ms(text)
+        out.push(if hold == .Val(_) -> "{text.split("\"after_ms\":").to_list()[0]}\"after_ms\":N}}" else -> text)
+    }
+}
+
+run: fn() {
+    mux: web.app()
+    mux.get("/live", fn(req: HTTPRequest) { watch_count(req) })
+    listening: mux.bind("127.0.0.1:0") ?? panic("bind")
+    addr: listening.local_addr() ?? panic("address")
+    serving: task { listening.serve() ?? panic("serve") }
+    time.sleep(20ms)
+
+    device: ws.connect("ws://{addr}/live") ?? panic("connect")
+    message: device.recv() ?? panic("ready")
+    print("watching: {message.text() ?? "?"}")
+    // A write overtakes the first run: the binding stays stale.
+    print("read 1 under writes: {read_once(device).texts}")
+    // A write overtakes the second run too: its result is held, and the
+    // event tells the device how long the hold lasts.
+    second: read_once(device)
+    print("read 2 under writes: {second.texts}")
+    hold: second.after_ms ?? panic("no hold announced")
+    // A read inside the hold gets the held result.
+    print("read 3 inside the hold: {read_once(device).texts}")
+    stop_writes()
+    // The device waits out the hold its event named, then reads the newer
+    // value; that first current result tells every watcher to read again.
+    time.sleep(time.Duration{ns: hold * 1000000})
+    print("read 4 after the hold: {read_once(device).texts}")
+
+    device.close(1000, "") ?? panic("close")
+    grace: 100ms
+    listening.shutdown(grace) ?? panic("shutdown")
+    _: serving.join() ?? panic("server join")
+}

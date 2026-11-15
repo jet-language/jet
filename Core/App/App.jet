@@ -420,7 +420,7 @@ LiveRegistry: struct {
 // what it read may predate that write. Under writes that keep overtaking it, a
 // binding settles: from its second overtaken run in a row, its stale result
 // is served for a hold (live_store) instead of running the source on every
-// read.
+// read, and its watchers (`watch`) are told when to read it again.
 state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! {
     now: rt.clock_mono_ns()
     seen: live_current(binding.id, now)
@@ -439,16 +439,20 @@ state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Load
 
 // `socket`, a server-side WebSocket connection, receives
 // `{"live":"invalidate","binding":<id>}` each time `binding` is invalidated,
-// starting with the latest such event when there was one. A connection
-// receives only the bindings its handler watches; the handler holds
-// `binding` because it read it for its own caller under that caller's policy.
+// starting with the latest such event when there was one. While the binding
+// is held (live_store), the event carries `"after_ms":<n>`: a read in the
+// next n milliseconds gets the held stale result, so the client reads again
+// after them, and the binding's first current result after the hold sends the
+// event again. A connection receives only the bindings its handler watches;
+// the handler holds `binding` because it read it for its own caller under
+// that caller's policy.
 watch: fn<T: [Encode, Decode], E: [Encode, Decode]>(socket: WsConn, binding: Live<T, E>) Never! -[Net]> {
     ws.__live_watch(socket, "live:{binding.id}")
 }
 
 // `changes` counts stored results that differed from the one before;
-// `ws_pushes` counts the invalidations published to the WebSocket live hub,
-// one per `invalidate` that marked a binding.
+// `ws_pushes` counts the publishes to the WebSocket live hub: one per
+// `invalidate` that marked a binding, and one per hold's start and end.
 live_stats: fn() -> String Never! {
     registry: live_decode(live_cell_load()) ?? return "LiveStats(error=live registry unavailable)"
     "LiveStats(queries={live_query_count(registry)}, limit={LIVE_MAX_QUERIES}, evictions={registry.evictions}, invalidations={registry.invalidations}, changes={registry.changes}, ws_pushes={registry.ws_pushes})"
@@ -609,8 +613,11 @@ live_value_state: fn<T: [Encode, Decode], E: [Encode, Decode]>(text: String) -> 
 // runs it again. From the LIVE_HOLD_AFTER-th such run in a row, the stale
 // result is held: reads serve it until the hold ends (as long as the run took,
 // at least LIVE_HOLD_MIN_NS), and the first read after that runs the source
-// again, so the binding never keeps an older value as current and never runs
-// on every read. A push (`started` None) is current as stored. `now`, the
+// again, so the binding never runs on every read. A hold is never served as
+// current: its start publishes the binding's event with `after_ms`, so a
+// watching client that read the held result reads again once it ends, and the
+// first current result after a hold publishes the event again, so every
+// watcher reads it. A push (`started` None) is current as stored. `now`, the
 // time the run began, < 0 keeps the last run time.
 live_store: fn(id: Int, value: String, now: Int, started: Int?) {
     if value.len() > LIVE_MAX_PAYLOAD {
@@ -626,20 +633,27 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
         }
         overtaken := false
         if started == .Val(generation) && registry.records[index].generation != generation -> overtaken = true
+        // The hub event this store publishes: a hold's start or its end.
+        event := ""
         if overtaken {
             registry.records[index].overtaken += 1
             if registry.records[index].overtaken >= LIVE_HOLD_AFTER && now >= 0 {
                 ended: rt.clock_mono_ns()
                 took: ended - now
-                registry.records[index].held_ns = ended + if took > LIVE_HOLD_MIN_NS -> took else -> LIVE_HOLD_MIN_NS
+                hold: if took > LIVE_HOLD_MIN_NS -> took else -> LIVE_HOLD_MIN_NS
+                registry.records[index].held_ns = ended + hold
+                event = live_event(id, Val(live_hold_ms(hold)))
             }
         } else {
+            if registry.records[index].held_ns != 0 -> event = live_event(id, None)
             registry.records[index].dirty = false
             registry.records[index].overtaken = 0
             registry.records[index].held_ns = 0
         }
+        if event != "" -> registry.ws_pushes += 1
         if now >= 0 -> registry.records[index].ran_ns = now
         if live_cell_replace(seen, live_encode(registry)) {
+            if event != "" -> rt_web.live_publish("live:{id}", event)
             return
         }
     }
@@ -647,20 +661,26 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
 
 // Marks dirty every binding of `source`, or only the one whose key is `key`,
 // then publishes each marked binding's invalidation to the WebSocket live
-// hub: topic `live:<id>`, the event `{"live":"invalidate","binding":<id>}`.
-// Only connections that watch that binding (`watch`) receive it; one that
-// starts watching later first receives the topic's latest.
+// hub: topic `live:<id>`, the event `live_event` (with the rest of its hold
+// when the binding is held). Only connections that watch that binding
+// (`watch`) receive it; one that starts watching later first receives the
+// topic's latest.
 live_invalidate: fn(source: String, key: String?) {
     loop {
         seen: live_cell_load()
         registry := live_decode(seen) ?? return
+        now: rt.clock_mono_ns()
         hits := [Int]{}
+        events := [String]{}
         loop index in 0..<registry.records.len() {
             if registry.records[index].source != source -> next
             if key == .Val(only) && registry.records[index].key != only -> next
             registry.records[index].dirty = true
             registry.records[index].generation += 1
-            hits.push(registry.records[index].id)
+            id: registry.records[index].id
+            held: registry.records[index].held_ns
+            hits.push(id)
+            events.push(live_event(id, if held > now -> Val(live_hold_ms(held - now)) else -> None))
         }
         if hits.len() == 0 {
             return
@@ -668,13 +688,23 @@ live_invalidate: fn(source: String, key: String?) {
         registry.invalidations += hits.len()
         registry.ws_pushes += 1
         if live_cell_replace(seen, live_encode(registry)) {
-            loop id in hits {
-                rt_web.live_publish("live:{id}", "{{\"live\":\"invalidate\",\"binding\":{id}}}")
-            }
+            loop at in 0..<hits.len() -> rt_web.live_publish("live:{hits[at]}", events[at])
             return
         }
     }
 }
+
+// The live hub's event for binding `id`: re-read it, or, while it is held,
+// re-read it after `after_ms`, since a read before then gets its held stale
+// result.
+live_event: fn(id: Int, after_ms: Int?) -> String {
+    if after_ms == .Val(ms) -> return "{{\"live\":\"invalidate\",\"binding\":{id},\"after_ms\":{ms}}}"
+    "{{\"live\":\"invalidate\",\"binding\":{id}}}"
+}
+
+// `ns` in whole milliseconds, rounded up, so a client that waits them reads
+// after the hold.
+live_hold_ms: fn(ns: Int) -> Int { (ns + 999999) /% 1000000 }
 
 live_index: fn(registry: LiveRegistry, id: Int) -> Int? {
     loop index in 0..<registry.records.len() {
