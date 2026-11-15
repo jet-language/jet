@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6975,
-    "rev": 106095,
+    "rev": 106100,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75672,6 +75672,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T15:39:24.514Z"
+        },
+        {
+          "n": 39,
+          "text": "Within the ratified no-slower band, each B step's per-program ratio is multiplied into a running ledger beside the 6.2 gate, so losses inside the band cannot add up across B0 to B5. Proof: the gate's report prints each program's product across all landed B steps and refuses one past the band.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T10:39:55.255Z"
+        },
+        {
+          "n": 40,
+          "text": "The note states how a body kind that stays on text gets its body after A2, given A2's 0-bytes-of-Core-text-parsed proof, and a case pins that path. Proof: the note's section and a case where a text-kept kind still compiles and runs while the load parses no other Core text.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T10:39:57.011Z"
+        },
+        {
+          "n": 41,
+          "text": "Until B5 lands, jet build at O1 and O2 still checks Core bodies from text. The census carries that path as its own row, so a B step that breaks it shows up at once. Proof: the census row and its pass on the batch compiler.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T10:39:58.478Z"
+        },
+        {
+          "n": 42,
+          "text": "Every B step lands with before-and-after numbers on the batch compiler: per-body load against check, peak memory and the CLI A/B (hello peak, the 32.8 MiB load); A2a's CLI numbers come first. Proof: the per-step receipt logged on this card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T10:39:59.842Z"
         }
       ],
       "refs": [],
@@ -75682,9 +75718,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T06:23:41.310Z",
+      "updated": "2026-11-15T10:39:59.842Z",
       "updatedBy": "Main",
-      "criteriaLastN": 38
+      "criteriaLastN": 42
     },
     {
       "id": "c0l7lwif",
@@ -214522,6 +214558,242 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-15T02:11:13.210Z"
+    },
+    {
+      "id": "D-PRECORE-SPEED1",
+      "cardId": "c08r6ogl",
+      "group": "tooling",
+      "title": "When shipping Core already checked would make a compile slower, which rule wins?",
+      "situation": "Core is Jet's standard library: files, text, maths and more. jet already ships Core's machine code, but every compile still checks some Core function bodies from text, such as the generic ones. One rule says no compile may do that. A second rule says shipping Core precompiled must never make a compile slower or use more memory. The first try broke the second rule badly: hello took 22 seconds instead of about 1, and that design was retired. The next steps load checked bodies instead. Each load must cost under a tenth of a check, but memory and start-up can still lose. You are asked which rule wins when one step meets the first rule and breaks the second. We recommend A: speed gates every merge, small losses cannot add up across steps, and each kind of body moves only when loading it is no slower.",
+      "gist": "Jet wants its standard library already checked inside jet, and no compile ever slower. When one step can't do both, which rule wins?",
+      "lesson": "Two good rules can pull apart. Decide ahead of time which one gates a merge, and make the other one a measured goal rather than a silent exception.",
+      "explainer": "Checking means the compiler confirms that code is correct: names, types, effects. A checked body is a function whose checking was done when jet itself was built. Loading it means reading those saved results instead of redoing the work.\n\nA kind of body is a group that loads the same way, such as generic functions (written once for many types) or methods of built-in types.\n\nPeak memory is the most memory one compile uses at any moment.\n\nThe noise band is a change too small to tell from noise on a shared machine: 3% and 2 ms in time, 1 MB or 1% in memory.",
+      "story": "Mia writes a six-line program that reads a file and prints it. Today jet checks 79 Core function bodies from text for it, about 74 ms of its 790 ms of CPU. If a new step loads those bodies already checked, but her compile then takes more memory or time, her compile gets slower.",
+      "inWild": "Swift ships its standard library as a binary module with inlinable bodies, and also a text interface (.swiftinterface) that a newer compiler rebuilds when the binary one can't be used.\nRust ships the standard library as rlib files: machine code plus metadata holding generic and inline bodies, which rustc decodes lazily.\nGo has shipped no precompiled standard library since Go 1.20; it rebuilds it from source into a build cache.",
+      "detail": "The two rules are card #6328 criteria c22 and c37. c22 (open): Core and Prelude ship precompiled inside jet, as checked interfaces and machine code made when jet is built. `jet run` reads, scans and re-checks no Core source, and strace of hello shows no file calls on the toolchain tree. It keeps one meaning on O0, O1 and O2.\n\nc37 (met): with precompiled Core, `jet check hello.jet` and `jet run hello.jet` take no more wall time and peak memory than with Core from sources, median of 3. It was met on 2026-11-15 by the seal stand-ins (dev c01387e368). On p143 and p144 hello tied (wall ratio 1.000), and lint, e3401, RunColdContext and Summarize got faster. Its text still names the retired record and covers only hello, so every option also rewords it.\n\nHistory: the front-end Core record met part of c22 and broke c37. On gate-p62 the record jet took 22.1 to 24.4 s at 1.68 GB, against 0.76 to 1.5 s at 185 MB from sources. Its decoder cost about 10 us per row byte, and its module-sized units widened what a compile loaded. It was retired on 2026-11-14.\n\nWhat ships today: Core's machine code, `jet_core.o`, built at O2 when jet is built. A call to a sealed Core function binds to it through a stand-in checked by signature only (Compiler/JetSema/Source/Sema/CoreDemand.jet). The bodies a compile still checks from text are the kept ones. They are generic functions, function values, intrinsics, the 35 packages not built as machine code (`JET_CLI_CORE_LOWERED`), impl methods, defaults and comptime calls (note section 4).\n\nWhat step B can win, measured on p155: a kept body costs 0.84 to 0.96 ms of traced CPU to check. fread.jet, six lines using core.files, keeps 79 bodies: 73.7 ms of its 790 ms user plus sys. RunColdContext keeps 591: 494.6 ms of 4,180 ms. So step B can remove about a tenth of these compiles' CPU, and less of their wall time.\n\nWhere a B step can lose: note section 3.3 fails any form whose load costs more than a tenth of the check, per body. So a step is unlikely to lose CPU on the bodies it replaces. It can lose elsewhere. A loaded body is a full owned body, so peak memory can rise. jet may grow by up to 48 MB across A and B, which costs page faults on a cold start. Setup and wider loading add fixed cost, which is where the record lost.\n\nNever slower is defined in note section 6.2. The programs are hello, abs.jet, fread.jet, e2404, lint, e3401, RunColdContext and Summarize, under `jet check` and `jet run`. Each runs on built-in Core, with a named matching tree and with a named edited tree. The jet before and the jet after alternate over 11 warm runs, plus 5 cold runs. A program is worse when its median wall or CPU rises by more than 3% and 2 ms, or its peak memory by more than 1 MB or 1%.\n\nPlan (Docs/proposals/2026-11-15-lazy-precompiled-core-interfaces.md): step A ships declarations, signatures, types, constants and reach. Step B ships checked bodies one kind at a time, B0 to B5 (section 4). Until the owner rules, Main's ruling on gap H16 holds: no B step that makes a 6.2 program worse merges.\n\nNumbers so far: none for any B step. The only new ones come from the unlanded A2a patch (PrecompiledCore-4-a2a-lazy-bodies), which still parses Core text, heads first and then the kept bodies. They were measured in process, one run each, as load peak memory. A core.files, core.sys and core.process program parsed 1,376 Core bodies instead of 1,962. Its load peak fell from 103.8 to 92.6 MB. Hello's load grew 17.5 MB against 17.6 MB. No timing from that machine was valid.\n\nForms a kind can take are Main's choice within c22. Machine code in `jet_core.o` already serves sealed calls, and could take the lowered packages at a cost in jet's size, but not every generic instance or comptime call. The interface alone is step A; it leaves fread's 79 bodies (option C). Checked rows loaded per body are B1's form. Note section 9 rejects a mapped image of sema's tables, which hold per-process ids. This ballot decides what happens when the best form still loses.\n\nBeginner path: Mia writes and sets nothing, and her program is the same under every option. She cannot tell which kinds load. Expert path: a Core contributor names the edited tree with JET_TOOLCHAIN_ROOT (ruling T1). A named tree always checks Core from text, so step B never changes its speed, and the named-tree arms of 6.2 check that. The counter `core.bodies_from_text.<category>`, which step A0 adds, shows which kinds still come from text.\n\nEdge cases. Stale artifact: the interface is part of the jet binary, written by the same check as `jet_core.o` and the seal, so nothing on disk can go stale. A Core unit whose text hash does not match its rows parses whole. Cross-tier: until B5, `jet build` at O1 and O2 checks bodies from text, so one function can be loaded under `jet run` and checked under `jet build`. The body guard and note section 8's tier proof run at every step, in every option.\n\nNoise: the machine is shared, so a change inside the band counts as no change, and a slowdown of up to 3% or 2 ms can pass unseen in any option. A kind that stays on text keeps a text body path on built-in Core. The note does not yet say how that fits A2's proof that a compile parses 0 bytes of Core text.\n\nGates this ballot cannot loosen: the AGENTS.md performance gate still fails any build-time cell where Jet loses to a peer, whatever option wins. The cold compile target is 30 million lines per second. Option C leaves about a tenth of CPU in Core body checks for good, and option B lets steps drift away from that target.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Speed gates every merge; each kind of body moves only when it is no slower",
+          "gist": "No step that slows a measured program beyond the noise band merges, and small losses cannot add up across steps. A kind of body that loads slower keeps being checked from text until a faster form exists.",
+          "detail": "Each B step runs note section 6.2's A/B against the jet before it. It merges only if no program is worse beyond the band, in time or peak memory. A ledger also multiplies each program's ratios over all B steps. If a product passes the band, no further kind moves until a step wins it back, so six steps cannot each spend 3%.\n\nA kind that loses keeps checking from text, with a published row: its gap and the next form to try. c22 is claimed when every kind has moved. A kind that never wins returns to the owner with its numbers, and c22 stays open meanwhile. c37 is reworded to the 6.2 set and band.",
+          "code": "use files: core.files\n\nrun: fn() {\n    // The user writes nothing new.\n    // A kind of Core body that loads at least as fast as it checks\n    // comes from jet's saved results; any other kind is checked\n    // from text, as today, until its faster form lands.\n    text: files.read(\"notes.txt\") ?? \"no notes\"\n    print(text)\n}"
+        },
+        {
+          "key": "B",
+          "name": "The precompiled rule wins within a small budget",
+          "gist": "A B step may merge even if it slows a program, up to 5% wall time and 5% peak memory.",
+          "detail": "Each B step is timed as in A. A step whose loss is up to 5% in time or peak memory still merges, in place of A's 3% band. c37 is reworded to allow it. Best form: A's ledger caps the total at 5% per program over all of B. Without a cap, six steps could add up to 34%. c22 comes sooner only for a kind that loses by between 3% and 5%.",
+          "code": "use files: core.files\n\nrun: fn() {\n    // The user writes nothing new.\n    // Every kind of Core body comes from jet's saved results as soon\n    // as its step lands, even if this compile is up to 5% slower.\n    text: files.read(\"notes.txt\") ?? \"no notes\"\n    print(text)\n}"
+        },
+        {
+          "key": "C",
+          "name": "The speed rule wins for good; Core stays text plus an index",
+          "gist": "Stop at step A: Core ships declarations already checked, and compiles check the bodies they use from text.",
+          "detail": "Stop after step A. c22 is reworded: a compile may check the Core bodies it keeps from text, reading only those bodies. No B step is built. This reverses the owner's 2026-11-12 restatement that Core ships checked inside jet. Kept-body checks stay on every compile: about a tenth of CPU for fread and RunColdContext.",
+          "code": "use files: core.files\n\nrun: fn() {\n    // The user writes nothing new.\n    // Every Core body this program uses is checked from text,\n    // and only those bodies are read.\n    text: files.read(\"notes.txt\") ?? \"no notes\"\n    print(text)\n}"
+        },
+        {
+          "key": "D",
+          "name": "Nothing merges until every kind of body is faster",
+          "gist": "Hold every B step unlanded, and land all of them at once when every program is faster.",
+          "detail": "No B step lands on its own. Each is written and tested, and the stack waits as unlanded patches in Main's inbox, since the repository allows no extra branch. It lands in one change once the whole stack passes A's gate. Owner orders say finished work lands and is never held, so D needs an exception to them. A failure in the one large change is harder to trace to its kind.",
+          "code": "use files: core.files\n\nrun: fn() {\n    // The user writes nothing new.\n    // Today's path until all of step B is ready and faster,\n    // then every Core body comes from jet's saved results at once.\n    text: files.read(\"notes.txt\") ?? \"no notes\"\n    print(text)\n}"
+        },
+        {
+          "key": "E",
+          "name": "Net never slower: all steps together must beat checking from text",
+          "gist": "A step may be slower on its own, as long as all B steps so far, together, are no slower than checking Core from text.",
+          "detail": "This reads c37 as written: compare with Core from text, not with the jet of the day before. Each B step runs A's A/B, and A's ledger multiplies each program's ratios since the jet before B0. A step merges while every program's product stays within the band, even if that step alone is slower. A losing kind can then ride on the wins of the kinds before it.\n\nNo measured program ends slower than Core from text, but one can get slower than the jet of the day before. A program outside the set that uses only the losing kind can end slower than text.",
+          "code": "use files: core.files\n\nrun: fn() {\n    // The user writes nothing new.\n    // A kind of Core body loads from saved results once all of\n    // step B so far, taken together, is no slower than text.\n    text: files.read(\"notes.txt\") ?? \"no notes\"\n    print(text)\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps every measured compile within noise of the jet before it, and stops small losses adding up over all of B. It moves each kind of body as soon as loading it wins, and shows exactly what blocks c22.",
+        "gains": [
+          "No measured compile gets slower than the jet before it, beyond the noise band",
+          "The ledger stops small losses adding up across steps",
+          "Each kind of body moves as soon as it wins",
+          "What blocks c22 is a published, measured list"
+        ],
+        "losses": [
+          {
+            "loss": "c22 may close later than under B or E, or never, if some kind never loads fast enough.",
+            "mitigation": "Each lagging kind publishes its gap and next form (machine code, narrower rows, per-body loading), and returns to the owner with its numbers."
+          },
+          {
+            "loss": "Until every kind moves, built-in Core keeps a text body path beside the loaded one.",
+            "mitigation": "The text path stays for named trees anyway, and the body guard compares the two paths in every build."
+          },
+          {
+            "loss": "Only the 6.2 programs are gated, so another program can still get slower.",
+            "mitigation": "The census of note section 10 reports Core bodies by kind over every example and gauntlet program, and a program that loses joins the set."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B's 5% allowance is only 2 points looser than A's 3% band, so it buys little c22 time. It still lets compiles drift slower, against the owner's order for a measured win over no precompiled Core."
+          },
+          {
+            "key": "C",
+            "reason": "C gives up on checked bodies before any of them is measured. It reverses the owner's ruling that Core ships checked, and keeps about a tenth of CPU in Core body checks on every compile."
+          },
+          {
+            "key": "D",
+            "reason": "D holds back the kinds of bodies that already win, needs an exception to the rule that ready work lands, and makes one large change that is hard to trace."
+          },
+          {
+            "key": "E",
+            "reason": "E lets one step make a program slower than the jet of the day before, so a user who upgrades can see a regression. Programs outside the measured set lose the most."
+          }
+        ],
+        "tradeoff": "A later, possibly open c22 claim, in exchange for never shipping a measured compile slower than the jet before it."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotReview-PRECORE. The draft hid that c37 is met, that the 6.2 gate has a 3% and 2 ms band, that per-step losses could add up, and that D needs a forbidden branch. B and C hid owner-order and performance-gate conflicts, and option E, the forms, both paths and edge cases were missing; each is fixed here."
+      },
+      "checkInstructions": "Read card #6328 c22 and c37 in Tower, with c37's evidence. Read sections 1.4, 3.3, 4, 6, 9 and 10 of Docs/proposals/2026-11-15-lazy-precompiled-core-interfaces.md, and gap H16 in Docs/audits/2026-11-15-lazy-core-interfaces-review-2.md. The stand-in binding is in Compiler/JetSema/Source/Sema/CoreDemand.jet, and the packages not built as machine code are JET_CLI_CORE_LOWERED in Compiler/JetCli/Source/Cli/CoreLibrary.jet. The A2a numbers are in the meta of the SUB PrecompiledCore-4-a2a-lazy-bodies in Main's inbox.",
+      "surface": {
+        "gist": "Jet wants its standard library shipped already checked, and no compile ever slower. When one step can't do both, which rule wins?",
+        "lesson": "Two good rules can pull apart. Decide which one gates a merge, and make the other a measured goal.",
+        "trio": {
+          "current": {
+            "note": "Today jet ships Core's machine code, but still checks some Core bodies from text.",
+            "code": "use files: core.files\n\nrun: fn() {\n    // About 80 Core function bodies are checked from text here.\n    text: files.read(\"notes.txt\") ?? \"no notes\"\n    print(text)\n}"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "Swift loads its standard library as a binary module, with a text interface as a fallback.",
+            "code": "// Swift: `import Foundation` loads a prebuilt binary module.\nimport Foundation\nlet text = (try? String(contentsOfFile: \"notes.txt\")) ?? \"no notes\"\nprint(text)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Speed gates every merge; a kind of body moves only when no slower",
+            "gist": "No step that slows a measured program merges, and small losses cannot add up.",
+            "gains": [
+              "No measured compile gets slower",
+              "Each kind moves as soon as it wins"
+            ],
+            "losses": [
+              "c22 may close late, or never"
+            ],
+            "proposed": {
+              "code": "use files: core.files\n\nrun: fn() {\n    // Fast-loading kinds of Core bodies come from saved results;\n    // the rest are checked from text until their faster form lands.\n    text: files.read(\"notes.txt\") ?? \"no notes\"\n    print(text)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "The precompiled rule wins within a small budget",
+            "gist": "A step may merge if it slows a program by up to 5% in time or memory.",
+            "gains": [
+              "c22 may close sooner"
+            ],
+            "losses": [
+              "Some compiles get up to 5% slower",
+              "Only 2 points looser than A's band"
+            ],
+            "proposed": {
+              "code": "use files: core.files\n\nrun: fn() {\n    // Every kind of Core body loads from saved results once its\n    // step lands, even if this compile is up to 5% slower.\n    text: files.read(\"notes.txt\") ?? \"no notes\"\n    print(text)\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "The speed rule wins for good; Core stays text plus an index",
+            "gist": "Stop after declarations ship; compiles check the Core bodies they use from text.",
+            "gains": [
+              "No new loading work"
+            ],
+            "losses": [
+              "Every compile keeps checking some Core bodies",
+              "Reverses the owner's ruling that Core ships checked"
+            ],
+            "proposed": {
+              "code": "use files: core.files\n\nrun: fn() {\n    // Every Core body this program uses is checked from text.\n    text: files.read(\"notes.txt\") ?? \"no notes\"\n    print(text)\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Nothing merges until every kind of body is faster",
+            "gist": "Hold every step unlanded; land them all once every program is faster.",
+            "gains": [
+              "One switch for the whole of Core"
+            ],
+            "losses": [
+              "Winning kinds wait for the slowest one",
+              "Needs an exception to the rule that ready work lands"
+            ],
+            "proposed": {
+              "code": "use files: core.files\n\nrun: fn() {\n    // Today's path until all of step B is ready and faster.\n    text: files.read(\"notes.txt\") ?? \"no notes\"\n    print(text)\n}"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Net never slower: all steps together must beat text",
+            "gist": "A step may be slower alone if all steps together still beat text.",
+            "gains": [
+              "c22 may close sooner than under A",
+              "Matches the speed rule's wording"
+            ],
+            "losses": [
+              "A compile can get slower than the day before"
+            ],
+            "proposed": {
+              "code": "use files: core.files\n\nrun: fn() {\n    // Core bodies load from saved results once all steps so far,\n    // together, are no slower than checking from text.\n    text: files.read(\"notes.txt\") ?? \"no notes\"\n    print(text)\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A never ships a measured compile slower than before, stops small losses adding up, and moves each kind as soon as it wins.",
+          "gains": [
+            "No measured compile gets slower",
+            "Small losses cannot add up across steps",
+            "A measured list of what blocks c22"
+          ],
+          "losses": [
+            {
+              "loss": "c22 may close late, or never.",
+              "mitigation": "Each lagging kind names its next form and returns to the owner with its numbers."
+            },
+            {
+              "loss": "Programs outside the measured set are not gated.",
+              "mitigation": "A census covers every example, and a program that loses joins the set."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B's 5% is barely looser than A's band, yet lets compiles drift slower."
+            },
+            {
+              "key": "C",
+              "reason": "C gives up checked bodies before any is measured."
+            },
+            {
+              "key": "D",
+              "reason": "D holds back kinds that already win."
+            },
+            {
+              "key": "E",
+              "reason": "E lets a compile get slower than the day before."
+            }
+          ],
+          "tradeoff": "A later, possibly open c22 claim, for never shipping a slower measured compile."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-15T10:39:53.392Z"
     }
   ],
   "questions": [
@@ -217847,6 +218119,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T10:39:59.842Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08r6ogl",
+      "note": "#42 Every B step lands with before-and-after numbers on the batc"
+    },
+    {
+      "at": "2026-11-15T10:39:58.478Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08r6ogl",
+      "note": "#41 Until B5 lands, jet build at O1 and O2 still checks Core bod"
+    },
+    {
+      "at": "2026-11-15T10:39:57.011Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08r6ogl",
+      "note": "#40 The note states how a body kind that stays on text gets its "
+    },
+    {
+      "at": "2026-11-15T10:39:55.255Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08r6ogl",
+      "note": "#39 Within the ratified no-slower band, each B step's per-progra"
+    },
+    {
+      "at": "2026-11-15T10:39:53.392Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PRECORE-SPEED1",
+      "note": "When shipping Core already checked would make a compile slower, which rule wins?"
+    },
     {
       "at": "2026-11-15T10:38:24.179Z",
       "by": "Main",
