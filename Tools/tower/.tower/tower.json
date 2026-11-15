@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6895,
-    "rev": 103950,
+    "rev": 103970,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35450,21 +35450,26 @@
     {
       "id": "c0fi6uj5",
       "num": 3549,
-      "title": "CoreLib system: complete Jet ownership",
-      "body": "Complete archives, networking, process, tasks, events, watchers, terminal, logging, email, and database semantics. Keep host access behind typed provider leaves and prove all applicable tiers.",
+      "title": "System Core modules are fully Jet-owned: every declaration has a Jet body or a policy-free provider leaf, with typed failures",
+      "body": "Destination: the system Core modules (archive, net, service, sys, log, http, term, sync, db, event, process, tasks, watcher, email) are ordinary Jet. Every declaration has a Jet body or a typed, policy-free provider leaf; protocol, policy, validation and typed failures live in Jet source; and failure and effect proofs pass on O0, O1 and O2.\n\nWhy it matters: Core is ordinary Jet that uses only mechanisms any package can use (philosophy pillar 5), and the same program means the same on every tier (I9).\n\nOpen work: the CoreSurfaceLedger check for these modules (c1), the per-module core proofs (c3), opaque file handles (c11, D-FILES-HANDLE-ABI1=A), sys.set reporting EnvError (c17), raw-byte env values (c18, owner gate D-ENV-RAW-BYTES1) and core.os facts computed once in Core (c19).\n\nThe Rust-era plan (crates/ paths, the 2026-09 dispatcher row counts) is retired with Rust removal; the dispatcher rows now live in Compiler/Prelude/Core.rows.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "**Goal.** This is the system wave of #3690 (W2/W3): archive, process/tasks, event/watcher, term/log/sys, email/db and net transports. Jet source owns protocol, policy, validation and typed failures. Host access stays behind typed, policy-free provider leaves.\n\n**Current state.**\n- c4 (sys.expand parity) is met: `tests/corelib_parts/system.rs:461` `core_sys_expand_home_patterns_are_identical_across_tiers`.\n- c5 fails. `Core/sys/sys.jet:16` `pub fn set(name, value) -[Env]> { core.sys.set(name, value) }` is infallible. The leaf `crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:677` `jet_std_env_set(...) -> Result<(), EnvError>` runs `jet_env_validate_name/value` in Rust, which is policy in the leaf. The emitted Rust assigns that Result to a `()` MIR slot (E0308; log 2026-09-24). The test is `tests/corelib_parts/system.rs:488`.\n- Dispatcher rows in `crates/jet-codegen/src/Prelude/Core.jet` for system modules: 355 in total, 293 of them already Jet-owned duplicates.\n\n| Module | Rows | Jet-owned |\n|---|---|---|\n| net | 107 | 107 |\n| service | 59 | 5 |\n| sys | 52 | 52 |\n| log | 28 | 28 |\n| http | 27 | 24 |\n| term | 22 | 20 |\n| sync | 17 | 17 |\n| db | 13 | 13 |\n| event | 7 | 7 |\n| process | 6 | 6 |\n| tasks | 6 | 4 |\n| email | 6 | 5 |\n| watcher | 4 | 4 |\n\n- Sibling owners of sub-contracts: #3594 (process binary streams), #3596 (archive streaming), #3557 (TCP handle shape, building), #3669 (db semantics) and #3665/#3666 (HTTP/TLS).\n\n**Changes.**\n1. **c5 first:**\n   - Move env name/value validation (empty, `=`, NUL, and the platform length cap) into `Core/sys/sys.jet`.\n   - `set` becomes `-[Env]> EnvError!`, matching `unset` at :18, under the ratified typed-failure/no-fake-success law.\n   - The leaf `jet_std_env_set` becomes policy-free and returns `()`.\n   - Update the provider row (`Core.jet:352`) and regenerate with `node Tools/agent/gen-core-tables.mjs --write`.\n   - Update the test witness to `sys.set(key, v) ?? return` and add an invalid-name line.\n2. Then, one module per patch: net → sys/log/term → sync/event/watcher/process/tasks → db/email → service. Delete the Jet-owned `dispatcher_row`/`ambient_route` lines and the dead `Prelude/CoreLib` functions and JIT shims (F1). Mirror the removal in `Compiler/JetFoundation/Source/Registry/*.jet` and `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet`.\n3. The 54 `core.service` rows with no Jet owner need Jet bodies over typed leaves. Raw sockets and OS calls stay leaves, using the F4 declaration once ratified.\n4. Migrate callers, examples and goldens in each patch.\n\n**Proof.**\n- The command in add_criteria.\n- `cargo test --test corelib_system` (focused set), `jet test Compiler --profile cases process_sessions/`, `jet test Compiler --profile cases corelib_net/`.\n- `jet test Compiler --profile golden io/log` and `jet test Compiler --profile golden io/process_`: identical output on every tier.\n- `node Tools/agent/check-core-surface-ledger.mjs`: passes.\n\n**Batch.** `batch-host-runtime`: the work edits the Prelude dispatcher and CoreLib Rust leaves, and proof is a tier-parity run after one build.\n\n**Dependencies.** Parent #3690. Sibling sub-contract owners are listed above and do not block the c5 fix or the F1 route cuts.\n",
+      "plan": "## Goal\nEvery system Core module declaration has a Jet body or a typed, policy-free provider leaf (c1), proven per module on O0, O1 and O2 (c3).\n\n## Open steps\n- c11: FileReader, FileWriter and FileLock become opaque provider-owned values (D-FILES-HANDLE-ABI1=A).\n- c17: sys.set returns EnvError (Core/Sys/Sys.jet declares Never! today).\n- c18: raw-byte env values, after the owner gate D-ENV-RAW-BYTES1.\n- c19: core.os facts computed once in Core.\n- Then run CoreSurfaceLedger --check for c1 and the per-module core profile for c3.",
       "checkSteps": null,
       "probe": "scripts/agent/jet-env cargo test -p jet --test core_net_tls tls_rejects_empty_dns_labels_before_transport_on_all_tiers -- --exact --nocapture",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": "Main",
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Body and title updated 2026-11-15: the Rust-era plan (crates/ paths) is retired; the open criteria name the remaining work."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -35947,7 +35952,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:03.647Z",
-      "updated": "2026-11-15T03:37:54.459Z",
+      "updated": "2026-11-15T03:48:43.196Z",
       "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-13T01:49:48.348Z",
       "goals": [
@@ -35964,15 +35969,20 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "**Goal**\nFinish the data/web slice of Core Jet ownership (parent #3547 is done). Every data, web, reactive, sync, service and jobs declaration has a real Jet body or a typed provider leaf, all policy, validation and error meaning lives in Jet, and each package passes AOT, `jet run` and interpreter proof.\n\n**Current state**\n- Building (log 2026-09-24): disjoint worktree lanes for data, HTTP client, web router and sync. Known failures: core/data/database and `is_base64` emit AOT Rust E0308/E0063 (JetErr into typed `DataError` slots). The Core/http/client.jet syntax cascade (E0003 at byte 12789) blocked the http_i9 framing test.\n- HTTP/CSRF policy still in Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:141-174 (`JetWebServerFnCsrfPolicy`, `JetWebServerFnSpec`) and HTTPServer.rs. Core/http/server.jet:53 `json<T: Encode>` delegates to the provider. The HTTP client/server framing now belongs to #3665 and #3666, so it is out of this card's scope.\n- Jobs: Core/jobs/jobs.jet:59-69 `JobQueue` is an in-memory record list (`queue()` builds `records: []`), which shadows the D-DX-QUEUE1=A SQLite provider. Examples/features/concurrency/job_queue.jet has no golden.\n- Packages: Core/data (data, loader, stream, arrow, plot, sketch), Core/web (router, forms, query, table, virtual, store, storage, browser, devserver), Core/reactive, Core/service, Core/jobs.\n\n**Changes**\n1. Lane data: fix the typed error-carrier emission so `DataError` slots receive `DataError`, not `JetErr`. The fix goes in Compiler/JetCodegen at the result-carrier lowering, mirrored in the Rust emitter only as far as the shipped binary needs. Then fix the Core/data/data.jet `public_parameter` split and Core/web/query.jet `esc_json` UTF-8 defects named in the log.\n2. Lane web: move CSRF/retry/idempotency policy from WebServerFn.rs into Core/web (a Jet decision function). WebServerFn.rs keeps only transport leaves.\n3. Lane jobs: make `jobs.queue()` open the single SQLite-default durable provider identity with receiver `enqueue`/`claim`/`ack`/`retry`/`delay`/dead-letter. Delete the in-memory `records` shadow, migrate callers and add the job_queue golden.\n4. Per package: diff each source declaration against the CoreCallRows and CoreModuleExportNames rows and the actual callers. Delete any route that re-encodes a Jet body. Main alone edits the shared Core.jet and registry rows at integration.\n5. Web and browser tier cells stay explicitly pending until exercised.\n\n**Proof**\n- `jet test Compiler --profile golden concurrency/job_queue`: passes.\n- `Tools/agent/jet-env cargo test --test corelib_http_data -- core_data_`: passes, including database and base64 on AOT.\n- `Tools/agent/jet-env cargo test --test ui_backend -- web_` and `jet test Compiler --profile golden web/`: pass.\n- A three-tier `jet run` diff for Examples/features/web/query_lifecycle.jet and store_history.jet against their goldens: empty.\n\n**Batch**\nbatch-core-ui (web/reactive family): most remaining work is Core/web, reactive and jobs. The data carrier fix lands in the same build.\n\n**Dependencies**\nNone blocking. #3665 and #3666 own HTTP framing and TLS.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
-      "assignee": "Main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed 2026-11-15: the last open criterion (c13, SQLite completeness) moved to #6894, split into three criteria. The web parts moved with #6445 earlier."
+        },
         {
           "at": "2026-11-13",
           "by": "Main",
@@ -36405,11 +36415,12 @@
         {
           "n": 13,
           "text": "The Jet SQLite is the complete library: the public sqllogictest corpus passes, WAL mode and crash-recovery round trips with C SQLite pass, and every SQL feature of SQLite 3.45 that Core/Db does not use yet is ported (moved from #6695 c2 and c3 by owner order 2026-11-09).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T17:21:03.033Z"
+          "evidence": "Moved to #6894 c1: the SQL engine leaves Core for the sql package (D-DB-AUTH-HOME1=A); SQLite completeness has its own card, split into corpus, interop and feature census",
+          "at": "2026-11-15T03:48:11.347Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -36422,13 +36433,13 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:04.333Z",
-      "updated": "2026-11-14T12:41:26.421Z",
-      "updatedBy": "Main",
-      "claimedAt": "2026-11-13T10:45:22.971Z",
+      "updated": "2026-11-15T03:48:20.175Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 13
+      "criteriaLastN": 13,
+      "completedAt": "2026-11-15T03:48:20.175Z"
     },
     {
       "id": "c025w7rd",
@@ -57522,12 +57533,12 @@
         },
         {
           "n": 2,
-          "text": "After the ratified items land, each of the 15 ScriptBench programs in idiomatic Jet is within 15% of the shortest peer in o200k tokens and has fewer hidden behaviours (implicit conversions, unchecked failure paths, hidden globals or mutation, untyped data, quoting traps) than every peer, per the bench reasoning check. Baseline 2026-10-28: Jet 6,954 bytes, Python 4,420, nushell 3,172.",
+          "text": "After the ratified scripting items land, each of the 15 ScriptBench programs in idiomatic Jet is within 15% of the shortest peer in o200k tokens and has fewer hidden behaviours (implicit conversions, unchecked failure paths, hidden globals or mutation, untyped data, quoting traps) than every peer, per the bench reasoning check. Baseline 2026-10-28: Jet 6,954 bytes, Python 4,420, nushell 3,172. Proof: `jet Tools/perf/scriptbench/Bench.jet --data … --out …` token report.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:06:50.959Z"
+          "at": "2026-11-15T03:48:02.436Z"
         },
         {
           "n": 6,
@@ -57550,8 +57561,8 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-21T11:49:42.286Z",
-      "updated": "2026-11-15T01:10:51.010Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:48:02.436Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
@@ -68607,8 +68618,8 @@
     {
       "id": "c0q31aks",
       "num": 6144,
-      "title": "Ballot: are Core's generic bodies checked against the selected target?",
-      "body": "Finding B10 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). Core's generic bodies are checked without the selected target's no_os fact; user bodies are checked with it (Sema/Scopes.jet:492-498).\n\nPillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9).",
+      "title": "No-heap machines: the heap-free proof follows calls into Core with no exemption by name (D-CORE-TARGET1=A)",
+      "body": "Finding B10 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md): Core's generic bodies are checked without the selected target's no_os fact, while user bodies are checked with it (sema_scope_environment_no_os in Compiler/JetSema/Source/Sema/Scopes.jet tests module_is_core).\n\nD-CORE-TARGET1=A (ratified 2026-11-14) answers the ballot: a chip with no heap means the program promises not to use the heap, the same promise -[!Mem.Alloc]> makes; the compiler runs that proof from the program's start through Core and packages alike, reports a problem inside Core on the program's call, and shows each step of the path.\n\nPillar 5 (Docs/spec/philosophy.md): Core uses only mechanisms any package can use.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
@@ -68623,6 +68634,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Ballot answered by D-CORE-TARGET1=A (ratified 2026-11-14); c1 now states the build."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "Owner question on D-CORE-TARGET1: rework so A is the best design with downsides engineered away (G3Core-2)."
@@ -68636,12 +68652,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The ballot is answered and Sema/Scopes.jet:492-498 no longer tests for Core.",
+          "text": "D-CORE-TARGET1=A is built: on a machine with no heap, the existing -[!Mem.Alloc]> proof runs from the program's start and follows calls into Core and packages alike, with no exemption by name (the `module_is_core` test in sema_scope_environment_no_os, Compiler/JetSema/Source/Sema/Scopes.jet, is gone); a heap use inside Core or a package is reported on the program's call, with a note showing each step and the line that allocates. Proof: `git grep -n 'module_is_core(environment.module_identity)' -- Compiler/JetSema/Source/Sema/Scopes.jet` prints nothing and `jet test Compiler --profile ui --filter no_heap_target_core_path`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-29T12:53:32.990Z"
+          "at": "2026-11-15T03:48:03.352Z"
         },
         {
           "n": 3,
@@ -68661,8 +68677,8 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:32.990Z",
-      "updated": "2026-11-15T01:10:45.131Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:48:16.594Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
     {
@@ -74653,7 +74669,7 @@
     {
       "id": "c0l7lwif",
       "num": 6342,
-      "title": "Fixed strings and a growable builder: should String be unchangeable, with a separate mutable type, and what are both called",
+      "title": "String edited in place: insert, remove, truncate, reserve and capacity (D-TEXT-FIXED1=A)",
       "body": "Owner, 2026-10-30: \"Relook at string types: string should be constant, not flexible, and string builders (don't love the name). String builders are the mutable version that can grow, shrink, change, etc.; strings should generally be fixed. Maybe strings would be like Odin string builders and text would be static unchangeable constant strings? Open to suggestions for both concepts' names.\" Today Jet's one text type is String (about 2,250 uses in Examples), and D-STRING-EMPTY1 covers reusing it. Owner: SurfaceDesign (design only).",
       "kind": "task",
       "track": "sidequest",
@@ -74723,12 +74739,12 @@
         },
         {
           "n": 5,
-          "text": "D-TEXT-FIXED1=A is built: a := String or &String parameter is edited in place with plain calls (D-CALLSITE-MARK2=A): s.insert(at, text), s.remove(from, to), s.truncate(n), s.reserve(n) and s.try_push(x); String.with_capacity(n) and s.capacity() exist; positions count characters; a name: value String (D-DECL-COLON1=A) rejects every edit with a registered diagnostic; examples with golden output on o0, o1 and o2, and a paired perf cell against building a new String.",
+          "text": "D-TEXT-FIXED1=A is built: a := String or &String parameter is edited in place with plain calls (D-CALLSITE-MARK2=A): s.insert(at, text), s.remove(from, to), s.truncate(n), s.reserve(n) and s.try_push(x); String.with_capacity(n) and s.capacity() exist; positions count characters; a name: value String (D-DECL-COLON1=A) rejects every edit with a registered diagnostic; a paired perf cell compares against building a new String. Proof: `jet test Compiler --profile golden --filter Text/StringEditInPlace` on O0, O1 and O2 and `jet test Compiler --profile ui --filter string_edit_fixed_name`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:48:31.361Z"
+          "at": "2026-11-15T03:48:04.233Z"
         },
         {
           "n": 6,
@@ -74748,8 +74764,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T17:30:09.329Z",
-      "updated": "2026-11-07T04:01:26.393Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T03:48:14.762Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0qbikgx",
@@ -91420,12 +91436,12 @@
         },
         {
           "n": 2,
-          "text": "Every gap is either filled with idiomatic Jet surface in the shape of existing Core modules, or carries an owner ruling that Jet does not need it.",
+          "text": "Every gap the libc census names is filled with idiomatic Jet surface in the shape of existing Core modules (new public API through a ballot), or carries an owner ruling that Jet does not need it. Proof: `jet Tools/agent/LibcCensus.jet` lists no family marked as a gap without a Jet API or a ruling ID.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T19:03:18.189Z"
+          "at": "2026-11-15T03:48:05.102Z"
         }
       ],
       "refs": [],
@@ -91440,8 +91456,8 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:54:55.014Z",
-      "updated": "2026-11-14T20:01:27.994Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:48:05.102Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
     {
@@ -91666,6 +91682,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: c3 split into one-implementation, full Wayland and X11 criteria; proofs added."
+        },
+        {
           "at": "2026-11-10",
           "by": "Main",
           "text": "t15a landed G6LeadC-13 (01b86931e7..8327f5ae47): the Wayland wire part's `net: core.net` broke every web build that imports core.ui (E3304). Fixed at the root: the target socket check judges only the program's own `use`, and ui.open reaches the wire part only under a comptime Linux branch. Proof: cases web_build 31/0, including web_ui_open_answers_no_display."
@@ -91793,21 +91814,21 @@
         },
         {
           "n": 2,
-          "text": "Safe Jet: programs using ui need no #Unsafe, and Core/Ui (the Wayland client included) contains no #Unsafe; the OS primitives it needs (AF_UNIX connect, fd passing over SCM_RIGHTS as owned typed fds, a bounds-checked shared-memory buffer unmapped on drop, poll) are safe typed Core APIs whose single vetted edge lives in the runtime (owner 2026-11-08: \"i want this to work in safe jet\")",
+          "text": "Safe Jet: programs using ui need no #Unsafe and Core/Ui (the Wayland client included) contains none; AF_UNIX connect, fd passing over SCM_RIGHTS as owned typed fds, a bounds-checked shared-memory buffer unmapped on drop, and poll are safe typed Core APIs whose single vetted edge is in the runtime (owner 2026-11-08). Proof: `git grep -n '#Unsafe' -- Core/Ui` prints nothing and `jet test Compiler --profile golden --filter Ui/WaylandWindow`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T19:54:16.531Z"
+          "at": "2026-11-15T03:48:06.845Z"
         },
         {
           "n": 3,
-          "text": "One implementation (owner 2026-11-08: \"keep one implementation and just have it adapt to underlying linux\"): one window, frame, buffer, input, keymap (XKB), renderer and event-loop model; each display server is a thin wire adapter chosen from the environment. Full-featured on Wayland first (multiple windows, resize, HiDPI scale, pointer, keyboard with layouts and repeat, text input, clipboard, cursor shapes, decorations, fullscreen), then X11 on the same implementation",
+          "text": "One implementation (owner 2026-11-08: \"keep one implementation and just have it adapt to underlying linux\"): one window, frame, buffer, input, XKB keymap, renderer and event-loop model, and each display server is a thin wire adapter chosen from the environment. Proof: `jet test Compiler --profile cases --filter ui/display_adapter_selection`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T19:54:18.077Z"
+          "at": "2026-11-15T03:48:07.718Z"
         },
         {
           "n": 4,
@@ -91820,12 +91841,12 @@
         },
         {
           "n": 5,
-          "text": "Ownership makes misuse unwritable: Fd and SharedMemory are owned resources closed on drop (no double close, no use after close, no fd-reuse race across threads); offsets and lengths are range-typed (Int(lo..hi)) so sema proves bounds before a leaf runs.",
+          "text": "Ownership makes misuse unwritable: Fd and SharedMemory close on drop (no double close, no use after close, no fd-reuse race across threads), and offsets and lengths are range-typed (Int(lo..hi)) so sema proves bounds before a leaf runs. Proof: `jet test Compiler --profile ui --filter fd_use_after_close` and `jet test Compiler --profile ui --filter shared_memory_offset_out_of_range`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T20:10:09.820Z"
+          "at": "2026-11-15T03:48:08.655Z"
         },
         {
           "n": 6,
@@ -91838,12 +91859,12 @@
         },
         {
           "n": 7,
-          "text": "One app experience across targets (owner 2026-11-08): the same Jet app runs as a native window and as a web app with identical behavior, look and functionality. Layout, style, the drawing model, text shaping and rasterization, the input and event model (keys, text, pointer, focus, IME, shortcuts) and the frame are each one Jet implementation in Core/Ui and Core/App. Each target only presents and marshals: Wayland shm or the web. Golden-image tests compare native and web output pixel for pixel for the same program, and event-script tests compare their behavior.",
+          "text": "The same Jet app runs as a native window and as a web app with identical behaviour and pixels: layout, style, drawing, text shaping and rasterization, input and event model, and frame are each one Jet implementation, and each target only presents and marshals (owner 2026-11-08). Proof: `jet test Compiler --profile golden --filter Ui/NativeWebParity` compares native and web images pixel for pixel and replays one event script on both.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T22:51:05.368Z"
+          "at": "2026-11-15T03:48:09.578Z"
         },
         {
           "n": 8,
@@ -91856,12 +91877,12 @@
         },
         {
           "n": 9,
-          "text": "A dated adversarial review in Docs/audits compares Jet native windows with SDL3, GLFW, winit and GTK4 on the same program (open a 2560x1440 window, draw a frame, answer keys, resize, close), each built and run on this host: time to first presented frame, key-to-present latency p50 and p99, idle CPU, peak RSS, binary size and source lines, plus the features each has that Jet lacks (X11, HiDPI, IME, clipboard, drag and drop, accessibility, multiple windows). Every claim ends holds, holds within limits, or fails, and each gap is a criterion on this card.",
+          "text": "A dated adversarial review in Docs/audits compares Jet native windows with SDL3, GLFW, winit and GTK4 on one program (open a 2560x1440 window, draw a frame, answer keys, resize, close), each built and run on this host: time to first frame, key-to-present latency p50 and p99, idle CPU, peak RSS, binary size and source lines, and the features each has that Jet lacks; every claim ends holds, holds within limits, or fails, and each gap becomes a criterion on this card. Proof: `git ls-files Docs/audits | grep -i native-windows` names the review.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T22:50:22.473Z"
+          "at": "2026-11-15T03:48:10.463Z"
         },
         {
           "n": 10,
@@ -91894,7 +91915,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-15T03:48:01.362Z",
+      "updated": "2026-11-15T03:48:17.494Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 11
     },
@@ -93912,12 +93933,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "core.net.dtls exposes DTLS 1.2 client and server over UDP on the ported engine, idiomatic Jet in the core.net.tls shape (typed config, Result errors, Close), with interop cases against the vendored mbedtls DTLS peers and an example plus golden (owner ruling 2026-11-08, Q11 B).",
+          "text": "core.net.dtls exposes DTLS 1.2 client and server over UDP on the Jet TLS engine, in the core.net.tls shape (typed config, Result errors, Close), with interop cases against the vendored mbedtls DTLS peers and an example golden (owner ruling 2026-11-08, Q11 B). Proof: `jet test Compiler --profile cases --filter net/dtls_interop_` and `jet test Compiler --profile golden --filter Net/DtlsEcho`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T15:59:05.339Z"
+          "at": "2026-11-15T03:48:05.975Z"
         }
       ],
       "refs": [],
@@ -93928,8 +93949,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:59:02.674Z",
-      "updated": "2026-11-09T15:59:05.339Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:48:05.975Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 1
     },
     {
@@ -210797,6 +210818,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:48:43.196Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0fi6uj5",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-15T03:48:34.113Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0fi6uj5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:48:33.100Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0fi6uj5",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:48:20.175Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0qus24o",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T03:48:17.495Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0l39twq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:48:16.594Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0q31aks",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:48:15.707Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0qus24o",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:48:14.762Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0l7lwif",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T03:48:13.085Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0q31aks",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:48:11.347Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0qus24o",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T03:48:10.463Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#9: proof; was: A dated adversarial review in Docs/audits compares Jet native windows with SDL3, GLFW, winit and GTK4 on the same program (open a 2560x1440 window, draw a frame, answer keys, resize, close), each buil"
+    },
+    {
+      "at": "2026-11-15T03:48:09.578Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#7: proof; was: One app experience across targets (owner 2026-11-08): the same Jet app runs as a native window and as a web app with identical behavior, look and functionality. Layout, style, the drawing model, text "
+    },
+    {
+      "at": "2026-11-15T03:48:08.655Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#5: proof; was: Ownership makes misuse unwritable: Fd and SharedMemory are owned resources closed on drop (no double close, no use after close, no fd-reuse race across threads); offsets and lengths are range-typed (I"
+    },
+    {
+      "at": "2026-11-15T03:48:07.718Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#3: split: the Wayland feature set and X11 to their own criteria; was: One implementation (owner 2026-11-08: \"keep one implementation and just have it adapt to underlying linux\"): one window, frame, buffer, input, keymap (XKB), renderer and event-loop model; each display"
+    },
+    {
+      "at": "2026-11-15T03:48:06.845Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#2: proof; was: Safe Jet: programs using ui need no #Unsafe, and Core/Ui (the Wayland client included) contains no #Unsafe; the OS primitives it needs (AF_UNIX connect, fd passing over SCM_RIGHTS as owned typed fds, "
+    },
+    {
+      "at": "2026-11-15T03:48:05.975Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0qnrbr0",
+      "note": "#1: proof; was: core.net.dtls exposes DTLS 1.2 client and server over UDP on the ported engine, idiomatic Jet in the core.net.tls shape (typed config, Result errors, Close), with interop cases against the vendored mb"
+    },
+    {
+      "at": "2026-11-15T03:48:05.102Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0cs6xlg",
+      "note": "#2: proof; was: Every gap is either filled with idiomatic Jet surface in the shape of existing Core modules, or carries an owner ruling that Jet does not need it."
+    },
+    {
+      "at": "2026-11-15T03:48:04.233Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l7lwif",
+      "note": "#5: proof; was: D-TEXT-FIXED1=A is built: a := String or &String parameter is edited in place with plain calls (D-CALLSITE-MARK2=A): s.insert(at, text), s.remove(from, to), s.truncate(n), s.reserve(n) and s.try_push("
+    },
+    {
+      "at": "2026-11-15T03:48:03.352Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0q31aks",
+      "note": "#1: the ballot is answered by D-CORE-TARGET1=A (ratified 2026-11-14); was: The ballot is answered and Sema/Scopes.jet:492-498 no longer tests for Core."
+    },
+    {
+      "at": "2026-11-15T03:48:02.436Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ys8fj",
+      "note": "#2: proof; was: After the ratified items land, each of the 15 ScriptBench programs in idiomatic Jet is within 15% of the shortest peer in o200k tokens and has fewer hidden behaviours (implicit conversions, unchecked "
+    },
     {
       "at": "2026-11-15T03:48:01.362Z",
       "by": "TowerKeeper-1",
