@@ -250,12 +250,11 @@ Reader: trait {
 }
 
 // A byte sink: core.files's FileWriter, and any type the streaming codecs
-// of core.encoding write to. `write_bytes` writes all of `bytes`; `flush`
-// pushes what the sink holds on to its destination.
+// of core.encoding write to.
 Writer: trait {
     bare_bound: Bool{true}
-    write_bytes: fn(&self, bytes: [U8]) IOError!
-    flush: fn(&self) IOError!
+    write: fn(&self, bytes: [U8]) -> Int IOError!
+    write_all: fn(&self, bytes: [U8]) IOError!
 }
 
 // A value a transaction restores on rollback.

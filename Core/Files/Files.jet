@@ -398,9 +398,8 @@ FileReader: struct {
     }
 }
 
-/// An open file for writing. `write_line`, `write_all` and `write_bytes` are
-/// buffered; `flush` hands the bytes to the system and `fsync` also makes
-/// them durable.
+/// An open file for writing. `write_line` and `write_all` are buffered;
+/// `flush` hands the bytes to the system and `fsync` also makes them durable.
 /// Only Core's opens fill the `priv handle`, so a literal outside core.files
 /// cannot forge one.
 #[!Equatable, !Comparable]
@@ -429,19 +428,9 @@ FileWriter: struct {
         core.files.__writer_allocate(self, size)
     }
 
-    /// `write_bytes` hands over every byte, as `write_all` does; the bytes
-    /// are buffered until `flush`, `fsync` or close. `write` also returns
-    /// the count.
+    /// `write` hands over every byte, as `write_all` does, and returns the
+    /// count; the bytes are buffered until `flush`, `fsync` or close.
     impl Writer {
-        write_bytes: fn(&self, bytes: [U8]) -[Time.Wait]> IOError! {
-            rt.writer_write_all(self, bytes)
-        }
-
-        // The handle's own flush.
-        flush: fn(&self) -[Time.Wait]> IOError! {
-            self.flush()
-        }
-
         write: fn(&self, bytes: [U8]) -[Time.Wait]> Int IOError! {
             rt.writer_write_all(self, bytes) ?? return Err(err)
             Ok(bytes.len())
