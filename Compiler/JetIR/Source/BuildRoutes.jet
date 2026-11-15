@@ -38,9 +38,9 @@ ir_young_storage: fn(b: IRBuilder, slot: Int) -> Bool Never! {
     made
 }
 
-// `list.push(value)`: grows the buffer to twice its capacity (at least 4)
-// when full, then stores the element at `len`, which moves into the
-// allocator owning the buffer (BuildMove.jet).
+// `list.push(value)`: grows a full buffer (ir_list_growth), then stores the
+// element at `len`, which moves into the allocator owning the buffer
+// (BuildMove.jet).
 ir_list_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, value: Int) Never! {
     slot: ir_list_slot(m, b, list, row)
     ir_store_at(m, p, b, slot.address, 0, value)
@@ -48,22 +48,43 @@ ir_list_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int,
     ir_list_counted(m, b, list, slot.length)
 }
 
+// The words an align-8 heap block keeps ahead of its payload (JetRuntime
+// Alloc.jet alloc_header).
+IR_HEAP_BLOCK_HEADER: 24
+
+// How a List buffer of `stride`-byte elements grows when full: a buffer
+// below `first` slots grows to `first`, any other to twice its capacity
+// plus `step`. For a power-of-two stride the header and the slots then
+// fill a power-of-two block exactly, a heap size class or whole pages,
+// from the smallest block holding 4 slots on: a block of B bytes holds
+// (B - header) / stride slots, B / stride - ceil(header / stride), and the
+// next block twice that plus the step. Any other stride doubles from 4.
+ir_list_growth: fn(stride: Int) -> (first: Int, step: Int) Never! {
+    block := 1
+    loop block < stride -> block = block * 2
+    if stride <= 0 || block != stride -> return (first: 4, step: 0)
+    block = 32
+    loop block < 4 * stride + IR_HEAP_BLOCK_HEADER -> block = block * 2
+    (first: (block - IR_HEAP_BLOCK_HEADER) /% stride, step: (IR_HEAP_BLOCK_HEADER + stride - 1) /% stride)
+}
+
 // The address of the element after the last of the List header at `list`
-// (element row `row`), whose buffer first grows to twice its capacity (at
-// least 4) when full, and the List's length; the caller stores the element
-// there, then counts it (ir_list_counted).
+// (element row `row`), whose buffer first grows (ir_list_growth) when full,
+// and the List's length; the caller stores the element there, then counts
+// it (ir_list_counted).
 ir_list_slot: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> (address: Int, length: Int) Never! {
     stride: ir_list_stride(m, row)
+    growth: ir_list_growth(stride)
     width: ir_word_const(m, b, stride)
     length: ir_load_word(m, b, list, 0)
     capacity: ir_load_word(m, b, list, 8)
     full: ir_bool_op(m, b, IROp.Eq, length, capacity)
     ir_open_if(b.f, full, b.line)
-    grown: ir_word_op(m, b, IROp.Add, capacity, capacity)
-    four: ir_word_const(m, b, 4)
-    small: ir_bool_op(m, b, IROp.Lt, grown, four)
+    grown: ir_list_grown(m, b, capacity, growth.step)
+    first: ir_word_const(m, b, growth.first)
+    small: ir_bool_op(m, b, IROp.Lt, capacity, first)
     ir_open_if(b.f, small, b.line)
-    ir_emit(b.f, IROp.Copy, grown, four, -1, -1, b.line)
+    ir_emit(b.f, IROp.Copy, grown, first, -1, -1, b.line)
     ir_end(b.f, b.line)
     grown_bytes: ir_word_op(m, b, IROp.Mul, grown, width)
     data: ir_list_grow_buffer(m, b, list, grown_bytes, false)
@@ -76,6 +97,14 @@ ir_list_slot: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> (address: 
     ir_end(b.f, b.line)
     elements: ir_load_word(m, b, list, 16)
     (address: ir_element_address(m, b, elements, length, stride), length: length)
+}
+
+// Twice `capacity` plus `step` (ir_list_growth), in a fresh slot.
+ir_list_grown: fn(m: &IRModule, b: &IRBuilder, capacity: Int, step: Int) -> Int Never! {
+    doubled: ir_word_op(m, b, IROp.Add, capacity, capacity)
+    if step == 0 -> return doubled
+    added: ir_word_const(m, b, step)
+    ir_word_op(m, b, IROp.Add, doubled, added)
 }
 
 // The List header at `list` counts the element stored after its `length`.
@@ -636,7 +665,7 @@ ir_list_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: In
     added: ir_word_op(m, b, IROp.Mul, count, width)
     full: ir_bool_op(m, b, IROp.Gt, total, capacity)
     ir_open_if(b.f, full, b.line)
-    grown: ir_word_op(m, b, IROp.Add, capacity, capacity)
+    grown: ir_list_grown(m, b, capacity, ir_list_growth(stride).step)
     below: ir_bool_op(m, b, IROp.Lt, grown, total)
     ir_open_if(b.f, below, b.line)
     ir_emit(b.f, IROp.Copy, grown, total, -1, -1, b.line)
