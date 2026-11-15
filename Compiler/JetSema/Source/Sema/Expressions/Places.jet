@@ -1150,7 +1150,8 @@ sema_expression_module_constant_read: fn(graph: SemaRegistrationGraph, resolved:
 
 // The report for `alias.member` when the whole-module import `alias` names
 // a module without `member`, as the call path reports `alias.member(..)`:
-// E1004 for a Core module, E0605 for a private item and E0102 otherwise.
+// E0605 for an item its own declaration keeps private, E1004 for another
+// Core item and E0102 otherwise.
 // None when `alias` is not a whole-module import (a binding with no
 // declaration, as `sema_call_source_import_target` reads it).
 sema_expression_module_member_unknown: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, alias: String, member: String, member_span: Span) -> Diagnostic? {
@@ -1160,7 +1161,11 @@ sema_expression_module_member_unknown: fn(graph: SemaRegistrationGraph, module_i
             if binding.local != alias || binding.symbol.kind != SymbolKind.Import || binding.declaration_position != None -> next
             target_index: sema_registration_module_index(graph, binding.target_module_identity) ?? return None
             target: graph.modules[target_index]
-            if module_is_core(target.module_identity) -> return Val(sema_expression_core_member_unknown(target, member, member_span))
+            declared_private: if sema_registration_direct_symbol(target, member) == {
+                .Val(declared) -> !sema_registration_visible(declared.visibility, module_identity, graph.modules[module_index].package_identity, target.module_identity, target.package_identity)
+                .None -> false
+            }
+            if module_is_core(target.module_identity) && !declared_private -> return Val(sema_expression_core_member_unknown(target, member, member_span))
             if sema_registration_direct_symbol(target, member) != None -> return Val(sema_error("E0605", member_span, "`{alias}.{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{alias}.{member}` from inside its module, or remove `priv` from its module or field"))
             return Val(sema_call_import_member_unknown(target.module_name, member, member_span))
         }

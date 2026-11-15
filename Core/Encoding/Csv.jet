@@ -923,7 +923,7 @@ writer: fn<W: Writer>(target: &&W, limits: EncodingLimits{EncodingLimits.safe()}
 }
 
 // A record that takes its fields, not a copy of them.
-__csv_row: fn(line: Int, fields: &&[String]) -> CSVRow Never! { CSVRow{line: line, fields: fields.move()} }
+priv csv_row: fn(line: Int, fields: &&[String]) -> CSVRow Never! { CSVRow{line: line, fields: fields.move()} }
 
 // A bounded record reader over any byte source (a FileReader, a socket, or
 // any other `Reader`), read `buffer_bytes` at a time.
@@ -1102,7 +1102,7 @@ CSVReader: struct<R: Reader> {
             return Ok(None)
         }
         heap: mem.__list_capacity<String>(self.fields) * mem.__type_size<String>() + self.fields_heap
-        row: __csv_row(line, self.fields.move())
+        row: csv_row(line, self.fields.move())
         self.fields = [String]{}
         self.fields_heap = 0
         self.allocation.release(heap)

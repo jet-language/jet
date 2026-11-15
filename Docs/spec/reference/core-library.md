@@ -325,7 +325,9 @@ live engine or native handles. Code outside Core can't name them:
 `use core.db.[CachedStatement]` and a `db.CachedStatement{…}` literal through
 an alias are both **E0609**. A call to
 an unexported function through an alias is E1004, so safe code can't build a
-handle from a made-up word.
+handle from a made-up word. A helper Core declares `priv` is refused as any
+package's `priv` item is, with the same diagnostic: `csv.csv_row(…)` outside
+Core is **E0605**, like `dep.pad(…)` for a `priv pad` of a dependency.
 
 ### `core.compiler.lang` — language declarations
 
