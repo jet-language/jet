@@ -1,0 +1,29 @@
+# jet.runtime.sys image_part_size and image_part read a part the build
+# added to the running executable (JetRuntime CompilerHost.jet
+# jet_sys_image_part_size_raw, jet_sys_image_part_raw): a size, then the
+# bytes in one call, lent from where the kernel mapped them, with no file
+# read. jet reads each runtime part it carries that way (JetCli Host.jet
+# jet_cli_runtime_part: one image_part_size and one image_part call per part),
+# so every step here runs on the runtime parts jet reads from itself, with no
+# toolchain tree named. A program's own executable carries no part, so both
+# bindings answer None for it, with one meaning on O0, O1 and O2.
+env: NO_COLOR=1
+write: main.jet = "use sys: jet.runtime.sys\n\nrun: fn() {\n    size: sys.image_part_size(\"jet.identity\") ?? -1\n    print(\"size {size}\")\n    if sys.image_part(\"jet.identity\", 0, 64) == .Val(bytes) -> print(\"bytes {bytes.len()}\") else -> print(\"no part\")\n    print(\"range {if sys.image_part(\"jet.runtime/runtime.key\", 8, 8) == None -> \"none\" else -> \"some\"}\")\n}\n"
+step: jet run -O0 -A main.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "size -1\nno part\nrange none\n"
+step: jet run -O1 -A main.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "size -1\nno part\nrange none\n"
+step: jet run -O2 -A main.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "size -1\nno part\nrange none\n"
+step: jet build -O2 -A main.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+step aot: built
+exit: 0
+stdout: = "size -1\nno part\nrange none\n"
