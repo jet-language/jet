@@ -36,27 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Call the function directly, mark the parameter in the function type the way the function does (`fn(&amp;T)`, `fn(&amp;&amp;T)`), or pass a lambda that makes that call.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0227</code>: <code>tests/ui/function_type_take_param.stderr</code>.</p>
-<pre class="diag">Error [jet.MoveWithoutMarker]: `f` takes `words`, but `words` is used again later
-  --&gt; tests/ui/function_type_take_param.jet:19:14
+<p>First UI snapshot mentioning <code>E0227</code>: <code>tests/ui/enum_constructor_value_take.stderr</code>.</p>
+<pre class="diag">Error [jet.MarkedFunctionValue]: `Sink.Out` can&#39;t be used as a function value here because it takes its payload (`&amp;&amp;FileWriter`)
+  --&gt; tests/ui/enum_constructor_value_take.jet:15:16
     |
- 19 |     first: f(words)
-    |              ^^^^^
-  --&gt; tests/ui/function_type_take_param.jet:20:15
-    |
- 20 |     first + f(words)
-    |               ^^^^^ `words` is used again here
- Why: `f` takes ownership of this argument, and a call never copies on its own, so `words` has no value after this call
- Fix: Write `words.copy()` to pass a copy and keep `words`, or reorder so this call is the last use of `words`
-More: jet-lang.dev/e/E0209
-
-Error [jet.MarkedFunctionValue]: `count` can&#39;t be used as a function value because its parameter `words` is `&amp;&amp;`
-  --&gt; tests/ui/function_type_take_param.jet:24:29
-    |
- 24 |     slots: Slots{read_only: count, taking: count}
-    |                             ^^^^^
- Why: A function type gives each parameter plain read access unless it marks a write (`fn(&amp;T)`) or a take (`fn(&amp;&amp;T)`), so a value of `count` would drop the `&amp;&amp;` its parameter declares
- Fix: Call `count` directly, mark the parameter in the function type (`fn(&amp;&amp;T)`), or pass a lambda that makes that call
+ 15 |     print(wrap(Sink.Out))
+    |                ^^^^^^^^
+ Why: `FileWriter` can&#39;t be copied out of a read parameter into the variant, so the constructor takes it, and a function type gives each parameter plain read access unless it marks a take (`fn(&amp;&amp;T)`)
+ Fix: Mark the parameter in the function type (`fn(&amp;&amp;FileWriter)`), or build the case directly with `Sink.Out(…)`
 More: jet-lang.dev/e/E0227
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
