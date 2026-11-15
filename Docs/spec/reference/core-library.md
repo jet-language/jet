@@ -5539,7 +5539,8 @@ named `POST {route}`. It carries `jet.request_id`, `http.request.method`,
 A status of 500 or more is an error. A valid W3C `traceparent` puts the span
 in its caller's trace. A Remote call sends one, with that trace's id as its
 `x-request-id`, so the server span of a Remote call has the caller's trace
-and request id.
+and request id. Like `JET_APP_PORT` and `JET_DEV`, the OTEL_* variables are
+the platform's: reading them charges the package no `Env`.
 
 ### `core.web` — server-rendered applications
 
