@@ -1475,7 +1475,24 @@ sema_expression_lambda_type_is_result: fn(ty: Type) -> Bool Never! {
 
 sema_expression_lambda: fn(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if sema_expression_lambda_expects_http_handler(expected, environment, program) -> return sema_expression_lambda_http_handler(lambda, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    // Where an optional function type is expected (`(fn(Int) -> String)?`),
+    // the lambda is checked against that function type and fills the slot.
+    if sema_expression_optional_fn_slot(expected, environment, program) == .Val(slot) {
+        value: sema_expression_lambda_with_host(lambda, Val(slot), environment, program, scopes, state, tail_store, context, diagnostics, false, false, false, false) ?? return None
+        return sema_expr_expected(value, expected, environment, program, diagnostics)
+    }
     sema_expression_lambda_with_host(lambda, expected, environment, program, scopes, state, tail_store, context, diagnostics, false, false, false, false)
+}
+
+// The function type an optional function slot `(F)?` holds, read through
+// aliases; None for any other expectation.
+sema_expression_optional_fn_slot: fn(expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+    wanted: expected ?? return None
+    if sema_expr_unwrap_tag(sema_call_resolved_type(wanted, environment, program)) == .Option(inner) {
+        slot: sema_call_resolved_type(inner, environment, program)
+        if slot == .Fn(_, _, _, _, _, _) -> return Val(slot)
+    }
+    None
 }
 
 // The canonical `core.http.server` request handler, never a same-named user
@@ -2423,6 +2440,15 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         index += 1
     }
     if found_capture_keys.len() != capture_keys.len() -> return None
+    // A bound `&self` method value whose closure keeps a copy of its
+    // receiver would change the copy, not the owner: refused where it is
+    // stored or passed on, kept where it borrows or moves the receiver. Its
+    // one capture is the receiver's root.
+    if lambda.meta.bound_write && lambda_work.meta.cloned_captures.len() > 0 {
+        receiver: lambda_work.meta.cloned_captures[0]
+        diagnostics.push(sema_error("E0924", lambda.span, "this bound `&self` method value would change a copy of `{receiver}`", "stored or passed on, a function value keeps a copy of `{receiver}`, so the method's changes would land on that copy and never reach `{receiver}`", "call the method where the change is needed, or pass the value straight to the call that runs it"))
+        return None
+    }
     }
     }
 

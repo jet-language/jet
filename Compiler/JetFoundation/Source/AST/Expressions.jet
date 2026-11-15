@@ -379,6 +379,11 @@ LambdaMeta: struct {
     escapes: Bool
     runtime_erased: Bool
     http_route_source: String?{None}
+    // Whether the lambda is a bound `&self` method value (`counter.bump`
+    // passed as a function) over a name or field path, whose one capture is
+    // the receiver's root local: sema refuses the value when its closure would
+    // copy that local, since the method would change the copy.
+    bound_write: Bool{false}
     needs_fn_mut: Bool
     mut_captures: [String]
     cloned_captures: [String]

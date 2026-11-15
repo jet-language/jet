@@ -904,10 +904,6 @@ SemaRegistrationGraph: struct {
     // bound.
     package_reach_slots: [String:Int]{[String:Int]{}}
     package_reach: [[Bool]]{[[Bool]]{}}
-    // Whether registration bound every module's imports. A marker-law error
-    // stops registration before then (sema_registration_prepare_graph), and a
-    // check of such a graph would find no imported name in any module.
-    imports_bound: Bool{false}
     // Compiler-owned nominal name (`Err`, `Ordering`, `RemoveBy`) -> its row.
     compiler_builtin_rows: [String:SemaRegistrationRowRef]{[String:SemaRegistrationRowRef]{}}
     // Resolved trait symbol id -> the impl rows implementing it, in
@@ -5081,7 +5077,11 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     }
     // Marker namespace/declaration laws precede import member registration and
     // generated rule bodies. The complete loader edge set detects ambiguous
-    // qualified markers even when two imports share their local alias.
+    // qualified markers even when two imports share their local alias. A
+    // marker-law error leaves the graph incomplete, so no rule body expands
+    // (sema_registration_expand_user_templates), but registration goes on
+    // binding imports: the declaration pass then reports every error that
+    // does not depend on the invalid marker, without unbound-import cascades.
     marker_diagnostics := [Diagnostic]?{None}
     package_markers := [Marker]?{None}
     if sema_marker_module_applied_catalog(graph) == .Val(applied) {
@@ -5099,10 +5099,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     if package_markers == .Val(bound) -> graph.build_facts.package_markers = bound
     if marker_diagnostics == .Val(found) {
         loop diagnostic in found -> graph.diagnostics.push(diagnostic)
-        if found.len() > 0 {
-            graph.complete = false
-            return graph
-        }
+        if found.len() > 0 -> graph.complete = false
     } else {
         graph.internal_problem = Val("the canonical Prelude marker registry is unavailable")
         graph.complete = false
@@ -5228,7 +5225,6 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         sema_inline_modules_check_imports(graph, module_index)
         module_index += 1
     }
-    graph.imports_bound = true
     sema_registration_index_package_reach(graph)
     graph = sema_comptime_use_check(graph, threads)
     graph = sema_registration_canonicalize_qualified_types(graph, threads)

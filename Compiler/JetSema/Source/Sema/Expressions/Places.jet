@@ -50,6 +50,9 @@ use {
         module_none,
         module_is_none,
         module_text,
+        PipeStep,
+        expr_source_start,
+        pipe_value_name,
     ]
     jet_lexer.[Token]
     jet_parser.[jfmt_fmt_expr, jfmt_new, jfmt_out_text]
@@ -340,15 +343,13 @@ sema_expression_shared_guard_value: fn(ty: Type) -> SemaCallMemoryGuard? {
 // owning module sees them, so it resolves there (the owner's type parameters
 // stay parameters) before the owner's type arguments are substituted.
 sema_expression_field_owner_type: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner_module: ModuleID, declared: Type, generic_names: [String]) -> Type Never! {
-    if program.registration_graph == .Val(graph) {
-    // copy: the owner type is a new owned Type. Without an owner module it equals `declared`, the
-    // field's declared type (a read parameter), which stays in the nominal.
-    if module_is_none(owner_module) -> return declared.copy()
-    generics: loop name in generic_names -> TGenericParam{name: name, bounds: [SymbolID]{}}
-    return sema_type_resolve_declared_with_generics(graph, declared, owner_module, generics)
+    if program.registration_graph == .Val(graph) && !module_is_none(owner_module) {
+        generics: loop name in generic_names -> TGenericParam{name: name, bounds: [SymbolID]{}}
+        return sema_type_resolve_declared_with_generics(graph, declared, owner_module, generics)
     }
-    // copy: the owner type is a new owned Type. When nothing applies it equals `declared`, the
-    // field's declared type (a read parameter), which stays in the nominal.
+    // copy: the owner type is a new owned Type. Without a registration graph
+    // or an owner module it equals `declared`, the field's declared type (a
+    // read parameter), which stays in the nominal.
     declared.copy()
 }
 
@@ -486,6 +487,12 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
                         value: sema_tree_node(field_ty, TExprKind.Field{receiver: base, field: reference}, span)
                         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
                     }
+                }
+                // A method of that name read without parentheses where no
+                // function type is expected is a forgotten call.
+                if sema_expression_method_candidates(base.ty, member, span, environment, program).len() > 0 {
+                    diagnostics.push(sema_expression_method_read_without_call(owner_name, member, span))
+                    return None
                 }
                 // Rust `infer_field_access`: the nearest declared field is
                 // the suggested fix and its edit; otherwise name the owner.
@@ -747,6 +754,11 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
             swizzle: sema_expression_core_vector_swizzle(base, member, span, probe_value.ty, environment, program, diagnostics)
             if swizzle.invalid -> return None
             rewritten = swizzle.read
+        }
+        if rewritten == None {
+            bound: sema_expression_bound_method(base, member, span, probe_value.ty, expected, environment, program, scopes, diagnostics)
+            if bound.invalid -> return None
+            rewritten = bound.read
         }
         if rewritten == .Val(generated) {
             sema_check_context_rollback(context, base_context_mark.move())
@@ -1161,6 +1173,123 @@ sema_expression_core_member_unknown: fn(module_row: SemaRegistrationModule, memb
         return diagnostic_with_edit(diagnostic, TextEdit{span: member_span, new_text: symbol.name})
     }
     sema_call_core_unknown_item(module_row.module_name, member, member_span)
+}
+
+// A method read without parentheses where a function type is expected
+// (`each(ids, crew.tell)`, or a `(fn(Int) -> String)?` slot) is the method
+// with its receiver bound: the lambda `fn(a, …) { crew.tell(a, …) }`, checked
+// against that function type, so the method's parameters, result, error
+// type and effects must fit it, and a generic method takes its type
+// arguments from it. A name or field path is captured as a closure captures
+// it, so a closure that cannot keep it is refused naming it, and a `&self`
+// method whose closure would copy it is E0924 (Lambdas.jet, `bound_write`).
+// Any other receiver is evaluated once, at the read,
+// into a hidden binding the lambda captures. A `&&self` method is E0924, and
+// a type with both a field and a method of that name makes the read E0950.
+// `read` is None where no function type is expected or the type has no such
+// method.
+SemaBoundMethodRead: struct {
+    read: Expr?
+    invalid: Bool
+}
+
+sema_expression_bound_method: fn(base: Expr, member: String, span: Span, receiver: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaBoundMethodRead {
+    none: SemaBoundMethodRead{read: None, invalid: false}
+    slot: sema_expression_fn_slot(expected, environment, program) ?? return none
+    candidates: sema_expression_method_candidates(receiver, member, span, environment, program)
+    if candidates.len() == 0 -> return none
+    count: if slot == .Fn(params, _, _, _, _, _) -> params.len() else -> 0
+    if sema_expression_declares_field(receiver, member, environment, program, scopes) {
+        diagnostics.push(sema_expression_field_method_clash(base, member, span, count))
+        return SemaBoundMethodRead{read: None, invalid: true}
+    }
+    receiver_convention: candidates[0].receiver_convention
+    if receiver_convention == AccessConvention.Move {
+        diagnostics.push(sema_error("E0924", span, "`{member}` takes `&&self`, so `{sema_expression_move_mark_text(base)}.{member}` is no function value", "every call of a bound value would consume the same receiver", "call `{member}` once where it is needed, or write a closure that moves the receiver in"))
+        return SemaBoundMethodRead{read: None, invalid: true}
+    }
+    conventions := [AccessConvention]{}
+    if slot == .Fn(_, _, _, _, call_metadata, _) {
+        loop index in 0..<count -> conventions.push(sema_call_fn_param_convention(call_metadata, index))
+    }
+    hidden: pipe_value_name(expr_source_start(base))
+    // copy: the generated read owns its receiver; `base` is the caller's AST
+    // node. A path receiver is read again inside the lambda; any other is the
+    // head of the hidden binding the lambda captures.
+    owned: base.copy()
+    receiver_expr := Expr.Ident{name: hidden, span: expr_span(base), id: AST_NODE_GENERATED}
+    head := Expr?{None}
+    if {
+        sema_expression_bound_receiver_rooted(base) -> receiver_expr = owned
+        else -> head = Val(owned)
+    }
+    params: loop index in 0..<count -> LambdaParam{name: "__jet_bound_{index}", name_span: span, ty: None, ty_span: None, convention: conventions[index]}
+    args: loop index in 0..<count -> CallArg{convention: conventions[index], expr: Expr.Ident{name: "__jet_bound_{index}", span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    member_span: Span{start: span.end - member.len(), end: span.end}
+    call: Expr.MethodCall{receiver: receiver_expr, method: member, method_span: member_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}
+    meta := ast_empty_lambda_meta()
+    meta.bound_write = head == None && receiver_convention == AccessConvention.Write
+    lambda: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: call}, span: span, meta: meta}, id: AST_NODE_GENERATED}
+    pipe_head: head ?? return SemaBoundMethodRead{read: Val(lambda), invalid: false}
+    step: PipeStep{name: hidden, value: lambda, reads: 1, span: span}
+    SemaBoundMethodRead{read: Val(Expr.Pipe{head: pipe_head, steps: [PipeStep]{step}, span: span, id: AST_NODE_GENERATED}), invalid: false}
+}
+
+// The function type a slot expects: `F` itself or the `F` of an optional
+// `(F)?`, read through aliases; None for any other expectation.
+sema_expression_fn_slot: fn(expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+    wanted: expected ?? return None
+    resolved: sema_expr_unwrap_tag(sema_call_resolved_type(wanted, environment, program))
+    if resolved == .Fn(_, _, _, _, _, _) -> return Val(resolved)
+    sema_expression_optional_fn_slot(expected, environment, program)
+}
+
+// Whether a closure can capture the receiver as written: a name, or a field
+// path of one.
+sema_expression_bound_receiver_rooted: fn(expr: Expr) -> Bool Never! {
+    if expr == .Ident(_, _, _) -> return true
+    if expr == .Field(base, _, _, _) -> return sema_expression_bound_receiver_rooted(base)
+    false
+}
+
+// The methods `member` names on a value of type `receiver`; the lookup only
+// asks which exist, so its own reports are dropped.
+sema_expression_method_candidates: fn(receiver: Type, member: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaCallMethodCandidate] {
+    if program.registration_graph == .Val(graph) {
+        probe := [Diagnostic]{}
+        return sema_expr_registration_method_candidates(graph, environment.module_identity, receiver, member, [Type]{}, [Type]{}, span, environment, program, probe)
+    }
+    [SemaCallMethodCandidate]{}
+}
+
+// Whether the struct a value of type `receiver` is declares a field `member`.
+sema_expression_declares_field: fn(receiver: Type, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool {
+    pinned: sema_pin_target(receiver)
+    found_name: if pinned == .Val(target) -> sema_expr_type_base_name(sema_expr_unwrap_tag(target)) else -> sema_expr_type_base_name(sema_expr_unwrap_tag(receiver))
+    owner_name: found_name ?? return false
+    owner := sema_expression_type_symbol(scopes, environment, program, owner_name)
+    if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
+    symbol: owner ?? return false
+    struct_def: sema_scope_declaration_struct(environment, program, symbol.id) ?? return false
+    loop field in struct_def.fields {
+        if field.name == member -> return true
+    }
+    false
+}
+
+// E0950: where a function type is expected, `value.name` names both a field
+// and a method of the value's type. The fix offers the closure for each.
+sema_expression_field_method_clash: fn(base: Expr, member: String, span: Span, count: Int) -> Diagnostic Never! {
+    receiver: sema_expression_move_mark_text(base)
+    names: if count == 1 -> "x" else -> (loop index in 0..<count -> "x{index + 1}").join(", ")
+    sema_error("E0950", span, "`{receiver}.{member}` names both a field and a method `{member}`", "where a function type is expected, a method read without parentheses passes the method with `{receiver}` bound, and a field read passes the field's value; with both, the read could silently switch from one to the other", "write `fn({names}) {{ {receiver}.{member}({names}) }}` to pass the method, or `fn({names}) {{ {receiver}.{member}.call({names}) }}` to pass the field")
+}
+
+// E0924: a method read without parentheses where no function type is
+// expected; the fix adds the call's parentheses.
+sema_expression_method_read_without_call: fn(owner_name: String, member: String, span: Span) -> Diagnostic Never! {
+    diagnostic: sema_error("E0924", span, "`{member}` is a method of `{owner_name}`, not a field; call it: `.{member}()`", "a method read without parentheses is a value only where a function type is expected; anywhere else it is a forgotten call", "add `()` to call `{member}`, or write a closure that calls it")
+    diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: span.end, end: span.end}, new_text: "()"})
 }
 
 // A swizzle read on a Core vector or swizzleable lane type (`v.x`, `v.zyx`)

@@ -837,7 +837,8 @@ is E0105.
 Fields and methods have separate namespaces (D-MEMBER-NAMESPACE1=A): a struct
 may declare a field and a method with the same name, while two fields or two
 methods with one name are still E0105. A member read without parentheses,
-`err.cause`, is the field. A member call, `err.cause()`, selects the method,
+`err.cause`, is the field; where a function type is expected, a type with both
+makes the read E0950 (below). A member call, `err.cause()`, selects the method,
 whether it is declared in the type, in an `impl`, by a trait or as an operator
 hook; only a type with no such method lets the call reach a callable field.
 A method the caller cannot see (E0605) or a call whose arguments do not fit it
@@ -859,6 +860,27 @@ run: fn() {
     print(counter.step.call(4)) // 8: the field
 }
 ```
+
+A method read without parentheses where a function type or an optional one is
+expected (D-BOUND-METHOD1=A) — a call argument, a struct field, a list
+element or a return value — is the method with its receiver bound:
+`each(ids, crew.tell)` passes the lambda `fn(id) { crew.tell(id) }`, checked
+against the expected type like any lambda, so the method's parameters,
+result, error type and effects must fit it, and a generic method takes its
+type arguments from it. The receiver is evaluated once, at the read: a name
+or a field path of one is captured as a closure captures it, and any other
+receiver (`hire("Lin").tell`) is computed there and kept. A bound value that
+cannot keep a lent receiver is refused naming it, as the closure is (E0120
+for `counter.bump` returned past the call that lent `counter`). A `&self`
+method binds where its closure borrows or moves the receiver, as an argument
+the call runs; stored or passed on over a copy of the receiver, its changes
+would land on the copy, so it is E0924, as is a `&&self` method. Anywhere
+else, a union with a function member included, the read is a forgotten call:
+E0924, whose edit adds `()`. Where a function type is expected and the type
+has both a field and a method of the name, the read is E0950, which offers
+`fn(x) { value.name(x) }` for the method and `fn(x) { value.name.call(x) }` for
+the field. A closure fits an optional function slot the same way:
+`show(fn(n) { "#{n}" })` where `(fn(Int) -> String)?` is expected.
 
 Enum `if subject == { … }` tables must be exhaustive, and they name
 every case: an `else` over a closed set (an enum, `T?`, `T E!`, or a union) is

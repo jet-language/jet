@@ -4617,6 +4617,46 @@ UnknownField: struct {
     }
 }
 
+MethodReadWithoutCall: struct {
+    impl Diagnostic {
+        code: "E0924"
+        safety_class: .Soundness
+        safety_reason: "A method read without parentheses that is no function value is almost always a forgotten call, and a bound `&self` method over a copy of its receiver would change the copy, so neither quietly compiles."
+        expert_path: "pass the method where a function type is expected, or write the closure that calls it"
+        meaning: "A method read without parentheses that is no function value here"
+        structured_fix: .SuggestedSourceEdit
+        no_fix: None
+        fix_safety: .NeedsReview
+
+        what: fn(self) -> String { "A method is read without parentheses where it is no function value" }
+
+        why: fn(self) -> String {
+            "A method read without parentheses is a function value only where a function type is expected, and only while its receiver is kept: a `&self` method's changes must reach the receiver, and a `&&self` method never binds. Anywhere else the read is a forgotten call."
+        }
+
+        fix: fn(self) -> String { "Call the method, or write a closure that calls it." }
+    }
+}
+
+FieldMethodClash: struct {
+    impl Diagnostic {
+        code: "E0950"
+        safety_class: .Soundness
+        safety_reason: "A field and a method of one name both fit where a function is expected, so choosing one would let an edit elsewhere swap them silently."
+        expert_path: "none: write the closure that names the one you mean"
+        meaning: "A read where a function type is expected names a type's field and its method of one name"
+        detail: true
+
+        what: fn(self) -> String { "A read where a function type is expected names both a field and a method" }
+
+        why: fn(self) -> String {
+            "Where a function type is expected, a method read without parentheses passes the method with its receiver bound, and a field read passes the field's value; a type with both under one name leaves the read ambiguous."
+        }
+
+        fix: fn(self) -> String { "Write the closure for the one you mean: `fn(x) {{ value.name(x) }}` calls the method, `fn(x) {{ value.name.call(x) }}` calls the field." }
+    }
+}
+
 InvalidConstructionField: struct {
     impl Diagnostic {
         code: "E0303"

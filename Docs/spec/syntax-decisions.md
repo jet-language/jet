@@ -78,6 +78,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `compiler.generate` | explicit shared-preparation publication of Generated items |
 | `compiler.query(source, kind, at:, limit:)` | the one typed fact query of `core.compiler`: the `[Fact]` rows of one `FactKind` in an explicit immutable `FactSource` (`.Schema`, `.Program` or `.Run`), or a `MetadataError`, never a partial or empty stand-in; `jet inspect facts --store=… --kind=…` renders the same rows |
 | `fn(…) { … }` | lambda: a function binding's value without its name; a passed lambda leaves out the parameter types, effect row and result its expected callable type fixes (`xs.filter(fn(n) { n > 2 })`), a stored one writes them as a named function does (`square: fn(n: Int) -> Int { n * n }`); the body is always braced and its last value is the result |
+| `value.method` | bound method value: where a function type or an optional one is expected (an argument, a struct field, a list element, a return value), a method read without parentheses is the method with its receiver bound, the lambda `fn(a) { value.method(a) }` checked against that type; the receiver is evaluated once and kept as a closure keeps a capture, so a `&self` method over a copied receiver is refused; anywhere else, a union included, the read is a forgotten call, and a type with both a field and a method of the name makes it an error naming both |
 | `-[…]` | effect row on a callable |
 | `!` | error-contract mark after its error type (`E!`, `(A \| B)!`); deny-only root in an effect row |
 | `?` | optional type mark after its type (`T?`) |
@@ -641,6 +642,23 @@ invoked explicitly as `value.field.call(args)`. Visibility, receiver access,
 effects and ownership are checked on the selected member, and every execution
 tier lowers the same checked selection. Core's `EncodingError` keeps both its
 public `cause` field and its `cause()` accessor.
+
+**D-BOUND-METHOD1=A — a method passes as a function value where one is
+expected** *(ratified 2026-11-14, card #6824)*: where a function type or an
+optional one is expected (a call argument, a struct field, a list element, a
+return value; a generic parameter only once inferred), a method read without
+parentheses is the method with its receiver bound: `each(ids, crew.tell)`
+passes `fn(id) { crew.tell(id) }`. Sema writes it as that lambda, checked
+against the expected type, so it adds no runtime path. The receiver is
+evaluated once at the read and kept as a closure keeps a capture; one it
+cannot keep is refused naming it. A `&self` method stored or passed on over
+a copy of its receiver, and a `&&self` method, are E0924. A union never
+counts as a function slot: there, as anywhere else, the read is a forgotten
+call, E0924 with an edit that adds `()`. Where a function is expected and the
+type has both a field and a method of the name, the read is E0950, which
+offers the closure for each; this amends D-MEMBER-NAMESPACE1=A's "a read
+without parentheses is the field" only there. A closure fits an optional
+function slot the same way.
 
 **S61 — Argument labels & parameter contracts** *(D-NARG1, D-NARG2,
 D-APILABEL1=A ratified 2026-08-05, card #1393)*: a written label binds by

@@ -1,0 +1,18 @@
+// A stored `&self` method value would keep a copy of its receiver, so the
+// method's changes would never reach `counter`: refused naming it.
+Counter: struct {
+    n: Int
+
+    bump: fn(&self, by: Int) { self.n += by }
+}
+
+Holder: struct {
+    bump: fn(Int)
+}
+
+run: fn() {
+    counter := Counter{n: 1}
+    holder: Holder{bump: counter.bump}
+    holder.bump(2)
+    print(counter.n)
+}
