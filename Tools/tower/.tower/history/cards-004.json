@@ -100319,6 +100319,446 @@
       "completedAt": "2026-11-12T10:46:32.218Z",
       "questions": [],
       "retiredAt": "2026-11-15T10:52:46.763Z"
+    },
+    {
+      "id": "c0ytw4eo",
+      "num": 3173,
+      "title": "Reconcile published local examples with current syntax and failure law",
+      "body": "Reconcile published local examples with current syntax and failure law.\n\nCaptured source examples and the unmatched executable accept different loop spellings, while cleanup comments mention a propagation token absent from the shown call. Learners need examples that match authoritative current law and an identified compiler.\n\nAudit and repair only the selected local loop/error/cleanup teaching examples and their snapshots against current Syntax/Tower law and a source-matched build. Keep historical capture/probe inputs immutable as evidence; no compatibility aliases.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-read-f08. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e10",
+      "milestoneId": "e10-m06-adoption-reference-learning",
+      "phase": "done",
+      "priority": "P2",
+      "plan": "**Goal**\nMake the selected loop, error and cleanup teaching examples conform to current Syntax and Tower law: legal forms run, intended rejections are shown, and no comment teaches punctuation that does not exist. The card owns teaching-source conformance only. Guard runtime repair belongs to READ-F05 and formatter preservation to READ-F07.\n\n**Current state**\n- The finite manifest (criterion 2) largely exists in `Examples/README.md:114-119`: loop_forms, `tests/ui/list_loop_mutate.jet` (E0507), errors, typed_error_families and scope_guard, each with its normative claim, golden and command. It was added by d94ccde46 (2026-09-21), which also rewrote loop_forms, errors, typed_error_families and scope_guard.\n- `Examples/features/basics/loop_forms.jet:1-16` now teaches `loop` / `loop cond` / `loop x in`, eager value loops and `next`. `Examples/features/concurrency/bounded_workers.jet` (golden `.out`) and `all_failfast.jet` (golden `all_failfast.err.out`) are not in the manifest.\n- The last AOT golden attempt on basics/loop_forms (card log 2026-09-22) failed in generated Rust with E0308 on `jet_list_len` i64. No open card owns that failure (Tower title search).\n\n**Changes**\n1. Add manifest rows for `concurrency/bounded_workers` and `concurrency/all_failfast` to `Examples/README.md:114-119`, naming the decisions each teaches.\n2. Audit comments in those two files and in errors/typed_error_families/scope_guard. Keep unmarked fallible calls, explicit failure return, `??` fallback and scope-guard cleanup visibly distinct. Delete any mention of a propagation token absent from the code, and use only current `E!`/`T?` spelling.\n3. Run the manifest. If loop_forms still hits the AOT E0308, file one codegen card, list it as this card's blocker, and do not work around it in the example.\n4. Leave historical captures and receipts untouched, with no aliases.\n\n**Proof**\nRun `jet test Compiler --profile golden <stem>` for each of `basics/loop_forms`, `errors/errors`, `errors/typed_error_families`, `io/scope_guard`, `concurrency/bounded_workers` and `concurrency/all_failfast`; all pass (all_failfast via `.err.out`, exit 70/1). Also pass `jet test Compiler --profile ui list_loop_mutate`.\n\n**Batch**\n`batch-docs`: teaching comments and a manifest, re-verified by the golden pass.\n\n**Dependencies**\nNone known. It is conditional on the loop_forms E0308 reproducing; see change 3. The work overlaps #3177 on the same files, so one implementer should take both.",
+      "checkSteps": "1. Use the corrected complete loop_forms, bounded_workers and all_failfast source capture. Do not classify the original synthetic/condensed excerpts as stale repository files, and do not preserve retired spellings as compatibility aliases.\n2. Make a finite manifest of loop_forms, list-loop mutation, errors, typed_error_families and scope_guard examples and the normative decisions each teaches.\n3. Resolve current syntax from authoritative Syntax/Tower records, never from whichever spelling frozen e841 accepts.\n4. Exercise the current legal form and the intended rejection/repair on one recorded source/binary; update obsolete comments and current examples, not historical receipts.\n5. Separate unmarked fallible calls, explicit failure return, fallback recovery and cleanup behavior so comments do not teach nonexistent punctuation.\n6. Coordinate actual guard runtime repair with READ-F05 and formatter preservation with READ-F07; this card owns teaching-source conformance, not duplicate compiler mechanisms.",
+      "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-read-f08. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "All 32 criteria are met; c7 was re-proved on dev by meet g6f."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c26: the semindex builtins case (G12Docs-3, PASS on seed-b8, meet-reproof1) covers only one piece. c26 requires that no retired spelling remains in any in-repo source, example or doc, which needs the syntax_reconciliation sweep to pass. Not met."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "c15 (G12Docs-4): core.web.store writes take apply: fn(&T) Never!, the S47 write-marked function type, instead of a no-argument callback. D-DX-STORE1=A stands: a store is one core.reactive signal with transactions. Its sketch's no-argument callback over per-field signals could not change a store that has one Signal<T>, so every transaction recorded before == after. The core-library line is rewritten to the new contract. Core API change within an approved card; no syntax change."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "c16 status 2026-11-11 (G8Scope, seed-t22): CLI/Battery and UI/Battery pass at O0, O1 and O2. tests/run/Net/BackendBattery is KNOWN-FAILING 3 with no .out, because the IR lowering of HTTPRouterRegister and jet_http_router_dispatch is missing (retired-with-rust.tsv row). That lowering is the remaining work."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c16: Examples/features/cli/battery -> tests/run/CLI/Battery."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the owner order that a retired spelling gets no teaching diagnostic, UI snapshot or jet fix rule; the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 14 criteria from archived #267, #344, #1285, #1369, #2396, #3458: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Landed on dev at undefined in CardClose-46: backend_battery passes E0740/E1220/E1803 and now stops at the ir.build HTTP-router ICE (exit 101); KF row #3173 with that reason"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #3092 \"Deliver the existing production-minded backend starter\" into this card (published examples and starters); its 6 open item(s) are carried as \"(was #3092)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6307 \"First-party batteries cli, backend and gui fail their own checks (E0626)\" into this card (published examples match current syntax and failure law); its 4 open item(s) are carried as \"(was #6307)\" criteria, and its 1 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6304 \"tanstack_start example fails E0102: `WebFormValidationChain` has no method `render`\" into this card (published examples match current syntax and failure law); its 2 open item(s) are carried as \"(was #6304)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6272 \"Examples tooling/data_stream_bounds and data_hostile no longer demonstrate their limits: under spec semantics they print 'unexpected ok 2' and 'large_limit: ok'\" into this card (published examples match current syntax and failure law); its 3 open item(s) are carried as \"(was #6272)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3177, #3704, #3574; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3177, #3704, #3574; their criteria are carried here verbatim as [#n] rows."
+        },
+        {
+          "at": "2026-10-03",
+          "by": "Pip",
+          "text": "CloseLead 04:5x on close-int release build: 4 of 6 goldens pass (list_loop_mutate re-blessed for source drift only, verified). Fails: basics/loop_forms AOT is an I2 rustc E0308 on jet_iter_indexes; errors/errors AOT prints BadDigit(x) instead of BadDigit(\"x\") (string payload Debug quoting differs on AOT)."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-docs."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (syntax1b, Opus 5.5): E_BUILD. Teaching-source conformance for loop/error/cleanup examples is still open. The 2026-09-28 syntax cutover rewrote spellings mechanically, but comments and the finite manifest remain undone. The last golden attempt (basics/loop_forms) failed in generated Rust (E0308 on jet_list_len i64), a codegen defect outside this card. Evidence: Examples/features/basics/loop_forms.jet, Examples/features/concurrency/{bounded_workers,all_failfast}.jet, Examples/features/errors/{errors,typed_error_families}.jet, Examples/features/io/scope_guard.jet (all present); card log 2026-09-22 (loop_forms AOT E0308); related #3065 (corpus runs), #3177 (contract explanations)"
+        },
+        {
+          "at": "2026-09-22",
+          "by": "Main",
+          "text": "Current exact runtime/golden attempt on clean worktree ~/Projects/Github/jet/.agent-worktrees/wave-a-proof: JET_GOLDEN_FILTER=basics/loop_forms JET_TEST_JOBS=1 CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 JET_TARGET_CAP_GB=120 scripts/agent/jet-env cargo test --quiet --test golden examples_compile_and_run -- --exact --nocapture. The source reaches AOT Rust compilation but fails with two E0308 generated-code mismatches in /tmp/nix-shell.KjrVBM/jet_golden_...: jet_list_len returns i64 where JetInt is expected and jet_iter_indexes returns JetIter<i64> where JetIter<JetInt> is expected (15.43s test body; 31.26s command). No golden/runtime success is claimed; this is a current generated Core/type bridge blocker. Resource check remained bounded (about 48 GiB available, no OOM)."
+        },
+        {
+          "at": "2026-09-21",
+          "by": "Main",
+          "text": "Main integrated current example repairs in d94ccde46; owner-dirty core-library reference was not overwritten. Source-matched runtime/golden proof remains open."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 2,
+          "text": "Make a finite manifest of loop_forms, list-loop mutation, errors, typed_error_families and scope_guard examples and the normative decisions each teaches.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Meet g12b (Lander5 meetrun, 2026-11-12 02:4x) on dev 6ca4d72969 with seed-b10 jet@a0.0.45#c089d4d3: git grep -n -F \"| Normative decisions |\" -- Examples/README.md, rc 0. The Current-law teaching manifest table (bb8dccbaa7) lists the LoopForms, list_loop_mutate, Errors, fallible_entry_unhandled, TypedErrorFamilies, error_family_missing_conversion, ScopeGuard and scope_guard_discarded examples, each with the normative decisions it teaches, its snapshot and its command. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g12b/1.out.",
+          "at": "2026-11-12T07:42:42.191Z"
+        },
+        {
+          "n": 4,
+          "text": "Exercise the current legal form and the intended rejection/repair on one recorded source/binary; update obsolete comments and current examples, not historical receipts.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-1 06d9664536, proved by Lander3 before landing (Lander/loop/out/G12Docs-1/rc): 11/11 lines pass. UI fallible_entry_unhandled, scope_guard_discarded, task_capture; goldens LoopForms, Errors, ScopeGuard, AllFailFast, BoundedWorkers, Callbacks, Closures and ClosureCaptureWrites. Line 12 (tests/guards/syntax_reconciliation.jet) was base red then; it passes on batch compiler b4 at dev 9ecdaf509e, which contains this commit (G6Meta-37 reproof, 3/3).",
+          "at": "2026-11-11T20:43:26.180Z"
+        },
+        {
+          "n": 5,
+          "text": "Separate unmarked fallible calls, explicit failure return, fallback recovery and cleanup behavior so comments do not teach nonexistent punctuation.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-1 06d9664536, proved by Lander3 before landing (Lander/loop/out/G12Docs-1/rc): 11/11 lines pass. UI fallible_entry_unhandled, scope_guard_discarded, task_capture; goldens LoopForms, Errors, ScopeGuard, AllFailFast, BoundedWorkers, Callbacks, Closures and ClosureCaptureWrites. Line 12 (tests/guards/syntax_reconciliation.jet) was base red then; it passes on batch compiler b4 at dev 9ecdaf509e, which contains this commit (G6Meta-37 reproof, 3/3).",
+          "at": "2026-11-11T20:43:27.129Z"
+        },
+        {
+          "n": 7,
+          "text": "Scoped goldens pass for basics/loop_forms, errors/errors, errors/typed_error_families, io/scope_guard, concurrency/bounded_workers and concurrency/all_failfast (`JET_GOLDEN_FILTER=<stem> cargo test --test golden examples_compile_and_run`), plus `JET_UI_FILTER=list_loop_mutate cargo test --test diagnostic_snapshots`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:04.131Z"
+        },
+        {
+          "n": 8,
+          "text": "[#3177] Loop, failure, cleanup and callable examples state what is read, changed, returned, delayed and required on each exit, distinguishing binding immutability from alias mutation and eager from lazy.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-1 06d9664536, proved by Lander3 before landing (Lander/loop/out/G12Docs-1/rc): 11/11 lines pass. UI fallible_entry_unhandled, scope_guard_discarded, task_capture; goldens LoopForms, Errors, ScopeGuard, AllFailFast, BoundedWorkers, Callbacks, Closures and ClosureCaptureWrites. Line 12 (tests/guards/syntax_reconciliation.jet) was base red then; it passes on batch compiler b4 at dev 9ecdaf509e, which contains this commit (G6Meta-37 reproof, 3/3).",
+          "at": "2026-11-11T20:43:28.451Z"
+        },
+        {
+          "n": 9,
+          "text": "[#3704] Each listed browser example calls its API against a local BiDi fixture, with goldens of observed results. A corpus guard fails on literal API-name-only output.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-6 3446622b88, proved by Lander3 before landing: 8 browser examples against the BiDi mock pass their goldens at O0/O1/O2, and the guard examples_observe_the_api_they_teach passes (11/11 lines).",
+          "at": "2026-11-11T20:42:48.663Z"
+        },
+        {
+          "n": 10,
+          "text": "[#3574] Golden foundations/dsl (rules, filter, formula, symbolic) passes on the Jet compiler at every level and on web where applicable, with its valid/invalid and recalculation assertions.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Golden run by G8Scope on seed-t22, tree dev 740973dd61, verified by Main 2026-11-11: tests/run/Foundations/DSL passes at O0, O1 and O2 with its valid, invalid and recalculation assertions.",
+          "at": "2026-11-11T13:03:05.097Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #6272) Both examples demonstrate their limit being hit through declared APIs, and their goldens (hand-derived) pass on o0/o1/o2",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G8Scope-16 landed through express train e3 as dev ab1a3aa5f6 (plus regen commit 5747bd6167), 19 minutes from staging to landing. DataStreamBounds hits max_groups and passes its golden at O0, O1 and O2 with the limit line; the train census and 26 lines are green.",
+          "at": "2026-11-11T13:22:53.991Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #6272) data.query(stream) is declared in Core/Data and returns a query that carries the stream's limits; data_hostile's group_by over such a query refuses past max_groups on o0/o1/o2 per its golden (owner direction 2026-10-30).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Golden run by G8Scope on seed-t22, tree dev 740973dd61, verified by Main 2026-11-11: tests/run/Tooling/DataHostile passes at O0, O1 and O2 and prints \"large_limit: Limit query.group_by.mean: max_groups 1 exceeded\"; Core/Data/Data.jet:763 __query_stream carries the reader's limits.",
+          "at": "2026-11-11T13:03:06.416Z"
+        },
+        {
+          "n": 14,
+          "text": "(was #6304) The tanstack_start example matches its golden on O0/O1/O2, with no E0102",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Golden run by G8Scope on seed-t22, tree dev 740973dd61, verified by Main 2026-11-11: the example is now Examples/Apps/Web/JetWeb (renamed in 657d0c5553 and 2d8aea4762). Its golden passes at O0, O1 and O2 with no E0102.",
+          "at": "2026-11-11T13:03:08.127Z"
+        },
+        {
+          "n": 15,
+          "text": "(was #6304) Core/Web/Store.jet transaction/update/batch/optimistic/patch take apply: fn() Never!, so they cannot change the store (Rust took FnOnce(&mut T)). They take a mutating callback in the canonical Jet spelling, and store.transaction in tanstack_start and state_surface changes the stored value (a case proves it). Note: fn(&T) is E0003 today; if no ratified mutating-callback type exists, this row needs an owner ballot first.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Core/Web/Store.jet's transaction, update, batch, optimistic and patch take a mutating callback and change the stored value. The state_surface spin (live_cell_load() folded to a build-time value) is fixed by G12Docs-50 fd03c6617f, under which local values never fold a call that the runtime answers. The tanstack_start example no longer exists in Examples/ on dev. meet g6d on dev 831b178482 with seed-b12 jet@a0.0.45#b5c287db (built from 2844b04984), Lander5 meetrun 2026-11-12: jet test Compiler --profile cases tests/cases/corelib/web_store_writes_change_the_stored_value.case PASS 1 (2.out). b12 slice on dev 2844b04984 with the same seed: jet test Compiler --profile golden Examples/Apps/Web/StateSurface.jet PASS o0, o1, o2 (deferred-b12/23.out). 0 FAIL/KF/ERROR.",
+          "at": "2026-11-12T09:26:50.052Z"
+        },
+        {
+          "n": 16,
+          "text": "(was #6307) Examples/features/cli/battery, net/backend_battery and ui/battery match their goldens on O0/O1/O2",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "cab718bcb4 (G8Scope-19): its named proof lines pass on batch compiler seed-t25a.",
+          "at": "2026-11-11T18:55:25.571Z"
+        },
+        {
+          "n": 17,
+          "text": "(was #6307, from #6198 Jetpack backend battery) The backend battery sources under Jetpack/Provider/Source/Batteries check clean as part of the unit they're assembled into: `JET=<train jet> jet Jetpack/Bootstrap/Check.jet --area Engine` exits 0 with no diagnostics in those files.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On dev a3251d72c0 with seed-t22 (G8Scope, verified by Main 2026-11-11), jet Jetpack/Bootstrap/Check.jet --area Engine exits 0 (JETPACK CHECK OK, peak 3.43 GB). Both battery sources (BatteryCatalog.jet and BatteryMaterialize.jet) are in the assembled unit. All 1568 diagnostics were mapped through jetpack.map.json: none falls in those files, and there are 0 errors. Receipt and log are in $JET_SCRATCH_ROOT/lanes/G8Scope/c17/.",
+          "at": "2026-11-11T14:08:07.326Z"
+        },
+        {
+          "n": 18,
+          "text": "(was #6307) (from #6198 Jetpack backend battery (Provider/Batteries/backend/backend.) The dogfood gate type-checks the battery files, with a negative test showing a sema error fails it",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "cab718bcb4 (G8Scope-19): its named proof lines pass on batch compiler seed-t25a.",
+          "at": "2026-11-11T18:55:26.514Z"
+        },
+        {
+          "n": 20,
+          "text": "(was #3092) No sample token secret, plaintext password or automatic destructive schema synchronization is presented as production default.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-9 7e48050739, proved by Lander3 before landing: backend starter workspace, credential/sync guard and 2 deployment cases pass on the batch compiler (5/5 lines). The SIGTERM drain is tracked separately as c40.",
+          "at": "2026-11-11T20:42:49.699Z"
+        },
+        {
+          "n": 21,
+          "text": "(was #3092) The maintained starter consumes its actual default-installed package and records its dependency pins.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "b10 deferred pass, Lander5 loop: seed-b10 (jet@a0.0.45#c089d4d3) on the b10 tree 32540fb2c4, ended 2026-11-12 01:56 rc 0, with every line of the named SUBs PASS ($JET_SCRATCH_ROOT/lanes/Lander/loop/out/deferred-b10). G12Docs-10, G12Docs-19 and G12Docs-29: tests/cases/backend_starter/fetch_pins_the_installed_backend_battery.case PASS (the maintained starter consumes the default-installed backend battery and records its pin), with the packages-profile rows fetch resolves a version dependency on a shipped battery to the toolchain battery and pins it under the batteries source, and fetch records no registry rationale for a battery pin, both PASS.",
+          "at": "2026-11-12T07:04:39.663Z"
+        },
+        {
+          "n": 22,
+          "text": "(was #3092) One change in a shared workspace library reaches the built service and its client.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-9 7e48050739, proved by Lander3 before landing: backend starter workspace, credential/sync guard and 2 deployment cases pass on the batch compiler (5/5 lines). The SIGTERM drain is tracked separately as c40.",
+          "at": "2026-11-11T20:42:51.000Z"
+        },
+        {
+          "n": 23,
+          "text": "(was #3092) Deployment invokes the produced artifact, reports readiness, and drains on shutdown.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-9 7e48050739, proved by Lander3 before landing: backend starter workspace, credential/sync guard and 2 deployment cases pass on the batch compiler (5/5 lines). The SIGTERM drain is tracked separately as c40.",
+          "at": "2026-11-11T20:42:52.166Z"
+        },
+        {
+          "n": 25,
+          "text": "(was #3092) [#3089] Every Nest comparison package has a pin and an install/run compatibility receipt. Peer-range contradictions are resolved or marked unsupported.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-8 4b28ca525c, proved by Lander3 before landing (on top of G12Docs-7 b7e241a6c9): Docs/research/evidence-2026-11-11 pins all 16 Nest comparison packages with npm ci and a green build/start/request/SIGTERM receipt each, including Prisma 7.10.1 (generate + migrate deploy, create 201). Throttler 6.5.0 is marked unsupported (ERESOLVE against core 12.0.1), and 6.6.0 is pinned. No verdict is unknown; the personal-info guard rc 0.",
+          "at": "2026-11-11T20:30:14.205Z"
+        },
+        {
+          "n": 26,
+          "text": "(was #267) Expand syntax_reconciliation so no retired spelling remains in in-repo sources, examples or docs; retired spellings get no teaching diagnostic (owner order) [precut audit: failing on 9c7ddf1359: C:syntax_reconciliation/retired_authority_types_and_markers_keep_exact_teaching_diagnostics FAIL JSON filter selected no values]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Meet g12c (Lander5 meetrun, 2026-11-12) on dev 50a2cbc7e6 with seed-b11 jet@a0.0.45#3667b9a1: jet test tests/guards/syntax_reconciliation.jet gave rc 0, 145 passed, 0 failed, including live_surface_has_no_retired_spellings and retired_authority_vocabulary_stays_in_fixtures_history_or_unrelated_english. The earlier precut teaching-diagnostic row was removed by becadb2ed1. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g12c/1.out.",
+          "at": "2026-11-12T08:20:58.360Z"
+        },
+        {
+          "n": 28,
+          "text": "(was #1285 c2) first_hour.jet teaches #CLI and parallel_scan.jet teaches taskgroup.all or para_map, with the manual versions kept as labelled expert files [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Golden run by G8Scope on seed-t22, tree dev 740973dd61, verified by Main 2026-11-11: FirstHour.jet:3 teaches `#CLI` and ParallelScan.jet:50 teaches `para_map`, with the manual versions labelled Expert. FirstHour, ParallelScan and both Expert files pass at O0, O1 and O2.",
+          "at": "2026-11-11T13:03:09.378Z"
+        },
+        {
+          "n": 29,
+          "text": "(was #1285 c3) text parsing examples open with the streaming reader instead of materializing lines for file-scale work [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Golden run by G8Scope on seed-t22, tree dev 740973dd61, verified by Main 2026-11-11: Text/StreamLines.jet:18 streams handle.lines(), and StringParse.jet:1-4 is labelled in-memory only. Both pass at O0, O1 and O2.",
+          "at": "2026-11-11T13:03:10.688Z"
+        },
+        {
+          "n": 30,
+          "text": "(was #1285 c4) the composed log, MMIO, and math flagships exist and pass the golden suite [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Golden run by G8Scope on seed-t22, tree dev 740973dd61, verified by Main 2026-11-11: Systems/LogJob.jet (the composed flagship), LowLevel/MMIOBoardWrite.jet and Math/NumericFloor.jet each pass at O0, O1 and O2.",
+          "at": "2026-11-11T13:03:12.016Z"
+        },
+        {
+          "n": 31,
+          "text": "(was #1369 c1) Examples/ has no redundant grouping parentheses, and their removal changes no meaning (the affected goldens pass on O0, O1 and O2).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-50 (fd03c6617f): folded values are static data through the frozen-statics path, with no size cap, so JetWeb's 100000-Order locals no longer go past the IR build budget. That ICE at o1/o2 was the last red golden of the Examples parentheses cleanup. b12 priority slice (Lander5 batch.sh b12 --deferred-only DEFERRED_SUBS, 2026-11-12 04:07-04:09, rc 0) on dev 2844b04984 with seed-b12, published from 2844b04984; out $JET_SCRATCH_ROOT/lanes/Lander/loop/out/deferred-b12/: jet test Compiler --profile golden Examples/Apps/Web/JetWeb PASS o0, o1, o2 (24.out); Examples/Apps/Web/StateSurface PASS o0, o1, o2 (23.out); no FAIL, ERROR, KF or SKIP.",
+          "at": "2026-11-12T09:15:22.603Z"
+        },
+        {
+          "n": 33,
+          "text": "(was #2396 c1) Every one of the 38 audit findings has one primary product/compiler owner and one executable recurrence guard; zero findings remain audit-only or rewrite-later [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-5 9ecdaf509e, proved by Lander3 before landing: every proof line passes on the batch compiler (b4), including the JSONAt golden after the slice-room fix.",
+          "at": "2026-11-11T20:42:42.329Z"
+        },
+        {
+          "n": 34,
+          "text": "(was #2396 c2) A checked-in manifest inventories every maintained Jet source role and generated-source producer, records producer-to-artifact provenance, and a synthetic new eligible file or producer with no classification fails before content rules run [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-5 9ecdaf509e, proved by Lander3 before landing: every proof line passes on the batch compiler (b4), including the JSONAt golden after the slice-room fix.",
+          "at": "2026-11-11T20:42:43.396Z"
+        },
+        {
+          "n": 35,
+          "text": "(was #2396 c3) One tests/support CorpusPolicy adapter owns the manifest, semantic rule registry, exception validator, and artifact inventory; each existing domain gate invokes it, while retirement_ratchet remains a separate lexical mechanism [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-5 9ecdaf509e, proved by Lander3 before landing: every proof line passes on the batch compiler (b4), including the JSONAt golden after the slice-room fix.",
+          "at": "2026-11-11T20:42:44.616Z"
+        },
+        {
+          "n": 36,
+          "text": "(was #2396 c4) Every rule uses parsed AST, resolved calls, type/effect/ownership/liveness/constant/control-flow facts, or generator IR and reports file, rule, stable semantic site/span, why, and a mechanical replacement; no rule uses regex, text counts, names, or line thresholds [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-5 9ecdaf509e, proved by Lander3 before landing: every proof line passes on the batch compiler (b4), including the JSONAt golden after the slice-room fix.",
+          "at": "2026-11-11T20:42:45.680Z"
+        },
+        {
+          "n": 37,
+          "text": "(was #2396 c5) Every exception identifies rule, stable semantic site/span, expected occurrence and reason; a second same-rule occurrence fails, and generated protocol overrides name and prove a different protocol [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-5 9ecdaf509e, proved by Lander3 before landing: every proof line passes on the batch compiler (b4), including the JSONAt golden after the slice-room fix.",
+          "at": "2026-11-11T20:42:46.674Z"
+        },
+        {
+          "n": 38,
+          "text": "(was #2396 c6) Executable rules cover every original lane finding of the #2396 audit (fixture, negative and expert roles, all seven binding renderers, site and docs producers, and duplicate Tower domain truthiness and equality policies), with positive and negative tests.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-5 9ecdaf509e, proved by Lander3 before landing: every proof line passes on the batch compiler (b4), including the JSONAt golden after the slice-room fix.",
+          "at": "2026-11-11T20:42:47.693Z"
+        },
+        {
+          "n": 39,
+          "text": "(was #3458 c1) errors/rollback_trait.jet compiles and runs without the missing canonical Rollback trait identity ICE and preserves its rollback contract [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Golden run by G8Scope on seed-t22, tree dev 740973dd61, verified by Main 2026-11-11: the RollbackTrait golden passes at O0, O1 and O2, with no Rollback identity ICE.",
+          "at": "2026-11-11T13:03:13.295Z"
+        },
+        {
+          "n": 40,
+          "text": "A native artifact that registers process.on_signal(.Term) drains on SIGTERM: the runtime's signal delivery cancels every blocked task (serve(), sleep, accept, read), not just the root task's control, so the handler runs and the process exits within 1 s. The backend starter drains on SIGTERM (not via the SIGINT workaround), and a case sends SIGTERM to a serving artifact at O0/O1/O2. Found by G12Docs-2, 2026-11-11: today SIGTERM is ignored for 5 s or more.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Meet g12b on dev 6ca4d72969 with seed-b10 jet@a0.0.45#c089d4d3, both rc 0 with a judged PASS and zero FAIL/ERROR/KF/SKIP/TIMEOUT: jet test Compiler --profile cases tests/cases/process_signal_drain/sigterm_drains_a_serving_artifact_within_a_second.case (SIGTERM to a serving artifact at O0/O1/O2 drains within the 1 s bound); jet test Compiler --profile cases tests/cases/backend_starter/deployment_runs_the_built_service_reports_readiness_and_drains.case (the starter is stopped with signal TERM and exits 0). Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g12b/{4,5}.out.",
+          "at": "2026-11-12T07:42:43.090Z"
+        }
+      ],
+      "refs": [
+        "docs/research/mine-for-jet-2026-09-12.md#finding-read-f08",
+        "examples/features/basics/loop_forms.jet",
+        "tests/ui/list_loop_mutate.jet",
+        "examples/features/errors/errors.jet",
+        "examples/features/errors/typed_error_families.jet",
+        "examples/features/io/scope_guard.jet",
+        "docs/spec/syntax-decisions.md",
+        "D-RESULT-OPTION-CANON1",
+        "D-ERR-CONV",
+        "D-FAIL-CONV1",
+        "D-FAIL-CONV2",
+        "D-DEFER1"
+      ],
+      "tags": [
+        "mining-20260912",
+        "readability",
+        "mine-playlist-20260911",
+        "cluster-examples-teaching",
+        "batch-docs",
+        "wayfinder:task"
+      ],
+      "parentId": "c0h4r83r",
+      "needsAcceptance": false,
+      "created": "2026-09-12T13:27:30.358Z",
+      "updated": "2026-11-12T10:54:25.068Z",
+      "updatedBy": "Main",
+      "workOrder": 277,
+      "goals": [
+        "G12"
+      ],
+      "criteriaLastN": 40,
+      "completedAt": "2026-11-12T10:54:25.068Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T10:59:12.116Z"
     }
   ]
 }
