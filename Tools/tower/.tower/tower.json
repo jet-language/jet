@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106466,
+    "rev": 106472,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58235,6 +58235,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c1 progress on batch compiler p186 (dev 80906d9d14), 2026-11-15: cases liveness_web_compile 1/1, taskgroup_stack 4/4 and taskgroup_parameter 9/9 PASS (landed 21c769a897, jet check --target web checks for the browser machine; the liveness case now runs jet check --target=web, which is the front end its title asserts). 18 known-failing rows remain; GoalsA-1-4 owns them."
+        },
+        {
           "at": "2026-11-14",
           "by": "Main",
           "text": "dev c95c96fc94: 13 web_build loader cases leave known-failing.tsv (web_hello_dom_shim_roundtrip, web_compute_wasm_bridge_roundtrip, web_reactive_dom_snapshot_roundtrip, wasm for-in/range-loop bridges, codable struct bridge, if-expr value blocks, enum match break, matches binds once, eager collection adapters, impure regions, value/range arm tables, int export); each passes alone on gate-p131. Progress on c1."
@@ -58401,8 +58406,8 @@
       "parentId": "c022g7qw",
       "needsAcceptance": false,
       "created": "2026-10-23T04:11:56.439Z",
-      "updated": "2026-11-15T05:46:25.493Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T17:35:29.149Z",
+      "updatedBy": "Main",
       "goals": [
         "G9"
       ],
@@ -59983,6 +59988,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "Gate p186 (batch compiler p186 (dev 80906d9d14), 2026-11-15, pinned 0-23, thread admission landed 9b32c3dbc6): wall 27.12 s (p185 28.89 s), CPU 111.86 s (-5.2%), parallelism 6.6 (p185 4.1), instructions +0.3%; comptime 1.14 s, sema.finalize 3.73 s; runtime step jet-bare sema.finalize 1.60 s. The speed gate reported INCONCLUSIVE only because Throughput.jet could not find perf on the gate PATH."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Self-build runtime step (PrecompiledCore-4 trace of p185's jet-bare step, 8.7 s): the Core chain is the critical path at 6.5 s (load+register+comptime 1.0, sema.finalize 2.5, ir.build 1.0, ir.opt 1.4), then a serial tail of Core object 1.1 and pack 0.7. The interface walk (about 505 units, one thread, three whole parses per unit, 2.98 s CPU) has 2.8 s of slack. The main compile cannot supply the step's Core facts (they must be the new compiler's), and the step waits on the jet-bare link. Ordered: ir.opt to x64 pipelining (-0.4 to -0.6 s, every build) now, then the S4 flat AST (about -1 s here plus the main compile). Threading the interface (0 wall, -2 s CPU), the 0.26 s post-check gap and the pack are recorded in the plan for later."
         },
         {
@@ -60454,7 +60464,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T16:40:43.770Z",
+      "updated": "2026-11-15T17:35:30.442Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -74593,6 +74603,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "RSS after core-bodies-rss (batch compiler p186 (dev 80906d9d14), 2026-11-15): RunColdContext check outside the tree 436-443 MB (p185 535-545, p184 about 345), 0.81-0.89 s, 2349 bodies loaded; InspectBuild in-tree check 3,332 MB (p185 3,544, p184 3,054). The positioned-read SUB for the file-backed half lands next."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c22 load path works on p185 (dev b6b255de57): RunColdContext checked outside the tree loads 2348 Core bodies from core.bodies (14 from text, 23.6 MB read); jet check 0.78-0.84 s against 1.27-1.52 s on p182, core_demand about 175 ms. Open: max RSS of that check rose to about 540 MB from about 345 MB on p184, and InspectBuild's check peak rose to 3,544 MB from 3,054 MB; both are back with PrecompiledCore-4."
         },
         {
@@ -75381,7 +75396,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T15:57:07.037Z",
+      "updated": "2026-11-15T17:35:31.865Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -101885,11 +101900,11 @@
         {
           "n": 1,
           "text": "FunctionInfo, MethodInfo and function types read one typed callable fact: parameters with labels and defaults (never run), declared and inferred effects, captures with ownership, access and type, and specialization identity. The callable example reads every field with no string parsing, and changing a callee's signature re-checks code that reads it. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/CallableCatalog`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:40.963Z"
+          "evidence": "batch compiler p186 (dev 80906d9d14), 2026-11-15: golden --filter Metaprogramming/Reflection/CallableCatalog 3/3 PASS (o0, o1, o2; fix landed 6333e7e70e)",
+          "at": "2026-11-15T17:35:24.847Z"
         },
         {
           "n": 2,
@@ -101903,11 +101918,11 @@
         {
           "n": 3,
           "text": "`reflect.of(value)` keeps typed values and identity with no reading of display strings; capturing a value is complete or refused with a registered diagnostic; retention is explicit and inspectable; O0, O1 and O2 print the same output. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/ReflectValue`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:40.963Z"
+          "evidence": "batch compiler p186 (dev 80906d9d14), 2026-11-15: golden --filter Metaprogramming/Reflection/ReflectValue 3/3 PASS (fix landed 6333e7e70e)",
+          "at": "2026-11-15T17:35:26.163Z"
         },
         {
           "n": 4,
@@ -101984,11 +101999,11 @@
         {
           "n": 12,
           "text": "A type name is a value of type Type wherever a Type is expected: `counts[Position] = 2` keys a map by type, `if t == { Position -> … }` switches on it, `Type{Rock}` builds one explicitly and `type_of(p)` gives a name's static type; Box<Int> and Box<String> are different keys (D-PRIM-TYPEKEY2=A, amending D-PRIM-TYPEKEY1=A). Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/TypeValues` on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:34:01.775Z"
+          "evidence": "batch compiler p186 (dev 80906d9d14), 2026-11-15: golden --filter Metaprogramming/Reflection/TypeValues 3/3 PASS on o0, o1 and o2 (landed 8f441cf0e3)",
+          "at": "2026-11-15T17:35:27.770Z"
         }
       ],
       "refs": [],
@@ -102003,7 +102018,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:40.964Z",
-      "updated": "2026-11-15T15:57:03.009Z",
+      "updated": "2026-11-15T17:35:27.770Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -218114,6 +218129,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T17:35:31.865Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T17:35:30.442Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T17:35:29.149Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m58g8t",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T17:35:27.770Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T17:35:26.163Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T17:35:24.847Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#1"
+    },
     {
       "at": "2026-11-15T16:40:43.770Z",
       "by": "Main",
