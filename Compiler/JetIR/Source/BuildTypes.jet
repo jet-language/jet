@@ -1077,9 +1077,18 @@ ir_record_in_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, row: 
         }
         payloads.push(members)
     }
+    // An enum whose boxes are variant-sized (ir_enum_variant_sized) gets its
+    // box once the runtime names the variant; any other one box up front.
+    sized: ir_enum_variant_sized(p.types[definition])
     size: ir_enum_box_size(m, p, definition, [Type]{}) ?? return ir_fail(a, span, unsupported)
-    boxed: ir_box_alloc(m, a, size, row)
-    ir_emit(a.f, IROp.Store, -1, target, 0, boxed, a.line)
+    boxed := -1
+    if sized {
+        none: ir_word_const(m, a, 0)
+        ir_emit(a.f, IROp.Store, -1, target, 0, none, a.line)
+    } else {
+        boxed = ir_box_alloc(m, a, size, row)
+        ir_emit(a.f, IROp.Store, -1, target, 0, boxed, a.line)
+    }
     word_row: ir_word_row(m)
     runtime_tag: ir_runtime(m, a, "jet_rt_record_tag_{atom}", [Int]{handle}, word_row)
     loop (index, variant) in variants {
@@ -1087,6 +1096,11 @@ ir_record_in_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, row: 
         expected: ir_word_const(m, a, ordinal)
         selected: ir_bool_op(m, a, IROp.Eq, runtime_tag, expected)
         ir_open_if(a.f, selected, a.line)
+        if sized {
+            variant_size: ir_enum_variant_box_size(m, p, definition, [Type]{}, index) ?? return ir_fail(a, span, unsupported)
+            boxed = ir_box_alloc(m, a, variant_size, row)
+            ir_emit(a.f, IROp.Store, -1, target, 0, boxed, a.line)
+        }
         discriminant: ir_word_const(m, a, index)
         ir_emit(a.f, IROp.Store, -1, boxed, 0, discriminant, a.line)
         single: variant.payload == .Single(_)
@@ -3820,8 +3834,9 @@ ir_variant_members_laid: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], 
     Val(members)
 }
 
-// The widest struct a variant holds inline. Every value of an enum takes a
-// box as wide as its widest variant (ir_enum_box_size), so one rare wide
+// The widest struct a variant holds inline. An enum whose layout is promised
+// elsewhere boxes every value as wide as its widest variant
+// (ir_enum_box_size, ir_enum_variant_sized), so one rare wide
 // payload made every value that wide: the checked body's NodeKind took 288
 // bytes a node for a median variant of 24 (#6527 c11). Past six words, a
 // wrapper box of its own costs the wide variant one allocation and saves
@@ -3859,6 +3874,54 @@ ir_enum_box_size: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> Int?
     size: ir_align8(end)
     name_rows_set(m.enum_sizes, identity, size)
     Val(size)
+}
+
+// Whether a box of a variant of `definition` takes only the bytes that
+// variant needs (ir_enum_variant_box_size), not the widest variant's. Kept
+// to the program's own non-generic enums whose layout nothing else reads: a
+// Core enum, a union's structural enum, the Dyn enum the runtime walks and a
+// declared C or aligned layout keep every box at the widest variant.
+ir_enum_variant_sized: fn(definition: TTypeDef) -> Bool Never! {
+    if definition.generic_params.len() > 0 || ir_dyn_declaration(definition) || module_is_core(definition.module_identity) -> return false
+    if definition.key.starts_with("union:") -> return false
+    definition.layout == None && definition.c_layout_tag == None && definition.enum_layout == None && definition.layout_alignment == None
+}
+
+// The bytes a box of variant `index` of enum `row` (instance `args`) is
+// allocated and freed with. A variant-sized enum's (ir_enum_variant_sized)
+// holds the variant's own members, rounded up to all its heap size class
+// holds (ir_heap_block_fill) and never past the widest variant, so variants
+// in one class share a size and a box keeps the class it had at the widest
+// size or a smaller one; any other enum's is the widest (ir_enum_box_size).
+ir_enum_variant_box_size: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], index: Int) -> Int? Never! {
+    widest: ir_enum_box_size(m, p, row, args) ?? return None
+    if !ir_enum_variant_sized(p.types[row]) -> return Val(widest)
+    members: ir_variant_members(m, p, row, args, index) ?? return None
+    end := 8
+    loop member in members {
+        size: if member.boxed -> 8 else -> m.types[member.ty].size
+        if member.offset + size > end -> end = member.offset + size
+    }
+    filled: ir_heap_block_fill(ir_align8(end))
+    Val(if filled < widest -> filled else -> widest)
+}
+
+// The box size of each variant of enum `row` (instance `args`) when they
+// differ (ir_enum_variant_box_size), else none: every box is then the
+// widest variant's.
+ir_enum_variant_box_sizes: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> [Int] Never! {
+    sizes := [Int]{}
+    if !ir_enum_variant_sized(p.types[row]) -> return sizes
+    widest: ir_enum_box_size(m, p, row, args) ?? return sizes
+    narrower := false
+    if p.types[row].kind == .Enum(variants, _) {
+        loop index in 0..<variants.len() {
+            size: ir_enum_variant_box_size(m, p, row, args, index) ?? return [Int]{}
+            if size != widest -> narrower = true
+            sizes.push(size)
+        }
+    }
+    if narrower -> sizes else -> [Int]{}
 }
 
 // A member of a record, tuple or variant: a String member renders quoted

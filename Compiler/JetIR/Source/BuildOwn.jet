@@ -283,7 +283,9 @@ ir_box_payload: fn(m: IRModule, row: Int, offset: Int) -> [IRMember] Never! {
     members
 }
 
-// The bytes a box of row `row` was allocated with (ir_box_alloc sizes).
+// The bytes a box of row `row` was allocated with (ir_box_alloc sizes); for
+// an enum whose variants' boxes differ in size (ir_box_variant_sizes), the
+// widest variant's, which ir_box_size_slot narrows to a box's own.
 ir_box_bytes: fn(m: &IRModule, p: IRProgram, row: Int) -> Int Never! {
     ty: ir_untag(m.types[row].ty)
     if ty == .Option(inner) -> return ir_align8(ir_type_size(m, p, inner))
@@ -296,6 +298,46 @@ ir_box_bytes: fn(m: &IRModule, p: IRProgram, row: Int) -> Int Never! {
     definition: ir_enum_def(m, p, row) ?? return 8
     args: ir_row_args(m, row)
     ir_enum_box_size(m, p, definition, args) ?? 8
+}
+
+// The box size of each variant of the enum box row `row` when they differ
+// (ir_enum_variant_box_sizes), else none: ir_box_bytes sizes every box.
+ir_box_variant_sizes: fn(m: &IRModule, p: IRProgram, row: Int) -> [Int] Never! {
+    if ir_untag(m.types[row].ty) == {
+        .Option(_) | .Result(_, _) -> return [Int]{}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    definition: ir_enum_def(m, p, row) ?? return [Int]{}
+    args: ir_row_args(m, row)
+    ir_enum_variant_box_sizes(m, p, definition, args)
+}
+
+// A fresh word slot holding the bytes the present box `boxed` of box row
+// `row` was allocated with: ir_box_bytes, or for an enum whose variants'
+// boxes differ in size, its variant's from a read-only table of
+// ir_box_variant_sizes indexed by the box's discriminant. `sizes` is that
+// list.
+ir_box_size_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, boxed: Int, sizes: [Int]) -> Int Never! {
+    if sizes.len() == 0 {
+        size: ir_box_bytes(m, p, row)
+        return ir_word_const(m, b, size)
+    }
+    bytes := [U8]{}
+    loop size in sizes {
+        rest := size
+        loop _ in 0..<8 {
+            bytes.push(U8{rest.bit_and(255)})
+            rest = rest >> 8
+        }
+    }
+    word_row: ir_word_row(m)
+    table: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.DataAddress, table, ir_intern_bytes(m, bytes), -1, -1, b.line)
+    selector: ir_load_word(m, b, boxed, 0)
+    eight: ir_word_const(m, b, 8)
+    offset: ir_word_op(m, b, IROp.Mul, selector, eight)
+    entry: ir_word_op(m, b, IROp.Add, table, offset)
+    ir_load_word(m, b, entry, 0)
 }
 
 // Whether a box shape member is dropped with the box: a recursive edge's
@@ -391,8 +433,8 @@ ir_box_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shap
 }
 
 ir_box_free: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
-    size: ir_box_bytes(m, p, row)
-    bytes: ir_word_const(m, b, size)
+    sizes: ir_box_variant_sizes(m, p, row)
+    bytes: ir_box_size_slot(m, p, b, row, at, sizes)
     ir_free(m, b, at, bytes)
 }
 
@@ -446,10 +488,15 @@ ir_box_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) ->
     ir_open_if(a.f, sole, a.line)
     ir_emit(a.f, IROp.Return, -1, boxed, -1, -1, a.line)
     ir_end(a.f, a.line)
-    size: ir_box_bytes(m, p, row)
-    replica: ir_box_replica(m, a, size, boxed, row)
+    sizes: ir_box_variant_sizes(m, p, row)
+    bytes: ir_box_size_slot(m, p, a, row, boxed, sizes)
+    replica: ir_box_replica_sized(m, a, bytes, boxed, row)
     a.fresh[replica] = false
-    ir_emit(a.f, IROp.CopyBytes, -1, replica, boxed, size, a.line)
+    if sizes.len() == 0 {
+        ir_emit(a.f, IROp.CopyBytes, -1, replica, boxed, ir_box_bytes(m, p, row), a.line)
+    } else {
+        _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{replica, boxed, bytes}, -1)
+    }
     loop shape in shapes {
         copied := false
         loop member in shape.members {

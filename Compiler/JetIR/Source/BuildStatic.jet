@@ -429,7 +429,7 @@ ir_static_enum: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, slot
     slot_args: ir_row_args(m, slot_type)
     members: ir_variant_members(m, p, row, slot_args, index) ?? return None
     if members.len() != types.len() -> return None
-    size: ir_enum_box_size(m, p, row, slot_args) ?? return None
+    size: ir_enum_variant_box_size(m, p, row, slot_args, index) ?? return None
     boxed: ir_static_box(s, size)
     ir_static_put(s, boxed, IR_STATIC_BOX_HEADER, IRStaticWord{word: index}, 8)
     loop (position, arg) in args {

@@ -52,6 +52,19 @@ ir_list_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int,
 // Alloc.jet alloc_header).
 IR_HEAP_BLOCK_HEADER: 24
 
+// The largest block a heap size class serves (JetRuntime Alloc.jet
+// alloc_class); a larger payload is mapped directly.
+IR_HEAP_CLASS_BLOCK: 4096
+
+// The bytes the heap block serving a `bytes`-byte align-8 payload holds:
+// its size class's block less the header, or for a payload mapped directly
+// past the largest class, `bytes` itself.
+ir_heap_block_fill: fn(bytes: Int) -> Int Never! {
+    block := 32
+    loop block < bytes + IR_HEAP_BLOCK_HEADER -> block = block * 2
+    if block > IR_HEAP_CLASS_BLOCK -> bytes else -> block - IR_HEAP_BLOCK_HEADER
+}
+
 // How a List buffer of `stride`-byte elements grows when full: a buffer
 // below `first` slots grows to `first`, any other to twice its capacity
 // plus `step`. For a power-of-two stride the header and the slots then

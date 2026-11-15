@@ -226,11 +226,15 @@ ir_move_box_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, row: Int, boxed:
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     needed: ir_runtime(m, a, "jet_rt_move_needed", [Int]{boxed}, bool_row)
     ir_open_if(a.f, needed, a.line)
-    size: ir_box_bytes(m, p, row)
-    bytes: ir_word_const(m, a, size)
+    sizes: ir_box_variant_sizes(m, p, row)
+    bytes: ir_box_size_slot(m, p, a, row, boxed, sizes)
     align: ir_word_const(m, a, 8)
     replica: ir_runtime(m, a, "jet_rt_alloc_value", [Int]{bytes, align}, row)
-    ir_emit(a.f, IROp.CopyBytes, -1, replica, boxed, size, a.line)
+    if sizes.len() == 0 {
+        ir_emit(a.f, IROp.CopyBytes, -1, replica, boxed, ir_box_bytes(m, p, row), a.line)
+    } else {
+        _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{replica, boxed, bytes}, -1)
+    }
     loop shape in shapes {
         if !ir_move_shape_copies(m, p, shape) -> next
         opened: ir_box_shape_open(m, a, replica, shape)

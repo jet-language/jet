@@ -6103,7 +6103,7 @@ ir_enum_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: St
     }
     slot_args: ir_row_args(m, slot_type)
     members: ir_variant_members(m, p, row, slot_args, index) ?? return ir_fail_slot(b, span, "payload of {variant}")
-    size: ir_enum_box_size(m, p, row, slot_args) ?? return ir_fail_slot(b, span, "layout of {owner}")
+    size: ir_enum_variant_box_size(m, p, row, slot_args, index) ?? return ir_fail_slot(b, span, "layout of {owner}")
     values := [Int]{}
     targets := [IRMember]{}
     if payload == {
@@ -9035,7 +9035,7 @@ ir_comptime_enum: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot_t
     slot_args: ir_row_args(m, slot_type)
     members: ir_variant_members(m, p, row, slot_args, index) ?? return ir_fail_slot(b, span, "payload of {variant}")
     if members.len() != types.len() -> return ir_fail_slot(b, span, "payload of {variant}")
-    size: ir_enum_box_size(m, p, row, slot_args) ?? return ir_fail_slot(b, span, "layout of {nominal}")
+    size: ir_enum_variant_box_size(m, p, row, slot_args, index) ?? return ir_fail_slot(b, span, "layout of {nominal}")
     values := [Int]{}
     targets := [IRMember]{}
     loop (position, arg) in args {

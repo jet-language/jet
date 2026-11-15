@@ -3297,6 +3297,11 @@ ir_load_word: fn(m: &IRModule, b: &IRBuilder, base: Int, offset: Int) -> Int Nev
 // BuildMove.jet), any other from the heap (jet_rt_alloc(bytes, 8)).
 ir_box_alloc: fn(m: &IRModule, b: &IRBuilder, size: Int, row: Int) -> Int Never! {
     bytes: ir_word_const(m, b, ir_align8(size))
+    ir_box_alloc_sized(m, b, bytes, row)
+}
+
+// ir_box_alloc of the word-multiple byte count the word slot `bytes` holds.
+ir_box_alloc_sized: fn(m: &IRModule, b: &IRBuilder, bytes: Int, row: Int) -> Int Never! {
     align: ir_word_const(m, b, 8)
     symbol: if m.user_values && ir_box_row(m, row) -> "jet_rt_alloc_value" else -> "jet_rt_alloc"
     boxed: ir_runtime(m, b, symbol, [Int]{bytes, align}, row)
@@ -3325,10 +3330,16 @@ ir_wrapper_alloc: fn(m: &IRModule, b: &IRBuilder, size: Int, place: Int) -> Int 
 // the allocator that served `old` (jet_rt_alloc_value_grow), the holder's or
 // an older one, else the heap.
 ir_box_replica: fn(m: &IRModule, b: &IRBuilder, size: Int, old: Int, row: Int) -> Int Never! {
-    if !m.user_values || (row != ir_pointer_row(m) && !ir_box_row(m, row)) {
-        return ir_box_alloc(m, b, size, row)
-    }
     bytes: ir_word_const(m, b, ir_align8(size))
+    ir_box_replica_sized(m, b, bytes, old, row)
+}
+
+// ir_box_replica of the word-multiple byte count the word slot `bytes`
+// holds.
+ir_box_replica_sized: fn(m: &IRModule, b: &IRBuilder, bytes: Int, old: Int, row: Int) -> Int Never! {
+    if !m.user_values || (row != ir_pointer_row(m) && !ir_box_row(m, row)) {
+        return ir_box_alloc_sized(m, b, bytes, row)
+    }
     replica: ir_runtime(m, b, "jet_rt_alloc_value_grow", [Int]{bytes, old, old}, row)
     b.fresh[replica] = m.types[row].drop != ""
     replica

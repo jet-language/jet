@@ -1,0 +1,18 @@
+// A variant-sized enum box rounds its bytes up to all the heap size class
+// serving it holds; a payload past the largest class keeps its own size.
+use {
+    jet_ir.[IR_HEAP_BLOCK_HEADER, ir_heap_block_fill]
+}
+
+#Test("a payload fills its size class") {
+    assert(ir_heap_block_fill(8) == 8)
+    assert(ir_heap_block_fill(16) == 64 - IR_HEAP_BLOCK_HEADER)
+    assert(ir_heap_block_fill(40) == 40)
+    assert(ir_heap_block_fill(48) == 128 - IR_HEAP_BLOCK_HEADER)
+    assert(ir_heap_block_fill(4072) == 4072)
+}
+
+#Test("a payload past the largest class keeps its size") {
+    assert(ir_heap_block_fill(4080) == 4080)
+    assert(ir_heap_block_fill(10000) == 10000)
+}
