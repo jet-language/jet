@@ -135,7 +135,9 @@ sema_registration_qualified_symbol_type: fn(symbol: Symbol, jobs: SemaQualifiedJ
 
 // Moves a module's rewritten types (sema_registration_qualified_types) into
 // its rows, slot by slot in the same order. A module with no rewritten type
-// keeps its rows untouched, so rows another holder shares are not copied.
+// keeps its rows untouched, so rows another holder shares are not copied;
+// within a module, only a row a slot rewrites is written, so a list whose
+// rows keep their types is not copied either.
 sema_registration_qualified_apply: fn(graph: &SemaRegistrationGraph, module_index: Int, types: &&[Type?]) {
     slots := types.move()
     if !sema_registration_qualified_rewrites(slots) -> return
@@ -143,9 +145,13 @@ sema_registration_qualified_apply: fn(graph: &SemaRegistrationGraph, module_inde
     sema_registration_qualified_apply_functions(graph.modules[module_index].functions, slots)
     loop nominal in 0..<graph.modules[module_index].nominals.len() -> sema_registration_qualified_apply_functions(graph.modules[module_index].nominals[nominal].methods, slots)
     loop implementation in 0..<graph.modules[module_index].impls.len() -> sema_registration_qualified_apply_functions(graph.modules[module_index].impls[implementation].methods, slots)
-    loop position in 0..<graph.modules[module_index].symbols.len() -> sema_registration_qualified_apply_symbol(graph.modules[module_index].symbols[position], slots)
+    loop position in 0..<graph.modules[module_index].symbols.len() {
+        if sema_registration_qualified_next(slots) == .Val(ty) -> graph.modules[module_index].symbols[position].ty = Val(ty)
+    }
     loop import_index in 0..<graph.modules[module_index].imports.len() {
-        loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() -> sema_registration_qualified_apply_symbol(graph.modules[module_index].imports[import_index].bindings[binding].symbol, slots)
+        loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
+            if sema_registration_qualified_next(slots) == .Val(ty) -> graph.modules[module_index].imports[import_index].bindings[binding].symbol.ty = Val(ty)
+        }
     }
 }
 
@@ -160,16 +166,12 @@ sema_registration_qualified_rewrites: fn(slots: [Type?]) -> Bool Never! {
 sema_registration_qualified_apply_functions: fn(functions: &[SemaRegistrationFunction], slots: &[Type?]) {
     loop row in 0..<functions.len() {
         if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].signature = ty
-        sema_registration_qualified_apply_symbol(functions[row].symbol, slots)
+        if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].symbol.ty = Val(ty)
         loop parameter in 0..<functions[row].parameters.len() {
             if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].parameters[parameter].ty = ty
-            sema_registration_qualified_apply_symbol(functions[row].parameters[parameter].symbol, slots)
+            if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].parameters[parameter].symbol.ty = Val(ty)
         }
     }
-}
-
-sema_registration_qualified_apply_symbol: fn(symbol: &Symbol, slots: &[Type?]) {
-    if sema_registration_qualified_next(slots) == .Val(ty) -> symbol.ty = Val(ty)
 }
 
 // The next slot's rewritten type, None to keep the row's own.
