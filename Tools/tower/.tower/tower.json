@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6884,
-    "rev": 103545,
+    "rev": 103550,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27241,11 +27241,11 @@
         {
           "n": 11,
           "text": "An ill-typed node in the typed expression tree of Examples/Metaprogramming/Generics/TypedAST.jet (an Int node where a Bool is required) is refused at compile time with a registered code and UI snapshot; the peer comparison is Docs/research/evidence-2026-09-29/3159-typed-ast.md. Proof: `jet test Compiler --profile ui --filter typed_ast_ill_typed`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:52.558Z"
+          "evidence": "dev a652c3674b (GoalsA-1-3 typed-ast-ill-typed). p141 batch compiler (dev 6aaa5c8879), 2026-11-14 22:24: jet test Compiler --profile ui --filter typed_ast_ill_typed -> PASS 1 FAIL 0. Both encodings of TypedAST.jet are refused: per-type enums with E0108 BindingTypeMismatch (IntExpr where BoolExpr is required), and phantom Expr<T> with ValueTypeMismatch (Expr<Int> where Expr<Bool> is required), both registered codes with snapshot tests/ui/typed_ast_ill_typed.stderr.",
+          "at": "2026-11-15T03:22:31.230Z"
         },
         {
           "n": 12,
@@ -27308,7 +27308,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:35.846Z",
-      "updated": "2026-11-15T03:08:39.769Z",
+      "updated": "2026-11-15T03:22:31.230Z",
       "updatedBy": "Main",
       "workOrder": 128,
       "goals": [
@@ -32021,30 +32021,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "List, Set, Map, text, tuple/product destinations, outcomes and a user-defined destination have exact ownership/order/duplicate/short-circuit contracts.",
+          "text": "FromIterator is the one destination protocol (D-ITER-COLLECT1=A): [1,2,1] into List keeps [1,2,1], into Set dedups, into Map applies last-wins, String concatenates, a tuple destination and a user `impl Bag.FromIterator` build, each with stated ownership, order, duplicate and short-circuit rules (no FromIterator exists in Core on dev 168e1e9e92). Proof: `jet test Compiler --profile golden --filter Collections/FromIter` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-12T14:48:29.180Z"
+          "at": "2026-11-15T03:22:35.408Z"
         },
         {
           "n": 2,
-          "text": "The requested destination is explicit at the call; no expected type silently changes a yielding loop or a plain collection map/filter.",
+          "text": "The destination is explicit at the call: an expected `Set<Int>` type never turns `list.map(f)`, a plain filter or a yielding loop into a Set, and a yielding loop always builds List<T>. Proof: `jet test Compiler --profile ui --filter from_iter_expected_type_no_retype`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-12T14:48:29.180Z"
+          "at": "2026-11-15T03:22:36.289Z"
         },
         {
           "n": 3,
-          "text": "One construction mechanism handles ordinary and fallible input with the approved partial-result and cleanup law; failed construction does not leak resources.",
+          "text": "One construction path handles ordinary and fallible input: a fallible source stops at the first error with the stated partial-result rule, and a failed construction leaks no resource. Proof: `jet test Compiler --profile golden --filter Collections/FromIter` shows the failing source and its close count.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-12T14:48:29.180Z"
+          "at": "2026-11-15T03:22:37.159Z"
         },
         {
           "n": 4,
@@ -32066,12 +32066,12 @@
         },
         {
           "n": 6,
-          "text": "[#3330]  • Extends in place from any iterable, with no temporary List. • Uses Map last-wins, Set dedup and String/byte policy. The prefix-on-failure rule is explicit. • Golden `collections/extend_iterable`; pair `extend_lazy_vs_temp_list` measures below 1.00.",
+          "text": "extend grows a destination in place from any iterable with no temporary List, using Map last-wins, Set dedup and the String and byte policy, with an explicit prefix-on-failure rule (D-ITER-EXTEND1=A). Proof: `jet test Compiler --profile golden --filter collections/extend_iterable`, and the extend_lazy_vs_temp_list pair measures below 1.00.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:27:08.180Z"
+          "at": "2026-11-15T03:22:38.052Z"
         },
         {
           "n": 7,
@@ -32235,7 +32235,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:29.180Z",
-      "updated": "2026-11-15T03:03:42.646Z",
+      "updated": "2026-11-15T03:22:38.052Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 48,
       "goals": [
@@ -209023,6 +209023,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:22:38.052Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vmcbl",
+      "note": "#6: strip debris; decision; proof; was: [#3330]  • Extends in place from any iterable, with no temporary List. • Uses Map last-wins, Set dedup and String/byte policy. The prefix-on-failure rule is explicit. • Golden `collections/extend_iter"
+    },
+    {
+      "at": "2026-11-15T03:22:37.159Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vmcbl",
+      "note": "#3: one outcome with a proof; was: One construction mechanism handles ordinary and fallible input with the approved partial-result and cleanup law; failed construction does not leak resources."
+    },
+    {
+      "at": "2026-11-15T03:22:36.289Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vmcbl",
+      "note": "#2: absorbs c5 and c10; was: The requested destination is explicit at the call; no expected type silently changes a yielding loop or a plain collection map/filter."
+    },
+    {
+      "at": "2026-11-15T03:22:35.408Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vmcbl",
+      "note": "#1: absorbs c4; current paths; decision; was: List, Set, Map, text, tuple/product destinations, outcomes and a user-defined destination have exact ownership/order/duplicate/short-circuit contracts."
+    },
+    {
+      "at": "2026-11-15T03:22:31.230Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xb6zik",
+      "note": "#11"
+    },
     {
       "at": "2026-11-15T03:20:37.505Z",
       "by": "TowerKeeper-1",
