@@ -5,6 +5,7 @@ use {
     encoding: core.encoding
     csv: core.encoding.csv
     files: core.files
+    files_data: core.files.data
 }
 
 #Codable
@@ -32,7 +33,7 @@ run: fn() {
     limits := data.DataLimits.safe()
     limits.max_groups = 1
     limits.max_output_rows = 10
-    reader := data.csv_reader<Event>(input, limits) ?? panic("reader")
+    reader := files_data.csv_reader<Event>(input, limits) ?? panic("reader")
     first: stream.next(reader) ?? panic("next")
     print("first:{first.service}:{first.latency_ms}")
     if data.query(reader)

@@ -4196,13 +4196,13 @@ is retained and counts as nonblank (only spaces and tabs make a blank record).
 ending, otherwise an `Unsupported` error), drops the first record when
 `header` is true, and keeps it when `header` is false; `skip_blank` only skips
 blank physical rows (D-ROWS1).
-The filesystem query helper decodes header-named records into a typed query;
-it is distinct from the physical row parser.
+The typed CSV file query is `core.db.query.query<T>`; it is distinct from the
+physical row parser.
 The public `CSVReader<R>` and `CSVWriter<W>` are ordinary
 source-owned holders, not native resource-table handles. The typed
-`core.data.csv_reader<T>` is Core source over a `CSVReader<FileReader>`: each
-`next` reads one record (the header on the first pull) and decodes it, so rows
-stream one at a time.
+`core.files.data.csv_reader<T>` is Core source over a `CSVReader<FileReader>`:
+each `next` reads one record (the header on the first pull) and decodes it, so
+rows stream one at a time.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
@@ -4213,7 +4213,6 @@ stream one at a time.
 | `csv.writer<W: Writer>(target, limits, formulas)` | `CSVWriter<W> EncodingError!` | Construct an incremental CSV writer to any byte sink. The writer escapes formula cells as `csv.to_string` does. |
 | `CSVReader<R>.next()` | `CSVRow? EncodingError! -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. A source read failure is an `IO` error whose cause keeps the `IOError` kind and OS code. |
 | `CSVWriter<W>.write(fields)` / `flush()` / `finish()` | `Unit EncodingError! -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record, a flush or finish, so a flushed sink ends on a whole record. |
-| `csv.query<T>(path, sql)` | `Query<T> ![FieldError] -[FS]>` | Decode typed header-named records and apply the bounded query plan. |
 | `CSVRow` | type | Physical line number and parsed string fields. |
 
 ### `core.encoding.toml` — TOML values
@@ -4446,8 +4445,7 @@ run: fn() {
 | `url<T>(url, format, authority, limits)` / `database<T>(query, parameters, authority, limits)` | `DataLoader<T> DataError!` | Build an authority-bound remote or SQL loader. |
 | `value<T>(value, limits)` / `load_default<T>(locator)` / `load<T>(locator, limits)` | `DataLoader<T> DataError!` | Load an owned value or source locator with explicit limits. |
 | `csv<T>(text)` / `json<T>(text)` | `[T] DataError!` | Decode typed CSV or JSON input. |
-| `csv_reader<T>(reader, limits)` / `json_reader<T>(reader, limits)` | `DataStream<T> DataError!` | Decode a typed reader over a `FileReader` under limits. |
-| `snapshot(loader)` | `DataSnapshot<T> DataError! -[FS, Net, DB]>` | Materialize a source snapshot. |
+| `snapshot(loader)` | `DataSnapshot<T> DataError! -[FS, Net, DB]>` | Materialize a source snapshot. A local file loader snapshots the bytes `core.files.data.read` bound; an unread file loader is a `Bridge` error. |
 | `schema(rows)` | `[DataColumn]` | Inspect the columns of typed rows. |
 | `count(value)` | `Int` | Count rows in a list or materialized query result. |
 | `describe(values: [Float])` | `DataSummary DataError!` | Produce bounded descriptive statistics. |
@@ -4467,8 +4465,6 @@ run: fn() {
 | `show(plot)` / `render(plot, backend)` | `JetDataPlotRender DataError!` | Render through the selected backend. |
 | `bar_text(groups)` / `bar_svg(groups)` | `String DataError!` | Render `Group<String, Int>` bars as text or SVG. |
 | `line_text(groups, options)` / `line_svg(groups, options)` | `String DataError!` | Render `Group<String, Float>` lines with `DataLineOptions`. |
-| `status()` | `[DataStatus] -[FS, Env]` | Report native and bridge path, ownership, trust, fallback, and replacement facts. Live R availability reads `PATH` and `JET_DATA_R_BRIDGE`, then checks files. |
-| `require_bridge(provider)` | `Unit DataError! -[FS, Env]` | Fail closed when a requested `py`, `r`, or `gpu` bridge is unavailable; use the same live availability facts as `status`. |
 
 Query methods filter, sort, map, extrema, joins, grouping, collection, and
 watching while retaining typed positions for errors. `Query<T>.plan()` returns
@@ -4478,7 +4474,7 @@ the data provider, rather than rebuilding its private storage as a source
 record. Filter, sort, and grouping selectors receive an owned row value at
 the provider callback boundary. A query's limits bound its sorts, groups, and
 collected rows, and every query derived from it keeps them: grouping a
-`csv_reader` stream with `max_groups = 1` into two groups fails with
+`core.files.data.csv_reader` stream with `max_groups = 1` into two groups fails with
 `Limit query.group_by.mean: max_groups 1 exceeded`.
 Grouped `count`, `sum`, and `mean` return `Query<Group<K, V>>`, and `mean`
 requires a floating numeric selector. `DataTracked<T, K>` supports `query`,
@@ -4496,8 +4492,23 @@ quoted text stays a value and cannot become query syntax.
 propagating a numeric-conversion failure from the aggregate.
 
 `DataStatus.clone_value` is the copy-related field. Bridge rows remain separate
-from native rows, and `require_bridge` returns `DataErrorKind.Bridge` instead
-of silently substituting a native or unavailable provider (D-DATA-BRIDGE1).
+from native rows, and `core.files.data.require_bridge` returns
+`DataErrorKind.Bridge` instead of silently substituting a native or unavailable
+provider (D-DATA-BRIDGE1).
+
+### `core.files.data` — host-backed data reads
+
+`core.files.data` holds the `core.data` operations that touch the host: the
+file read behind a local file loader, the typed file readers, and the bridge
+probes, which read `PATH` and check files. `core.data` itself never reads a
+file.
+
+| Function | Returns | Description |
+| --- | --- | --- |
+| `read<T>(loader)` | `Unit DataError! -[FS]` | Read a local file loader's file under its limits and bind the bytes for the next `snapshot`; an offline loader with a last-good snapshot reads nothing. A missing file is an `IO` error. |
+| `csv_reader<T>(reader, limits)` / `json_reader<T>(reader, limits)` | `DataStream<T> DataError!` | Decode a typed reader over a `FileReader` under limits. |
+| `status()` | `[DataStatus] -[FS, Env]` | Report native and bridge path, ownership, trust, fallback, and replacement facts. Live R availability reads `PATH` and `JET_DATA_R_BRIDGE`, then checks files. |
+| `require_bridge(provider)` | `Unit DataError! -[FS, Env]` | Fail closed when a requested `py`, `r`, or `gpu` bridge is unavailable; use the same live availability facts as `status`. |
 
 ### `core.data.loader` — source lifecycle
 
@@ -6422,6 +6433,17 @@ The enclosing SQL file can call those helpers and name the sorting carrier as
 Core-runtime privilege. Inline-module function imports use `use internal.[…]`;
 member types use their qualified names instead of that function import list.
 The lifted declarations retain their private visibility for other files.
+
+### `core.db.query` — typed SQL queries over rows and CSV files
+
+`core.db.query` runs the bounded SQL kernel of `core.db.sql` over typed rows.
+`rows.query(sql)` on an in-memory `[T]` and `query<T>(path, sql)` on a CSV
+file both return the deferred `Query<T>` of `core.data`; a program that runs
+either imports this module.
+
+| Function | Returns | Description |
+| --- | --- | --- |
+| `query<T>(path, sql)` | `Query<T> ![FieldError] -[FS]>` | Decode typed header-named CSV records and apply the bounded query plan. |
 
 ### `core.compute` — checked tensors and explicit devices
 

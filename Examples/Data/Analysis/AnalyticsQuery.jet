@@ -9,7 +9,7 @@ package: {
 // DuckDB comparison: zero-import and typed rows are the same wins here; Jet
 // also rejects an unknown field at compile time instead of at query runtime.
 use {
-    core.encoding.csv
+    db_query: core.db.query
     files: core.files
     testing: core.testing
 }
@@ -24,7 +24,7 @@ run: fn() {
     path: Path.from(root).join("sales.csv").to_string()
     files.write(path, "item,qty\npen,3\nink,5\nclip,1") ?? panic("fixture")
     query: SQL{"SELECT * FROM sales WHERE qty > 1 ORDER BY qty DESC LIMIT 2"}
-    sales_query: csv.query<Sale>(path, query) ?? panic("query")
+    sales_query: db_query.query<Sale>(path, query) ?? panic("query")
     sales: sales_query.collect() ?? panic("collect")
     total: sales.map(fn(s) { s.qty }).sum()
     print("rows: {sales.len()}")

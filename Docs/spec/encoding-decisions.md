@@ -1440,7 +1440,8 @@ all float widths, item/total bounds, map order, and flush/finish behavior.
 The checked shared allocation helper distinguishes heap-ceiling failure
 from allocator refusal; existing Bool callers still map either to false.
 
-Typed `csv.query<T>` owns the bounded-input and validation policy in source.
+The typed CSV query `core.db.query.query<T>` owns the bounded-input and
+validation policy in source.
 Its raw read leaf receives the caller's bound, opens once, reports the open
 file's metadata size, and reads at most bound+1 bytes (without touching an
 already oversized file). Source checks the 512 MiB metadata bound before the

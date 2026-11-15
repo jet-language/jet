@@ -7,7 +7,7 @@ package: {
 // One typed query collects to an ordinary list.
 use {
     data: core.data
-    core.encoding.csv
+    db_query: core.db.query
     files: core.files
     testing: core.testing
 }
@@ -56,7 +56,7 @@ run: fn() {
     temp: testing.temp_dir("jet-typed-query")
     path: Path.from(temp).join("sales.csv").to_string()
     files.write(path, "item,cents\nsmall,40\nlarge,125\nmedium,80") ?? panic("CSV fixture")
-    file_query: csv.query<Sale>(
+    file_query: db_query.query<Sale>(
         path,
         SQL{"SELECT * FROM sales WHERE cents > 50 ORDER BY item"},
     ) ?? panic("file query")

@@ -1,5 +1,8 @@
 package: { name: "typed_csv_group_stats", authority: { allow: [Env, FS] } }
-use data: core.data
+use {
+    data: core.data
+    files_data: core.files.data
+}
 
 #Codable
 Ticket: struct {
@@ -76,6 +79,6 @@ run: fn() {
         .collect() ?? panic("count")
     print(data.bar_text(counts) ?? panic("bar"))
     print((data.bar_svg(counts) ?? panic("svg")).len())
-    status: data.status()
+    status: files_data.status()
     print("{status[0].step}:{status[0].path}")
 }

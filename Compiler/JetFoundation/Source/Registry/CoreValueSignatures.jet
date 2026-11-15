@@ -26,8 +26,18 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
         }, Val(Type.Bool)))
     }
 
-    if module_name == "core.data" {
+    if module_name == "core.files.data" {
         if member == "__host_path_is_file" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_u8, read)}, Val(core_sig_result(Type.Bool, core_sig_named("EncodingCause")))))
+        if member == "status" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.List{element: core_sig_named("DataStatus")})))
+        }
+        if member == "require_bridge" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(unit, core_sig_named("DataError")))))
+        }
+    }
+    if module_name == "core.data" {
         if core_sig_one_of(member, [String]{"sum", "mean", "min", "max", "variance", "stddev"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(list_float, read),
@@ -47,14 +57,6 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(list_float, read),
             }, Val(core_sig_result(core_sig_named("DataSummary"), core_sig_named("DataError")))))
-        }
-        if member == "status" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.List{element: core_sig_named("DataStatus")})))
-        }
-        if member == "require_bridge" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(Type.String, read),
-            }, Val(core_sig_result(unit, core_sig_named("DataError")))))
         }
         if core_sig_one_of(member, [String]{"bar_text", "bar_svg"}) {
             group_int: Type.Apply{name: "Group", args: [Type]{Type.String, Type.Int}}

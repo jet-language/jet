@@ -1,9 +1,12 @@
 // Parquet corpus consumer for the ratified DataFlow surface.
-// The shipped seam is data.file<T>(..., "parquet", limits) followed by
-// data.snapshot<T>(loader). There is no Parquet-specific typed-row/DataQuery
+// The shipped seam is data.file<T>(..., "parquet", limits), files_data.read(loader)
+// and data.snapshot<T>(loader). There is no Parquet-specific typed-row/DataQuery
 // constructor yet, so this fixture consumes the existing canonical Dyn
 // row projection instead of naming an unshipped API.
-use data: core.data
+use {
+    data: core.data
+    files_data: core.files.data
+}
 
 run: fn() {
     int_loader := data.file<[Dyn]>(
@@ -11,6 +14,7 @@ run: fn() {
         "parquet",
         data.DataLimits.safe()
     ) ?? panic("int32 loader")
+    files_data.read(int_loader) ?? panic("int32 read")
     int_snapshot: data.snapshot<[Dyn]>(int_loader) ?? panic("int32 snapshot")
     int_rows: int_snapshot.value
 
@@ -37,6 +41,7 @@ run: fn() {
         "parquet",
         data.DataLimits.safe()
     ) ?? panic("dictionary loader")
+    files_data.read(dictionary_loader) ?? panic("dictionary read")
     dictionary_snapshot: data.snapshot<[Dyn]>(dictionary_loader) ?? panic("dictionary snapshot")
     dictionary_rows: dictionary_snapshot.value
     first_dictionary_row: dictionary_rows[0]
@@ -51,6 +56,7 @@ run: fn() {
         "parquet",
         data.DataLimits.safe()
     ) ?? panic("malformed loader")
+    files_data.read(malformed_loader) ?? panic("malformed read")
     if data.snapshot<[Dyn]>(malformed_loader) == {
         .Ok(_) -> print("malformed: unexpectedly accepted")
         .Err(err) -> print("malformed: rejected {err.kind:Debug} {err.operation}")

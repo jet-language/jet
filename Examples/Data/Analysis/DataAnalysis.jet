@@ -4,7 +4,10 @@ package: {
     authority: { allow: [Env, FS, IO] }
 }
 
-use data: core.data
+use {
+    data: core.data
+    files_data: core.files.data
+}
 
 Ticket: struct {
     team: String
@@ -39,7 +42,7 @@ run: fn() {
     summary: data.describe(values) ?? panic("describe")
     chart: data.bar_text(counts) ?? panic("bar")
     svg: data.bar_svg(counts) ?? panic("svg")
-    status: data.status()
+    status: files_data.status()
 
     print("tickets: {tickets.len()}")
     print("focused: {focused.len()}")

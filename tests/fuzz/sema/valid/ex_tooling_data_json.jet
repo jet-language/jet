@@ -1,5 +1,8 @@
 // Typed Core data JSON ingest + select slice (D-WD9, D-DATA-SURFACE1).
-use data: core.data
+use {
+    data: core.data
+    files_data: core.files.data
+}
 
 #Codable
 Ticket: struct {
@@ -17,5 +20,5 @@ run: fn() {
         .collect() ?? panic("filter")
     print("selected:{data.count(selected)}")
     loop t in selected -> print("{t.team}:{t.minutes}")
-    print("{data.status()[5].step}:{data.status()[5].path}")
+    print("{files_data.status()[5].step}:{files_data.status()[5].path}")
 }

@@ -8,6 +8,7 @@ package: {
 use {
     data: core.data
     files: core.files
+    files_data: core.files.data
     testing: core.testing
 }
 
@@ -131,7 +132,7 @@ run: fn() {
     input: files.open(path) ?? panic("open")
     limits := data.DataLimits.safe()
     limits.max_groups = 1
-    reader: data.csv_reader<Event>(input, limits) ?? panic("reader")
+    reader: files_data.csv_reader<Event>(input, limits) ?? panic("reader")
     if data.query(reader)
         .group_by(fn(e) { e.service })
         .mean(fn(e) { e.latency_ms })

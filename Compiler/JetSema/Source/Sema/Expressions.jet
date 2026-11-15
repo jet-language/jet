@@ -4128,8 +4128,8 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
             if f32_math.handled {
                 return SemaMethodSpecialCheck{handled: true, value: f32_math.value}
             }
-            // `csv.query<Row>(path, SQL{…})` checks its literal SQL columns against `Row` (E2420).
-            if module_name == "core.encoding.csv" && method == "query" && type_args.len() == 1 && args.len() == 2 {
+            // The CSV `query<Row>(path, SQL{…})` checks its literal SQL columns against `Row` (E2420).
+            if module_name == "core.db.query" && method == "query" && type_args.len() == 1 && args.len() == 2 {
                 sema_data_check_analytics_sql_schema(type_args[0], args[1].expr, expr_span(args[1].expr), environment, program, diagnostics)
             }
             if module_name == "core.ui" && method == "node_role" {

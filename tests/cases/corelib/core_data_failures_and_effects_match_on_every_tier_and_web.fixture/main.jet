@@ -1,6 +1,7 @@
 use {
     data: core.data
     files: core.files
+    files_data: core.files.data
 }
 
 #Codable
@@ -30,25 +31,26 @@ run: fn() {
     attempt("csv bad cell", fn() { Ok("{(data.csv<Ticket>("team,minutes\nCore,soon") ?? return Err(err)).len()}") })
     attempt("json cut short", fn() { Ok("{(data.json<Ticket>("{{") ?? return Err(err)).len()}") })
     attempt("unknown bridge", fn() {
-        data.require_bridge("cobol") ?? return Err(err)
+        files_data.require_bridge("cobol") ?? return Err(err)
         Ok("bridged")
     })
     attempt("r bridge off", fn() {
-        data.require_bridge("r") ?? return Err(err)
+        files_data.require_bridge("r") ?? return Err(err)
         Ok("bridged")
     })
     attempt("provider format", fn() {
         loader: data.load_default<[Ticket]>("tickets.txt") ?? return Err(err)
         Ok(loader.source.locator)
     })
-    // A file loader reads nothing until its snapshot; a missing file is IO.
+    // A file loader reads nothing until core.files.data reads it; a missing file is IO.
     missing := data.load_default<[Ticket]>("absent.csv") ?? panic("a csv locator makes a loader")
-    if data.snapshot(missing) == {
+    if files_data.read(missing) == {
         .Ok(_) -> print("missing file: ok")
         .Err(error) -> print("missing file: {error.kind} {error.operation}")
     }
     files.write("tickets.csv", "team,minutes\nCore,4.0\nTools,5.5\n") ?? panic("write tickets.csv: {err}")
     present := data.load_default<[Ticket]>("tickets.csv") ?? panic("a csv locator makes a loader")
+    files_data.read(present) ?? panic("read tickets.csv: {err}")
     if data.snapshot(present) == {
         .Ok(snapshot) -> print("present file: ok {snapshot.value.len()} rows, {snapshot.value[1].team} {snapshot.value[1].minutes}")
         .Err(error) -> print("present file: {error}")

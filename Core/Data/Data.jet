@@ -11,21 +11,15 @@ package: {
 use {
     core: core
 
-    core_files: core.files
-    core.files.[FileReader]
     math: core.math
     encoding: core.encoding
     rt: jet.runtime.encoding
     core.encoding.[EncodingError, EncodingLimits]
     json_codec: core.encoding.json
     csv_codec: core.encoding.csv
-    core.encoding.csv.[CSVReader]
     encoding_stream: __core_encoding_stream
     parquet: __core_data_parquet
     core.crypto.[sha256]
-    sys: core.sys
-    core.db.[SQL, DBValue]
-    sql_kernel: core.db.sql
     time: core.time
     core.time.[DateTime]
     quantile_select.[finite_quantile, select_rank]
@@ -351,24 +345,6 @@ __StreamSource: struct<T> {
     ahead_index: Int
     terminal: DataError?
     done: Bool
-}
-
-// The CSV record cursor behind `csv_reader<T>`; the first record is the
-// header and is read on the first pull.
-__CSVRowSource: struct {
-    records: CSVReader<FileReader>
-    header: [String]
-    started: Bool
-    row: Int
-}
-
-// The JSON event cursor behind `json_reader<T>`; the opening `[` is read on
-// the first pull and the closing `]` ends the stream.
-__JSONRowSource: struct {
-    parser: encoding_stream.JSONPull<FileReader>
-    array_started: Bool
-    array_done: Bool
-    row: Int
 }
 
 DataPivotCell: struct {
@@ -783,6 +759,13 @@ __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
         }
         Ok(out)
     })
+}
+
+// A stream over a pull source (the file readers of core.files.data): `pull`
+// reads and decodes one row, `None` at the end of input.
+__stream_from: fn<T>(pull: &&fn() -> T? DataError!, limits: DataLimits) -> DataStream<T> Never! {
+    source: Shared{__StreamSource<T>{pull: pull, limits: limits, ahead: [T]{}, ahead_index: 0, terminal: None, done: false}}
+    DataStream<T>{items: [T]{}, index: 0, cancelled: false, __source: Val(source)}
 }
 
 // The next row of a stream: its owned items first, then its pull source.
@@ -1349,122 +1332,6 @@ __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(
     })
 }
 
-// `rows.query(sql)`: the rows encode to `Dyn` trees, the checked SQL binds its
-// one WHERE value after parsing, and every referenced field must exist in the
-// all-row schema. Only WHERE, ORDER BY and LIMIT select typed rows here; a
-// projection or grouping changes the row shape.
-__query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
-    trees := [Dyn]{}
-    loop row in rows -> trees.push(row.encode())
-    spec: __query_sql_spec(sql) ?? return Err(__query_field_error("{err}"))
-    core.db.sql.__validate_query_fields(spec, __query_sql_fields(trees), "analytics query") ?? return Err(__query_field_error("{err}"))
-    reshapes := spec.group_by.len() != 0 || spec.projection.len() != 1 || spec.projection[0] != sql_kernel.JetSQLSelectItem.Wildcard
-    loop item in spec.projection {
-        if item == .Aggregate(_, _, _) -> reshapes = true
-    }
-    if reshapes -> return Err(__query_field_error("SQL projection/grouping changes the row shape; use the Dyn query result"))
-    selected := [T]{}
-    loop index in __query_sql_select(trees, spec) -> selected.push(rows[index].copy())
-    Ok(__query_make<T>([String]{"scan", "sql"}, false, DataLimits.safe(), fn() { Ok(selected.copy()) }))
-}
-
-// The CSV header door of `csv.query`: every field the SQL names must be a
-// header column.
-__query_validate_fields: fn(fields: [String], sql: SQL) [FieldError]! {
-    spec: sql_kernel.parse_sql_query(sql.text) ?? return Err(__query_field_error("{err}"))
-    core.db.sql.__validate_query_fields(spec, fields, "analytics query") ?? return Err(__query_field_error("{err}"))
-    Ok()
-}
-
-__query_field_error: fn(message: String) -> [FieldError] Never! {
-    [FieldError]{FieldError{path: "", reason: message}}
-}
-
-// The checked carrier binds after parsing, so a value cannot become query
-// syntax; the kernel has one scalar WHERE slot.
-__query_sql_spec: fn(sql: SQL) -> sql_kernel.JetSQLQuery Err! {
-    spec := sql_kernel.parse_sql_query(sql.text) ?? return Err("{err}")
-    placeholder := false
-    if spec.filter == .Val(filter) -> placeholder = filter.value == "?"
-    if sql.values.len() == 0 {
-        if placeholder -> return Err("analytics query WHERE binding is missing")
-        return Ok(spec)
-    }
-    if !placeholder || sql.values.len() != 1 -> return Err("analytics query bindings do not match its WHERE value")
-    if sql.values[0] == .Blob(_) -> return Err("analytics query WHERE requires a scalar binding")
-    literal: if sql.values[0] == {
-        .Null -> "null"
-        .Int(value) -> "{value}"
-        .Float(value) -> core.db.__float_text(value)
-        .Bool(value) -> "{value}"
-        .Text(value) -> "'{value.replace("'", "''")}'"
-        .Blob(_) -> ""
-    }
-    if spec.filter == .Val(filter) -> spec.filter = Val((field: filter.field.copy(), operator: filter.operator.copy(), value: literal))
-    Ok(spec)
-}
-
-// The all-row schema's field names: every object key of every row, and `$`
-// for a row that is not an object.
-__query_sql_fields: fn(trees: [Dyn]) -> [String] Never! {
-    names := [String]{}
-    loop tree in trees {
-        if tree == .Object(_) {
-            loop entry in encoding_stream.object_entries(tree) -> names.push(entry.key.copy())
-        } else {
-            names.push("$")
-        }
-    }
-    names
-}
-
-// A cell's comparison text: text as is, scalars in their display form, null
-// empty, and any other value as compact JSON.
-__query_sql_cell: fn(tree: Dyn, field: String) -> String? Never! {
-    if !(tree == .Object(_)) -> return None
-    loop entry in encoding_stream.object_entries(tree) {
-        if entry.key != field -> next
-        return Val(if entry.value == {
-            .Text(text) -> text.copy()
-            .Int(number) -> "{number}"
-            .Float(number) -> core.db.__float_text(number)
-            .Bool(flag) -> "{flag}"
-            .Null -> ""
-            .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> json_codec.to_string(entry.value) ?? ""
-        })
-    }
-    None
-}
-
-// WHERE keeps rows whose cell compares true, ORDER BY sorts the kept
-// positions, and LIMIT keeps a prefix.
-__query_sql_select: fn(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] Never! {
-    selected := [Int]{}
-    loop index in 0..<trees.len() {
-        if spec.filter == .Val(filter) {
-            cell: __query_sql_cell(trees[index], filter.field) ?? next
-            if !sql_kernel.compare_sql_cell(cell, filter.operator, filter.value) -> next
-        }
-        selected.push(index)
-    }
-    if spec.order == .Val(order) {
-        keys := [String]{}
-        loop index in selected -> keys.push(__query_sql_cell(trees[index], order.field) ?? "")
-        ordered := [Int]{}
-        loop position in __query_merge_order(keys, true, order.descending) -> ordered.push(selected[position])
-        selected = ordered
-    }
-    if spec.limit == .Val(limit) {
-        kept := [Int]{}
-        loop index in selected {
-            if (checked(U64{kept.len()}) ?? U64{0}) >= limit -> break
-            kept.push(index)
-        }
-        selected = kept
-    }
-    selected
-}
-
 // `data.schema(rows)`: sema passes the checked row type's column names and
 // type spellings (a scalar row is one `value` column), so empty rows still
 // describe their columns.
@@ -1533,34 +1400,6 @@ __query_test_sales: fn() -> [__QueryTestSale] Never! {
     unmatched: __query_collect<DataJoin<__QueryTestSale, __QueryTestSale?>>(__query_left_join<__QueryTestSale, __QueryTestSale>(query<__QueryTestSale>(rows), query<__QueryTestSale>([__QueryTestSale]{}), fn(sale) { sale.item }, fn(sale) { sale.item })) ?? panic("unmatched left_join")
     assert_eq(unmatched.len(), 4)
     assert(unmatched[1].right == None)
-}
-
-#Test("SQL row queries bind after parsing and keep typed rows") {
-    rows: __query_test_sales()
-    selected: __query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE cents > ? ORDER BY item", values: [DBValue]{.Int(50)}}) ?? panic("sql")
-    assert_eq(__query_plan<__QueryTestSale>(selected), [String]{"scan", "sql"})
-    got: __query_collect<__QueryTestSale>(selected) ?? panic("collect")
-    assert_eq(got.len(), 3)
-    assert_eq(got[0].item, "apps")
-    assert_eq(got[1].cents, 90)
-    top: __query_collect<__QueryTestSale>(__query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales ORDER BY cents DESC LIMIT 2", values: [DBValue]{}}) ?? panic("top")) ?? panic("top collect")
-    assert_eq(top.len(), 2)
-    assert_eq(top[0].cents, 125)
-    assert_eq(top[1].cents, 90)
-    quoted: __query_collect<__QueryTestSale>(__query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE item = ?", values: [DBValue]{.Text("it's")}}) ?? panic("quoted")) ?? panic("quoted collect")
-    assert_eq(quoted.len(), 0)
-    refusals: [String]{"SELECT * FROM sales WHERE missing = 1", "SELECT item FROM sales", "SELECT * FROM sales WHERE cents > ?"}
-    expected: [String]{"analytics query references unknown field `missing`", "SQL projection/grouping changes the row shape; use the Dyn query result", "analytics query WHERE binding is missing"}
-    loop index in 0..<refusals.len() {
-        if __query_sql<__QueryTestSale>(rows, SQL{text: refusals[index], values: [DBValue]{}}) == {
-            .Ok(_) -> panic("SQL query should be refused")
-            .Err(errors) -> assert_eq(errors[0].reason, expected[index])
-        }
-    }
-    if __query_validate_fields([String]{"item"}, SQL{text: "SELECT * FROM sales ORDER BY cents", values: [DBValue]{}}) == {
-        .Ok(_) -> panic("an unknown header field should be refused")
-        .Err(errors) -> assert_eq(errors[0].reason, "analytics query references unknown field `cents`")
-    }
 }
 
 #Test("schema columns keep their order, nullability and column identity") {
@@ -1686,91 +1525,6 @@ json: fn<T: Decode>(text: String) -> [T] DataError! {
     assert_eq(rows, [Int]{9007199254740993, 100, -9007199254740993})
 }
 
-// Typed CSV rows over a consumed file (Rust `jet_data_csv_reader` and
-// `jet_data_stream_scan`). The stream pulls one record at a time: the first
-// record names the fields, and every later record must carry exactly that
-// many. A row failure carries its 1-based data row and stays latched.
-csv_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
-    data_limits_check(limits) ?? return Err(err)
-    records: csv_codec.reader<FileReader>(reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
-    state: Shared{__CSVRowSource{records: records.move(), header: [String]{}, started: false, row: 0}}
-    source: Shared{__StreamSource<T>{
-        pull: fn() { csv_reader_next<T>(state) },
-        limits: limits,
-        ahead: [T]{},
-        ahead_index: 0,
-        terminal: None,
-        done: false,
-    }}
-    Ok(DataStream<T>{items: [T]{}, index: 0, cancelled: false, __source: Val(source)})
-}
-
-// One pull of `csv_reader<T>`: the header on the first pull, then one data
-// record decoded to `T`; `None` at end of input.
-csv_reader_next: fn<T: Decode>(state: Shared<__CSVRowSource>) -> T? DataError! {
-    cell := state.guard_edit()
-    if !cell.value.started {
-        cell.value.started = true
-        if cell.value.records.next() == {
-            .Ok(first) -> {
-                named: first ?? return Ok(None)
-                cell.value.header = named.fields.copy()
-            }
-            .Err(failure) -> return Err(data_from_encoding("csv_reader", None, failure))
-        }
-    }
-    if cell.value.records.next() == {
-        .Ok(next) -> {
-            record: next ?? return Ok(None)
-            cell.value.row = cell.value.row + 1
-            if csv_reader_row<T>(cell.value.header, record.fields, cell.value.row) == {
-                .Ok(row) -> return Ok(Val(row))
-                .Err(failure) -> return Err(failure)
-            }
-        }
-        .Err(failure) -> return Err(data_from_encoding("csv_reader", Val(cell.value.row + 1), failure))
-    }
-}
-
-// One data record as header-named Text cells (Rust
-// `jet_data_stream_decode_csv_row`). The cells decode as text, so a
-// `Float` field reads "10.0".
-csv_reader_row: fn<T: Decode>(header: [String], fields: [String], row: Int) -> T DataError! {
-    if fields.len() != header.len() {
-        error := data_error(DataErrorKind.Decode, "CSV row has {fields.len()} fields; expected {header.len()}", "csv_reader")
-        error.row = Val(row)
-        return Err(error)
-    }
-    entries := [(key: String, value: Dyn)]{}
-    loop column in 0..<header.len() -> entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
-    tree: encoding_stream.object_from_entries(entries)
-    previous: rt.text_cells_enter()
-    if tree.decode<T>() == {
-        .Ok(value) -> {
-            rt.text_cells_leave(previous)
-            return Ok(value)
-        }
-        .Err(failures) -> {
-            rt.text_cells_leave(previous)
-            error := data_decode_error(failures, "csv_reader")
-            error.row = Val(row)
-            return Err(error)
-        }
-    }
-}
-
-// An encoding failure keeps its kind family, column and cause (Rust
-// `jet_data_from_encoding`).
-data_from_encoding: fn(operation: String, row: Int?, cause: EncodingError) -> DataError Never! {
-    kind: if cause.kind == {
-        .Limit -> DataErrorKind.Limit
-        .IO -> DataErrorKind.IO
-        .State -> DataErrorKind.State
-        .Syntax | .Truncated | .Unsupported -> DataErrorKind.Decode
-    }
-    DataError{kind: kind, operation: operation, row: row, column: cause.column, index: None, reason: cause.reason.copy(), cause: Val(cause)}
-}
-
 // The checked `DataLimits` of a reader or snapshot (Rust
 // `jet_data_limits_validate`).
 data_limits_check: fn(limits: DataLimits) DataError! {
@@ -1783,82 +1537,10 @@ data_limits_check: fn(limits: DataLimits) DataError! {
     Ok()
 }
 
-// Typed rows of one top-level JSON array over a consumed file (Rust
-// `jet_data_json_reader` and the JSON arm of `jet_data_stream_scan`;
-// core-library.md `json_reader<T: Decode>(reader, limits)`). Numbers keep
-// their typed lexemes, each array element folds to one tree under the
-// reader's allocation budget, and a failure stays latched.
-json_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
-    data_limits_check(limits) ?? return Err(err)
-    parser := encoding_stream.json_reader<FileReader>(reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
-    parser.typed_numbers = true
-    state: Shared{__JSONRowSource{parser: parser.move(), array_started: false, array_done: false, row: 0}}
-    source: Shared{__StreamSource<T>{
-        pull: fn() { json_reader_next<T>(state) },
-        limits: limits,
-        ahead: [T]{},
-        ahead_index: 0,
-        terminal: None,
-        done: false,
-    }}
-    Ok(DataStream<T>{items: [T]{}, index: 0, cancelled: false, __source: Val(source)})
-}
-
-// One pull of `json_reader<T>`: the opening `[` on the first pull, then one
-// array element decoded to `T`; `None` at the closing `]` or end of input.
-json_reader_next: fn<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError! {
-    cell := state.guard_edit()
-    if cell.value.array_done -> return Ok(None)
-    if !cell.value.array_started {
-        if cell.value.parser.next() == {
-            .Ok(next) -> {
-                opened: next ?? return Ok(None)
-                if opened != .ArrayStart {
-                    return Err(data_error(DataErrorKind.Decode, "typed JSON stream requires a top-level array of objects", "json_reader"))
-                }
-                cell.value.array_started = true
-            }
-            .Err(failure) -> return Err(data_from_encoding("json_reader", None, failure))
-        }
-    }
-    first: if cell.value.parser.next() == {
-        .Ok(next) -> next
-        .Err(failure) -> {
-            return Err(data_from_encoding("json_reader", Val(cell.value.row + 1), failure))
-        }
-    }
-    event: first ?? {
-        cell.value.array_done = true
-        return Ok(None)
-    }
-    if event == .ArrayEnd {
-        cell.value.array_done = true
-        return Ok(None)
-    }
-    heap := encoding_stream.FoldBudget{decoded: 0, tracked: 0}
-    tree: if cell.value.parser.fold(event, heap) == {
-        .Ok(folded) -> folded
-        .Err(failure) -> {
-            cell.value.parser.allocation.release(heap.tracked)
-            return Err(data_from_encoding("json_reader", Val(cell.value.row + 1), failure))
-        }
-    }
-    cell.value.parser.allocation.release(heap.tracked)
-    cell.value.row = cell.value.row + 1
-    if tree.decode<T>() == {
-        .Ok(value) -> Ok(Val(value))
-        .Err(failures) -> {
-            error := data_decode_error(failures, "json_reader")
-            error.row = Val(cell.value.row)
-            Err(error)
-        }
-    }
-}
-
 // A typed snapshot of a loader's payload (Rust `jet_data_loader_snapshot`
 // with the Foundation `PreludeDataFlow` kernel; core-library.md
-// `snapshot(loader)`, line 3045). The payload
-// is the bound bytes, the offline/value last-good bytes, or the local file;
+// `snapshot(loader)`). The payload is the bound bytes (a local file's bytes
+// once `core.files.data.read` reads it) or the offline/value last-good bytes;
 // it parses by format, decodes to `T`, and commits as the new last-good
 // snapshot. Any failure is recorded in the loader status before it returns.
 snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
@@ -2339,89 +2021,6 @@ line_svg: fn(groups: [Group<String, Float>], options: DataLineOptions) -> String
         values.push(group.value)
     }
     Ok(render_line_options_svg(labels, values, options))
-}
-
-/// Native facts and live, explicitly opted-in bridge availability.
-status: fn() -[FS, Env]> [DataStatus] Never! {
-    rows := [DataStatus]{}
-    native_steps: [String]{"core.data.csv", "core.data.stats", "core.data.query", "core.data.stream", "core.data.schema", "core.data.json"}
-    loop step in native_steps {
-        rows.push(DataStatus{step: step, path: "native", clone_value: "none", ownership: "jet", trust: "native", fallback: "none", replacement: "native"})
-    }
-    bridge_steps: [String]{"py.*", "r.*", "gpu.*"}
-    loop step in bridge_steps -> rows.push(bridge_status(step))
-    rows
-}
-
-require_bridge: fn(provider: String) DataError! -[FS, Env]> {
-    step: bridge_provider(provider) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data bridge provider `{provider}`; expected py, r, or gpu", "require_bridge"))
-    facts: bridge_status(step)
-    if facts.path == "available" -> return Ok()
-    return Err(data_error(DataErrorKind.Bridge, "{step} unavailable (clone_value={facts.clone_value}, ownership={facts.ownership}, trust={facts.trust}, fallback={facts.fallback}, replacement={facts.replacement})", "require_bridge"))
-}
-
-bridge_provider: fn(provider: String) -> String? Never! {
-    name := trim(provider)
-    loop name.ends_with(".") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 1]) ?? ""
-    if name.ends_with(".*") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 2]) ?? ""
-    name = upper(name)
-    if name == "PY" || name == "PYTHON" -> return Val("py.*")
-    if name == "R" -> return Val("r.*")
-    if name == "GPU" || name == "CUDA" || name == "METAL" || name == "VULKAN" || name == "WEBGPU" -> return Val("gpu.*")
-    None
-}
-
-bridge_status: fn(step: String) -[FS, Env]> DataStatus Never! {
-    path := "unavailable"
-    if step == "r.*" && bridge_tool_on_path("Rscript") {
-        if sys.get("JET_DATA_R_BRIDGE") == .Val(enabled) {
-            if enabled == "1" -> path = "available"
-        }
-    }
-    if step == "py.*" -> return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "python-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data native lists/query/stats"}
-    if step == "r.*" -> return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "r-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data Query<T> typed round-trip"}
-    DataStatus{step: step, path: path, clone_value: "device-transfer", ownership: "device-buffer", trust: "untrusted-accelerator", fallback: "none", replacement: "core.data / Tensor native CPU path"}
-}
-
-bridge_tool_on_path: fn(tool: String) -[FS, Env]> Bool Never! {
-    // Keep opaque native path bytes: PATH need not be UTF-8.
-    path: core.sys.__host_env("PATH") ?? return false
-    windows: sys.is_windows()
-    delimiter: if windows -> U8{59} else -> U8{58}
-    directory := [U8]{}
-    quoted := false
-    index := 0
-    loop {
-        at_end: index == path.len()
-        if !at_end {
-            b: path[index]
-            index += 1
-            if windows && b == (U8{34}) {
-                quoted = !quoted
-                next
-            }
-            if b != delimiter || quoted {
-                directory.push(b)
-                next
-            }
-        }
-        if directory.len() > 0 {
-            last: directory[directory.len() - 1]
-            drive_relative: windows && directory.len() == 2 && directory[1] == (U8{58})
-            if last != (U8{47}) && (!windows || last != (U8{92})) && !drive_relative {
-                directory.push(if windows -> U8{92} else -> U8{47})
-            }
-        }
-        loop b in tool.bytes() -> directory.push(b)
-        is_file := false
-        #Unsafe("native path bytes originate from the host environment and are split at ASCII boundaries") {
-            is_file = core.data.__host_path_is_file(directory) ?? false
-        }
-        if is_file -> return true
-        if at_end -> break
-        directory = [U8]{}
-    }
-    false
 }
 
 make_loader: fn<T>(kind: DataLoaderKind, locator: String, member: String, parameters: [String], format_name: String, authority_name: String, limits: DataLimits) -> DataLoader<T> DataError! {
@@ -3497,10 +3096,31 @@ data_loader_validate: fn<T>(loader: DataLoader<T>) DataError! {
     Ok()
 }
 
-// `payload` plus the local-file read of `jet_data_loader_payload`: bound
-// bytes, then offline/value last-good bytes, then the local file. Every
-// other source needs its provider to bind the payload.
-data_loader_payload: fn<T>(loader: DataLoader<T>) -[FS]> (data: [U8], offline: Bool) DataError! {
+// The local file read of `core.files.data.read`: the file's bytes become the
+// pending payload the next `snapshot` commits. An offline loader that holds a
+// last-good snapshot keeps it and reads nothing; a failed read is recorded in
+// the loader status.
+__read_file: fn<T>(loader: &DataLoader<T>, read: fn(String) -[FS]> [U8] Err!) -[FS]> DataError! {
+    if loader.cancelled {
+        return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was cancelled before read")))
+    }
+    data_loader_validate<T>(loader) ?? return Err(data_loader_fail<T>(loader, err))
+    data_limits_check(loader.limits) ?? return Err(data_loader_fail<T>(loader, err))
+    if loader.source.kind != DataLoaderKind.File || loader.source.member.len() > 0 {
+        return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.InvalidArgument, "data.loader.file", "only a local file loader reads its file")))
+    }
+    if loader.offline && loader.last_good != None -> return Ok()
+    bytes: read(loader.source.locator) ?? return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.IO, "data.loader.file", "could not read `{loader.source.locator}`: {err}")))
+    data_loader_check_payload(loader.limits, bytes.len(), "data.loader.file") ?? return Err(data_loader_fail<T>(loader, err))
+    loader.payload = Val(bytes)
+    Ok()
+}
+
+// `payload` of `jet_data_loader_payload`: bound bytes, then offline/value
+// last-good bytes. A local file loader's bytes are bound by
+// `core.files.data.read`; every other source needs its provider to bind the
+// payload.
+data_loader_payload: fn<T>(loader: DataLoader<T>) -> (data: [U8], offline: Bool) DataError! {
     if loader.payload == .Val(bound) {
         data_loader_check_payload(loader.limits, bound.len(), "data.loader") ?? return Err(err)
         return Ok((data: bound.copy(), offline: loader.offline))
@@ -3516,9 +3136,7 @@ data_loader_payload: fn<T>(loader: DataLoader<T>) -[FS]> (data: [U8], offline: B
         return Err(data_loader_error(DataErrorKind.Bridge, "data.loader.offline", "offline mode has no last-good snapshot"))
     }
     if local_file {
-        read: core_files.read_bytes(loader.source.locator) ?? return Err(data_loader_error(DataErrorKind.IO, "data.loader.file", "could not read `{loader.source.locator}`: {err}"))
-        data_loader_check_payload(loader.limits, read.len(), "data.loader.file") ?? return Err(err)
-        return Ok((data: read, offline: loader.offline))
+        return Err(data_loader_error(DataErrorKind.Bridge, "data.loader.file", "file payload is missing; read it with core.files.data.read"))
     }
     operation: if loader.source.kind == {
         .URL -> "data.loader.url"

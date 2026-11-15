@@ -1,6 +1,6 @@
 
 use {
-    csv: core.encoding.csv
+    db_query: core.db.query
     files: core.files
     testing: core.testing
 }
@@ -18,6 +18,6 @@ run: fn() {
     root: testing.temp_dir("checked-query-bindings")
     path: Path.from(root).join("rows.csv").to_string()
     files.write(path, "name,amount\nordinary,40\nother,80\n") ?? panic("fixture")
-    file_rows: (csv.query<Row>(path, SQL{"SELECT * FROM rows WHERE amount > {threshold}"}) ?? panic("file plan")).collect() ?? panic("file query")
+    file_rows: (db_query.query<Row>(path, SQL{"SELECT * FROM rows WHERE amount > {threshold}"}) ?? panic("file plan")).collect() ?? panic("file query")
     print(file_rows.len())
 }

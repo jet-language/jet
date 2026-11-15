@@ -1,6 +1,6 @@
-// core-conformance: core.encoding.csv.query
+// core-conformance: core.db.query.query
 use {
-    csv: core.encoding.csv
+    db_query: core.db.query
     files: core.files
     testing: core.testing
 }
@@ -15,7 +15,7 @@ run: fn() {
     root: testing.temp_dir("csv-query")
     path: Path.from(root).join("sales.csv")
     files.write(path, "item,qty\npen,3\n") ?? panic("fixture")
-    query: csv.query<Sale>(
+    query: db_query.query<Sale>(
         path.to_string(),
         SQL{"SELECT * FROM sales WHERE qty > 1"}
     ) ?? panic("query")

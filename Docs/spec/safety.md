@@ -5200,23 +5200,23 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 2417,
-      "column": 9,
-      "reason": "native path bytes originate from the host environment and are split at ASCII boundaries"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Data/Data.jet",
-      "line": 3373,
+      "line": 2972,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3707,
+      "line": 3325,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Db/Query.jet",
+      "line": 161,
+      "column": 5,
+      "reason": "the exact owned query bytes passed the shared strict UTF-8 validator"
     },
     {
       "package": "Core",
@@ -5249,21 +5249,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 554,
-      "column": 5,
-      "reason": "the exact owned query bytes passed the shared strict UTF-8 validator"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/Csv.jet",
-      "line": 1076,
+      "line": 1042,
       "column": 9,
       "reason": "each completed UTF-8 scalar was validated before its original bytes entered this field"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 1234,
+      "line": 1200,
       "column": 25,
       "reason": "every byte of the field is below 128, so it is whole UTF-8"
     },
@@ -5399,6 +5392,13 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 457,
       "column": 5,
       "reason": "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Files/Data.jet",
+      "line": 262,
+      "column": 9,
+      "reason": "native path bytes originate from the host environment and are split at ASCII boundaries"
     },
     {
       "package": "Core",
@@ -11287,16 +11287,15 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Crypto/Vault.jet | 373:5 | "vault typed revocation commit provider boundary" |
 | Core | Core/Crypto/Vault.jet | 379:5 | "vault passphrase export provider boundary" |
 | Core | Core/Crypto/Vault.jet | 386:5 | "vault recipient export provider boundary" |
-| Core | Core/Data/Data.jet | 2417:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
-| Core | Core/Data/Data.jet | 3373:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Data/Data.jet | 3707:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 2972:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3325:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Db/Query.jet | 161:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
 | Core | Core/Encoding/Cbor.jet | 100:5 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/Cbor.jet | 166:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CborStream.jet | 234:9 | "the retained key copies exactly the already validated text bytes" |
 | Core | Core/Encoding/CborStream.jet | 336:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
-| Core | Core/Encoding/Csv.jet | 554:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
-| Core | Core/Encoding/Csv.jet | 1076:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
-| Core | Core/Encoding/Csv.jet | 1234:25 | "every byte of the field is below 128, so it is whole UTF-8" |
+| Core | Core/Encoding/Csv.jet | 1042:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
+| Core | Core/Encoding/Csv.jet | 1200:25 | "every byte of the field is below 128, so it is whole UTF-8" |
 | Core | Core/Encoding/Eetf.jet | 551:9 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/Json.jet | 1261:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/Json.jet | 1266:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
@@ -11316,6 +11315,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Encoding/XmlEngine.jet | 175:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XmlEngine.jet | 2676:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/Yaml.jet | 457:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
+| Core | Core/Files/Data.jet | 262:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
 | Core | Core/Files/Files.jet | 685:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | Core | Core/Files/Files.jet | 753:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Files/Sealed.jet | 155:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
@@ -12129,7 +12129,7 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file": "Core/Crypto/Vault.jet", "function": "commit_revoke", "proof": "The write token and plan are validated and both move into the provider, so each is used once; nothing is returned but the error."},
   {"file": "Core/Crypto/Vault.jet", "function": "export_to_passphrase", "proof": "`validate_key` runs first and the passphrase is lent read-only; the result is passphrase-encrypted wrapped bytes, never the plain key."},
   {"file": "Core/Crypto/Vault.jet", "function": "export_to_recipients", "proof": "`validate_key` runs and the recipient list is bounded to 1..16; the result is recipient-encrypted wrapped bytes, never the plain key."},
-  {"file":"Core/Data/Data.jet","function":"bridge_tool_on_path","proof":"__host_path_is_file invokes OsStr::from_encoded_bytes_unchecked (Top/DataStats.rs:11-13), so its input must retain native encoded-byte provenance. data.jet:1090 obtains PATH from the current host's encoded environment; :1092-1108 split only at ASCII colon/semicolon and remove Windows ASCII quotes. :1111-1117 append only ASCII separators and valid UTF-8 tool text, preserving that host encoding. The metadata leaf borrows the owned list and returns Bool/error, not a pointer; the caller cannot supply an unrelated byte allocation to this helper or retain a host borrow."},
+  {"file":"Core/Files/Data.jet","function":"bridge_tool_on_path","proof":"__host_path_is_file invokes OsStr::from_encoded_bytes_unchecked (Top/DataStats.rs:11-13), so its input must retain native encoded-byte provenance. data.jet:1090 obtains PATH from the current host's encoded environment; :1092-1108 split only at ASCII colon/semicolon and remove Windows ASCII quotes. :1111-1117 append only ASCII separators and valid UTF-8 tool text, preserving that host encoding. The metadata leaf borrows the owned list and returns Bool/error, not a pointer; the caller cannot supply an unrelated byte allocation to this helper or retain a host borrow."},
   {"file":"Core/Data/Data.jet","function":"data_loader_render","proof":"The gate at data.jet:1729 only matches the compiler-private Dyn Number, TypedText and Bytes variants. Each payload is accessed after its matching discriminant at :1730, :1734 or :1738, then read through ordinary String/List operations into the caller's exclusively borrowed output; no unchecked memory, forged carrier or raw pointer is created. Other variants leave the gate for normal recursive rendering. Any typed Dyn input remains a valid enum; callers cannot select a mismatched native payload."},
   {"file":"Core/Data/Data.jet","function":"data_schema_value_type","proof":"Not a core.data export (Compiler/Prelude/Core.rows:69). Its #Unsafe block (Data.jet:3674-3677) only pattern-matches the compiler-private Dyn carriers .Number and .Bytes to name their schema type; it reads no memory, builds or mutates no carrier and returns a static String, so no caller can break those carriers' invariants through it. Every other Dyn shape is matched through the public variants (:3678-3688)."},
   {"file":"Core/Process/Process.jet","function":"cmd","proof":"The __spec_fields leaf is layout transfer into ProcessSpec, not process execution (Top/ProcessSpec.rs:6-37). process.jet:92 takes all fields from default_fields(:419-428): paired environment columns are both empty; optional cwd, stdin, timeout, resource limits, terminal and policy are accompanied by their actual presence flags at :95-104, with valid typed placeholders. The sole present numeric limit is 67108864. argv is a typed owned String list; even empty argv is deferred to checked spawn, not indexed here. No descriptor or memory address is supplied or returned, and callers cannot alter the hidden initialized field set."},
@@ -12153,7 +12153,7 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Encoding/CborStream.jet","function":"retain_key","proof":"__bytes_into_text at cbor_stream.jet:208 copies stored, which :205 fills with exactly text.count_bytes() bytes obtained through bounds-checked stream.byte_at from a valid String. It neither truncates a scalar nor edits its encoding. Only that exact copy becomes the retained key; arbitrary wire bytes cannot reach this transfer."},
   {"file":"Core/Encoding/CborStream.jet","function":"next_inner","proof":"For a CBOR text item cbor_stream.jet:303 obtains the owned payload, :306 strictly validates that exact list's UTF-8 and returns Syntax on failure, then :308 immediately copies it through __bytes_into_text. No mutation intervenes, and binary items(:304) never use the text transfer. Host/wire callers cannot bypass the validator with malformed payload bytes."},
   {"file":"Core/Encoding/Eetf.jet","function":"term","proof":"A method of the private TermWriter (Eetf.jet:521), which is not among core.encoding.eetf's exports (Compiler/Prelude/Core.rows:103), and depth-bounded (:548). Its #Unsafe region (:549-603) only pattern-matches the compiler-private Dyn carriers .Number and .Bytes to encode them; every byte is written through the bounds-checked put, put_u32 and payload helpers after item() length limits, and object entries come from stream.object_entries, itself a recorded safe abstraction. No carrier is constructed or mutated and no memory is addressed."},
-  {"file":"Core/Encoding/Csv.jet","function":"query_text","proof":"csv.jet:315-316 enforce the bounded read's size/list limits and :317 validates sample.bytes with the strict shared UTF-8 validator. The gate at :318-319 immediately copies that same owned list through __bytes_into_text; failures return FieldError before conversion. A caller's arbitrary file contents cannot produce an invalid String or retain a native read-buffer borrow."},
+  {"file":"Core/Db/Query.jet","function":"query_text","proof":"csv.jet:315-316 enforce the bounded read's size/list limits and :317 validates sample.bytes with the strict shared UTF-8 validator. The gate at :318-319 immediately copies that same owned list through __bytes_into_text; failures return FieldError before conversion. A caller's arbitrary file contents cannot produce an invalid String or retain a native read-buffer borrow."},
   {"file":"Core/Encoding/Csv.jet","function":"finish_field","proof":"CSVReader.character(:725-744) validates lead width, all continuation bytes, overlong/surrogate/out-of-range cases before next_inner(:880-882) calls push. push(:798-874) appends each entire validated scalar or only ASCII quote/CRLF escapes. Consequently finish_field's __bytes_into_text(:769) copies only complete UTF-8 storage, then resets field(:771). Partial/invalid wire scalars fail without reaching this gate."},
   {"file":"Core/Encoding/Csv.jet","function":"__take_plain","proof":"The gate at Csv.jet:1040-1042 copies buffer[start..<end] into a String. The scan at :1031 advances end only while stops[byte] == 0, and stops (a priv field, built once by reader at :1141 and never written again) is 1 for every byte from 128, so each byte of the slice is ASCII and the slice is whole UTF-8. start..<end lies inside buffer: end < start + room <= buffer.len() (:1033)."},
   {"file":"Core/Encoding/Json.jet","function":"append_events","proof":"json.jet:707-709 match each private Dyn.Number/TypedText/Bytes discriminant before projecting its initialized String/list into the corresponding typed DataEvent. Only owned enum payloads are returned; no mismatched variant access, pointer formation or borrowed backing view escapes. Public variants are recursively handled outside the gate(:712-735)."},

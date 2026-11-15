@@ -495,14 +495,13 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "config_from_env" -> Val("Env")
             else -> Val("Net")
         }
-        // csv.query reads its file. Every codec reader and writer is generic
-        // over its `Reader` or `Writer` and needs no effect to construct.
-        "core.encoding.csv" -> if member == "query" -> Val("FS") else -> None
+        // The CSV query reads its file.
+        "core.db.query" -> if member == "query" -> Val("FS") else -> None
         // The host's f32 SIMD dispatch is a fixed CPU fact read without a
         // system call; comptime refuses it (BuildRoutes.jet
         // ir_comptime_ambient_refusal).
         "core.compute" -> if member == "__simd_lanes" || member == "device_cpu" -> None else -> Val("GPU")
-        "core.data" -> if member == "__host_path_is_file" -> Val("FS") else -> None
+        "core.files.data" -> if member == "__host_path_is_file" -> Val("FS") else -> None
         // A service file leaf names the one leaf it needs, as core.files
         // does; the lock and workflow sleeps name Time. A service's record
         // stamps read the wall clock, its authority tokens draw from the OS
@@ -657,7 +656,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             else -> None
         }
         "core.http" -> if member == "get" -> Val("Time.Wait") else -> None
-        "core.encoding.csv" -> if member == "query" -> Val("Time.Wait") else -> None
+        "core.db.query" -> if member == "query" -> Val("Time.Wait") else -> None
         "core.db" -> if member == {
             "transaction" | "__transaction" | "migrate" | "__migrate" -> Val("Time.Wait")
             else -> None

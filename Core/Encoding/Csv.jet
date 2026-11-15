@@ -6,10 +6,7 @@ use {
     stream: __core_encoding_stream
     encoding: core.encoding
     rt: jet.runtime.encoding
-    files: core.files
     mem: core.mem
-    core.data.[Query]
-    core.db.[SQL]
 }
 
 syntax_error: fn(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
@@ -51,8 +48,6 @@ unsupported_error: fn(format: EncodingFormat, offset: Int, reason: String) -> En
 // maps diagnostic text to FieldError.
 // Streaming reads distinguish optional EOF from typed IO failures, and writes
 // borrow bounded byte windows over existing registered file leaves.
-// `query<T>` reads a bounded UTF-8 table, validates its header, decodes all
-// typed rows and reuses the same SQL query door as an in-memory list.
 CSVRow: struct {
     line: Int
     fields: [String]
@@ -527,35 +522,6 @@ priv formula_cell: fn(value: Dyn, formulas: CSVFormulas) -> String Never! {
     if value == .Text(_) && formula_escaped(cell, formulas) -> return "'{cell}"
     cell
 }
-
-
-/// Typed CSV query with the same SQL grammar and result carrier as rows.query.
-query: fn<T: [Decode, Encode]>(path: String, sql: SQL) -[FS]> Query<T> [FieldError]! {
-    text: query_text(path) ?? return Err(err)
-    physical: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
-    header: if physical.len() == 0 -> [String]{} else -> physical[0]
-    core.data.__query_validate_fields(header, sql) ?? return Err(err)
-    values: decode<T>(text) ?? return Err(err)
-    values.query(sql)
-}
-
-query_read_error: fn(path: String, reason: String) -> [FieldError] Never! {
-    [FieldError]{FieldError{path: "", reason: "could not read `{path}`: {reason}"}}
-}
-
-// An oversized file is refused from its reported size before any byte is read.
-query_text: fn(path: String) -[FS]> String [FieldError]! {
-    max: 536870912
-    info: files.stat(path, links: .Follow) ?? return Err(query_read_error(path, "{err}"))
-    if info.size > max -> return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
-    bytes: files.read_at(path, 0, max + 1) ?? return Err(query_read_error(path, "{err}"))
-    if bytes.len() > max -> return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
-    rt.utf8_validate(bytes) ?? return Err(query_read_error(path, err.message))
-    #Unsafe("the exact owned query bytes passed the shared strict UTF-8 validator") {
-        return Ok(rt.bytes_into_text(bytes))
-    }
-}
-
 
 delimiter_at: fn(raw: [U8], i: Int, delimiter: [U8]) -> Bool {
     if i + delimiter.len() > raw.len() -> return false

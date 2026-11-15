@@ -445,6 +445,8 @@ skip_layout: fn(source: [U8], start: Int) -> Int {
 }
 
 // The end of quoted text opened at `start`; unterminated text runs to the end.
+// A double-quoted interpolation `{…}` is skipped whole, so quotes nested in it
+// do not end the text; `{{` is a literal brace.
 skip_quoted: fn(source: [U8], start: Int, triple: Bool, quote: Int) -> Int {
     width: if triple -> 3 else -> 1
     index := start + width
@@ -454,6 +456,8 @@ skip_quoted: fn(source: [U8], start: Int, triple: Bool, quote: Int) -> Int {
             index += 2
         } else if byte == quote && (!triple || triple_quote_at(source, index)) {
             return index + width
+        } else if quote == QUOTE && byte == OPEN_BRACE {
+            index = if byte_at(source, index + 1) == OPEN_BRACE -> index + 2 else -> skip_balanced(source, index, OPEN_BRACE, CLOSE_BRACE)
         } else {
             index += 1
         }
