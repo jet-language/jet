@@ -383,14 +383,15 @@ reader: fn(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: I
     Ok(ChunkReader{header_hash: crypto.sha256(all).bytes, key: key.move(), nonce_prefix: prefix,
         remaining: integer(fixed, 12, 8), index: 1, final: false})
 }
-open_chunk: fn(state: &ChunkReader, framing: [U8], encrypted: [U8]) -> crypto.Secret crypto.FileCryptoError! {
+// The record's plaintext; the caller owns wiping it.
+open_chunk: fn(state: &ChunkReader, framing: [U8], encrypted: [U8]) -> [U8] crypto.FileCryptoError! {
     if state.final || state.index > MAX_RECORDS || framing.len() != 5 -> return Err(.OpenFailed)
     length: integer(framing, 0, 4)
     flags: framing[4]
     if !record_shape(length, flags) || encrypted.len() != length + TAG || length + 21 > state.remaining -> return Err(.OpenFailed)
     if flags == (U8{1}) && length + 21 != state.remaining -> return Err(.OpenFailed)
-    clear: crypto.Secret{bytes: open_key(state.key, nonce(state.nonce_prefix, state.index), encrypted,
-        chunk_aad(state.header_hash, state.index, length, flags))}
+    clear: open_key(state.key, nonce(state.nonce_prefix, state.index), encrypted,
+        chunk_aad(state.header_hash, state.index, length, flags))
     state.remaining -= length + 21
     state.index += 1
     state.final = flags == (U8{1})
@@ -459,7 +460,7 @@ finish: fn(state: ChunkReader, trailing: [U8]) crypto.FileCryptoError! {
             append(container, record.framing)
             append(container, record.cipher)
             clear: open_chunk(decoded, record.framing, record.cipher) ?? panic("open record")
-            assert(crypto.constant_time_equal(clear, crypto.Secret.from_bytes(plain)))
+            assert(clear == plain)
             offset += count
         }
         finish(decoded, [U8]{}) ?? panic("final record")

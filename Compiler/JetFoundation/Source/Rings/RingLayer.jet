@@ -31,7 +31,7 @@ jet_ring_dependency_rows: fn() -> [JetRingDependencyRow] Never! {
         {module_name: "core.color", dependencies: [String]{"core.math"}},
         {module_name: "core.compute", dependencies: [String]{"core.math", "core.text.fmt"}},
         {module_name: "core.compute.solve", dependencies: [String]{"core.compute", "core.math"}},
-        {module_name: "core.crypto", dependencies: [String]{"core", "core.files", "core.files.path"}},
+        {module_name: "core.crypto", dependencies: [String]{"core"}},
         {module_name: "core.crypto.expert", dependencies: [String]{"core.crypto"}},
         {module_name: "core.crypto.random", dependencies: [String]{"core.crypto"}},
         {module_name: "core.crypto.uuid", dependencies: [String]{"core.crypto"}},
@@ -64,6 +64,7 @@ jet_ring_dependency_rows: fn() -> [JetRingDependencyRow] Never! {
         {module_name: "core.files", dependencies: [String]{"core.text", "core.sys"}},
         {module_name: "core.encoding.yaml", dependencies: [String]{"core.encoding", "core.encoding.json"}},
         {module_name: "core.files.path", dependencies: [String]{"core.files"}},
+        {module_name: "core.files.sealed", dependencies: [String]{"core.crypto", "core.crypto.random", "core.files", "core.tasks"}},
         {module_name: "core.http", dependencies: [String]{"core.net"}},
         {module_name: "core.http.client", dependencies: [String]{"core.http"}},
         {module_name: "core.http.server", dependencies: [String]{"core.http"}},
@@ -191,7 +192,6 @@ jet_ring_helper_layer: fn(module_name: String, helper: String) -> RuntimeLayer? 
         }
         "core.crypto" -> if helper == {
             "__nominal__" | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Digest256" | "Digest512" | "sha256" | "blake3" | "sha512" | "constant_time_equal_bytes" | "constant_time_equal" | "verify" | "sign" -> Val(RuntimeLayer.Core)
-            "file_seal" | "file_open" -> Val(RuntimeLayer.Std)
             else -> None
         }
         "core.archive" -> if helper == {
@@ -242,7 +242,6 @@ jet_ring_dependency_keys: fn(usage: String) -> [String] Never! {
     if helper.len() > 0 && module_name != "core" -> jet_ring_insert_string(dependencies, module_name)
     if usage == "core::json" -> jet_ring_insert_string(dependencies, "core.encoding.json")
     if usage == "core::bytes" -> jet_ring_insert_string(dependencies, "core.encoding")
-    if usage == "core.crypto::file_seal" || usage == "core.crypto::file_open" -> jet_ring_insert_string(dependencies, "core.files")
     if !jet_ring_is_namespace_only(module_name) {
         module_parts := module_name.split(".").to_list()
         if module_parts.len() > 1 {

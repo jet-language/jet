@@ -320,7 +320,7 @@ A Core module's API is the list of names it exports: the items this reference
 documents for it, recorded as its `module core.X exports { … }` row in
 `Compiler/Prelude/Core.rows`. Every other declaration in its source belongs to
 Core alone, including internal helpers and constants and handle types such as
-`core.db`'s `CachedStatement` or `core.crypto`'s `JetcFd`, whose fields are
+`core.db`'s `CachedStatement` or `core.files.sealed`'s `JetcFd`, whose fields are
 live engine or native handles. Code outside Core can't name them:
 `use core.db.[CachedStatement]` and a `db.CachedStatement{…}` literal through
 an alias are both **E0609**. A call to
@@ -1471,6 +1471,26 @@ rooted base, and a relative base rejects a path that climbs out with `..`. It
 is not symlink truth: a link inside `base` that points outside it still
 counts as within. Compare `canonicalize` results when links matter.
 
+### `core.files.sealed` — files sealed to recipients
+
+```jet
+use {
+    crypto: core.crypto
+    sealed: core.files.sealed
+}
+```
+
+| API | Result | Description |
+| --- | --- | --- |
+| `seal(recipients, source, destination)` / `open(identity, source, destination)` | `FileCryptoError!` (unit success) | Stream authenticated JETC v2 files in bounded 1 MiB chunks, with atomic no-overwrite publication; success has no Boolean payload. |
+| `migrate_v1(key, source, recipients, destination)` | `Bool FileCryptoError!` | Migrate a historical file to recipient JETC v2 after re-open verification; it takes a raw key, so a call outside `#Unsafe` is E0510. |
+
+`seal` and `open` take typed `Path` values at their checked boundary and use
+`FS` plus `Rand` where indicated. The record format is `core.crypto`'s chunk
+engine; this module owns the descriptors, the source snapshot checks, and the
+publication. Plaintext read or opened here sits in a buffer wiped when it
+closes.
+
 ### `core.net.url` — RFC 3986 URL values
 
 `core.net.url` parses, constructs, joins, normalizes, and renders the `URL`
@@ -1974,15 +1994,13 @@ run: fn() {
 | `x25519(secret, public)` / `x25519_shared(secret, public)` | `SharedSecret CryptoError!` | Perform typed X25519 agreement and reject invalid keys. |
 | `x25519_public(secret)` | `X25519PublicKey CryptoError!` | Derive the public key. |
 | `seal(recipients, bytes, aad)` / `open(identity, box, aad)` | `Sealed CryptoError!` / `[U8] CryptoError!` | Use the recipient envelope with internal key and nonce handling. |
-| `file_seal(recipients, source, destination)` / `file_open(identity, source, destination)` | `FileCryptoError!` (unit success) | Stream authenticated JETC v2 files in bounded 1 MiB chunks, with atomic no-overwrite publication; success has no Boolean payload. |
 | `sign(signing_key, bytes)` / `verify(verify_key, bytes, signature)` | `Signature CryptoError!` / `Bool CryptoError!` | Use nominal Ed25519 signing and verification. |
 | `wrap(secret, recipient)` / `unwrap(identity, wrapped)` | `WrappedKey CryptoError!` / `Secret CryptoError!` | Wrap a nominal Secret for an X25519 recipient. |
 | `password_hash(password)` / `password_verify(password, stored)` | `PasswordHash CryptoError!` / `Bool CryptoError!` | Hash and verify a nominal Secret with the Core password policy. |
 
 `Sealed`, `Signature`, `Digest256`, and `Digest512` expose byte projection
 methods where the declared API permits it; secret-bearing types must not be
-logged. `file_seal` and `file_open` take typed `Path` values at their checked
-boundary and use `FS` plus `Rand` where indicated.
+logged.
 `Secret` owns its configuration `Decode` implementation in Core source:
 only a text data-tree value is accepted, and its UTF-8 bytes become the secret.
 There is no corresponding `Encode` implementation. A user-defined type named
@@ -2032,7 +2050,6 @@ the safe `core.crypto` functions remain the default.
 | `aes256gcm_seal/open` | `[U8] CryptoError!` | Use explicit AES-256-GCM key, nonce, plaintext, and AAD bytes. |
 | `xchacha20poly1305_seal/open` | `[U8] CryptoError!` | Use explicit XChaCha20-Poly1305 key, nonce, plaintext, and AAD bytes. |
 | `open_v1(key, envelope)` | `[U8] CryptoError!` | Read a canonical historical JETC v1 envelope only from `#Unsafe`. |
-| `migrate_v1(key, source, recipients, destination)` | `Bool FileCryptoError!` | Migrate a historical file to recipient JETC v2 after re-open verification. |
 | `secret_bytes(secret)` / `shared_secret_bytes(secret)` | `[U8]` | Project raw bytes only at an audited boundary. |
 
 Raw callers own protocol selection, byte validation, and the `#Unsafe` audit;
@@ -6800,6 +6817,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.files`
 - `core.encoding.yaml`
 - `core.files.path`
+- `core.files.sealed`
 - `core.game`
 - `core.git`
 - `core.http`

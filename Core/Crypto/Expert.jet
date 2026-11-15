@@ -8,7 +8,7 @@
 // are Jet. The OS CSPRNG stays a host cell.
 use {
     core
-    core.crypto.[CryptoError, FileCryptoError, Secret, SharedSecret, Signature, SigningKey, X25519PublicKey, X25519SecretKey, constant_time_equal_bytes]
+    core.crypto.[CryptoError, Secret, SharedSecret, Signature, SigningKey, X25519PublicKey, X25519SecretKey, constant_time_equal_bytes]
     crypto: core.crypto
     ct: __core_crypto_ct
     u32_words.[push_u32le]
@@ -355,10 +355,6 @@ open_v1: fn(key: [U8], envelope: [U8]) -> [U8] CryptoError! {
     opened: open_v1_body(key, envelope[5], nonce, body)
     opened_bytes: opened ?? return Err(.OpenFailed)
     Ok(opened_bytes)
-}
-
-migrate_v1: fn(key: [U8], source: Path, recipients: [X25519PublicKey], destination: Path) -[FS, Rand]> Bool FileCryptoError! {
-    crypto.__migrate_v1(key, source, recipients, destination)
 }
 
 

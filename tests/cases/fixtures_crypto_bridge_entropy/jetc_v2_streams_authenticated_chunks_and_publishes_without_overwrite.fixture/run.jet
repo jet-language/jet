@@ -4,6 +4,7 @@ use {
     crypto: core.crypto
     expert: core.crypto.expert
     files: core.files
+    sealed: core.files.sealed
 }
 filled: fn(value: Int, count: Int) -> [U8] {
     out := [U8]{}
@@ -41,7 +42,7 @@ store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
     plain[1048576] = (U8{2})
     files.write_bytes("source.bin", plain) ?? panic("source")
     recipient: crypto.X25519SecretKey.new_random() ?? panic("recipient")
-    crypto.file_seal([recipient.public_key()], Path.from("source.bin"), Path.from("sealed.jetc")) ?? panic("seal")
+    sealed.seal([recipient.public_key()], Path.from("source.bin"), Path.from("sealed.jetc")) ?? panic("seal")
     encoded: files.read_bytes("sealed.jetc") ?? panic("encoded")
     assert_eq(cut(encoded, 0, 8), [U8]{74, 69, 84, 67, 2, 1, 1, 0})
     header_len: little(encoded, 8, 4)
@@ -54,18 +55,18 @@ store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
     final_at: 5 + 1048576 + 16
     assert_eq(little(body, final_at, 4), 17)
     assert_eq(body[final_at + 4], U8{1})
-    crypto.file_open(recipient, Path.from("sealed.jetc"), Path.from("restored.bin")) ?? panic("open")
+    sealed.open(recipient, Path.from("sealed.jetc"), Path.from("restored.bin")) ?? panic("open")
     assert_eq(files.read_bytes("restored.bin") ?? panic("restored"), plain)
     wrong: crypto.X25519SecretKey.new_random() ?? panic("wrong")
-    if crypto.file_open(wrong, Path.from("sealed.jetc"), Path.from("wrong.bin")) == {
+    if sealed.open(wrong, Path.from("sealed.jetc"), Path.from("wrong.bin")) == {
         .Ok(_) -> panic("wrong recipient opened")
         .Err(error) -> assert_eq(error, crypto.FileCryptoError.OpenFailed)
     }
     assert(!files.exists("wrong.bin"))
     files.write_bytes("restored.bin", "do not replace".bytes()) ?? panic("sentinel")
-    // Ratified DestinationExists, not drift PublishFailed: Core crypto.jet54-58,531-535.
-    if crypto.file_open(recipient, Path.from("sealed.jetc"), Path.from("restored.bin")) == {
-        .Ok(_) -> panic("file_open replaced an existing destination")
+    // Ratified DestinationExists, not drift PublishFailed: core.files.sealed's publication.
+    if sealed.open(recipient, Path.from("sealed.jetc"), Path.from("restored.bin")) == {
+        .Ok(_) -> panic("sealed.open replaced an existing destination")
         .Err(error) -> assert_eq(error, crypto.FileCryptoError.DestinationExists)
     }
     assert_eq(files.read_bytes("restored.bin") ?? panic("preserved"), "do not replace".bytes())

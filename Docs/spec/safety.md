@@ -4850,77 +4850,70 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 292,
+      "line": 266,
       "column": 5,
       "reason": "vault key import: validate a serialized wrapped carrier at the typed crypto boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 298,
+      "line": 272,
       "column": 5,
       "reason": "vault key import: expose the authenticated wrapped carrier, not plaintext key material"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 303,
+      "line": 277,
       "column": 5,
       "reason": "vault key import: construct the typed recipient unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 308,
+      "line": 282,
       "column": 5,
       "reason": "vault key import: construct the typed passphrase unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 652,
-      "column": 5,
-      "reason": "the expert API explicitly authorizes authenticated legacy-v1 migration"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Crypto/Crypto.jet",
-      "line": 1193,
+      "line": 790,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1220,
+      "line": 817,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1526,
+      "line": 1123,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1624,
+      "line": 1221,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1633,
+      "line": 1230,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1639,
+      "line": 1236,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
@@ -5420,6 +5413,13 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 753,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Files/Sealed.jet",
+      "line": 155,
+      "column": 5,
+      "reason": "the expert API explicitly authorizes authenticated legacy-v1 migration"
     },
     {
       "package": "Core",
@@ -6159,14 +6159,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Examples",
       "file": "Examples/Crypto/CryptoMigration.jet",
-      "line": 34,
+      "line": 35,
       "column": 5,
       "reason": "AES-256-GCM protocol interoperability"
     },
     {
       "package": "Examples",
       "file": "Examples/Crypto/CryptoSuite.jet",
-      "line": 39,
+      "line": 40,
       "column": 5,
       "reason": "known-answer check reads the RFC 7748 shared secret"
     },
@@ -7216,7 +7216,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "tests",
       "file": "tests/cases/fixtures_crypto_bridge_entropy/jetc_v1_migration_reseals_to_verified_v2_without_touching_source.fixture/run.jet",
-      "line": 23,
+      "line": 24,
       "column": 5,
       "reason": "crypto expert: the fixture seals a pinned JETC v1 envelope and migrates it"
     },
@@ -9518,13 +9518,6 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
-      "file": "tests/conformance/corpus/core/crypto/expert/migrate_v1.jet",
-      "line": 12,
-      "column": 5,
-      "reason": "fixed JETC v1 source failure"
-    },
-    {
-      "package": "tests",
       "file": "tests/conformance/corpus/core/crypto/expert/open_v1.jet",
       "line": 7,
       "column": 5,
@@ -9620,6 +9613,13 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 11,
       "column": 5,
       "reason": "inspect shared-secret length"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/files/sealed/migrate_v1.jet",
+      "line": 12,
+      "column": 5,
+      "reason": "fixed JETC v1 source failure"
     },
     {
       "package": "tests",
@@ -9883,14 +9883,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "tests",
       "file": "tests/fuzz/sema/differential/ex_crypto_crypto_migration.jet",
-      "line": 28,
+      "line": 29,
       "column": 5,
       "reason": "AES-256-GCM protocol interoperability"
     },
     {
       "package": "tests",
       "file": "tests/fuzz/sema/valid/ex_crypto_crypto_suite.jet",
-      "line": 38,
+      "line": 39,
       "column": 5,
       "reason": "known-answer check reads the RFC 7748 shared secret"
     },
@@ -11223,17 +11223,16 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 368:5 | "the case explicitly authorizes signalling its own spawned child" |
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 30:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
 | Core | Core/Auth/Auth.jet | 114:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
-| Core | Core/Crypto/Crypto.jet | 292:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
-| Core | Core/Crypto/Crypto.jet | 298:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
-| Core | Core/Crypto/Crypto.jet | 303:5 | "vault key import: construct the typed recipient unlock request" |
-| Core | Core/Crypto/Crypto.jet | 308:5 | "vault key import: construct the typed passphrase unlock request" |
-| Core | Core/Crypto/Crypto.jet | 652:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
-| Core | Core/Crypto/Crypto.jet | 1193:5 | "crypto expert: Argon2id password hashing" |
-| Core | Core/Crypto/Crypto.jet | 1220:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/Crypto/Crypto.jet | 1526:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/Crypto/Crypto.jet | 1624:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/Crypto/Crypto.jet | 1633:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/Crypto/Crypto.jet | 1639:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Crypto.jet | 266:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
+| Core | Core/Crypto/Crypto.jet | 272:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
+| Core | Core/Crypto/Crypto.jet | 277:5 | "vault key import: construct the typed recipient unlock request" |
+| Core | Core/Crypto/Crypto.jet | 282:5 | "vault key import: construct the typed passphrase unlock request" |
+| Core | Core/Crypto/Crypto.jet | 790:5 | "crypto expert: Argon2id password hashing" |
+| Core | Core/Crypto/Crypto.jet | 817:5 | "crypto expert: Argon2id password verification" |
+| Core | Core/Crypto/Crypto.jet | 1123:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 1221:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 1230:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 1236:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
 | Core | Core/Crypto/Expert.jet | 293:1 | "crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call" |
 | Core | Core/Crypto/Expert.jet | 332:1 | "crypto expert: the caller takes custody of the secret's raw bytes and wipes them" |
 | Core | Core/Crypto/Expert.jet | 334:1 | "crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them" |
@@ -11305,6 +11304,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Encoding/Yaml.jet | 457:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
 | Core | Core/Files/Files.jet | 685:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | Core | Core/Files/Files.jet | 753:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Files/Sealed.jet | 155:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
 | Core | Core/Http/Client.jet | 650:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 134:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 139:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
@@ -11410,8 +11410,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | Docs/proposals/jai-style-sample/Data.jet | 1886:5 | "inspect existing private Decode carriers only inside checked Core data source" |
 | Docs | Docs/spec/reference/syntax-surface.jet | 549:1 | "reads through a raw pointer; addr must be live and valid" |
 | Docs | Docs/spec/reference/syntax-surface.jet | 552:5 | "addr is the address of a live Int on this frame" |
-| Examples | Examples/Crypto/CryptoMigration.jet | 34:5 | "AES-256-GCM protocol interoperability" |
-| Examples | Examples/Crypto/CryptoSuite.jet | 39:5 | "known-answer check reads the RFC 7748 shared secret" |
+| Examples | Examples/Crypto/CryptoMigration.jet | 35:5 | "AES-256-GCM protocol interoperability" |
+| Examples | Examples/Crypto/CryptoSuite.jet | 40:5 | "known-answer check reads the RFC 7748 shared secret" |
 | Examples | Examples/Crypto/ExpertProjection.jet | 36:5 | "expert cryptography is an explicit opt-in" |
 | Examples | Examples/Crypto/RandomAPISplit.jet | 36:5 | "compare the typed and raw HKDF rungs" |
 | Examples | Examples/Crypto/VaultKeys.jet | 44:5 | "restore audited raw signing-key material" |
@@ -11561,7 +11561,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/fixtures_crypto_bridge_entropy/expert_surface_matches_reference_vectors_and_bounds.fixture/run.jet | 44:5 | "original expert interoperability vectors" |
 | tests | tests/cases/fixtures_crypto_bridge_entropy/expert_xchacha20poly1305_matches_cfrg_vector.fixture/run.jet | 39:5 | "original published known-answer vector" |
 | tests | tests/cases/fixtures_crypto_bridge_entropy/jetc_v1_expert_open_accepts_only_the_pinned_grammar.fixture/run.jet | 42:5 | "original pinned JETC v1 migration grammar" |
-| tests | tests/cases/fixtures_crypto_bridge_entropy/jetc_v1_migration_reseals_to_verified_v2_without_touching_source.fixture/run.jet | 23:5 | "crypto expert: the fixture seals a pinned JETC v1 envelope and migrates it" |
+| tests | tests/cases/fixtures_crypto_bridge_entropy/jetc_v1_migration_reseals_to_verified_v2_without_touching_source.fixture/run.jet | 24:5 | "crypto expert: the fixture seals a pinned JETC v1 envelope and migrates it" |
 | tests | tests/cases/fixtures_crypto_bridge_entropy/keygen_zeroizes_provider_copy_and_stack_seed.fixture/run.jet | 41:5 | "crypto expert: the test reads the generated seed to prove it is live and 32 bytes" |
 | tests | tests/cases/fixtures_crypto_bridge_entropy/prior_crypto_suite_still_uses_live_entropy.fixture/run.jet | 44:5 | "crypto expert: the test reads the generated seed length" |
 | tests | tests/cases/fixtures_crypto_bridge_entropy/typed_secret_wrap_sign_kdf_and_password_paths_preserve_roles.fixture/run.jet | 51:5 | "crypto expert: the test derives from the secret's raw bytes" |
@@ -11890,7 +11890,6 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/conformance/corpus/core/crypto/expert/ed25519_sign.jet | 6:5 | "fixed RFC 8032 Ed25519 vector" |
 | tests | tests/conformance/corpus/core/crypto/expert/ed25519_verify_strict.jet | 7:5 | "fixed RFC 8032 Ed25519 vector" |
 | tests | tests/conformance/corpus/core/crypto/expert/hkdf_sha256_raw.jet | 8:5 | "fixed RFC 5869 HKDF vector" |
-| tests | tests/conformance/corpus/core/crypto/expert/migrate_v1.jet | 12:5 | "fixed JETC v1 source failure" |
 | tests | tests/conformance/corpus/core/crypto/expert/open_v1.jet | 7:5 | "fixed JETC v1 AES vector" |
 | tests | tests/conformance/corpus/core/crypto/expert/secret_bytes.jet | 9:5 | "inspect fixed secret bytes" |
 | tests | tests/conformance/corpus/core/crypto/expert/shared_secret_bytes.jet | 11:5 | "inspect shared-secret length" |
@@ -11905,6 +11904,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/conformance/corpus/core/crypto/vault/prepare_import_signing.jet | 5:5 | "restore a fixed signing-key vector" |
 | tests | tests/conformance/corpus/core/crypto/vault/prepare_import_x25519.jet | 5:5 | "restore a fixed X25519 secret vector" |
 | tests | tests/conformance/corpus/core/crypto/x25519.jet | 11:5 | "inspect shared-secret length" |
+| tests | tests/conformance/corpus/core/files/sealed/migrate_v1.jet | 12:5 | "fixed JETC v1 source failure" |
 | tests | tests/conformance/corpus/core/mem/volatile_read.jet | 6:5 | "value is live on this stack frame and the pointer never escapes" |
 | tests | tests/conformance/corpus/core/mem/volatile_write.jet | 6:5 | "value is live on this stack frame and the pointer never escapes" |
 | tests | tests/conformance/corpus/core/sys/atexit.jet | 5:5 | "the exit callback has no captured state" |
@@ -11942,8 +11942,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/fixtures/native_inline_c_shared_state.jet | 13:1 | "reads the counter defined by fixture_bump" |
 | tests | tests/fixtures/native_inline_c_shared_state.jet | 25:5 | "the counter is private to these two bodies" |
 | tests | tests/fixtures/unsafe_obligations/run.jet | 5:5 | "local pointer" |
-| tests | tests/fuzz/sema/differential/ex_crypto_crypto_migration.jet | 28:5 | "AES-256-GCM protocol interoperability" |
-| tests | tests/fuzz/sema/valid/ex_crypto_crypto_suite.jet | 38:5 | "known-answer check reads the RFC 7748 shared secret" |
+| tests | tests/fuzz/sema/differential/ex_crypto_crypto_migration.jet | 29:5 | "AES-256-GCM protocol interoperability" |
+| tests | tests/fuzz/sema/valid/ex_crypto_crypto_suite.jet | 39:5 | "known-answer check reads the RFC 7748 shared secret" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet | 8:5 | "`cell` is live on this stack frame and the pointer never escapes" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet | 22:5 | "`cell` is a live Int on this stack frame; the pointer never escapes" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
@@ -12079,8 +12079,8 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file": "Core/Crypto/Jetc.jet", "function": "seal_wrap", "proof": "Copies the derived wrap nonce and the file key through expert.secret_bytes, passes them to seal_key, and zeroizes both copies on Ok and Err (:157-171); the Secret owners keep their Close duty. Its only caller writer (:301) runs it once per recipient with a key and nonce from derive_key over a fresh ephemeral X25519 key (:270-273) and that recipient's public key, so each derived key seals exactly one message under one nonce. A wrong nonce width is refused by expert (expert.jet:274; test :257)."},
   {"file": "Core/Crypto/Jetc.jet", "function": "open_wrap", "proof": "Copies the derived wrap nonce through expert.secret_bytes, passes it to open_key (authenticated open), and zeroizes the copy on both outcomes (:175-187). Its only caller reader (:374) supplies the stanza bytes after the header-shape checks (:340-346); the opened file key is wrapped in a Secret and must be exactly 32 bytes (:376)."},
   {"file": "Core/Crypto/Jetc.jet", "function": "secret_length", "proof": "The gate (:233-238) copies the Secret through expert.secret_bytes, reads only its length, and zeroizes the copy before returning that Int; no byte of the secret leaves the function and the original owner keeps its Close (#Test :241-246). Callers are writer (:269) and reader (:376) width checks."},
-  {"file": "Core/Crypto/Jetc.jet", "function": "writer", "proof": "The gate (:271-273) copies the ephemeral Secret through expert.secret_bytes straight into X25519SecretKey.from_bytes, which takes the copy and accepts exactly 32 bytes (crypto.jet:244-247); :269 already checked that width, so the refusal path is unreachable. The copy then lives only in the zeroizing X25519SecretKey (Close wipes, crypto.jet:254-258) and the moved ephemeral Secret keeps its own Close. Only the derived public key (:274) and per-recipient wraps leave; the coordinator draws the four inputs fresh for each container (crypto.jet:913-919)."},
-  {"file": "Core/Crypto/Crypto.jet", "function": "__migrate_v1", "proof": "Reachable only from expert.migrate_v1 (expert.jet:624, the sole caller), which the checker restricts to an importing core.crypto.expert caller inside #Unsafe (CheckerCoreLib/core_call.rs:2553-2577). The legacy buffer is bounded (≤1 GiB + 34, :666-675); the plaintext is a Secret only after authentication (:676-680); the staged v2 output is verified (:919-929) before publication."},
+  {"file": "Core/Crypto/Jetc.jet", "function": "writer", "proof": "The gate (:271-273) copies the ephemeral Secret through expert.secret_bytes straight into X25519SecretKey.from_bytes, which takes the copy and accepts exactly 32 bytes (crypto.jet:244-247); :269 already checked that width, so the refusal path is unreachable. The copy then lives only in the zeroizing X25519SecretKey (Close wipes, crypto.jet:254-258) and the moved ephemeral Secret keeps its own Close. Only the derived public key (:274) and per-recipient wraps leave; the coordinator draws the four inputs fresh for each container (Core/Files/Sealed.jet:372-375)."},
+  {"file": "Core/Files/Sealed.jet", "function": "migrate_v1", "proof": "The checker refuses a migrate_v1 call outside #Unsafe with E0510 (JetSema Sema/Calls/Core.jet:209-214), so every caller audits the raw key. The legacy buffer is bounded (≤1 GiB + 34, :144-150); expert.open_v1 authenticates before any plaintext exists (:155-157), and that plaintext sits in a JetcBytes buffer wiped at close; the staged v2 output is re-opened and verified (:402, :429-451) before publication."},
   {"file": "Core/Crypto/Crypto.jet", "function": "__vault_wrapped_from_bytes", "proof": "The gate (:314-317) forwards the moved bytes to vault.__wrapped_from_bytes (vault.jet:182-186), which returns a WrappedVaultKey only after wrapped_metadata (vault.jet:487-) bounds the blob to 16..8192 bytes and checks the JVKW magic and header fields; failures become KeyWrapError. The carrier holds the wrapped (encrypted) container, never plaintext key material. The `__` name is reserved (E0067 outside Core), so users reach it only as the typed constructor WrappedVaultKey.from_bytes (BuiltinStatics.jet:145, 148)."},
   {"file": "Core/Crypto/Crypto.jet", "function": "__vault_wrapped_bytes", "proof": "vault.__wrapped_bytes (vault.jet:187) returns an owned copy of the carrier's `encoded` field: the same authenticated wrapped container that WrappedVaultKey.from_bytes validated or the vault export produced. No unwrapped key or Secret is read, and the carrier stays intact. The `__` name is reserved (E0067 outside Core), so only Core and compiler lowering call it."},
   {"file": "Core/Crypto/Crypto.jet", "function": "__vault_unlock_recipient", "proof": "vault.__key_unlock_recipient (vault.jet:203-205) builds KeyUnlock{kind: 1, secret: identity.bytes[0..<len]}: a read View of the caller's X25519SecretKey bytes, not a copy, so no second copy of the identity exists and the owner keeps its zeroizing Close. The gate performs no raw memory operation; the view's lifetime is ordinary type checking of the view-carrying KeyUnlock (vault.jet:198-201; emitted as the borrowing JetVaultKeyUnlock<'_>, Emit/Types.jet:3201). Its consumer is vault.prepare_import_wrapped (vault.jet:275). Users reach it only as KeyUnlock.Recipient(identity) (BuiltinStatics.jet:146, 149)."},

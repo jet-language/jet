@@ -3,7 +3,7 @@
 // Bech32m text, and `from_text` reads that text back to the same key.
 // The RFC 7748 example private key keeps the printed key stable; a real
 // recipient makes its key with `X25519SecretKey.new_random()` and keeps it.
-// file_seal draws a fresh file key and nonce prefix for every container, so
+// `sealed.seal` draws a fresh file key and nonce prefix for every container, so
 // two seals of one file differ.
 package: {
     name: "crypto_file_seal_jetc"
@@ -13,6 +13,7 @@ package: {
 use {
     crypto: core.crypto
     files: core.files
+    sealed: core.files.sealed
 }
 
 run: fn() {
@@ -29,27 +30,27 @@ run: fn() {
 
     dir: files.temp_dir("jet-file-seal") ?? panic("temp dir")
     source: Path.from("{dir.path}/plain.bin")
-    sealed: Path.from("{dir.path}/plain.bin.jetc")
+    envelope: Path.from("{dir.path}/plain.bin.jetc")
     again: Path.from("{dir.path}/again.bin.jetc")
     opened: Path.from("{dir.path}/opened.bin")
     plain := [U8]{}
     loop i in 0..<(2 * 1048576 + 4321) -> plain.push(U8{i %% 251})
     files.write_bytes(source, plain) ?? panic("write source")
 
-    crypto.file_seal([back], source: source, destination: sealed) ?? panic("seal")
-    container: files.read_bytes(sealed) ?? panic("read container")
+    sealed.seal([back], source: source, destination: envelope) ?? panic("seal")
+    container: files.read_bytes(envelope) ?? panic("read container")
     print("plaintext bytes: {plain.len()}")
     print("container bytes: {container.len()}")
     print("magic: {String.from_bytes(container[0..<4]) ?? "?"} v{container[4]}")
     print("records: {plain.len() /% 1048576 + 1}")
 
-    crypto.file_seal([back], source: source, destination: again) ?? panic("second seal")
+    sealed.seal([back], source: source, destination: again) ?? panic("second seal")
     print("two seals differ: {(files.read_bytes(again) ?? panic("read again")) != container}")
 
-    crypto.file_open(identity, source: sealed, destination: opened) ?? panic("open")
+    sealed.open(identity, source: envelope, destination: opened) ?? panic("open")
     print("opened equals plaintext: {(files.read_bytes(opened) ?? panic("read opened")) == plain}")
 
-    if crypto.file_open(identity, source: sealed, destination: opened) == {
+    if sealed.open(identity, source: envelope, destination: opened) == {
         .Ok(_) -> print("open over an existing file: accepted")
         .Err(error) -> print("open over an existing file: {error}")
     }

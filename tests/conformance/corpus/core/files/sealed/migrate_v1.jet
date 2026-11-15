@@ -1,7 +1,7 @@
-// core-conformance: core.crypto.expert.migrate_v1
+// core-conformance: core.files.sealed.migrate_v1
 use {
     crypto: core.crypto
-    expert: core.crypto.expert
+    api: core.files.sealed
 }
 
 run: fn() -[IO]> {
@@ -10,7 +10,7 @@ run: fn() -[IO]> {
     source: Path.from("/dev/null")
     destination: Path.from("/dev/null/jet-core-conformance-migrated.jetc")
     #Unsafe("fixed JETC v1 source failure") {
-        print(if expert.migrate_v1(key, source, [recipient], destination) == {
+        print(if api.migrate_v1(key, source, [recipient], destination) == {
             .Ok(_) -> false
             .Err(_) -> true
         })

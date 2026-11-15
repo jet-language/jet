@@ -3066,8 +3066,8 @@ or any other error is reported instead, and the call's own failure
 propagation is not reported beside its E2702. A value only known at run time
 still reaches the operation's own check.
 
-`crypto.file_seal(recipients, source, destination)` and
-`crypto.file_open(identity, source, destination)` have unit success and the
+`sealed.seal(recipients, source, destination)` and
+`sealed.open(identity, source, destination)` (`core.files.sealed`) have unit success and the
 explicit `FileCryptoError!` contract. The identity is read-borrowed rather than
 moved. Both use the recipient-based JETC v2 envelope. The fixed prefix is `JETC`,
 version 2, kind 1, suite 1, flags 0,

@@ -1,7 +1,10 @@
-use crypto: core.crypto
+use {
+    crypto: core.crypto
+    sealed: core.files.sealed
+}
 
 old_seal: fn(recipients: [crypto.X25519PublicKey], source: Path, destination: Path) -[FS, Rand]> Bool crypto.FileCryptoError! {
-    return crypto.file_seal(recipients, source, destination)
+    return sealed.seal(recipients, source, destination)
 }
 
 run: fn() { }

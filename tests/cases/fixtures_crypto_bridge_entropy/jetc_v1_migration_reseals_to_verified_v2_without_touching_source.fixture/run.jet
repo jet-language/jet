@@ -2,6 +2,7 @@ use {
     crypto: core.crypto
     expert: core.crypto.expert
     files: core.files
+    sealed: core.files.sealed
 }
 
 // tests/fixtures/crypto_bridge_entropy.rs:661-760. Known failing.
@@ -33,29 +34,29 @@ use {
             migrated: "migrated-{algorithm}.jetc"
             restored: "restored-{algorithm}.bin"
             original: files.read_bytes(source) ?? panic("v1 bytes")
-            expert.migrate_v1(key, Path.from(source), recipients, Path.from(migrated)) ?? panic("migrate")
+            sealed.migrate_v1(key, Path.from(source), recipients, Path.from(migrated)) ?? panic("migrate")
             assert_eq(files.read_bytes(source) ?? panic("source"), original)
             encoded: files.read_bytes(migrated) ?? panic("migrated")
             assert_eq(encoded[0..<8], [U8]{74, 69, 84, 67, 2, 1, 1, 0})
-            crypto.file_open(recipient, Path.from(migrated), Path.from(restored)) ?? panic("open")
+            sealed.open(recipient, Path.from(migrated), Path.from(restored)) ?? panic("open")
             assert_eq(files.read_bytes(restored) ?? panic("restored"), plaintext)
         }
         original: files.read_bytes("source-1.jetc") ?? panic("original")
         files.write_bytes("existing.jetc", "keep".bytes()) ?? panic("existing")
-        if expert.migrate_v1(key, Path.from("source-1.jetc"), recipients, Path.from("existing.jetc")) == {
+        if sealed.migrate_v1(key, Path.from("source-1.jetc"), recipients, Path.from("existing.jetc")) == {
             .Ok(_) -> panic("migration overwrote an existing destination")
             .Err(error) -> assert_eq(error, crypto.FileCryptoError.DestinationExists)
         }
         assert_eq(files.read_bytes("existing.jetc") ?? panic("existing"), "keep".bytes())
         assert_eq(files.read_bytes("source-1.jetc") ?? panic("source"), original)
-        if expert.migrate_v1(key, Path.from("source-1.jetc"), recipients, Path.from("source-1.jetc")) == {
+        if sealed.migrate_v1(key, Path.from("source-1.jetc"), recipients, Path.from("source-1.jetc")) == {
             .Ok(_) -> panic("migration overwrote its source")
             .Err(error) -> assert_eq(error, crypto.FileCryptoError.DestinationExists)
         }
         assert_eq(files.read_bytes("source-1.jetc") ?? panic("source"), original)
         wrong := [U8]{}
         loop _ in 0..<32 -> wrong.push(U8{9})
-        if expert.migrate_v1(wrong, Path.from("source-1.jetc"), recipients, Path.from("wrong-key.jetc")) == {
+        if sealed.migrate_v1(wrong, Path.from("source-1.jetc"), recipients, Path.from("wrong-key.jetc")) == {
             .Ok(_) -> panic("migration opened with the wrong key")
             .Err(error) -> assert_eq(error, crypto.FileCryptoError.OpenFailed)
         }
@@ -65,7 +66,7 @@ use {
         hostile.push(U8{1})
         loop b in "bad".bytes() -> hostile.push(b)
         files.write_bytes("hostile.jetc", hostile) ?? panic("hostile")
-        if expert.migrate_v1(key, Path.from("hostile.jetc"), recipients, Path.from("absent.jetc")) == {
+        if sealed.migrate_v1(key, Path.from("hostile.jetc"), recipients, Path.from("absent.jetc")) == {
             .Ok(_) -> panic("migration accepted a hostile envelope")
             .Err(error) -> assert_eq(error, crypto.FileCryptoError.OpenFailed)
         }

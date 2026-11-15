@@ -337,8 +337,9 @@ core.crypto password_hash_with_salt String,[u8] Result<String,String>
 core.crypto password_verify Secret,PasswordHash Result<Bool,CryptoError>
 core.crypto seal [X25519PublicKey],[u8],[u8] Result<Sealed,CryptoError>
 core.crypto open X25519SecretKey,Sealed,[u8] Result<[u8],CryptoError>
-core.crypto file_seal [X25519PublicKey],Path,Path Result<Unit,FileCryptoError>
-core.crypto file_open X25519SecretKey,Path,Path Result<Unit,FileCryptoError>
+core.files.sealed seal [X25519PublicKey],Path,Path Result<Unit,FileCryptoError>
+core.files.sealed open X25519SecretKey,Path,Path Result<Unit,FileCryptoError>
+core.files.sealed migrate_v1 [u8],Path,[X25519PublicKey],Path Result<Unit,FileCryptoError>
 core.crypto sign SigningKey,[u8] Result<Signature,CryptoError>
 core.crypto verify VerifyKey,[u8],Signature Result<Bool,CryptoError>
 core.crypto wrap Secret,X25519PublicKey Result<WrappedKey,CryptoError>
@@ -349,7 +350,6 @@ core.crypto blake3 [u8] Digest256
 core.crypto sha512 [u8] Digest512
 core.crypto.expert xchacha20poly1305_seal|aes256gcm_seal|xchacha20poly1305_open|aes256gcm_open [u8],[u8],[u8],[u8] Result<[u8],CryptoError>
 core.crypto.expert open_v1 [u8],[u8] Result<[u8],CryptoError>
-core.crypto.expert migrate_v1 [u8],Path,[X25519PublicKey],Path Result<Unit,FileCryptoError>
 core.crypto.expert ed25519_sign [u8],[u8] Result<Signature,CryptoError>
 core.crypto.expert ed25519_verify_strict [u8],[u8],[u8] Result<Bool,CryptoError>
 core.crypto.expert x25519_raw [u8],[u8] Result<Secret,CryptoError>

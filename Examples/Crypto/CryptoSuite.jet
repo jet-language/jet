@@ -9,6 +9,7 @@ use {
     crypto: core.crypto
     core.crypto.expert
     fs: core.files
+    core.files.sealed
 }
 
 run: fn() {
@@ -49,21 +50,21 @@ run: fn() {
     print(crypto.constant_time_equal_bytes([1, 2, 3], [1, 2, 3]))
     print(crypto.constant_time_equal_bytes([1, 2, 3], [1, 2, 4]))
     source_text: "/tmp/jet_crypto_suite_source"
-    sealed_text: "/tmp/jet_crypto_suite_sealed"
+    envelope_text: "/tmp/jet_crypto_suite_sealed"
     opened_text: "/tmp/jet_crypto_suite_opened"
     if fs.exists(source_text) -> fs.remove(source_text)
-    if fs.exists(sealed_text) -> fs.remove(sealed_text)
+    if fs.exists(envelope_text) -> fs.remove(envelope_text)
     if fs.exists(opened_text) -> fs.remove(opened_text)
     source: Path.from(source_text)
-    sealed: Path.from(sealed_text)
+    envelope: Path.from(envelope_text)
     opened: Path.from(opened_text)
     source.write_atomic(abc)
     file_recipient: crypto.X25519SecretKey.new_random() ?? return
-    crypto.file_seal([file_recipient.public_key()], source: source, destination: sealed) ?? return
-    crypto.file_open(file_recipient, source: sealed, destination: opened) ?? return
+    sealed.seal([file_recipient.public_key()], source: source, destination: envelope) ?? return
+    sealed.open(file_recipient, source: envelope, destination: opened) ?? return
     opened_bytes: fs.read(opened_text)
     print(opened_bytes == "abc")
     fs.remove(source_text)
-    fs.remove(sealed_text)
+    fs.remove(envelope_text)
     fs.remove(opened_text)
 }

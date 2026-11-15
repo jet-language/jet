@@ -4,6 +4,7 @@ use {
     crypto: core.crypto
     expert: core.crypto.expert
     files: core.files
+    sealed: core.files.sealed
 }
 filled: fn(value: Int, count: Int) -> [U8] {
     out := [U8]{}
@@ -38,7 +39,7 @@ store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
 #Test("jetc_v2_rejects_tamper_truncation_append_and_cancellation_without_output") {
     files.write_bytes("source.bin", "authenticated file".bytes()) ?? panic("source")
     recipient: crypto.X25519SecretKey.new_random() ?? panic("recipient")
-    crypto.file_seal([recipient.public_key()], Path.from("source.bin"), Path.from("sealed.jetc")) ?? panic("seal")
+    sealed.seal([recipient.public_key()], Path.from("source.bin"), Path.from("sealed.jetc")) ?? panic("seal")
     canonical: files.read_bytes("sealed.jetc") ?? panic("canonical")
     body_at: 20 + little(canonical, 8, 4)
     loop mode in 0..<17 {
@@ -66,7 +67,7 @@ store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
         input: "hostile-{mode}.jetc"
         output: "hostile-{mode}.out"
         files.write_bytes(input, hostile) ?? panic("hostile")
-        if crypto.file_open(recipient, Path.from(input), Path.from(output)) == {
+        if sealed.open(recipient, Path.from(input), Path.from(output)) == {
             .Ok(_) -> panic("hostile envelope opened")
             .Err(error) -> assert_eq(error, crypto.FileCryptoError.OpenFailed)
         }

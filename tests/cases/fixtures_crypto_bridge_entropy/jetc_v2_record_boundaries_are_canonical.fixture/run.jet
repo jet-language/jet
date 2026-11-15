@@ -2,6 +2,7 @@ use {
     crypto: core.crypto
     expert: core.crypto.expert
     files: core.files
+    sealed: core.files.sealed
 }
 
 // tests/fixtures/crypto_bridge_entropy.rs:862-912. Known failing.
@@ -32,7 +33,7 @@ plain_length: fn(body: Int) -> Int? {
         plaintext := [U8]{}
         loop index in 0..<size -> plaintext.push((U8{index % 251}))
         files.write_bytes(source, plaintext) ?? panic("source")
-        crypto.file_seal([public], Path.from(source), Path.from(envelope)) ?? panic("seal")
+        sealed.seal([public], Path.from(source), Path.from(envelope)) ?? panic("seal")
         encoded: files.read_bytes(envelope) ?? panic("encoded")
         header_length: little(encoded, 8, 4)
         body_length: little(encoded, 12, 8)
@@ -54,7 +55,7 @@ plain_length: fn(body: Int) -> Int? {
             expected.push(Record{length: size - 1048576, flags: 1})
         }
         assert_eq(records, expected)
-        crypto.file_open(recipient, Path.from(envelope), Path.from(restored)) ?? panic("open")
+        sealed.open(recipient, Path.from(envelope), Path.from(restored)) ?? panic("open")
         assert_eq(files.read_bytes(restored) ?? panic("restored"), plaintext)
         assert_eq(files.read_bytes(source) ?? panic("preserved"), plaintext)
     }
