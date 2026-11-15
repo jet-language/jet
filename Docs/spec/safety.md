@@ -237,7 +237,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1410,
+  "total": 1411,
   "counts": {
     "Compiler": 646,
     "Core": 178,
@@ -245,7 +245,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     "Examples": 42,
     "Jetpack": 8,
     "Tools": 11,
-    "tests": 515
+    "tests": 516
   },
   "regions": [
     {
@@ -7544,6 +7544,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/aliased.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "a second release through a copy of the pointer, which the ownership check cannot see, so the runtime stops it"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/kept.jet",
       "line": 4,
       "column": 5,
@@ -10132,8 +10139,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 11 |
-| tests | 515 |
-| **total** | **1410** |
+| tests | 516 |
+| **total** | **1411** |
 
 ### Regions
 
@@ -11181,6 +11188,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/unsafe_and_runtime/fixtures/volatile_write_emit_is_byte_exact/main.jet | 2:1 | "UART TX register is mapped by the target machine" |
 | tests | tests/cases/unsafe_and_runtime/hardened_profile_stops_an_out_of_bounds_raw_access_at_every_level.fixture/read/read.jet | 6:5 | "reads the one Int the arena allocated" |
 | tests | tests/cases/unsafe_and_runtime/hardened_profile_stops_an_out_of_bounds_raw_access_at_every_level.fixture/write/write.jet | 6:5 | "writes the one Int the arena allocated" |
+| tests | tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/aliased.jet | 4:5 | "a second release through a copy of the pointer, which the ownership check cannot see, so the runtime stops it" |
 | tests | tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/kept.jet | 4:5 | "a copy of the pointer is read after its block is released, so the sentry stops the read" |
 | tests | tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/main.jet | 4:5 | "each block is used only through pointers derived from it, and released once" |
 | tests | tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/twice.jet | 4:5 | "the second release is refused before the program runs" |
