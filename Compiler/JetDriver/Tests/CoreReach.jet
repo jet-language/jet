@@ -346,6 +346,19 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     assert_eq(looked.program.items.len(), 1)
 }
 
+#Test("a Core unit follows its import once a reached marker spells the import's library part") {
+    owner: "use {{\n    table: __core_devtools_table\n}}\n\n#Table.Probe marked: fn() -> Int Never! {{ 1 }}\n"
+    parsed := jet_driver_parse_one(JetDriverParseJob.Core{text: owner, module_name: "core.devtools", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
+    words := parsed.words.move() ?? panic("a Core unit has words")
+    reach := jet_driver_reach(true)
+    unit: jet_driver_reach_admit(reach, 0, "core.devtools", words.move(), parsed.parsed.program.imports, false)
+    scoped := [JetDriverScopedImport]{}
+    jet_driver_scoped_imports(parsed.parsed.program.imports, parsed.parsed.program.items, "", true, scoped)
+    loop row in scoped -> jet_driver_reach_defer(reach, unit, row)
+    jet_driver_reach_drain(reach)
+    assert(jet_driver_reach_wants(reach, 0), "the marker `#Table.Probe` wants the import `table`")
+}
+
 // `eprint` is a source route of core.term and `progress` one of its
 // registry members: both stay, though the program never names them.
 #Test("a Core module that isn't routed leaves each unreached function, but its `__` names and what the compiler calls by name stay") {

@@ -3,7 +3,8 @@
 // of the same module spells the name bare, any reached Core code spells it
 // after a `.`, or any user source spells it at all. A Core module's private
 // import (`collation_table: __core_text_collation_table`) is followed only
-// once reached code spells its alias as a path head (`collation_table.X`), so
+// once reached code spells its alias as a path head (`collation_table.X`), or
+// as the library part of a qualified marker (`#Builtin.Role` for `builtin`), so
 // a program that never reaches collation or segmentation never reads, lexes
 // or parses their tables. Runtime units (`core.text.runtime.…`) follow the
 // same rule, so a program that only measures UTF-8 never loads the case
@@ -43,7 +44,7 @@
 // (jet_driver_reach_hold), so load time and memory follow reach, not the
 // size of the library.
 use {
-    jet_foundation.[BUILTIN_METHOD_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameRows, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_intern, name_intern_bytes, name_rows, name_rows_get_text, name_rows_set, name_table, name_text, owned_trait, owned_trait_codec]
+    jet_foundation.[BUILTIN_METHOD_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameRows, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_intern, name_intern_bytes, name_rows, name_rows_get_text, name_rows_set, name_table, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
     jet_ir.[IR_CORE_INTRINSICS, ir_core_lowered_by_name, ir_precise_source_family_owner]
     jet_lexer.[
         Lexed,
@@ -857,13 +858,21 @@ jet_driver_spell_span: fn(source: [U8], start: Int, end: Int, spellings: &JetDri
 }
 
 // Appends `word`, spelled at `source[start..<end]`, with its kind: bit 0 when
-// a `.` comes right before it, bit 1 when one comes right after it.
+// a `.` comes right before it, bit 1 when one comes right after it. A
+// qualified marker's library part (`Builtin` in `#Builtin.Role`) is also a
+// path head spelled with its `#`, the word a deferred import's marker
+// spelling waits for (JetDriverReachEdge.marker).
 jet_driver_spell_push: fn(source: [U8], start: Int, end: Int, word: Int, spellings: &JetDriverSpellings) Never! {
     kind := 0
     if start > 0 && source[start - 1] == (U8{46}) -> kind = 1
     if end < source.len() && source[end] == (U8{46}) -> kind += 2
     spellings.starts.push(start)
     spellings.keys.push(word * 4 + kind)
+    if kind == 2 && start > 0 && source[start - 1] == (U8{35}) {
+        marker: Int{name_intern_bytes(spellings.table, source, start - 1, end).id}
+        spellings.starts.push(start)
+        spellings.keys.push(marker * 4 + kind)
+    }
 }
 
 // The positions of `spans` by start, by insertion: spans come nearly in
@@ -1014,11 +1023,14 @@ JetDriverReachUnit: struct {
     heads: [Int:Bool]
 }
 
-// A private import a Core module defers until its alias is a reached head.
+// A private import a Core module defers until its alias is a reached head:
+// `alias`, or `marker`, the alias as a qualified marker's library part
+// spells it after its `#` (`#Builtin` for `builtin`; jet_driver_spell_push).
 JetDriverReachEdge: struct {
     unit: Int
     scoped: JetDriverScopedImport
     alias: Int
+    marker: Int
     followed: Bool
 }
 
@@ -1209,14 +1221,16 @@ jet_driver_reach_open: fn(reach: &JetDriverReach, module_name: String) {
 // Defers `scoped`, an import of the module at `unit`.
 jet_driver_reach_defer: fn(reach: &JetDriverReach, unit: Int, scoped: JetDriverScopedImport) {
     alias: Int{name_intern(reach.names, scoped.declaration.alias).id}
-    reach.edges.push(JetDriverReachEdge{unit: unit, scoped: scoped, alias: alias, followed: false})
+    marker: Int{name_intern(reach.names, "#{sema_casing_marker_qualifier(scoped.declaration.alias)}").id}
+    reach.edges.push(JetDriverReachEdge{unit: unit, scoped: scoped, alias: alias, marker: marker, followed: false})
 }
 
 // Whether reached code of the deferring module now spells the edge's alias as
-// a path head.
+// a path head, or as a marker's library part.
 jet_driver_reach_wants: fn(reach: JetDriverReach, edge: Int) -> Bool Never! {
     if reach.edges[edge].followed -> return false
-    reach.units[reach.edges[edge].unit].heads.get(reach.edges[edge].alias) != None
+    unit: reach.edges[edge].unit
+    reach.units[unit].heads.get(reach.edges[edge].alias) != None || reach.units[unit].heads.get(reach.edges[edge].marker) != None
 }
 
 // Defers what the source of the Core module at `unit` demands
@@ -1655,6 +1669,8 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
         any = true
         loop dead[edge.unit].len() <= edge.alias -> dead[edge.unit].push(false)
         dead[edge.unit][edge.alias] = true
+        loop dead[edge.unit].len() <= edge.marker -> dead[edge.unit].push(false)
+        dead[edge.unit][edge.marker] = true
         dead_imports[edge.unit].push(edge.scoped.declaration.span)
     }
     loop demand in reach.demands {
