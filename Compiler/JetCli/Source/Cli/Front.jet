@@ -1399,6 +1399,10 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
         }
         written.push(BuildOptionChoice{name: "os", value: "web", layer: BuildOptionLayer.Flag, written: written_as.move(), site: "", pinned: false})
     }
+    // The partition report is a web build's: a native build has none to show.
+    if command == "build" && !web && !flags.any(fn(flag) { flag.name == "os" && flag.value == "web" }) && jet_cli_flag_before_separator(jet_argv, "--explain-partition") {
+        return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`--explain-partition` requires `--target=web`", jet_cli_why("E2104"), "add `--target=web`, or drop `--explain-partition`", color, JET_DRIVER_EXIT_USAGE)}
+    }
     if build_options_resolve(command, profile, written) == {
         .Refused(code, what, fix) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)}
         .Resolved(options, notes) -> {
