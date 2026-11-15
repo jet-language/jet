@@ -504,6 +504,7 @@ source:
     pop r10
     mov r8d, ebx
     xor r9d, r9d
+    # Raw mmap: a relocation-free dying-path blob cannot call the map primitive.
     push 9                      # mmap(0, size, PROT_READ, MAP_PRIVATE, fd, 0)
     pop rax
     syscall

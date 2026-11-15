@@ -176,6 +176,16 @@ os_unmap_untracked_i64: fn(address: I64, size: I64) -> I64 {
     }
 }
 
+// The kernel's one mremap(2) call, untracked as os_map_untracked_i64 is: the
+// mapping of `old_size` bytes at `address` resized to `new_size`, moved when
+// `flags` holds MREMAP_MAYMOVE (1). The heap's large blocks grow this way;
+// the heap registers each block it hands out. The new address, or -errno.
+os_remap_untracked_i64: fn(address: I64, old_size: I64, new_size: I64, flags: I64) -> I64 {
+    #Unsafe("the caller owns the mapping and keeps no pointer into it past this call but the result") {
+        return os_syscall_i64(I64{25}, address, old_size, new_size, flags, I64{0}, I64{0})
+    }
+}
+
 #[Unsafe("stores one word at an address the caller owns and has mapped writable"), FFI(asm)]
 os_store_word: fn(address: Int, value: Int) {
     """

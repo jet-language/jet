@@ -1508,7 +1508,7 @@ alloc_grow_large: fn(pointer: I64, size: I64, grown: I64) -> I64 {
         if (needed <= bytes) { return pointer }
         class: alloc_large_class(needed)
         target: if (class < I64{0}) -> needed else -> wrapping(alloc_large_class_pages(class) * I64{4096})
-        moved: os_syscall_i64(I64{25}, mapping, bytes, target, I64{1}, I64{0}, I64{0})
+        moved: os_remap_untracked_i64(mapping, bytes, target, I64{1})
         if (moved < I64{0}) { return I64{0} }
         result: wrapping(moved + offset)
         os_store_i64(wrapping(result - I64{16}), moved)
