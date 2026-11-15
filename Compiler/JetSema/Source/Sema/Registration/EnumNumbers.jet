@@ -5,7 +5,9 @@
 // same source:
 //   `mode.to_int() -> Int`             the case's number
 //   `Mode.from_int(value: Int) -> Mode Err!`      the case with that number,
-//                                     or an error naming the number
+//                                     an error saying the backing can't hold
+//                                     the number, or an error naming a number
+//                                     the backing holds but no case has
 // A case payload (E1120), a number outside the backing type (E1121) and a
 // number two cases share (E1122) are refused; a case number is an integer
 // literal (E0035), so the checks see every number.
@@ -42,7 +44,7 @@ sema_enum_numbers_expand: fn(items: &[Item], diagnostics: &[Diagnostic]) {
             sema_enum_numbers_check_specified(definition, diagnostics)
             backing: jet_target_layout_enum_backing(definition) ?? next
             numbers: sema_enum_numbers_checked(definition, backing, diagnostics) ?? next
-            methods: sema_enum_numbers_methods(definition, numbers, diagnostics) ?? next
+            methods: sema_enum_numbers_methods(definition, backing, numbers, diagnostics) ?? next
             updated := definition
             // The methods are the compiler's: they report at the enum, and
             // their bodies' spans index the generated fragment, not the
@@ -162,8 +164,9 @@ sema_enum_numbers_literal: fn(expression: Expr) -> Int? {
 // itself. `to_int` is written `Never!`: a generated method is no candidate
 // of the failure solve (sema_failure_inference_candidate), so an unwritten
 // route would stay the default `Err!` and every caller would have to handle
-// a failure a case number can't have.
-sema_enum_numbers_methods: fn(definition: EnumDef, numbers: [Int], diagnostics: &[Diagnostic]) -> [Func]? {
+// a failure a case number can't have. `from_int` tells a number the backing
+// type can't hold apart from a number it holds that no case has.
+sema_enum_numbers_methods: fn(definition: EnumDef, backing: String, numbers: [Int], diagnostics: &[Diagnostic]) -> [Func]? {
     has_to_int: loop method in definition.methods {
         if method.name == "to_int" -> break true
     } ?? false
@@ -180,7 +183,14 @@ sema_enum_numbers_methods: fn(definition: EnumDef, numbers: [Int], diagnostics: 
         out.push("        }}\n    }}\n")
     }
     if !has_from_int {
-        out.push("    from_int: fn(value: Int) -> {name} Err! {{\n        if value == {{\n")
+        out.push("    from_int: fn(value: Int) -> {name} Err! {{\n")
+        outside := [String]{}
+        least: jet_layout_integer_backing_min(backing)
+        greatest: jet_layout_integer_backing_max(backing)
+        if least > -9223372036854775807 - 1 -> outside.push("value < {least}")
+        if greatest < 9223372036854775807 -> outside.push("value > {greatest}")
+        if outside.len() > 0 -> out.push("        if {outside.join(" || ")} -> return Err(\"{{value}} doesn't fit `{backing}`, the backing of `{name}`\")\n")
+        out.push("        if value == {{\n")
         loop index in 0..<numbers.len() -> out.push("            {numbers[index]} -> Ok({name}.{definition.variants[index].name})\n")
         out.push("            else -> Err(\"{{value}} is not a case number of `{name}`\")\n        }}\n    }}\n")
     }

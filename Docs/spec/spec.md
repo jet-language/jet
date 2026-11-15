@@ -1240,9 +1240,12 @@ case numbers: `U8`, `I8`, `U16`, `I16`, `U32`, `I32`, `U64`, or `I64`
 (D-ENUM-BACKING1=A). A case's number is its written integer literal
 (`Load = 16`, `Low = -1`), or one more than the case before it; the first
 case counts from 0. The enum gains `case.to_int() -> Int` and
-`E.from_int(value: Int) -> E Err!`, which returns the case with that number
-or an error naming the number (D-ENUM-INGRESS1=A). An enum that declares its
-own `to_int` or `from_int` keeps it.
+`E.from_int(value: Int) -> E Err!`, which returns the case with that number,
+an error saying the backing type can't hold the number (300 for a `U8`
+backing), or an error naming a number the backing holds but no case has
+(D-ENUM-INGRESS1=A). An enum that declares its own `to_int` or `from_int`
+keeps it. An `Int` never becomes an enum case on its own: passing an `Int`
+where an `E` is wanted is a type error.
 
 ```jet
 #Layout(U8)
