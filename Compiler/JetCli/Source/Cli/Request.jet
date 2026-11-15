@@ -100,7 +100,7 @@ use {
         jet_eval_native_session,
     ]
     jet_backend.[X64ImageFile, x64_image_file_read, x64_link_runtime_image, x64_link_runtime_pack]
-    jet_ir.[IRLibraryExportRow, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
+    jet_ir.[IRLibraryExportRow, IRLibraryResult, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent]
     jet_web.[web_runtime_partition]
@@ -198,72 +198,88 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 // JET_FRONT_CORE_OBJECT_OUTPUT: the Core code library (CoreLibrary.jet), from
 // its own Core check, which the runtime image links beside the runtime. Its
 // check, IR build and optimizer read nothing of the runtime's, so they run
-// on their own task while the runtime is checked and lowered here; only its
+// on their own task while the runtime is checked and lowered here. Only its
 // machine code waits, for the runtime's thread receipt, since Core starts
-// threads through the runtime. The compiler's identity, which both compiles
-// read, is settled before either starts.
+// threads through the runtime. Then it compiles on a task of its own
+// (jet_cli_core_library_made) while the runtime's machine code, web
+// partition and object are made here (jet_cli_runtime_object). The
+// compiler's identity, which both compiles read, is settled before either
+// starts. The runtime's IR build follows its front end at once, so the front
+// end's compile state drops on a detached task meanwhile
+// (JetDriverCompileRequest.release_state_aside).
 jet_cli_runtime_library: fn(request: &&JetDriverCompileRequest, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
-    core_prefix: cli_sys.get(ENV_JET_FRONT_CORE_OBJECT_OUTPUT)
-    if core_prefix == None {
-        alone: jet_cli_runtime_lowered(jet_cli_lowering_inputs(request, trace_sink), prefix, lifecycle, compiler_threads, trace_sink)
-        return jet_cli_runtime_finished(alone, prefix, JetCLICoreLibraryIR?{None}, core_prefix, trace_sink)
+    selected := request.move()
+    selected.release_state_aside = true
+    if cli_sys.get(ENV_JET_FRONT_CORE_OBJECT_OUTPUT) == .Val(core_prefix) -> return jet_cli_runtime_with_core(selected, prefix, lifecycle, core_prefix, compiler_threads, trace_sink)
+    alone: jet_cli_runtime_ir(jet_cli_lowering_inputs(selected, trace_sink), prefix, lifecycle, compiler_threads, trace_sink)
+    if alone.move() == {
+        .Stopped(result) -> result
+        .Built(result, library, interface_text, threads, receipt) -> {
+            object: jet_cli_runtime_object(library, interface_text, threads, receipt, prefix, trace_sink)
+            if object.problem != "" -> return jet_driver_compile_escaped_failure(object.problem)
+            jet_cli_runtime_packed(result, prefix, object.bytes.move(), [U8]?{None}, trace_sink)
+        }
     }
+}
+
+// The runtime library with the Core library beside it, whose object lands
+// at `core_prefix` (jet_cli_runtime_library).
+jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String, lifecycle: String?, core_prefix: String, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     problem: jet_cli_core_identity()
     if problem != "" -> return jet_driver_compile_escaped_failure(problem)
     // The Core build's own threads, with the memory free when it starts, as
-    // each phase of a library build reads it (jet_cli_runtime_lowered).
+    // each phase of a library build reads it (jet_cli_runtime_ir).
     core_threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
     building: task jet_cli_core_library_ir(core_threads, trace_sink)
-    lowered: jet_cli_runtime_lowered(jet_cli_lowering_inputs(request, trace_sink), prefix, lifecycle, compiler_threads, trace_sink)
+    runtime: jet_cli_runtime_ir(jet_cli_lowering_inputs(request, trace_sink), prefix, lifecycle, compiler_threads, trace_sink)
     core_ir: building.join() ?? return jet_driver_compile_escaped_failure("the Core library build stopped: {compiler_threads_failure_text(err)}")
-    jet_cli_runtime_finished(lowered, prefix, Val(core_ir), core_prefix, trace_sink)
-}
-
-// The runtime library `lowered` (jet_cli_runtime_lowered) packed with the
-// Core library's IR `core_ir` (None: no Core object), unless it stopped.
-jet_cli_runtime_finished: fn(lowered: &&JetCLIRuntimeLowered, prefix: String, core_ir: &&JetCLICoreLibraryIR?, core_prefix: String?, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
-    packed: if lowered.move() == {
+    if runtime.move() == {
         .Stopped(result) -> result
-        .Lowered(result, object, threads) -> jet_cli_runtime_packed(result, prefix, object, threads, core_ir, core_prefix, trace_sink)
-    }
-    packed
-}
-
-// The runtime `result` lowered to `object`, whose thread receipt is
-// `threads`: the Core library's machine code from its IR `core_ir`, then
-// the pack and the image (jet_cli_runtime_pack).
-jet_cli_runtime_packed: fn(result: &&JetDriverCompileResult, prefix: String, object: &&[U8], threads: [String], core_ir: &&JetCLICoreLibraryIR?, core_prefix: String?, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
-    core := [U8]?{None}
-    if core_ir.move() == {
-        .None -> {}
-        .Val(.Stopped(problem)) -> return jet_driver_compile_escaped_failure(problem)
-        .Val(.Built(library, issues, seal, core_threads)) -> {
-            if trace_sink == .Val(sink) -> sink.begin("runtime.core.object", "", -1, -1)
-            built: jet_cli_core_library(core_prefix ?? "", library, issues, seal, threads, core_threads, trace_sink)
-            if trace_sink == .Val(sink) -> sink.end("runtime.core.object", built.bytes.len())
-            if built.problem != "" -> return jet_driver_compile_escaped_failure(built.problem)
-            core = Val(built.bytes.move())
+        .Built(result, library, interface_text, threads, receipt) -> {
+            objects := [JetCLIRuntimeObject]{}
+            cores := [JetCLICoreLibrary]{}
+            task.group jet_cli_runtime_core_beside {
+                making: task jet_cli_core_library_made(core_ir, core_prefix, receipt, trace_sink)
+                objects.push(jet_cli_runtime_object(library, interface_text, threads, receipt, prefix, trace_sink))
+                cores.push(making.join() ?? JetCLICoreLibrary{bytes: [U8]{}, problem: "the Core library's machine code stopped: {compiler_threads_failure_text(err)}"})
+            }
+            object: objects.pop() ?? panic("the runtime library lost its object")
+            core: cores.pop() ?? panic("the runtime library lost the Core object")
+            if object.problem != "" -> return jet_driver_compile_escaped_failure(object.problem)
+            if core.problem != "" -> return jet_driver_compile_escaped_failure(core.problem)
+            jet_cli_runtime_packed(result, prefix, object.bytes.move(), Val(core.bytes.move()), trace_sink)
         }
     }
+}
+
+// The runtime `result` lowered to `object`, with the Core library's object
+// `core` (None: no Core object): the pack and the image
+// (jet_cli_runtime_pack).
+jet_cli_runtime_packed: fn(result: &&JetDriverCompileResult, prefix: String, object: &&[U8], core: &&[U8]?, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     if trace_sink == .Val(sink) -> sink.begin("runtime.pack", "", -1, -1)
-    packed: jet_cli_runtime_pack(result, prefix, object, core.move())
+    packed: jet_cli_runtime_pack(result, prefix, object, core)
     if trace_sink == .Val(sink) -> sink.end("runtime.pack", -1)
     packed
 }
 
-// The runtime library lowered (jet_cli_runtime_lowered): its compile's
-// result, its object's bytes, written to `{prefix}.o` with its export list,
-// ABI, thread receipt and interface, and that thread receipt. Else the
-// result that stops the build.
-JetCLIRuntimeLowered: enum {
+// The runtime library built as IR (jet_cli_runtime_ir): its compile's
+// result, the IR linted and optimized, the jet.runtime interface its
+// bindings render, the threads its machine code compiles on and its thread
+// receipt. Else the result that stops the build.
+JetCLIRuntimeIR: enum {
     Stopped(result: JetDriverCompileResult)
-    Lowered(result: JetDriverCompileResult, object: [U8], threads: [String])
+    Built(result: JetDriverCompileResult, library: IRLibraryResult, interface_text: String, threads: CompilerThreads, receipt: [String])
 }
 
-jet_cli_runtime_lowered: fn(front: &&JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeLowered {
+// The runtime library's object (jet_cli_runtime_object): its bytes, written
+// to `{prefix}.o` with its export list, ABI, thread receipt and interface,
+// else the problem that stops the build.
+JetCLIRuntimeObject: struct { bytes: [U8], problem: String }
+
+jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeIR {
     owned := front.move()
     result := owned.compile.move()
-    if !result.complete || result.internal_problem != None -> return JetCLIRuntimeLowered.Stopped{result: result}
+    if !result.complete || result.internal_problem != None -> return JetCLIRuntimeIR.Stopped{result: result}
     checked := owned.inputs.move() ?? return jet_cli_runtime_stopped("the runtime front end returned no checked inputs")
     // The lifecycle list, the export and interface rows and the checked
     // declarations the IR build reads.
@@ -300,47 +316,57 @@ jet_cli_runtime_lowered: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
         loop finding in ir_lint_module(library.program, "ir.opt", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
         if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
-    if issues.len() == 0 {
-        thread_exports: ir_thread_exports(library.program, library.exports, [String]{})
-        if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
-        compiled := ir_x64_compile_module(library.program.move(), threads)
-        if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
-        // JET_FRONT_RUNTIME_WEB_OUTPUT: the runtime partition of a web build
-        // (JetWeb Build.jet), selected from the same lowered module, as
-        // `{prefix}.wasm` with its receipt `{prefix}.wasm.tsv`.
-        if cli_sys.get(ENV_JET_FRONT_RUNTIME_WEB_OUTPUT) == .Val(web_prefix) {
-            if trace_sink == .Val(sink) -> sink.begin("runtime.web", "", -1, -1)
-            web := web_runtime_partition(compiled.program, library.exports, library.data)
-            if trace_sink == .Val(sink) -> sink.end("runtime.web", web.bytes.len())
-            if web.errors.len() > 0 {
-                cli_files.write("{prefix}.issues", web.errors.join("\n")) ?? return jet_cli_runtime_stopped("cannot write runtime library findings: {err}")
-                return jet_cli_runtime_stopped("the runtime's web partition failed; see {prefix}.issues")
-            }
-            cli_files.write_bytes("{web_prefix}.wasm", web.bytes) ?? return jet_cli_runtime_stopped("cannot write the runtime's web partition: {err}")
-            cli_files.write("{web_prefix}.wasm.tsv", web.receipt) ?? return jet_cli_runtime_stopped("cannot write the runtime's web receipt: {err}")
-        }
-        if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
-        object := ir_x64_library_object(compiled, library.exports, library.data, true, true)
-        if trace_sink == .Val(sink) -> sink.end("ir.object", object.bytes.len())
-        if object.errors.len() == 0 {
-            cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_cli_runtime_stopped("cannot write runtime object: {err}")
-            // Sorted: `jet run` binary-searches it (Host.jet jet_cli_runtime_exports_mark).
-            symbols := loop row in library.exports -> row.symbol
-            symbols.sort()
-            cli_files.write("{prefix}.exports", symbols.join("\n")) ?? return jet_cli_runtime_stopped("cannot write runtime exports: {err}")
-            cli_files.write("{prefix}.abi.json", ir_export_abi_json(library.abis)) ?? return jet_cli_runtime_stopped("cannot write runtime ABI: {err}")
-            cli_files.write("{prefix}.threads", thread_exports.join("\n")) ?? return jet_cli_runtime_stopped("cannot write runtime thread receipt: {err}")
-            cli_files.write("{prefix}.interface.jet", interface_text) ?? return jet_cli_runtime_stopped("cannot write the runtime interface: {err}")
-            return JetCLIRuntimeLowered.Lowered{result: result, object: object.bytes.move(), threads: thread_exports}
-        }
-        compiler_transfer_rows<String>(issues, object.errors)
+    if issues.len() > 0 {
+        cli_files.write("{prefix}.issues", issues.join("\n")) ?? return jet_cli_runtime_stopped("cannot write runtime library findings: {err}")
+        return jet_cli_runtime_stopped("runtime library lowering failed; see {prefix}.issues")
     }
-    cli_files.write("{prefix}.issues", issues.join("\n")) ?? return jet_cli_runtime_stopped("cannot write runtime library findings: {err}")
-    jet_cli_runtime_stopped("runtime library lowering failed; see {prefix}.issues")
+    receipt: ir_thread_exports(library.program, library.exports, [String]{})
+    JetCLIRuntimeIR.Built{result: result, library: library, interface_text: interface_text, threads: threads, receipt: receipt}
 }
 
-jet_cli_runtime_stopped: fn(problem: String) -> JetCLIRuntimeLowered Never! {
-    JetCLIRuntimeLowered.Stopped{result: jet_driver_compile_escaped_failure(problem)}
+// The runtime's machine code from its IR `library`, then, under
+// JET_FRONT_RUNTIME_WEB_OUTPUT, the runtime partition of a web build (JetWeb
+// Build.jet) selected from the same lowered module, as `{prefix}.wasm` with
+// its receipt `{prefix}.wasm.tsv`, and the object with its files.
+jet_cli_runtime_object: fn(library: &&IRLibraryResult, interface_text: String, threads: CompilerThreads, receipt: [String], prefix: String, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeObject {
+    if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
+    compiled := ir_x64_compile_module(library.program.move(), threads)
+    if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
+    if cli_sys.get(ENV_JET_FRONT_RUNTIME_WEB_OUTPUT) == .Val(web_prefix) {
+        if trace_sink == .Val(sink) -> sink.begin("runtime.web", "", -1, -1)
+        web := web_runtime_partition(compiled.program, library.exports, library.data)
+        if trace_sink == .Val(sink) -> sink.end("runtime.web", web.bytes.len())
+        if web.errors.len() > 0 {
+            cli_files.write("{prefix}.issues", web.errors.join("\n")) ?? return jet_cli_runtime_object_failed("cannot write runtime library findings: {err}")
+            return jet_cli_runtime_object_failed("the runtime's web partition failed; see {prefix}.issues")
+        }
+        cli_files.write_bytes("{web_prefix}.wasm", web.bytes) ?? return jet_cli_runtime_object_failed("cannot write the runtime's web partition: {err}")
+        cli_files.write("{web_prefix}.wasm.tsv", web.receipt) ?? return jet_cli_runtime_object_failed("cannot write the runtime's web receipt: {err}")
+    }
+    if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
+    object := ir_x64_library_object(compiled, library.exports, library.data, true, true)
+    if trace_sink == .Val(sink) -> sink.end("ir.object", object.bytes.len())
+    if object.errors.len() > 0 {
+        cli_files.write("{prefix}.issues", object.errors.join("\n")) ?? return jet_cli_runtime_object_failed("cannot write runtime library findings: {err}")
+        return jet_cli_runtime_object_failed("runtime library lowering failed; see {prefix}.issues")
+    }
+    cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_cli_runtime_object_failed("cannot write runtime object: {err}")
+    // Sorted: `jet run` binary-searches it (Host.jet jet_cli_runtime_exports_mark).
+    symbols := loop row in library.exports -> row.symbol
+    symbols.sort()
+    cli_files.write("{prefix}.exports", symbols.join("\n")) ?? return jet_cli_runtime_object_failed("cannot write runtime exports: {err}")
+    cli_files.write("{prefix}.abi.json", ir_export_abi_json(library.abis)) ?? return jet_cli_runtime_object_failed("cannot write runtime ABI: {err}")
+    cli_files.write("{prefix}.threads", receipt.join("\n")) ?? return jet_cli_runtime_object_failed("cannot write runtime thread receipt: {err}")
+    cli_files.write("{prefix}.interface.jet", interface_text) ?? return jet_cli_runtime_object_failed("cannot write the runtime interface: {err}")
+    JetCLIRuntimeObject{bytes: object.bytes.move(), problem: ""}
+}
+
+jet_cli_runtime_object_failed: fn(problem: String) -> JetCLIRuntimeObject Never! {
+    JetCLIRuntimeObject{bytes: [U8]{}, problem: problem}
+}
+
+jet_cli_runtime_stopped: fn(problem: String) -> JetCLIRuntimeIR Never! {
+    JetCLIRuntimeIR.Stopped{result: jet_driver_compile_escaped_failure(problem)}
 }
 
 // An IR Lint finding (Lint.jet) over the runtime library: a compiler bug,

@@ -107,6 +107,24 @@ jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: 
     JetCLICoreLibraryIR.Built{library: library, issues: issues, seal: seal, threads: threads}
 }
 
+// The Core library's machine code (jet_cli_core_library) from its IR
+// `built`, as the `runtime.core.object` span, at `prefix`, once the
+// runtime's thread receipt `runtime_threads` is known. The runtime library
+// build runs it on a task of its own while the runtime's machine code and
+// object are made (Request.jet jet_cli_runtime_with_core). A Core check
+// that stopped is the problem.
+jet_cli_core_library_made: fn(built: &&JetCLICoreLibraryIR, prefix: String, runtime_threads: [String], trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
+    if built.move() == {
+        .Stopped(problem) -> JetCLICoreLibrary{bytes: [U8]{}, problem: problem}
+        .Built(library, issues, seal, threads) -> {
+            if trace_sink == .Val(sink) -> sink.begin("runtime.core.object", "", -1, -1)
+            made: jet_cli_core_library(prefix, library, issues, seal, runtime_threads, threads, trace_sink)
+            if trace_sink == .Val(sink) -> sink.end("runtime.core.object", made.bytes.len())
+            made
+        }
+    }
+}
+
 // The Core library's machine code, from its IR `library`, the issue rows
 // `found` its build and lint left and the Core check's `seal` lines, once
 // the runtime's thread receipt `runtime_threads` is known.

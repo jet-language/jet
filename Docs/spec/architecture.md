@@ -515,10 +515,13 @@ point is the pass name its findings carry:
   each body as the passes get it, after each optimizer pass, and each SSA
   form.
 - `ir.build` and `ir.opt` in the runtime library build (`Request.jet`
-  `jet_cli_runtime_lowered`) and the Core code library
+  `jet_cli_runtime_ir`) and the Core code library
   (`CoreLibrary.jet` `jet_cli_core_library_ir`, on its own task beside the
   runtime's), after the build and after the optimizer (O1 for the runtime
-  library, O2 for Core); each finding is one of their issue rows.
+  library, O2 for Core); each finding is one of their issue rows. The Core
+  library's machine code then compiles on a task of its own
+  (`jet_cli_core_library_made`) beside the runtime's machine code and
+  object (`jet_cli_runtime_object`).
 
 The functions split across the compiler threads. A finding is a compiler
 bug, never a user diagnostic (AGENTS.md I2, I3): it becomes an ICE census
