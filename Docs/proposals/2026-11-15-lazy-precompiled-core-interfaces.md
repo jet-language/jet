@@ -539,10 +539,11 @@ program and a packet per checked function.
 
 **The capture.** The Core library's check (`JetCli/CoreLibrary.jet`, with
 `SemaRegistrationGraph.core_seal` set) captures each function check of a
-Prelude module (the canonical effect package and the Core modules
-`core.prelude` and `core`, the counter's `prelude` category) as its packet,
-right after the check and before the module pass reads it
-(`Compiler/JetSema/Source/Sema/CoreBodies.jet`). The packet is written,
+Core module or of the canonical effect package as its packet, right after
+the check and before the module pass reads it
+(`Compiler/JetSema/Source/Sema/CoreBodies.jet`). Those modules' checks
+stay off the compiler threads (`SemaRegistrationGraph.core_bodies_held`),
+so each runs on the module pass's thread. The packet is written,
 then drained back into the module's rows, so the capture moves rows and
 copies none. A method's packet carries no method input: its diagnostics
 already hold its preparation's, as a prepared packet's do, and a compile
@@ -556,20 +557,27 @@ pass reused is not captured, and is checked from text as before.
 the Core seal, a part of every jet the compiler build makes. The file
 opens with the facts of the capturing compile that a check reads beyond
 the Core text: target triple, profile, OS, artifact build, keep-going and
-test modes (`sema_core_bodies_context`). A native compile already bound to
-the built-in Core without `--deep-checks` (`JetCli/Request.jet`) reads the
-file's index into `SemaRegistrationHostHooks.core_bodies`. In place of a
-Prelude function's check, on the module pass's thread, it loads that
-function's packet (`sema_core_body_loaded`) when the facts are its own and
-every key resolves in its tables. The packet then drains as a prepared one
-does. Any miss checks the function from text. A captured check runs on the
+test modes (`sema_core_bodies_context`). Two compiles read the file's index
+into `SemaRegistrationHostHooks.core_bodies` (`JetCli/Request.jet`): a
+native compile already bound to the built-in Core, and a `jet check` of a
+program whose Core is the built-in one. Neither may use `--deep-checks`. A
+compile whose facts are the file's keeps its Core modules' checks on the
+module pass's thread, so no compiler thread checks a body the pass then
+loads (`core_bodies_held`). In place of a Core function's check it loads
+that function's packet (`sema_core_body_loaded`) when every key resolves
+in its tables. The packet then drains as a prepared one does. This holds in
+the module pass and in each Core demand wave, so a kept generic,
+function-value, lowered or comptime body loads too. Any miss checks the
+function from text, as does a stand-in of a run bound to the Core image,
+which is checked by its signature alone. A captured check runs on the
 module pass's thread, never from a thread's prepared packet, so the codecs
 and derived methods it demanded are recorded with it. A load records them
 again (`sema_demand_capture_replay`), as a reused comptime check does. A
 loaded body counts as `core.bodies_loaded`, not under `bodies_from_text`.
-A run whose tree's Core has not been compared yet checks the Prelude from
-text. That run still reads its tree's Core only when its demand names a
-deferred body.
+A run whose tree's Core has not been compared yet checks its Core bodies
+from text. That run still reads its tree's Core only when its demand names
+a deferred body. A `jet build` loads nothing yet: its artifact-build fact
+is not the capture's.
 
 #### 3.3.1 Fields that whole-program passes write (H10)
 

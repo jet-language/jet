@@ -643,8 +643,8 @@ SemaGraphResult: struct {
     // SemaRegistrationGraph.core_seal: the Core seal's lines
     // (sema_core_seal_lines); empty otherwise.
     core_seal: [String]{[String]{}}
-    // SemaRegistrationGraph.core_seal: the Prelude's function checks as the
-    // bodies file (CoreBodies.jet sema_core_bodies_bytes), in module order;
+    // SemaRegistrationGraph.core_seal: the Core function checks as the
+    // bodies file (CoreBodies.jet sema_core_bodies_bytes), in key order;
     // empty otherwise.
     core_bodies: [U8]{[U8]{}}
     // A run bound to the Core image (SemaRegistrationGraph.core_stand_ins):
@@ -4783,12 +4783,14 @@ SemaBodyClaim: struct {
 // declaration (sema_checked_unusable_bodies); during a Core demand wave
 // (graph.core_wave_rows) only that wave's, and during a codec or derive wave
 // (graph.codec_wave_rows, graph.derive_wave_rows) none: those check methods
-// alone. `weights` gets each one's source bytes.
+// alone, nor in a module whose checks stay on the module pass's thread
+// (CoreBodies.jet sema_core_bodies_held). `weights` gets each one's source
+// bytes.
 sema_check_parallel_jobs: fn(graph: SemaRegistrationGraph, module_index: Int, comptime_rows: [String:Int], weights: &[Int]) -> [SemaBodyJob] Never! {
     source_module: graph.modules[module_index]
     core_wave: graph.core_wave_rows.len() > 0
     jobs := [SemaBodyJob]{}
-    if graph.codec_wave_rows.len() > 0 || graph.derive_wave_rows.len() > 0 -> return jobs
+    if graph.codec_wave_rows.len() > 0 || graph.derive_wave_rows.len() > 0 || sema_core_bodies_held(graph, source_module) -> return jobs
     item_index := 0
     loop item in source_module.program.items {
         if item == .Func(func) {
@@ -4889,7 +4891,7 @@ sema_check_method_parallel_eligible: fn(graph: SemaRegistrationGraph, source_mod
 
 sema_check_parallel_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, generic_params: [TGenericParam], all_jobs: [SemaBodyJob], comptime_rows: [String:Int], weights: &[Int]) -> [SemaBodyJob] {
     jobs := [SemaBodyJob]{}
-    if generic_params.len() != 0 -> return jobs
+    if generic_params.len() != 0 || sema_core_bodies_held(graph, source_module) -> return jobs
     loop job in all_jobs {
         if job == {
             .NominalMethod(_, nominal_index, method_index) -> {
@@ -6927,6 +6929,7 @@ SemaGraphUndo: enum {
     ModuleAppend(module_index: Int, mark: SemaGraphModuleMark, name: String)
     NominalIndexes(symbol_rows: [U32:SemaRegistrationRowRef], slots: [String:Int], buckets: [[SemaRegistrationRowRef]])
     Counting(old: Bool)
+    CoreBodiesHeld(old: Bool)
     FailureSolved(old: Bool)
     CodecBody(module_index: Int, row: Int)
 }
@@ -7063,6 +7066,7 @@ sema_graph_trail_undo_to: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTra
                 trail.nominal_indexes_saved = false
             }
             .Counting(old) -> { graph.counting = old }
+            .CoreBodiesHeld(old) -> { graph.core_bodies_held = old }
             .FailureSolved(old) -> { graph.failure_solved = old }
             .CodecBody(module_index, row) -> sema_codec_undo_body(graph, module_index, row)
         }
@@ -11594,6 +11598,8 @@ sema_finalize_bodies: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTra
     trail.entries.push(SemaGraphUndo.Counting{old: resolved_graph.counting})
     resolved_graph.counting = false
     hook_access: sema_host_hook_access(host_hooks)
+    trail.entries.push(SemaGraphUndo.CoreBodiesHeld{old: resolved_graph.core_bodies_held})
+    resolved_graph.core_bodies_held = sema_core_bodies_hold(resolved_graph, hook_access)
     bodies.checked_types = sema_stage_checked_types(stage.modules)
     bodies.complete = resolved_graph.complete && stage.complete
     // Derived methods and deferred Core bodies are demanded afresh by this

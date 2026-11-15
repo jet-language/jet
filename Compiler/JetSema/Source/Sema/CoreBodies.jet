@@ -1,19 +1,19 @@
-// The Prelude's checked bodies as the Core library's check leaves them, which
-// a later compile loads in place of checking them from text. While the
-// registration graph's `core_seal` is set (the Core library's check, JetCli
-// CoreLibrary.jet), each Prelude function's check is captured as the packet
-// (SemaParallelBody) a compiler thread hands the module pass, and written
-// with the packet codec (BodyPacketCodec.jet) before the module pass reads
-// it. So a capture holds the check's own result and none of what the
-// whole-program passes write after it. A captured check runs on the module
-// pass's thread, not a compiler thread, so what it demands of the generated
-// codecs and derived methods (SemaDemandCapture) is recorded with it, and a
-// load records it again. The packet's ids are written as positions in lists
-// of their keys in that check (symbol and declaration keys, module
-// identities), which a compile resolves to its own ids. The check's
-// finalization writes the captures as the bodies file
-// (sema_core_bodies_bytes), which the Core library writes as
-// `{prefix}.bodies`:
+// The Core library's checked bodies as its check leaves them, which a later
+// compile loads in place of checking them from text. While the registration
+// graph's `core_seal` is set (the Core library's check, JetCli
+// CoreLibrary.jet), each Core function's check (the Prelude's among them) is
+// captured as the packet (SemaParallelBody) a compiler thread hands the
+// module pass, and written with the packet codec (BodyPacketCodec.jet)
+// before the module pass reads it. So a capture holds the check's own result
+// and none of what the whole-program passes write after it. A captured check
+// runs on the module pass's thread, not a compiler thread
+// (sema_core_bodies_held), so what it demands of the generated codecs and
+// derived methods (SemaDemandCapture) is recorded with it, and a load records
+// it again. The packet's ids are written as positions in lists of their keys
+// in that check (symbol and declaration keys, module identities), which a
+// compile resolves to its own ids. The check's finalization writes the
+// captures as the bodies file (sema_core_bodies_bytes), which the Core
+// library writes as `{prefix}.bodies`:
 //
 //   header, context, count, then per body: key, symbol keys, declaration
 //   keys, module identities, codec keys, derived-method keys, packet bytes
@@ -25,9 +25,11 @@
 //
 // A compile whose host hands it the bodies file
 // (SemaRegistrationHostHooks.core_bodies, only for the Core built into the
-// host) loads a Prelude function's packet in place of its check when the
+// host) loads a Core function's packet in place of its check when the
 // file's context is its own and every key resolves (sema_core_body_loaded);
-// else the function is checked from text.
+// else the function is checked from text. Its Core functions' checks stay
+// on the module pass's thread too, where the host hooks are, so no compiler
+// thread checks a body the pass then loads.
 use jet_foundation.[
     BodyCodecIn,
     BodyCodecOut,
@@ -94,19 +96,53 @@ sema_core_prelude_module: fn(package_identity: String, module_identity: ModuleID
     package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || (module_is_core(module_identity) && (module_name == "core.prelude" || module_name == "core"))
 }
 
-// The facts of `graph`'s compile a Prelude body's check reads beyond the
-// Core text: its target, profile, OS and artifact build, and the keep-going
-// and test modes. A body captured under other facts is not loaded.
+// A module whose function checks the Core library's check captures: a Core
+// module or one of the canonical effect package (the Prelude's).
+sema_core_body_module: fn(row: SemaRegistrationModule) -> Bool Never! {
+    row.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || module_is_core(row.module_identity)
+}
+
+// The facts of `graph`'s compile a Core body's check reads beyond the Core
+// text: its target, profile, OS and artifact build, and the keep-going and
+// test modes. A body captured under other facts is not loaded.
 sema_core_bodies_context: fn(graph: SemaRegistrationGraph) -> String Never! {
     "{graph.target_machine.triple} {graph.build_facts.profile} {graph.build_facts.os} {graph.build_facts.artifact_build} {graph.keep_going} {graph.test_mode}"
 }
 
+// Whether `graph`'s Core function checks stay on the module pass's thread
+// (SemaRegistrationGraph.core_bodies_held): the Core library's check
+// captures them, or the host hands the compile a bodies file captured in
+// its context, whose checks it loads.
+sema_core_bodies_hold: fn(graph: SemaRegistrationGraph, host_hooks: SemaHostHookAccess?) -> Bool {
+    if graph.core_seal -> return true
+    access: host_hooks ?? return false
+    if access == .Callbacks(hooks) {
+        permit: hooks.guard_read()
+        return sema_core_bodies_match(permit.value.core_bodies, graph)
+    }
+    false
+}
+
+// Whether `bodies` is a bodies file captured in `graph`'s context.
+sema_core_bodies_match: fn(bodies: SemaCoreBodies?, graph: SemaRegistrationGraph) -> Bool Never! {
+    if bodies == .Val(file) -> return file.context == sema_core_bodies_context(graph)
+    false
+}
+
+// Whether the function checks of module `row` stay off the compiler threads
+// (sema_core_bodies_hold), so the module pass's thread captures or loads
+// each: the body jobs the threads check (sema_check_parallel_jobs,
+// sema_check_parallel_method_jobs) leave them out.
+sema_core_bodies_held: fn(graph: SemaRegistrationGraph, row: SemaRegistrationModule) -> Bool Never! {
+    graph.core_bodies_held && sema_core_body_module(row)
+}
+
 // Does the Core library's check capture the function checks of module
-// `module_index`, a Prelude module?
+// `module_index`, a Core module?
 sema_core_body_capturing: fn(program: SemaProgramTables, module_index: Int) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
         if !graph.core_seal -> return false
-        return sema_core_prelude_module(graph.modules[module_index].package_identity, graph.modules[module_index].module_identity, graph.modules[module_index].module_name)
+        return sema_core_body_module(graph.modules[module_index])
     }
     false
 }
@@ -236,12 +272,14 @@ sema_core_body_was_loaded: fn(bodies: SemaCoreBodies?, loaded: [Bool], key: Stri
 // The check of function `owner_id` of module `module_index` as the Core
 // library's check captured it, its rows drained into `diagnostics` and the
 // fact lists as a prepared packet's are (sema_check_drain_body); None when
-// the function is checked from text: outside the Prelude, in the Core
-// library's own check, on a compiler thread (whose check has no host
-// hooks), or when the host handed no bodies file, the file's context is not
-// this compile's, it has no packet for the function, a key does not resolve
-// in this compile, or the packet does not read. A loaded function's
-// position is marked in SemaRegistrationHostHooks.core_bodies_loaded.
+// the function is checked from text: outside Core, in the Core library's
+// own check, as a stand-in of a run bound to the Core image (checked by its
+// signature alone, sema_core_stand_in), on a compiler thread (whose check
+// has no host hooks), or when the host handed no bodies file, the file's
+// context is not this compile's, it has no packet for the function, a key
+// does not resolve in this compile, or the packet does not read. A loaded
+// function's position is marked in
+// SemaRegistrationHostHooks.core_bodies_loaded.
 sema_core_body_loaded: fn(program: SemaProgramTables, host_hooks: SemaHostHookAccess?, module_index: Int, owner_id: SymbolID, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult? {
     access: host_hooks ?? return None
     packet: sema_core_body_load(program, access, module_index, owner_id) ?? return None
@@ -251,10 +289,11 @@ sema_core_body_loaded: fn(program: SemaProgramTables, host_hooks: SemaHostHookAc
 sema_core_body_load: fn(program: SemaProgramTables, access: SemaHostHookAccess, module_index: Int, owner_id: SymbolID) -> SemaParallelBody? {
     if access == .Callbacks(hooks) {
         if program.registration_graph == .Val(graph) {
-            if graph.core_seal -> return None
-            if !sema_core_prelude_module(graph.modules[module_index].package_identity, graph.modules[module_index].module_identity, graph.modules[module_index].module_name) -> return None
+            if graph.core_seal || !sema_core_body_module(graph.modules[module_index]) -> return None
+            key: symbol_table_key(graph.symbols, owner_id)
+            if sema_core_body_stands_in(graph, key) -> return None
             permit: hooks.guard_edit()
-            position: sema_core_bodies_position(permit.value.core_bodies, symbol_table_key(graph.symbols, owner_id)) ?? return None
+            position: sema_core_bodies_position(permit.value.core_bodies, key) ?? return None
             packet: sema_core_body_read(permit.value.core_bodies, graph, position) ?? return None
             loop permit.value.core_bodies_loaded.len() <= position -> permit.value.core_bodies_loaded.push(false)
             permit.value.core_bodies_loaded[position] = true
@@ -262,6 +301,14 @@ sema_core_body_load: fn(program: SemaProgramTables, access: SemaHostHookAccess, 
         }
     }
     None
+}
+
+// Whether the current Core demand wave checks the function keyed `key` as a
+// stand-in (CoreSeal.jet sema_core_stand_in), by its signature alone.
+sema_core_body_stands_in: fn(graph: SemaRegistrationGraph, key: String) -> Bool Never! {
+    if !graph.core_stand_in_wave || graph.core_wave_rows.get(key) == None -> return false
+    if graph.core_stand_ins == .Val(seal) -> return sema_core_seal_stand_in(seal, key) != None
+    false
 }
 
 // The packet of row `position` of `bodies`, with its keys resolved in

@@ -900,7 +900,7 @@ text, up front or on demand, and how many of each kind, each body under the
 first that fits: `prelude`, `generic`, `impl` for a trait-impl method,
 `generated`, `root` for a lowering root or a `close` method, `demand` for
 one a demand wave checked, `upfront` for any other), the
-`core.bodies_loaded` counter (how many Prelude function bodies it loaded
+`core.bodies_loaded` counter (how many Core and Prelude function bodies it loaded
 from the Core library's check in place of their text, `core.bodies` in
 `architecture.md`), throttled progress
 counts, and the

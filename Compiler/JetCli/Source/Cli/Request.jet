@@ -1868,6 +1868,13 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             selected.every_core_body = every_core_body
             selected.core_layers = core_layers
             selected.hold_check_state = hold_check_state
+            // A check of a program over the built-in Core loads that Core's
+            // function checks as a bound native compile does. Neither a
+            // Prelude source's check nor `jet check Core` does, as they check
+            // that Core.
+            if selected.mode == JetDriverCompileMode.Check && !prelude && !every_core_body && jet_cli_core_binding_built_in(jet_cli_core_binding(snapshot.entry_path, selected.core_tests)) {
+                jet_cli_core_bodies_lend(selected)
+            }
             // The runtime-library seam is `jet doc`'s (Host.jet jet_cli_doc_result):
             // a check, test or build under a stray JET_FRONT_LIBRARY_OBJECT_OUTPUT
             // stays that verb's compile.
@@ -1992,18 +1999,10 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
                     _: jet_cli_core_binding_built_in(binding)
                 }
             }
-            // A compile already bound to the Core built into this jet loads
-            // the Prelude's function checks from the Core library's check
-            // (JetSema CoreBodies.jet) in place of checking them from text,
-            // unless `--deep-checks` keeps bodies that check did not. A run
-            // whose tree's Core is not yet compared checks them from text,
-            // so it still reads that Core only if its demand names a
-            // deferred body.
-            if !options.deep_checks.all && options.deep_checks.scopes.len() == 0 && jet_cli_core_binding_bound(binding) {
-                bodies: sema_core_bodies_read(jet_cli_runtime_part(JET_CLI_CORE_BODIES_FILE))
-                hooks: compiled_request.eval_config.host_hooks.guard_edit()
-                hooks.value.core_bodies = bodies
-            }
+            // A run whose tree's Core is not yet compared checks its Core
+            // bodies from text, so it still reads that Core only if its
+            // demand names a deferred body.
+            if jet_cli_core_binding_bound(binding) -> jet_cli_core_bodies_lend(compiled_request)
             front := jet_cli_lowering_inputs(compiled_request, trace_sink)
             front.compile.core_built_in = jet_cli_core_binding_bound(binding)
             // The native route traces through the same sink and builds on the
@@ -2014,6 +2013,16 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             JetCLIExecutableCompiled.Checked{result: front.compile.move(), inputs: front.inputs.move(), snapshot: snapshot}
         }
     }
+}
+
+// A compile bound to the Core built into this jet loads the Core library's
+// function checks (JetSema CoreBodies.jet) in place of checking them from
+// text, unless `--deep-checks` keeps bodies that check did not.
+jet_cli_core_bodies_lend: fn(request: JetDriverCompileRequest) {
+    if request.deep_checks.all || request.deep_checks.scopes.len() > 0 -> return
+    bodies: sema_core_bodies_read(jet_cli_runtime_part(JET_CLI_CORE_BODIES_FILE))
+    hooks: request.eval_config.host_hooks.guard_edit()
+    hooks.value.core_bodies = bodies
 }
 
 // The comptime inputs `log` recorded, in read order.
