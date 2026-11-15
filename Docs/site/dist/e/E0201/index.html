@@ -40,11 +40,11 @@
 <pre class="diag">Error [jet.UseAfterMove]: `a.id` was consumed by the struct literal, so it can&#39;t be used here
   --&gt; tests/ui/close_value_stored_then_used.jet:28:13
     |
- 24 |     print(a.id)
+ 28 |     print(a.id)
     |             ^^
   --&gt; tests/ui/close_value_stored_then_used.jet:27:21
     |
- 23 |     h: Holder{item: a}
+ 27 |     h: Holder{item: a}
     |                     ^ `a.id` moved to the struct literal here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `a.id` after the move, or give the struct literal a copy with `a.id.copy()` where it moved.
@@ -53,11 +53,11 @@ More: jet-lang.dev/e/E0121
 Error [jet.UseAfterMove]: `a` was consumed by the struct literal, so it can&#39;t be used here
   --&gt; tests/ui/close_value_stored_then_used.jet:35:11
     |
- 31 |     print(a.len())
+ 35 |     print(a.len())
     |           ^
   --&gt; tests/ui/close_value_stored_then_used.jet:34:21
     |
- 30 |     g: Group{items: a}
+ 34 |     g: Group{items: a}
     |                     ^ `a` moved to the struct literal here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `a` after the move, or give the struct literal a copy with `a.copy()` where it moved.
@@ -66,11 +66,11 @@ More: jet-lang.dev/e/E0121
 Error [jet.UseAfterMove]: `a.id` was consumed by the variant payload, so it can&#39;t be used here
   --&gt; tests/ui/close_value_stored_then_used.jet:42:13
     |
- 38 |     print(a.id)
+ 42 |     print(a.id)
     |             ^^
   --&gt; tests/ui/close_value_stored_then_used.jet:41:18
     |
- 37 |     s: Slot.Full(a)
+ 41 |     s: Slot.Full(a)
     |                  ^ `a.id` moved to the variant payload here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `a.id` after the move, or give the variant payload a copy with `a.id.copy()` where it moved.
@@ -79,11 +79,11 @@ More: jet-lang.dev/e/E0121
 Error [jet.UseAfterMove]: `a` was consumed by `.push()`, so it can&#39;t be used here
   --&gt; tests/ui/close_value_stored_then_used.jet:50:13
     |
- 46 |     print(a.id)
+ 50 |     print(a.id)
     |             ^^
   --&gt; tests/ui/close_value_stored_then_used.jet:49:14
     |
- 45 |     out.push(a)
+ 49 |     out.push(a)
     |              ^ `a` moved to `.push()` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `a` after the move, or give `.push()` a copy with `a.copy()` where it moved.
@@ -92,8 +92,8 @@ More: jet-lang.dev/e/E0121
 Error [jet.MissingMoveMarker]: `r` cannot be moved from borrowed storage
   --&gt; tests/ui/close_value_stored_then_used.jet:54:53
     |
- 51 |     Holder{item: r}
-    |                  ^
+ 54 | from_parameter: fn(r: Res) -&gt; Holder { Holder{item: r} }
+    |                                                     ^
  Why: `r` is a read or write parameter, so its caller keeps the value, and `Res` can&#39;t be copied into the struct literal
  Fix: Declare the parameter `r: &amp;&amp;Res` so the caller hands the value over
 More: jet-lang.dev/e/E0201

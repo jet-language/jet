@@ -40,11 +40,11 @@
 <pre class="diag">Error [jet.TraitCapExceeded]: `text` reaches the `FS.Read` effect, which trait `Source` denies
   --&gt; tests/ui/effects/trait_cap_binds_body_impl_block_is_e0754.jet:12:9
     |
-  7 |         text: fn(self) -&gt; String { fs.read(self.path) ?? &quot;&quot; }
+ 12 |         text: fn(self) -&gt; String { fs.read(self.path) ?? &quot;&quot; }
     |         ^^^^
   --&gt; tests/ui/effects/trait_cap_binds_body_impl_block_is_e0754.jet:3:1
     |
-  2 | #FX(!FS)
+  3 | #FX(!FS)
     | ^^^^^^^^ trait `Source` is capped here
  Why: The trait&#39;s `#FX(…)` cap denies `FS` to every implementation of the trait&#39;s methods and every callee it can reach
  Fix: Remove the call that introduces `FS.Read`, or drop `!FS` from the trait&#39;s `#FX(…)` cap

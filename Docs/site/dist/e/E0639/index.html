@@ -40,7 +40,7 @@
 <pre class="diag">Error [jet.SelfOutsideMethod]: `show` takes `self`, but it is not a method
   --&gt; tests/ui/self_param_outside_method_is_e0639.jet:5:10
     |
-  5 | show: fn(self: Point) -&gt; Int {
+  5 | show: fn(self: Point) -&gt; Int { self.x }
     |          ^^^^
  Why: `self` is the value a method is called on; a function outside a type body or `impl` has no such value, so `self` would silently be an ordinary parameter
  Fix: Move `show` into the type&#39;s body or an `impl` block to make it a method, or give the parameter another name
@@ -49,7 +49,7 @@ More: jet-lang.dev/e/E0639
 Error [jet.SelfOutsideMethod]: `twice` takes `self`, but it is not a method
   --&gt; tests/ui/self_param_outside_method_is_e0639.jet:8:15
     |
- 10 |     twice: fn(self: Int) -&gt; Int {
+  8 |     twice: fn(self: Int) -&gt; Int { self * 2 }
     |               ^^^^
  Why: `self` is the value a method is called on; a function outside a type body or `impl` has no such value, so `self` would silently be an ordinary parameter
  Fix: Move `twice` into the type&#39;s body or an `impl` block to make it a method, or give the parameter another name

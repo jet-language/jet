@@ -40,7 +40,7 @@
 <pre class="diag">Error [jet.WebhookKeyNotSigningKey]: `key: &quot;webhook_secret&quot;` names no `#App.SigningKey` method of `Hooks`.
   --&gt; tests/ui/web_app_webhook_key_not_signing_key.jet:7:81
     |
-  7 |     #App.Webhook(path: &quot;/hooks/:project&quot;, signature: app.Signature.GitHub, key: &quot;webhook_secret&quot;)
+  7 |     #App.Webhook(path: &quot;/hooks/:project&quot;, signature: app.Signature.GitHub, key: &quot;webhook_secret&quot;) on_event: fn(self, project: String, event: String) -&gt; Int {
     |                                                                                 ^^^^^^^^^^^^^^^^
  Why: A webhook runs a delivery only when its signature matches the key that the service&#39;s signing-key method gives, so `key:` must name such a method.
  Fix: Mark the method `webhook_secret` names `#App.SigningKey`, or name one that it marks.

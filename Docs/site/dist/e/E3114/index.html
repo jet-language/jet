@@ -36,14 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Take an owner or a `View&lt;T&gt;` instead of the address, make the field `priv`, or mark the function `#Unsafe(&quot;…&quot;)` so each caller vouches for the address.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E3114</code>: <code>tests/ui/E3114_raw_address_into_kernel/stderr</code>.</p>
-<pre class="diag">Error [jet.RawAddressIntoKernel]: `_peek` carries the caller-chosen address `address` to `pointer_from_address`
-  --&gt; tests/ui/E3114_raw_address_into_kernel/run.jet:9:18
+<p>First UI snapshot mentioning <code>E3114</code>: <code>tests/ui/E3113_runtime_unit_source_outside_kernel/stderr</code>.</p>
+<pre class="diag">Error [jet.RawMemoryOutsideKernel]: `os_load_i64` at Compiler/JetRuntime/Source/Host.jet:3 is a raw memory operation outside the package&#39;s memory kernel
+  --&gt; tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet:16:65
     |
-  9 |         pointer: mem.Ptr&lt;Int&gt;.from_addr(address)
-    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: Code outside the kernel files calls `_peek` without a gate, so the address `pointer_from_address` uses would skip the kernel&#39;s audit.
- Fix: Take an owner or a `View&lt;T&gt;` in place of `address`, or mark `_peek` `#Unsafe(&quot;…&quot;)` so each caller vouches for the address.
+ 16 |     #Unsafe(&quot;the host holds the word at this address&quot;) { return os_load_i64(address) }
+    |                                                                 ^^^^^^^^^^^
+ Why: Raw memory operations stand only in the kernel files `policy.memory` names, so the package&#39;s memory safety is audited in one place.
+ Fix: Outside the kernel, read and write through a `[T]` list or a `View&lt;T&gt;` a kernel owner hands out; to make `Compiler/JetRuntime/Source/Host.jet` a kernel file, add `Compiler/JetRuntime/Source/Host.jet` to `policy.memory` in `package.jet`.
+More: jet-lang.dev/e/E3113
+
+Error [jet.RawAddressIntoKernel]: `_word` carries the caller-chosen address `address` to `os_load_i64`
+  --&gt; tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet:10:77
+    |
+ 10 |     #Unsafe(&quot;the kernel&#39;s own leaf reads a word its caller lends&quot;) { return os_load_i64(address) }
+    |                                                                             ^^^^^^^^^^^
+ Why: Code outside the kernel files calls `_word` without a gate, so the address `os_load_i64` uses would skip the kernel&#39;s audit.
+ Fix: Take an owner or a `View&lt;T&gt;` in place of `address`, or mark `_word` `#Unsafe(&quot;…&quot;)` so each caller vouches for the address.
 More: jet-lang.dev/e/E3114
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

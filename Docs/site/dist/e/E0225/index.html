@@ -40,8 +40,8 @@
 <pre class="diag">Error [jet.MissingMoveMarker]: `xs` cannot be moved from borrowed storage
   --&gt; tests/ui/move_mark_borrowed.jet:7:38
     |
-  8 |     Box{xs: xs.move()}
-    |             ^^^^^^^
+  7 | wrap: fn(xs: [Int]) -&gt; Box { Box{xs: xs.move()} }
+    |                                      ^^^^^^^
  Why: Read and write parameters and named windows keep ownership with their source
  Fix: Copy the value with `xs.copy()`, or declare the parameter `xs: &amp;&amp;[Int]` to take ownership
 More: jet-lang.dev/e/E0201
@@ -49,7 +49,7 @@ More: jet-lang.dev/e/E0201
 Error [jet.UnusedPlaceMark]: `.move()` takes a named place, not this value
   --&gt; tests/ui/move_mark_borrowed.jet:13:14
     |
- 17 |     first := grid[0].move()
+ 13 |     first := grid[0].move()
     |              ^^^^^^^^^^^^
  Why: `.move()` moves a name or one of its fields out of its owner; an element stays owned by its collection, and a call result or literal is already new
  Fix: Move the whole collection or name, or drop `.move()` from a fresh value

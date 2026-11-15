@@ -38,9 +38,9 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0722</code>: <code>tests/ui/taint/auth_token_keeps_credential_leak_protection.stderr</code>.</p>
 <pre class="diag">Error [jet.MissingErrorConversion]: This implicit fallible call can&#39;t convert `AuthError` into `Err` — no declared conversion exists
-  --&gt; auth_token_keeps_credential_leak_protection.jet:6:15
+  --&gt; tests/ui/taint/auth_token_keeps_credential_leak_protection.jet:6:15
     |
-  7 |     _ := auth.verify_jwt(token, key: key, audience: &quot;gateway&quot;)
+  6 |     _ := auth.verify_jwt(token, key: key, audience: &quot;gateway&quot;)
     |               ^^^^^^^^^^
  Why: Ordinary fallible calls propagate automatically; `AuthError` can reach `Err` only through `impl Err.From(AuthError)`
  Fix: Handle this call locally with `??`, add `impl Err.From(AuthError) { … }`, or change the return type
@@ -49,7 +49,7 @@ More: jet-lang.dev/e/E2402
 Error [jet.CredentialValueDenied]: A `Credential` value is denied at `print`
   --&gt; tests/ui/taint/auth_token_keeps_credential_leak_protection.jet:7:5
     |
-  8 |     print(token)
+  7 |     print(token)
     |     ^^^^^
  Why: `print` writes to a log, terminal, or serialized output, where a credential would leak
  Fix: Log a non-secret field, or pass the value through a matching `#Scrub(Credential)` function

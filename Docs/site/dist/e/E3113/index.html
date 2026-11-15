@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E3113</code>: <code>tests/ui/E3113_package_without_kernel_files/stderr</code>.</p>
 <pre class="diag">Error [jet.RawMemoryOutsideKernel]: `alloc_raw` is a raw memory operation outside the package&#39;s memory kernel
-  --&gt; tests/ui/E3113_package_without_kernel_files/run.jet:7:9
+  --&gt; tests/ui/E3113_package_without_kernel_files/run.jet:7:35
     |
-  7 |     mem.alloc_raw(16, 8)
-    |         ^^^^^^^^^
+  7 | _grab: fn() -&gt; mem.Ptr&lt;U8&gt;? { mem.alloc_raw(16, 8) }
+    |                                   ^^^^^^^^^
  Why: Raw memory operations stand only in the kernel files `policy.memory` names, so the package&#39;s memory safety is audited in one place.
  Fix: Outside the kernel, hold the memory in a `[T]` list or an owner a kernel file hands out; to make `run.jet` a kernel file, name the package&#39;s kernel files in `package.jet`: `policy: { memory: .Kernel([&quot;run.jet&quot;]) }`.
 More: jet-lang.dev/e/E3113

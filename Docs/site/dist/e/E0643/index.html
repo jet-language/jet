@@ -40,7 +40,7 @@
 <pre class="diag">Error [jet.ModuleValueNotBuilt]: `HITS` can&#39;t be computed while building: a module `Shared` cell starts from literal data, and its value is not literal data
   --&gt; tests/ui/module_shared_cell_starts_from_literal_data.jet:10:7
     |
-  8 | HITS: Shared{Count{value: start()}}
+ 10 | HITS: Shared{Count{value: start()}}
     |       ^^^^^^
  Why: A module-level `name: value` is computed while building and stored in the program, the same value on every tier; no code runs before `run: fn`, so a value that stops, reaches the outside world, or can&#39;t run while building is a build error
  Fix: Compute it in `run` and pass it on; or make it a function, marked `#Memo` when it is pure so the first result is kept; or, for outside data, read a pinned build input such as `#run { embed_file(&quot;config.txt&quot;) }`
