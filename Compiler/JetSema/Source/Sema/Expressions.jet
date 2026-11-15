@@ -3080,7 +3080,10 @@ sema_expr_comptime_call_args: fn(value: TExpr, context: SemaCheckContext) -> [TC
 }
 
 sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, span: Span, checked: SemaCallChecked, diagnostics: &[Diagnostic]) -> Bool {
-    wall := sema_effect_check_transaction_wall(environment, program, scopes, checked.facts.effect_bound, sema_effect_call_api(program, checked.value), span, diagnostics)
+    // The API spelling only names a wall violation, so a call outside every
+    // `#Transact` block never builds it (the wall passes at depth 0).
+    api: if scopes.transaction_wall_depth > 0 -> sema_effect_call_api(program, checked.value) else -> ""
+    wall := sema_effect_check_transaction_wall(environment, program, scopes, checked.facts.effect_bound, api, span, diagnostics)
     allowed: wall ?? return false
     if !allowed -> return false
     callee := sema_expr_call_callee(program, checked.value)
