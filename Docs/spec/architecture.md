@@ -225,14 +225,17 @@ writes module state, `I` when the failure solve proves it infallible from
 its reach alone, and `G` when its failure union is the general `Err`. A
 line with `I` alone names another function that solve proves infallible;
 a program that takes one as a value checks the Core bodies instead. A
-function whose result carries borrowed views gets no `S`. A `jet run` whose
-Core is the built-in one (no release profile, no `--deep-checks`) checks a
-sealed function with an `S` line by its signature alone, with the line's
+function whose result carries borrowed views gets no `S`, and the library
+writes `S` only on a function `core.facts` lists as `sealed`. A `jet run`
+whose Core is the built-in one (no release profile, no `--deep-checks`)
+checks a function with an `S` line by its signature alone, with the line's
 facts, and its Core demand stops there; a function a body names as a value,
 a shared global's initializer, an error conversion or a template item is
 checked in full. The run decides whether its Core is the built-in one, and
 reads the seal, only when its Core demand first names a Core body, so a
-program that names none never compares its tree's Core. When a stand-in
+program that names none never compares its tree's Core. It reads the seal
+jet carries by key, a binary search per function its demand names, and
+parses no other line. When a stand-in
 can't stand for its body (an error a whole-program pass reports, whose call
 chain may run through Core, other than a `-[]>` function's E3401 outside
 Core, which names its own first impure call; a memory, stack, kernel or cap

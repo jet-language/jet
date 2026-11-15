@@ -26,6 +26,7 @@ use {
     jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_transfer_rows, symbol_table]
     jet_ir.[IRCoreLibrary, ir_build_core_library, ir_core_exports_text, ir_core_facts_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[JET_VERSION]
+    jet_sema.[sema_core_seal_bound]
 }
 
 // The Core packages the toolchain does not ship as machine code: each one
@@ -90,7 +91,11 @@ jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: 
     // not on this thread as the function returns. The task owns it alone; a
     // process that exits first hands its pages back to the kernel. The rows
     // the build took are refilled empty, so the rest moves whole.
-    seal: inputs.core_seal.join("\n")
+    // The seal keeps an S only on a function the library's machine code
+    // seals (JetSema CoreSeal.jet sema_core_seal_bound), so a program reads
+    // it by key with no Core facts beside it.
+    seal: sema_core_seal_bound(inputs.core_seal.move(), jet_cli_core_facts(ir_core_facts_text(library.facts).bytes()).sealed).join("\n")
+    inputs.core_seal = [String]{}
     inputs.functions = [FnBody]{}
     inputs.symbols = symbol_table()
     inputs.sources = [String:String]{}

@@ -7,7 +7,7 @@
 use {
     cli_files: core.files
     jet_foundation.[CORE_SOURCE_OWNED_ROWS, CoreDeclarationFile, EFFECT_CANONICAL_MODULE, core_declarations_assets]
-    jet_sema.[SemaCoreSealSource, SemaCoreSealText]
+    jet_sema.[SemaCoreSeal, SemaCoreSealSource]
 }
 
 // The canonical effect module: the text of Compiler/Prelude/Effects.jet, then
@@ -141,15 +141,15 @@ jet_cli_core_binding_bound: fn(binding: Shared<JetCLICoreBinding>) -> Bool Never
 // A `jet run`'s read of this jet's Core seal (JetSema CoreSeal.jet
 // SemaCoreSealSource), which its Core demand makes when it first names a
 // deferred Core body: only then does the run decide whether its Core is
-// the built-in one (`binding`), and read the image's seal and Core facts.
+// the built-in one (`binding`). The seal is the image's part, lent from
+// its mapped image (jet_cli_runtime_part), which the demand searches by
+// key: no whole read or parse.
 JetCLICoreSealRead: struct {
     binding: Shared<JetCLICoreBinding>
     impl SemaCoreSealSource {
-        read: fn(self) -[FS, Env]> SemaCoreSealText? {
+        read: fn(self) -[FS, Env]> SemaCoreSeal? {
             if !jet_cli_core_binding_built_in(self.binding) -> return None
-            text: String.from_bytes(jet_cli_runtime_part(JET_CLI_CORE_SEAL_FILE)) ?? return None
-            facts: jet_cli_core_facts(jet_cli_runtime_part(JET_CLI_CORE_FACTS_FILE))
-            Val(SemaCoreSealText{text: text, sealed: facts.sealed.move()})
+            Val(SemaCoreSeal{bytes: jet_cli_runtime_part(JET_CLI_CORE_SEAL_FILE)})
         }
     }
 }

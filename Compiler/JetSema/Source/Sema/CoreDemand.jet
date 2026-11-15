@@ -941,8 +941,8 @@ sema_core_stand_in_bind: fn(graph: &SemaRegistrationGraph, host_hooks: SemaHostH
     permit: hooks.guard_edit()
     read: if permit.value.core_seal == .Val(source) -> source.read() else -> None
     permit.value.core_seal = None
-    sealed: read ?? return
-    graph.core_stand_ins = Val(sema_core_seal_read(sealed.text, graph, sealed.sealed))
+    seal: read ?? return
+    graph.core_stand_ins = Val(seal)
 }
 
 // Whether `keys` names a deferred Core body not yet checked, by its own key
@@ -1215,7 +1215,7 @@ sema_core_stand_in_full: fn(graph: SemaRegistrationGraph, key: String, value: Bo
         row: sema_core_seal_row(graph, key) ?? return
         names.full_rows[row] = true
         if names.stood_in.get(row) != None && names.rerun == "" -> names.rerun = "named"
-        if value && !names.valued && sema_core_seal_valued(seal, graph, key) {
+        if value && !names.valued && sema_core_seal_valued(seal, key) {
             names.valued = true
             if names.stood_in.len() > 0 && names.rerun == "" -> names.rerun = "valued"
         }
@@ -1231,7 +1231,7 @@ sema_core_stand_in_wait: fn(graph: SemaRegistrationGraph, key: String, names: &S
     if graph.core_stand_ins == .Val(seal) {
         id: decl_table_find(graph.decls, graph.symbols, key) ?? return false
         row: decl_id_index(id)
-        if names.full_rows.get(row) != None || sema_core_seal_stand_in_at(seal, row) == None -> return false
+        if names.full_rows.get(row) != None || sema_core_seal_stand_in(seal, key) == None -> return false
         names.pending.push(id)
         return true
     }
