@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6861,
-    "rev": 103050,
+    "rev": 103061,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -42004,8 +42004,8 @@
     {
       "id": "c0flvd7x",
       "num": 3838,
-      "title": "T? E! matches as three states: .Val, .None, .Err; only failures pass up by themselves",
-      "body": "D-OUTCOME-SHAPE1=A (ratified). Parent #3742. Today `User? DbError!` matches as nested `.Ok(.Val(x))`, `.Ok(.None)`, `.Err(e)` (CarrierResearch: parser Types.rs:1213-1247 builds Result{ok: Option(T)}).",
+      "title": "Failure model: three-state outcomes, failure ceilings, visible failure points, dbg and hop trails",
+      "body": "Destination: Jet's ratified failure law is built end to end. `T? E!` matches as three states (.Val, .None, .Err; D-OUTCOME-SHAPE1=A, done here). Failures pass up by themselves and None never does. A written failure contract is an optional ceiling and failure sets follow the effect law (D-FAIL-PUBSIG1=A, D-FAIL-EFFECT1=A). Readers see failure points through tools, and teams may require marks (D-FAIL-VISIBLE1=A). A function names its own error cases (D-ERR-CASES1=A, D-FAIL-INFER-UNION1=A). `dbg` works in pure code (D-DBG1=A). `err.as<T>()` recovers a typed failure (D-ERR-TRAIT1=A).\n\nWhy it matters: failures are the most common control flow in real programs; each gap here is a place where a beginner writes a conversion by hand or an expert cannot see where a failure leaves.\n\nSpec: Docs/spec/spec.md failure sections; probes: $JET_SCRATCH_ROOT/lanes/Main/prep/c3838/.\n\nOwned elsewhere: the editor's faint `?` inlay hint (#4917), publish's failure-set version rule (#6860).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
@@ -42019,6 +42019,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Rebuilt: c6 split per decision into #3838 c16, #3838 c17, #3838 c18, #3838 c19, #3838 c20, #3838 c21 and #6860 c4; c8 split into #3838 c22-#3838 c26; c4, c5, c9 restated with proofs."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -42075,30 +42080,31 @@
         },
         {
           "n": 4,
-          "text": "[#3713] Probe p25 prints the origin of `Err(\"empty input\")` and each hop (double, total, run) with file:line on every level. `--json` carries origin and hops with columns. `?(text)` frames stay in order. Snapshots cover a direct Err, one hop, three hops, and a failing Core call as origin.",
+          "text": "An unhandled failure prints its origin and each hop with file:line on every level: probe p25 prints the origin of `Err(\"empty input\")` and the hops double, total and run; `--json` carries the origin and hops with columns; `?(text)` frames stay in order (D-FAIL-VISIBLE1=A runtime report). Proof: `jet test Compiler --profile ui --filter failure_trail_` covers a direct Err, one hop, three hops and a failing Core call as origin.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:00:22.055Z"
+          "at": "2026-11-15T02:42:14.666Z"
         },
         {
           "n": 5,
-          "text": "[#3740] Infallible functions (p34 build/load/run) lower to plain returns with no outcome wrapper. Fallible callers, Err returns and written contracts keep the fallible ABI (direct, transitive, recursive, closure and trait cases). Core annotations migrate.",
+          "text": "Infallible functions (probe p34's build, load and run) lower to plain returns with no outcome wrapper, while fallible callers, Err returns and written contracts keep the fallible ABI in direct, transitive, recursive, closure and trait cases, and Core's annotations migrate. Proof: `jet test Compiler --profile cases --filter infallible_plain_return_abi`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:53:50.042Z"
+          "at": "2026-11-15T02:42:15.539Z"
         },
         {
           "n": 6,
           "text": "[#3742] Each ratified outcome is implemented and proved here: D-FAIL-VISIBLE1, D-FAIL-PUBSIG1, D-OUTCOME-SHAPE1 (three-state Val/None/Err, which is #3838 itself), D-ERR-CASES1, D-DBG1 (debug builtin on #3893), and D-FAIL-EFFECT1.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:00:23.997Z"
+          "evidence": "Moved to #3838 c16: the umbrella split per ratified decision: D-FAIL-VISIBLE1 (V1, V2), D-FAIL-PUBSIG1 and D-FAIL-EFFECT1 (P1, P2, #6860 AP4), D-DBG1 (D1, D2); D-OUTCOME-SHAPE1 is met here (c1-c3) and D-ERR-CASES1 by c7",
+          "at": "2026-11-15T02:42:17.358Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
@@ -42112,20 +42118,21 @@
         {
           "n": 8,
           "text": "Ratified failure-law gaps (Prep 2026-11-04, probes in $JET_SCRATCH_ROOT/lanes/Main/prep/c3838/): typed and minted failures leave run and a written Err! without a conversion (uprop1, uprop2 and wcase run on O0-O2, and the report names FindError -> Err); a catch-all .Err(e) over an open union binds Err (catchall prints on all tiers); an arm for a member that can no longer arrive is lint L0304 with a delete fix and a UI snapshot, while unknown names stay E0305; minted error types print with {e}, and E0915 no longer doubles its backticks; and one mint conflict reports one E0105 with no E0330 or E0108 cascade.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T14:54:42.765Z"
+          "evidence": "Moved to #3838 c22: the five failure-law gaps split one per outcome: G1-G5",
+          "at": "2026-11-15T02:42:18.312Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
-          "text": "err.as<T>() recovers a typed failure from an Err carrier as T? (D-ERR-TRAIT1 A), using the typed identity recorded at conversion, with an example on O0, O1 and O2.",
+          "text": "`err.as<T>()` recovers a typed failure from an Err carrier as `T?`, using the typed identity recorded at conversion (D-ERR-TRAIT1=A). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ErrAs` on o0, o1 and o2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T14:54:43.274Z"
+          "at": "2026-11-15T02:42:16.439Z"
         },
         {
           "n": 10,
@@ -42243,6 +42250,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:42:09.775Z"
+        },
+        {
+          "n": 24,
+          "text": "A match arm for a failure member that can no longer arrive is a tidy error with a delete fix (D-NO-WARNINGS1=A replaces lint L0304), while an unknown member name stays E0305. Proof: `jet test Compiler --profile ui --filter failure_arm_cannot_arrive`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:10.892Z"
+        },
+        {
+          "n": 25,
+          "text": "A minted error type prints with `{e}`, and E0915's message no longer doubles its backticks. Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/MintedDisplay` and the E0915 UI snapshot (`jet test Compiler --profile ui --filter E0915`).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:11.793Z"
+        },
+        {
+          "n": 26,
+          "text": "One mint conflict (one case name with two payload types, D-ERR-CASES1=A) reports one E0105 with no E0330 or E0108 cascade. Proof: `jet test Compiler --profile ui --filter mint_conflict_single_error`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:12.811Z"
         }
       ],
       "refs": [
@@ -42256,12 +42290,12 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-15T02:42:09.775Z",
+      "updated": "2026-11-15T02:42:20.973Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 23
+      "criteriaLastN": 26
     },
     {
       "id": "c0bs5inj",
@@ -100579,6 +100613,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:29:43.716Z"
+        },
+        {
+          "n": 4,
+          "text": "package.api records each public function's failure set: infallible to fallible, or a new member in a closed set, is a major change that `jet registry publish` refuses below a major version without acknowledgment (D-FAIL-PUBSIG1=A). Proof: `jet test Compiler --profile cases --filter publish_failure_set_major`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:13.760Z"
         }
       ],
       "refs": [],
@@ -100592,8 +100635,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:43.716Z",
-      "updated": "2026-11-15T02:29:43.716Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T02:42:13.760Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 4
     }
   ],
   "decisions": [
@@ -206012,6 +206056,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:42:20.973Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0flvd7x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:42:19.952Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0flvd7x",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T02:42:18.312Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T02:42:17.359Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T02:42:16.439Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0flvd7x",
+      "note": "#9: add proof; was: err.as<T>() recovers a typed failure from an Err carrier as T? (D-ERR-TRAIT1 A), using the typed identity recorded at conversion, with an example on O0, O1 and O2."
+    },
+    {
+      "at": "2026-11-15T02:42:15.539Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0flvd7x",
+      "note": "#5: strip debris; add proof; was: [#3740] Infallible functions (p34 build/load/run) lower to plain returns with no outcome wrapper. Fallible callers, Err returns and written contracts keep the fallible ABI (direct, transitive, recursi"
+    },
+    {
+      "at": "2026-11-15T02:42:14.666Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0flvd7x",
+      "note": "#4: strip debris; add proof; was: [#3713] Probe p25 prints the origin of `Err(\"empty input\")` and each hop (double, total, run) with file:line on every level. `--json` carries origin and hops with columns. `?(text)` frames stay in ord"
+    },
+    {
+      "at": "2026-11-15T02:42:13.760Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c09qojqz",
+      "note": "#4 package.api records each public function's failure set: infa"
+    },
+    {
+      "at": "2026-11-15T02:42:12.811Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#26 One mint conflict (one case name with two payload types, D-E"
+    },
+    {
+      "at": "2026-11-15T02:42:11.793Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#25 A minted error type prints with `{e}`, and E0915's message n"
+    },
+    {
+      "at": "2026-11-15T02:42:10.892Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#24 A match arm for a failure member that can no longer arrive i"
+    },
     {
       "at": "2026-11-15T02:42:09.775Z",
       "by": "TowerKeeper-1",
