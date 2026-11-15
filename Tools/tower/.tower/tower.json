@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106016,
+    "rev": 106025,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41974,6 +41974,24 @@
           "evidence": "Moved to #6867 c7: the offline queue is its own stream",
           "at": "2026-11-15T02:54:39.131Z",
           "closure": "obsolete"
+        },
+        {
+          "n": 27,
+          "text": "Warm coverage per screen (sync review gap G10): the build reports, for each screen, which of its live reads are in the warm set and which are not, and a check fails a screen marked offline that reads anything outside it. Proof: a case with one covered and one uncovered screen, and the check's output for each.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T06:19:37.121Z"
+        },
+        {
+          "n": 28,
+          "text": "Test-host network abilities (sync review gap G64): the app test host can disconnect a client from the server and restore it mid-test, deterministically, so offline, catch-up and replay cases run without real network faults. Proof: a case that disconnects, writes on both sides, restores, and checks the merged state.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T06:19:37.998Z"
         }
       ],
       "refs": [
@@ -41998,12 +42016,12 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-15T06:06:57.257Z",
+      "updated": "2026-11-15T06:19:37.998Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
       ],
-      "criteriaLastN": 26
+      "criteriaLastN": 28
     },
     {
       "id": "c0o8f1p4",
@@ -43296,20 +43314,20 @@
         {
           "n": 22,
           "text": "Typed and minted failures leave `run` and a written `Err!` contract without a conversion, on O0, O1 and O2, and the run-time report names the conversion (`FindError -> Err`) (probes uprop1, uprop2 and wcase in $JET_SCRATCH_ROOT/lanes/Main/prep/c3838/). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/MintedLeaveRun`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:42:08.881Z"
+          "evidence": "GoalsA-1-3-failure-proofs landed 2c1fb0ce3f. On batch compiler p153 (dev 84df7e8189), 2026-11-15 01:15: jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ PASS 9 FAIL 0 (MintedLeaveRun, CatchAllOpenUnion and MintedDisplay among them, on every golden tier); --profile ui --filter E0915 PASS 2; --profile ui --filter mint_conflict_single_error PASS 1; Compiler/JetTestKit/Tests/GoldenStreams.jet 253 passed.",
+          "at": "2026-11-15T06:19:27.614Z"
         },
         {
           "n": 23,
           "text": "A catch-all `.Err(e)` arm over an open failure union binds `e` as Err on every tier (probe catchall). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/CatchAllOpenUnion` on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:42:09.775Z"
+          "evidence": "GoalsA-1-3-failure-proofs landed 2c1fb0ce3f. On batch compiler p153 (dev 84df7e8189), 2026-11-15 01:15: jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ PASS 9 FAIL 0 (MintedLeaveRun, CatchAllOpenUnion and MintedDisplay among them, on every golden tier); --profile ui --filter E0915 PASS 2; --profile ui --filter mint_conflict_single_error PASS 1; Compiler/JetTestKit/Tests/GoldenStreams.jet 253 passed.",
+          "at": "2026-11-15T06:19:28.733Z"
         },
         {
           "n": 24,
@@ -43323,20 +43341,20 @@
         {
           "n": 25,
           "text": "A minted error type prints with `{e}`, and E0915's message no longer doubles its backticks. Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/MintedDisplay` and the E0915 UI snapshot (`jet test Compiler --profile ui --filter E0915`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:42:11.793Z"
+          "evidence": "GoalsA-1-3-failure-proofs landed 2c1fb0ce3f. On batch compiler p153 (dev 84df7e8189), 2026-11-15 01:15: jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ PASS 9 FAIL 0 (MintedLeaveRun, CatchAllOpenUnion and MintedDisplay among them, on every golden tier); --profile ui --filter E0915 PASS 2; --profile ui --filter mint_conflict_single_error PASS 1; Compiler/JetTestKit/Tests/GoldenStreams.jet 253 passed.",
+          "at": "2026-11-15T06:19:29.707Z"
         },
         {
           "n": 26,
           "text": "One mint conflict (one case name with two payload types, D-ERR-CASES1=A) reports one E0105 with no E0330 or E0108 cascade. Proof: `jet test Compiler --profile ui --filter mint_conflict_single_error`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:42:12.811Z"
+          "evidence": "GoalsA-1-3-failure-proofs landed 2c1fb0ce3f. On batch compiler p153 (dev 84df7e8189), 2026-11-15 01:15: jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ PASS 9 FAIL 0 (MintedLeaveRun, CatchAllOpenUnion and MintedDisplay among them, on every golden tier); --profile ui --filter E0915 PASS 2; --profile ui --filter mint_conflict_single_error PASS 1; Compiler/JetTestKit/Tests/GoldenStreams.jet 253 passed.",
+          "at": "2026-11-15T06:19:30.698Z"
         }
       ],
       "refs": [
@@ -43350,7 +43368,7 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-15T05:21:00.992Z",
+      "updated": "2026-11-15T06:19:30.698Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -75118,6 +75136,11 @@
       "log": [
         {
           "at": "2026-11-15",
+          "by": "Main",
+          "text": "c22 rulings by Main, 2026-11-15 01:15, within the ratified c22 text (recorded as fact). (1) G1(b) = T1: a toolchain tree is read only when named (JET_TOOLCHAIN_ROOT, Core tests, compiler builds). jet run inside a checkout makes 0 statx/openat/getdents64 calls on the tree, because c22 states the strace clause with no exception for checkouts; T2 would add one. (2) G17 split: c22 keeps the Core- and Prelude-attributable CPU of hello (at most 1 ms, per note r3); hello's fixed compiler cost (traced: register 7.6, finalize 4.1, link 3.0 ms) moves to #6759 under c22's own wording."
+        },
+        {
+          "at": "2026-11-15",
           "by": "TowerKeeper-1",
           "text": "Split 2026-11-15 by TowerKeeper-1 with Main approval: c7, c8, c9 and c10 moved to #6968; c18-c21 to #6639; c25 to #6906; c26 and c27 to #6959. Precompiled-Core criteria (c22, c23, c37 and the rest) are unchanged."
         },
@@ -75831,8 +75854,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T05:39:30.881Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T06:11:51.951Z",
+      "updatedBy": "Main",
       "criteriaLastN": 38
     },
     {
@@ -96741,6 +96764,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T05:53:31.554Z"
+        },
+        {
+          "n": 15,
+          "text": "Hello's cold user time is spent on the user's code (the c22 clause, split from #6328 c22 on 2026-11-15): in an untraced median of at least 5 cold runs of jet run hello.jet, more than half of user CPU is attributed by the compiler trace to the user's own code. The fixed cost (registration, finalize, link; traced 7.6, 4.1 and 3.0 ms on p149) is what falls. Proof: the trace attribution report and the medians, from a script committed with the change.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T06:11:52.842Z"
         }
       ],
       "refs": [],
@@ -96751,9 +96783,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-15T05:36:20.774Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 14
+      "updated": "2026-11-15T06:11:52.842Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 15
     },
     {
       "id": "c0on083p",
@@ -104773,6 +104805,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T05:41:42.103Z"
+        },
+        {
+          "n": 10,
+          "text": "A read-only parameter passed to app.live or app.invalidate is copied or borrowed by the lowering, not moved. Today (p153) the repro (a live source fn count(project: String), with bind and refresh taking project: String) reports E0120 ReadOnlyValueNotOwned at both call sites, and its fix names the compiler temporary __jet_live_N_0, a name the user never wrote. Proof: a case where jet check passes and jet run prints loaded 3; the case live_rerun_overtaken drops its project.copy() workaround.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T06:14:38.705Z"
         }
       ],
       "refs": [],
@@ -104787,9 +104828,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-15T06:06:58.461Z",
+      "updated": "2026-11-15T06:14:38.705Z",
       "updatedBy": "Main",
-      "criteriaLastN": 9
+      "criteriaLastN": 10
     },
     {
       "id": "c0ems7zb",
@@ -218300,6 +218341,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T06:19:37.998Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ttcd0k",
+      "note": "#28 Test-host network abilities (sync review gap G64): the app t"
+    },
+    {
+      "at": "2026-11-15T06:19:37.121Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ttcd0k",
+      "note": "#27 Warm coverage per screen (sync review gap G10): the build re"
+    },
+    {
+      "at": "2026-11-15T06:19:30.698Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-15T06:19:29.707Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-15T06:19:28.733Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-15T06:19:27.614Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-15T06:14:38.705Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00cqn1l",
+      "note": "#10 A read-only parameter passed to app.live or app.invalidate i"
+    },
+    {
+      "at": "2026-11-15T06:11:52.842Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ssy5wy",
+      "note": "#15 Hello's cold user time is spent on the user's code (the c22 "
+    },
+    {
+      "at": "2026-11-15T06:11:51.951Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T06:11:01.367Z",
       "by": "Main",
