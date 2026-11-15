@@ -1,7 +1,9 @@
 // Every typed diagnostic row carries What/Why/Fix prose, the prose opens in
 // sentence case, and the sentence-case projection keeps code fragments, flags,
-// paths, package refs, identifiers and keywords in their own case.
-use jet_foundation.[diagnostic_registry_rows, diagnostic_sentence_case_line]
+// paths, package refs, identifiers and keywords in their own case. A type
+// identity prints by its plain name unless the message names a second type
+// with that name.
+use jet_foundation.[diagnostic_from_registry, diagnostic_registry_rows, diagnostic_sentence_case_line]
 
 diagnostic_format_any_part_contains: fn(needle: String) -> Bool Never! {
     loop row in diagnostic_registry_rows() {
@@ -64,4 +66,12 @@ diagnostic_format_any_part_contains: fn(needle: String) -> Bool Never! {
     loop line in kept -> assert_eq(diagnostic_sentence_case_line(line), line)
     assert_eq(diagnostic_sentence_case_line("this row opens in prose"), "This row opens in prose")
     assert_eq(diagnostic_sentence_case_line("  remove the comma"), "  Remove the comma")
+}
+
+#Test("a type prints by its plain name beside a quoted literal of itself") {
+    shown: diagnostic_from_registry("E0112", None, "`module:7:fixture:main.jet::NoDebug` can't be shown with :Debug yet", "debug interpolation needs a debuggable value", "show its `Display` text with `{{NoDebug{{ value: 2 }}}}`, or implement `Debug` for `module:7:fixture:main.jet::NoDebug`")
+    assert_eq(shown.what, "`NoDebug` can't be shown with :Debug yet")
+    assert_eq(shown.fix, "Show its `Display` text with `{{NoDebug{{ value: 2 }}}}`, or implement `Debug` for `NoDebug`")
+    clash: diagnostic_from_registry("E0112", None, "`print` wants `NoDebug`, but this is `module:7:fixture:main.jet::NoDebug`", "every argument must match its parameter's type", "convert the value")
+    assert_eq(clash.what, "`print` wants `NoDebug`, but this is `main.NoDebug`")
 }

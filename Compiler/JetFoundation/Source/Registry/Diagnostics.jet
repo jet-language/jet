@@ -290,8 +290,10 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentit
 
 // Whether `head` also appears in `context` as a plain type name outside every
 // identity: a whole word, not part of a path (`.`, `/`, `:` before it, or a
-// member after it, as in `Logger.get`) and not a prose compound
-// (`Secret-bearing`).
+// member after it, as in `Logger.get`), not a prose compound
+// (`Secret-bearing`), and not the head of a literal in quoted source
+// (`{NoDebug{ value: 2 }}`), which spells the value the code wrote in its own
+// scope rather than printing a second type.
 diagnostic_identity_plain_use: fn(context: [U8], identities: [DiagnosticIdentity], head: String) -> Bool Never! {
     word: head.bytes()
     if word.len() == 0 -> return false
@@ -305,7 +307,8 @@ diagnostic_identity_plain_use: fn(context: [U8], identities: [DiagnosticIdentity
             before: diagnostic_byte_at(context, index - 1)
             after: diagnostic_byte_at(context, index + word.len())
             member: after == 46 && diagnostic_is_word_byte(diagnostic_byte_at(context, index + word.len() + 1))
-            if !diagnostic_is_word_byte(before) && before != 46 && before != 47 && before != 58 && !diagnostic_is_word_byte(after) && after != 45 && after != 58 && !member -> return true
+            literal: after == 123
+            if !diagnostic_is_word_byte(before) && before != 46 && before != 47 && before != 58 && !diagnostic_is_word_byte(after) && after != 45 && after != 58 && !member && !literal -> return true
         }
         index += 1
     }
