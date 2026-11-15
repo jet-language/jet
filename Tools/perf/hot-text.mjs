@@ -13,9 +13,17 @@
 // programs) add come next, each traced as that receipt runs it: out of
 // tree, with Core from the compiler's own records.
 // Names that no longer name a function are skipped by the build (`--trace`
-// counter ir.object.hot_missing); regenerate after large renames.
+// counter ir.object.hot_missing). A closure's name keeps while edits move
+// its source (JetIR ir_closure_key), so rows go stale only as functions are
+// renamed or removed, and the list misses only functions added since it was
+// traced; `--image` says when a regenerated list is due.
 //
 //   node Tools/perf/hot-text.mjs --jet <jet> [--out Compiler/JetCli/hot-text.list] [--twins <checkout>]
+//   node Tools/perf/hot-text.mjs --image <jet>
+//
+// `--image` reads the built compiler <jet>: it fails, listing them, when
+// more than IMAGE_MISSING_PERCENT percent of the list's rows name no
+// function of <jet>.
 //
 // <jet> is a built compiler beside its jet-runtime/ directory. Only the
 // compiler's own functions are listed: its object is the link's first input,
@@ -35,6 +43,13 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const LIST = join(ROOT, "Compiler/JetCli/hot-text.list");
+// The most rows of the list, in percent, that a built compiler may lack
+// before `--image` fails. A cycle's renames and removals cost a few rows
+// each and little layout; past this, the hot functions those rows named sit
+// among the cold ones, each run faults their pages in apart, and the list is
+// due to be regenerated.
+const IMAGE_MISSING_PERCENT = 3;
 const HELLO = 'run: fn() {\n    print("hello")\n}\n';
 // The script run's program is a small script as the gauntlet's are: it uses
 // the common forms, `use` rows, a struct, an enum and its match, a lambda, a
@@ -102,10 +117,10 @@ const TRACES = [
 ];
 
 function parseArgs(argv) {
-  const args = { jet: "", out: join(ROOT, "Compiler/JetCli/hot-text.list"), twins: "" };
+  const args = { jet: "", out: LIST, twins: "" };
   for (let i = 2; i < argv.length; i += 2) {
     const key = argv[i].replace(/^--/, "");
-    if (!(key in args) || i + 1 >= argv.length) throw new Error(`usage: node Tools/perf/hot-text.mjs --jet <jet> [--out <file>] [--twins <checkout>]`);
+    if (!(key in args) || i + 1 >= argv.length) throw new Error(`usage: node Tools/perf/hot-text.mjs --jet <jet> [--out <file>] [--twins <checkout>] | --image <jet>`);
     args[key] = resolve(argv[i + 1]);
   }
   if (!args.jet) throw new Error("--jet is required");
@@ -135,7 +150,25 @@ function functionSymbols(bytes) {
   return symbols;
 }
 
+// `--image`: fails, listing them, when more than IMAGE_MISSING_PERCENT
+// percent of the list's rows name no function of the built compiler `jet`;
+// else says how many do.
+function checkImage(jet) {
+  const names = new Set(functionSymbols(readFileSync(jet)).map((symbol) => symbol.name));
+  const rows = readFileSync(LIST, "utf8").split("\n").filter((line) => line !== "" && !line.startsWith("#"));
+  const missing = rows.filter((row) => !names.has(row));
+  const report = `Compiler/JetCli/hot-text.list: ${missing.length} of ${rows.length} rows name no function of ${jet}`;
+  if (missing.length * 100 > rows.length * IMAGE_MISSING_PERCENT) {
+    throw new Error(`${report}, over ${IMAGE_MISSING_PERCENT}%; regenerate the list (node Tools/perf/hot-text.mjs --jet ${jet}):\n${missing.join("\n")}`);
+  }
+  console.log(report);
+}
+
 function main() {
+  if (process.argv.length === 4 && process.argv[2] === "--image") {
+    checkImage(resolve(process.argv[3]));
+    return;
+  }
   const args = parseArgs(process.argv);
   const jetBytes = readFileSync(args.jet);
   const runtime = join(dirname(args.jet), "jet-runtime");

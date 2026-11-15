@@ -12,13 +12,19 @@
 // programs) add come next, each traced as that receipt runs it: out of
 // tree, with Core from the compiler's own records.
 // Names that no longer name a function are skipped by the build (`--trace`
-// counter ir.object.hot_missing); regenerate after large renames.
+// counter ir.object.hot_missing). A closure's name keeps while edits move
+// its source (JetIR ir_closure_key), so rows go stale only as functions are
+// renamed or removed, and the list misses only functions added since it was
+// traced; `--image` says when a regenerated list is due.
 //
 //   jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out Compiler/JetCli/hot-text.list] [--twins <checkout>]
 //   jet Tools/perf/hot-text/run.jet --check
+//   jet Tools/perf/hot-text/run.jet -- --image <jet>
 //
 // `--check` needs no build: it fails, listing them, when rows of the list
-// name no function the sources declare (hot_text_row_declared).
+// name no function the sources declare (hot_text_row_declared). `--image`
+// reads the built compiler <jet>: it fails, listing them, when more than
+// IMAGE_MISSING_PERCENT percent of the rows name no function of <jet>.
 //
 // <jet> is a built compiler beside its jet-runtime/ directory. Only the
 // compiler's own functions are listed: its object is the link's first input,
@@ -36,9 +42,16 @@ use {
     core.text.fmt
 }
 
-USAGE: "usage: jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out <file>] [--twins <checkout>] | --check"
+USAGE: "usage: jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out <file>] [--twins <checkout>] | --check | -- --image <jet>"
 
 LIST: "Compiler/JetCli/hot-text.list"
+
+// The most rows of the list, in percent, that a built compiler may lack
+// before `--image` fails. A cycle's renames and removals cost a few rows
+// each and little layout; past this, the hot functions those rows named sit
+// among the cold ones, each run faults their pages in apart, and the list is
+// due to be regenerated.
+IMAGE_MISSING_PERCENT: 3
 
 // The private Core parts: Core sources that are no public module, each
 // built under its own module name.
@@ -139,6 +152,10 @@ run: fn() -> Never Err! {
     argv: process.args()
     if argv.len() == 1 && argv[0] == "--check" {
         print(check(root))
+        process.exit(0)
+    }
+    if argv.len() == 2 && argv[0] == "--image" {
+        print(check_image(root, files.resolve(argv[1])))
         process.exit(0)
     }
     args := [String:String]{"jet": "", "out": files.join(root, LIST), "twins": ""}
@@ -247,6 +264,33 @@ check: fn(root: String) -> String Err! {
         return Err("{LIST}: {stale.len()} of {rows.len()} rows name no function the sources declare; regenerate the list (jet Tools/perf/hot-text/run.jet -- --jet <jet>):\n{stale.join("\n")}")
     }
     Ok("{LIST}: all {rows.len()} rows name a function the sources declare")
+}
+
+// `--image`: the list's rows that name no function of the built compiler
+// `jet`, as the failure when they are more than IMAGE_MISSING_PERCENT
+// percent of the rows (image_missing_over), else how many there are.
+check_image: fn(root: String, jet: String) -> String Err! {
+    names: function_symbols(files.read_bytes(jet), jet).map(fn(symbol) { symbol.name }).to_set()
+    rows: files.read(files.join(root, LIST)).lines().filter(fn(line) { line != "" && !line.starts_with("#") })
+    missing: rows.filter(fn(row) { !names.has(row) })
+    report: "{LIST}: {missing.len()} of {rows.len()} rows name no function of {jet}"
+    if image_missing_over(missing.len(), rows.len()) {
+        return Err("{report}, over {IMAGE_MISSING_PERCENT}%; regenerate the list (jet Tools/perf/hot-text/run.jet -- --jet {jet}):\n{missing.join("\n")}")
+    }
+    Ok(report)
+}
+
+// Whether `missing` of `rows` rows are more than IMAGE_MISSING_PERCENT
+// percent of them.
+image_missing_over: fn(missing: Int, rows: Int) -> Bool Never! {
+    missing * 100 > rows * IMAGE_MISSING_PERCENT
+}
+
+#Test("the image check fails past its share of missing rows") {
+    assert(!image_missing_over(0, 11234))
+    assert(!image_missing_over(337, 11234))
+    assert(image_missing_over(338, 11234))
+    assert(image_missing_over(1, 0))
 }
 
 // What the sources declare, under the names the build gives functions

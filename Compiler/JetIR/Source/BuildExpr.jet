@@ -8342,13 +8342,26 @@ ir_window_subject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, pla
 // variable gives up, so the release helper closes and drops it once. A task
 // body owns its captures instead (ir_lambda_box).
 //
-// The lambda's function is keyed by its enclosing function, its own source
-// span and its occurrence there: the merge shares functions by key, and the
-// branches of a `task.all` share one call span, so a key from the call span
-// would hand every branch the first branch's body.
+// The lambda's function is keyed by its enclosing function and its place
+// among the closures that function's body creates (ir_closure_key).
 
 ir_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyLambda, span: Span) -> Int Never! {
     ir_lambda_box(m, p, b, ty, lambda, false, span)
+}
+
+// The key of the next closure of kind `kind` (`lambda`, `fn_widen`, a zip
+// role) that `b`'s body creates: the body's key, the kind and how many of
+// that kind the body created before it. The merge shares functions by key,
+// so each closure needs a key of its own: the branches of a `task.all` share
+// one call span, so a key from a source span would hand every branch the
+// first branch's body. A closure's symbol ends with its key's hash
+// (ir_hashed_function), so a key without a source position keeps the symbol
+// while edits above it move its source, and the compiler's list of hot
+// functions (Compiler/JetCli/hot-text.list) keeps naming it.
+ir_closure_key: fn(b: &IRBuilder, kind: String) -> String Never! {
+    ordinal: b.lambdas.get(kind) ?? 0
+    b.lambdas[kind] = ordinal + 1
+    "{b.f.key}#{kind}{ordinal}"
 }
 
 // The closure box of `lambda` with its code queued. A task body
@@ -8434,11 +8447,7 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
         }
     }
     id: m.functions.len()
-    base_key: "{b.f.key}#lambda@{lambda.source_span.start}..{lambda.source_span.end}"
-    occurrence: b.lambdas.get(base_key) ?? 0
-    b.lambdas[base_key] = occurrence + 1
-    lambda_key: if occurrence == 0 -> base_key else -> "{base_key}#{occurrence}"
-    m.functions.push(ir_hashed_function("{b.f.name}.lambda@{lambda.source_span.start}", lambda_key, "{b.f.symbol}__lambda_", b.f.source_file, b.line))
+    m.functions.push(ir_hashed_function("{b.f.name}.lambda@{lambda.source_span.start}", ir_closure_key(b, "lambda"), "{b.f.symbol}__lambda_", b.f.source_file, b.line))
     m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, instance: b.instance, row: b.row, made: b.made, next_node: b.next_node, task_body: task_body})
     m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row: ir_pointer_row(m)
