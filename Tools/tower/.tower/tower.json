@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6861,
-    "rev": 103000,
+    "rev": 103025,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -51264,6 +51264,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:31:11.159Z"
+        },
+        {
+          "n": 11,
+          "text": "Keep-going has one failure-capture path per phase (the task join with a typed trap) instead of a second control flow on JET_KEEP_GOING in sema, comptime, lowering and optimization (15 Compiler files read it on dev 72a8142651); normal mode stops after the phase that reported, and both modes use the same thread schedule (architecture review Rel3, Docs/audits/2026-10-22-architecture-review.md). Proof: `git grep -l JET_KEEP_GOING -- Compiler` lists only the driver flag reader, and `jet test Compiler --profile cases --filter keep_going_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:40:29.267Z"
         }
       ],
       "refs": [],
@@ -51276,12 +51285,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T18:05:19.437Z",
-      "updated": "2026-11-15T02:31:17.038Z",
+      "updated": "2026-11-15T02:40:29.267Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 11
     },
     {
       "id": "c03183d1",
@@ -53301,7 +53310,7 @@
       "track": "sidequest",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -53310,6 +53319,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: the primitive-type ballots are ratified (c1, decision). The adopted types moved to their mechanism cards: #6366 c39, #6366 c40, #6845 c12; C strings wait on an owner ballot at #6366 c41. The 1:1 audit stays at Docs/audits/jai-parity-2026-10-16.md."
+        },
         {
           "at": "2026-11-13",
           "by": "Main",
@@ -53340,29 +53354,32 @@
         {
           "n": 1,
           "text": "(was #6127) An owner ballot is ratified for each of: sized booleans, C strings, runtime type values (typeid), and pointer-sized integers. The dynamically typed value (any, D-PRIM-ANY1) moved to #6833 by owner order 2026-11-13.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T23:01:47.743Z"
+          "evidence": "Sized booleans D-PRIM-BOOLSIZE1=A (2026-11-09), run-time type values D-PRIM-TYPEKEY1=A (2026-11-09) amended by D-PRIM-TYPEKEY2=A (2026-11-10), pointer-sized integers D-PRIM-USIZE1=A (2026-11-10) are ratified. C strings have no ballot: owner-gates row added and the outcome carried to #6366 (TowerKeeper-1 2026-11-14).",
+          "at": "2026-11-15T02:34:18.282Z",
+          "closure": "decision"
         },
         {
           "n": 2,
           "text": "(was #6127) Every adopted type has a registry row, an executable example with golden output on every tier, and a UI snapshot for its misuse diagnostic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:38:41.395Z"
+          "evidence": "Moved to #6366 c39: each adopted type goes to its mechanism card: ffi.Bool<U32> (FB1) and ffi.USize/ISize (FU1) to the FFI card, Type values (TK1) to the reflection card",
+          "at": "2026-11-15T02:34:19.339Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
           "text": "(was #6127) Every refused type is listed in the spec with its reason and the Jet mechanism that covers the use case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:38:42.324Z"
+          "evidence": "Merged into #6366 c41: no ratified primitive is refused; the only open choice is C strings, whose refusal path FC1 keeps",
+          "at": "2026-11-15T02:34:20.253Z",
+          "closure": "obsolete"
         },
         {
           "n": 4,
@@ -53390,11 +53407,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:07.706Z",
-      "updated": "2026-11-13T23:03:55.818Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:34:27.009Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
-      ]
+      ],
+      "completedAt": "2026-11-15T02:34:27.009Z"
     },
     {
       "id": "c04pd50v",
@@ -53429,11 +53447,12 @@
         {
           "n": 1,
           "text": "(was #8) The beginner/expert split is audited: each guardrail opt-out in the body (audit rows A05-A07, A20, E12-E17, B03, B06, B16) goes through the one D-JAI-EXPERT1=A mechanism, and a default build never reaches an expert power without it. Proof: a UI snapshot per opt-out shows the refusal without it, and a golden shows the power with it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:44:53.639Z"
+          "evidence": "Moved to #5022 c2: the one audit split per opt-out: host access (X1), step limit (X2), whole-program and string code (X3), check removal (X4); row B16 is not adopted (D-JAI-GENERIC1=F)",
+          "at": "2026-11-15T02:34:21.221Z",
+          "closure": "obsolete"
         },
         {
           "n": 2,
@@ -53443,6 +53462,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:34:02.976Z"
+        },
+        {
+          "n": 3,
+          "text": "Running past the compile-time step budget (audit row A07) needs the Meta expert leaf for unlimited steps; without it the 10,000,000-step budget stops with its registered error (D-JAI-EXPERT1=A). Proof: `jet test Compiler --profile ui --filter meta_unlimited_steps_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:34:04.239Z"
+        },
+        {
+          "n": 4,
+          "text": "Running the whole program while compiling and code from strings (audit rows A20, B03, B06) are Meta expert leaves (Meta.Raw, Meta.Rewrite and the run leaf): a dependency using one without the root's grant is refused (D-JAI-EXPERT1=A). Proof: `jet test Compiler --profile ui --filter meta_expert_leaf_root_only`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:34:05.325Z"
+        },
+        {
+          "n": 5,
+          "text": "Removing checks build-wide or per scope (audit rows E12-E17: a check field set to `off`, or `#Unchecked` inside `#Unsafe`) is the audited `check_removal` gate, which any package or organization may forbid; under a forbidding policy the removal is refused with a registered error (D-JAI-EXPERT1=A, D-JAI-BUILDOPT1). Proof: `jet test Compiler --profile ui --filter check_removal_gate_forbidden`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:34:06.397Z"
         }
       ],
       "refs": [
@@ -53460,12 +53506,12 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:40.464Z",
-      "updated": "2026-11-15T02:34:02.976Z",
+      "updated": "2026-11-15T02:34:21.221Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 2
+      "criteriaLastN": 5
     },
     {
       "id": "c0jlyc69",
@@ -74042,6 +74088,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:34:00.454Z"
+        },
+        {
+          "n": 42,
+          "text": "A `targets: [sandbox]` manifest entry builds a wasm component, or the manifest refuses it with a registered error. Today Jetpack's manifest model accepts it (Jetpack/PackageModel/Source/Manifest/Blocks/Targets.jet:236 on dev 72a8142651) and the compiler has no sandbox build target. Proof: `jet test Compiler --profile cases --filter manifest_target_sandbox`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:40:26.949Z"
+        },
+        {
+          "n": 43,
+          "text": "Examples/Modules/Packages/SandboxMathKit builds mathkit.wasm from SandboxSource during its own build instead of loading a committed binary, so no example ships a prebuilt guest. Proof: `git ls-files '*.wasm' -- Examples` prints nothing and `jet test Compiler --profile golden --filter Modules/Packages/SandboxMathKit` passes on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:40:28.147Z"
         }
       ],
       "refs": [
@@ -74054,9 +74118,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:48.265Z",
-      "updated": "2026-11-15T02:34:00.454Z",
+      "updated": "2026-11-15T02:40:28.147Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 41
+      "criteriaLastN": 43
     },
     {
       "id": "c0ov7lce",
@@ -87540,7 +87604,7 @@
     {
       "id": "c073cvg9",
       "num": 6637,
-      "title": "Compiler code health after the port: unwired features and the idiom pass (moved from #4717)",
+      "title": "Compiler code health after the port: retired teaching, stale comments, stutter names and unwired code",
       "body": "Moved from #4717 on 2026-11-06 because Rust removal is finished: wire or delete the code the slimming audit found nothing calls, and move the 1:1 port to conventional Jet (markers, metaprogramming, error model, ownership marks) with identical behavior.",
       "kind": "task",
       "track": "epoch",
@@ -87555,6 +87619,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: c7 merged into #6612 c4 (dotted paths), c19 moved to #4917 c71 (LSP). The other open items were restated with dev counts and proofs."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -87644,11 +87713,12 @@
         {
           "n": 7,
           "text": "No Jet output prints `::` (a standing owner rule). Semindex definition identities (fn:module:x::name, method:, type:, import:), inspect's callable identity (run::start), live value ids (app::counter) and expand's static:{module}::{name} use dotted paths with one kind-prefix scheme, cut over with every snapshot and caller in one change. A guard case fails on any `::` in UI, golden or case expected output, or in a JetCli or JetSemIndex string literal; only foreign-language subjects such as C++ and Rust FFI snippets are exempt. Effect keys were already dotted by TlsLead-3c33b (#6151 c33).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T22:00:59.518Z"
+          "evidence": "Merged into #6612 c4: #6612 owns dotted symbol paths in tool output; the no-`::` guard joins it",
+          "at": "2026-11-15T02:34:15.981Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
@@ -87662,12 +87732,12 @@
         },
         {
           "n": 9,
-          "text": "After stage 1 (#3862), package prefixes are dropped in Compiler/, and a name that repeats its package is a tidy error (listed by jet check and jet build, never stopping jet run) with a rename fix, landed with its one caller cutover and a UI snapshot.",
+          "text": "After stage 1 (#3862), Compiler/ drops package-prefixed names, and a name that repeats its package is a tidy error with a rename fix (listed by `jet check` and `jet build`, never stopping `jet run`; D-NO-WARNINGS1=A), landed with its caller cutover. Proof: `jet test Compiler --profile ui --filter name_repeats_package`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:09:39.567Z"
+          "at": "2026-11-15T02:34:07.456Z"
         },
         {
           "n": 10,
@@ -87681,21 +87751,21 @@
         },
         {
           "n": 11,
-          "text": "[#4150] Every retired-Jet-spelling recognition and teaching row is removed from the Jet compiler: parser arms (Parser/Statements.jet:544-550, Items.jet:1557-1559 and the like), registry rows, UI snapshots and jet fix rules, including E0388 (retired @ forms), E0397 and E0435 and the retired use-as/member-list teaching. Foreign-language teaching stays. (merged from #4148 c4)",
+          "text": "Every retired-Jet-spelling recognition and teaching row is removed from the compiler: E0388 (retired @ forms) and E0397 (still in Registry/DiagnosticRows.jet, Prelude/Diagnostics.jet and Sema/Statements.jet on dev 72a8142651; E0435 is gone), their parser arms, UI snapshots and `jet fix` rules, and the retired use-as and member-list teaching. Foreign-language teaching stays. Proof: `git grep -n -E '\"E0(388|397)\"' -- Compiler` prints nothing and `jet test tests/guards --filter diagnostics_coverage` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:51.379Z"
+          "at": "2026-11-15T02:34:08.566Z"
         },
         {
           "n": 12,
-          "text": "[#4253] After D-OWES1 (#4139): an advisory lint with a snapshot proposes the ratified debt spelling where docs state an obligation, and stays silent otherwise. (merged from #4148 c5)",
+          "text": "After D-OWES1 (#4139), where a doc comment states an obligation, `jet check` lists a tidy error proposing the ratified debt spelling, and stays silent otherwise (no advisory lints under D-NO-WARNINGS1=A). Proof: `jet test Compiler --profile ui --filter owes_debt_spelling`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:52.738Z"
+          "at": "2026-11-15T02:34:09.702Z"
         },
         {
           "n": 13,
@@ -87708,39 +87778,39 @@
         },
         {
           "n": 14,
-          "text": "(was #6215) DOCS-ONLY-equivalent: lane-check OK (merged from #4148 c7)",
+          "text": "No .jet comment cites deleted Rust code (crates/…/src paths or .rs:N lines; 134 files on dev 72a8142651). Proof: `git grep -l -E 'crates/[a-z_-]+/src|\\.rs:[0-9]' -- '*.jet'` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:55.805Z"
+          "at": "2026-11-15T02:34:10.939Z"
         },
         {
           "n": 15,
-          "text": "(was #6221) The failure-surface law reports 0 offenders (merged from #4148 c8)",
+          "text": "No live source uses retired failure syntax (`x?` propagation, `T ! E`) in JetDevserver, JetDebug, JetLSP tests or docs: the corpus guard reports 0 offenders. Proof: `jet test tests/guards --filter corpus_ast`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:57.350Z"
+          "at": "2026-11-15T02:34:11.993Z"
         },
         {
           "n": 16,
-          "text": "(was #6221) JetDevserver and JetDebug parse, check and run their tests under a gate (or are deleted by owner decision) (merged from #4148 c9)",
+          "text": "JetDevserver and JetDebug parse, check and run their tests (or are deleted by owner decision). Proof: `jet test Compiler/JetDevserver` and `jet test Compiler/JetDebug` pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:59.180Z"
+          "at": "2026-11-15T02:34:12.913Z"
         },
         {
           "n": 17,
-          "text": "(was #6221) The agent capsule and the reference doc teach only the current forms (merged from #4148 c10)",
+          "text": "AGENTS.md and Docs/spec/reference teach only current failure forms (no `x?` propagation, no `T ! E`). Proof: `jet test tests/guards --filter syntax_reconciliation` passes and `git grep -n -E '[a-z)]\\?$| ! [A-Z]' -- AGENTS.md Docs/spec/reference` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:52:00.574Z"
+          "at": "2026-11-15T02:34:13.975Z"
         },
         {
           "n": 18,
@@ -87754,20 +87824,21 @@
         {
           "n": 19,
           "text": "(was #6341) JetLSP reads declaration visibility from Sema facts, never from source text: the import quick-fix fires for a public function in another module, and signature preview reports external callers for public functions and not for functions inside a priv module, proved by JetLSP tests whose fixtures contain no pub keyword. (merged from #4148 c13)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:52:03.507Z"
+          "evidence": "Moved to #4917 c71: JetLSP behavior belongs on the LSP card",
+          "at": "2026-11-15T02:34:17.129Z",
+          "closure": "obsolete"
         },
         {
           "n": 20,
-          "text": "(was #2101 c2) No test prose or closure template claims an interpreter comparison (no interpreter tier, D-EXEC2=A) [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #4741 c9)",
+          "text": "No test prose, case name or closure template claims an interpreter comparison (there is no interpreter tier, D-EXEC2=A; 291 test files mention 'interpreter' on dev 72a8142651), cut over with the case renames in one change. Proof: `git grep -l -i interpreter -- tests` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:53.870Z"
+          "at": "2026-11-15T02:34:14.912Z"
         }
       ],
       "refs": [],
@@ -87778,7 +87849,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:41:10.182Z",
-      "updated": "2026-11-15T02:12:06.413Z",
+      "updated": "2026-11-15T02:34:25.191Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 20
     },
@@ -98694,6 +98765,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T00:36:37.416Z"
+        },
+        {
+          "n": 12,
+          "text": "The runtime's address API (rt_text_word, sync_load, rt_text_store, jet_rt_alloc and jet_rt_free; about 13,400 call sites, 97 E3114 hits in Alloc, RawWords, Sync, Fault, Thread and Secret, plus 6 in fixtures) moves to typed owners and views under D-MEM-CHOKEPOINT1=A, so the E3114 address rule needs no scope for the runtime identities (jet_runtime, jet_runtime_tests). Today that scope keeps E3114 at its state before the cutover, while E3113 holds everywhere. Proof: the scope is deleted, and jet check of Compiler/JetRuntime and its fixtures reports E3114=0.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:40:14.066Z"
         }
       ],
       "refs": [],
@@ -98704,9 +98784,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T02:03:15.561Z",
+      "updated": "2026-11-15T02:40:14.066Z",
       "updatedBy": "Main",
-      "criteriaLastN": 11
+      "criteriaLastN": 12
     },
     {
       "id": "c0in2dft",
@@ -205852,6 +205932,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T02:40:29.267Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c08i9ox6",
+      "note": "#11 Keep-going has one failure-capture path per phase (the task "
+    },
+    {
+      "at": "2026-11-15T02:40:28.147Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#43 Examples/Modules/Packages/SandboxMathKit builds mathkit.wasm"
+    },
+    {
+      "at": "2026-11-15T02:40:26.949Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#42 A `targets: [sandbox]` manifest entry builds a wasm componen"
+    },
+    {
+      "at": "2026-11-15T02:40:14.066Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#12 The runtime's address API (rt_text_word, sync_load, rt_text_"
+    },
+    {
+      "at": "2026-11-15T02:34:27.009Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02y3vkg",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T02:34:25.191Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c073cvg9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:34:23.766Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02y3vkg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:34:22.799Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c073cvg9",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T02:34:21.221Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c04pd50v",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T02:34:20.253Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02y3vkg",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T02:34:19.339Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02y3vkg",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T02:34:18.282Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02y3vkg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T02:34:17.129Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c073cvg9",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-15T02:34:15.981Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c073cvg9",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T02:34:14.912Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c073cvg9",
+      "note": "#20: strip debris; state the dev count; add proof; was: (was #2101 c2) No test prose or closure template claims an interpreter comparison (no interpreter tier, D-EXEC2=A) [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #"
+    },
+    {
+      "at": "2026-11-15T02:34:13.975Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c073cvg9",
+      "note": "#17: strip debris; name the files; add proof; was: (was #6221) The agent capsule and the reference doc teach only the current forms (merged from #4148 c10)"
+    },
+    {
+      "at": "2026-11-15T02:34:12.913Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c073cvg9",
+      "note": "#16: strip debris; add proof; was: (was #6221) JetDevserver and JetDebug parse, check and run their tests under a gate (or are deleted by owner decision) (merged from #4148 c9)"
+    },
+    {
+      "at": "2026-11-15T02:34:11.993Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c073cvg9",
+      "note": "#15: restated with its subject and proof; strip debris; was: (was #6221) The failure-surface law reports 0 offenders (merged from #4148 c8)"
+    },
+    {
+      "at": "2026-11-15T02:34:10.939Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c073cvg9",
+      "note": "#14: restated from the merged card's intent (556 comment lines citing deleted Rust code); the old text was a bare lane-check line; was: (was #6215) DOCS-ONLY-equivalent: lane-check OK (merged from #4148 c7)"
+    },
+    {
+      "at": "2026-11-15T02:34:09.702Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c073cvg9",
+      "note": "#12: D-NO-WARNINGS1=A leaves no advisory lints; strip debris; add proof; was: [#4253] After D-OWES1 (#4139): an advisory lint with a snapshot proposes the ratified debt spelling where docs state an obligation, and stays silent otherwise. (merged from #4148 c5)"
+    },
+    {
+      "at": "2026-11-15T02:34:08.566Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c073cvg9",
+      "note": "#11: strip debris; state what remains on dev; add proof; was: [#4150] Every retired-Jet-spelling recognition and teaching row is removed from the Jet compiler: parser arms (Parser/Statements.jet:544-550, Items.jet:1557-1559 and the like), registry rows, UI snaps"
+    },
+    {
+      "at": "2026-11-15T02:34:07.456Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c073cvg9",
+      "note": "#9: add proof; tidy-error wording per D-NO-WARNINGS1; was: After stage 1 (#3862), package prefixes are dropped in Compiler/, and a name that repeats its package is a tidy error (listed by jet check and jet build, never stopping jet run) with a rename fix, lan"
+    },
+    {
+      "at": "2026-11-15T02:34:06.397Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c04pd50v",
+      "note": "#5 Removing checks build-wide or per scope (audit rows E12-E17:"
+    },
+    {
+      "at": "2026-11-15T02:34:05.325Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c04pd50v",
+      "note": "#4 Running the whole program while compiling and code from stri"
+    },
+    {
+      "at": "2026-11-15T02:34:04.239Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c04pd50v",
+      "note": "#3 Running past the compile-time step budget (audit row A07) ne"
+    },
+    {
       "at": "2026-11-15T02:34:02.976Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-add",
@@ -209217,713 +209472,6 @@
       "action": "card.criteria-add",
       "ref": "c0oo8eeq",
       "note": "#3 One memory kernel module holds the only implementations of t"
-    },
-    {
-      "at": "2026-11-14T22:51:32.805Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oo8eeq",
-      "note": "#2 Inventory: a generated list classifies every #Unsafe region "
-    },
-    {
-      "at": "2026-11-14T22:51:31.815Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oo8eeq",
-      "note": "#1 Adversarial review first: a dated audit in Docs/audits attac"
-    },
-    {
-      "at": "2026-11-14T22:51:11.682Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0oo8eeq",
-      "note": "One audited memory chokepoint: every raw memory action goes through one small, heavily audited module"
-    },
-    {
-      "at": "2026-11-14T22:48:07.826Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T22:48:06.577Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T22:27:43.197Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-14T22:27:31.927Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#72"
-    },
-    {
-      "at": "2026-11-14T22:25:26.308Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#80"
-    },
-    {
-      "at": "2026-11-14T22:25:25.416Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-14T22:25:24.174Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-14T21:35:47.455Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08s0ppt",
-      "note": "#45 A loop statement whose body holds an expression-position `??"
-    },
-    {
-      "at": "2026-11-14T20:45:09.623Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x3j5om",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T20:44:57.667Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0o8f1p4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T20:44:56.788Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-14T20:35:20.602Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0q38sm2",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-14T20:17:42.357Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xuffg1",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-14T20:17:41.418Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xuffg1",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-14T20:17:40.480Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xuffg1",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-14T20:15:10.948Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0x5guom",
-      "note": "#8 The pprof export (jet perf --pprof) writes the protobuf that"
-    },
-    {
-      "at": "2026-11-14T20:15:00.185Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-14T20:14:59.246Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06vkd04",
-      "note": "#29 The time to the first stop and per step is measured and reco"
-    },
-    {
-      "at": "2026-11-14T20:14:58.375Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06vkd04",
-      "note": "#28 jet debug's DAP supports conditional breakpoints, logpoints "
-    },
-    {
-      "at": "2026-11-14T20:14:57.485Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06vkd04",
-      "note": "#27 The symbol table carries Jet names for functions, so LLDB, p"
-    },
-    {
-      "at": "2026-11-14T20:14:56.603Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0x5guom",
-      "note": "#7 A #Profiled instrumentation library sends meta.events call t"
-    },
-    {
-      "at": "2026-11-14T20:14:55.604Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c038vt4s",
-      "note": "#9 jet perf attributes each sample to the Jet function and sour"
-    },
-    {
-      "at": "2026-11-14T20:01:27.994Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cs6xlg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T20:01:20.584Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xuffg1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T20:01:19.685Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gy2j07",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T20:01:18.779Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gy2j07",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-14T20:01:17.618Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gy2j07",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-14T20:01:16.314Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gy2j07",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-14T18:46:15.797Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T18:37:42.374Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T18:35:54.165Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0exjsbx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T18:35:53.297Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06vkd04",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T18:13:40.736Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-BOUND-METHOD1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-14T18:13:40.736Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0vc9b8r",
-      "note": "#9 snapshots re-blessed"
-    },
-    {
-      "at": "2026-11-14T18:13:40.736Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0vc9b8r",
-      "note": "#8 editor grammars regenerated (jet self devtools grammars)"
-    },
-    {
-      "at": "2026-11-14T18:13:40.736Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0vc9b8r",
-      "note": "#7 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-11-14T18:13:40.736Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0vc9b8r",
-      "note": "#6 Data/Syntax registry entry updated"
-    },
-    {
-      "at": "2026-11-14T18:13:00.085Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-DECODE-SOURCE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-14T17:58:27.522Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-DECODE-SOURCE1",
-      "note": "How a binary format feeds typed decode"
-    },
-    {
-      "at": "2026-11-14T17:22:01.549Z",
-      "by": "Speed-2",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T16:27:39.982Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T16:10:58.388Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ssy5wy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T16:08:22.849Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ssy5wy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T16:05:36.105Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T16:00:46.517Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w0b4wd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T15:59:37.892Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T15:54:17.940Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pjwkhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T15:39:24.514Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08r6ogl",
-      "note": "#38 A record-Core run of a program whose foreign facts carry C r"
-    },
-    {
-      "at": "2026-11-14T15:28:17.258Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T15:10:56.148Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0vc9b8r",
-      "note": "#5 A type that declares a field and a method with the same name"
-    },
-    {
-      "at": "2026-11-14T15:10:44.059Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-BOUND-METHOD1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-14T15:04:02.955Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-GUARD-LINT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-14T14:56:49.958Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06vkd04",
-      "note": "priority"
-    },
-    {
-      "at": "2026-11-14T14:56:47.940Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "body,priority,goals"
-    },
-    {
-      "at": "2026-11-14T14:55:36.117Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "body,goals"
-    },
-    {
-      "at": "2026-11-14T14:55:19.956Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#6 Instrumentation costs nothing when it is off and stays withi"
-    },
-    {
-      "at": "2026-11-14T14:55:18.450Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#5 jet perf and jet debug both work on the self-hosted toolchai"
-    },
-    {
-      "at": "2026-11-14T14:55:16.821Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#4 Debugger display and watch expressions come from the compile"
-    },
-    {
-      "at": "2026-11-14T14:55:15.189Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#3 A user-written compile-time program instruments every functi"
-    },
-    {
-      "at": "2026-11-14T14:55:13.513Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#2 Every new user surface this needs (an instrumentation hook, "
-    },
-    {
-      "at": "2026-11-14T14:55:11.857Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#1 A dated adversarial review in Docs/audits compares Jet's deb"
-    },
-    {
-      "at": "2026-11-14T14:55:01.368Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0nwrfck",
-      "note": "Exceptional built-in debugging and profiling, built on Jet's reflection and metaprogramming (Jai-style)"
-    },
-    {
-      "at": "2026-11-14T14:52:53.456Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-GUARD-LINT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-14T14:48:39.532Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T14:45:01.998Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-BOUND-METHOD1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-14T14:42:57.709Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0vc9b8r",
-      "note": "#4 A union with a function member (Int | fn() -> Int) is usable"
-    },
-    {
-      "at": "2026-11-14T14:42:56.433Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0vc9b8r",
-      "note": "#3 A closure passed where an optional function type is expected"
-    },
-    {
-      "at": "2026-11-14T14:32:33.473Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pjwkhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T14:32:02.823Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ue0hua",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-14T14:32:01.256Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nxjs80",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-14T14:29:49.220Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c06m6abh",
-      "note": "#6: Neither D-DECL-COLON1 nor D-ALIAS-GENERIC1 ratifies non-generic aliases, and E0324 stays by #6176; the old text's Rows: [[String]] example contradicted them. Retiring E0324 would need its own ballot.; was: Aliases (D-DECL-COLON1=A and D-ALIAS-GENERIC1=A; supersedes D-ALIAS-BIND2=B's alias keyword): Rows: [[String]] aliases any type expression or type-valued recipe call, and a generic alias writes its pa"
-    },
-    {
-      "at": "2026-11-14T14:28:45.626Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vc9b8r",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T14:28:44.517Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-BOUND-METHOD1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-14T14:27:03.748Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vc9b8r",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T14:26:54.502Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-BOUND-METHOD1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-14T14:26:17.981Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q0onzctb",
-      "note": ""
-    },
-    {
-      "at": "2026-11-14T14:25:45.322Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q0sbyy4n",
-      "note": ""
-    },
-    {
-      "at": "2026-11-14T14:25:38.742Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-BOUND-METHOD1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-14T14:23:44.305Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CODABLE-DISTINCT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-14T14:23:44.305Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0ue0hua",
-      "note": "#11 snapshots re-blessed"
-    },
-    {
-      "at": "2026-11-14T14:23:44.305Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0ue0hua",
-      "note": "#10 editor grammars regenerated (jet self devtools grammars)"
-    },
-    {
-      "at": "2026-11-14T14:23:44.305Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0ue0hua",
-      "note": "#9 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-11-14T14:23:44.305Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0ue0hua",
-      "note": "#8 Data/Syntax registry entry updated"
-    },
-    {
-      "at": "2026-11-14T14:22:20.354Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q0sbyy4n",
-      "note": ""
-    },
-    {
-      "at": "2026-11-14T14:07:28.423Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j3st66",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T14:05:16.700Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ba2y7a",
-      "note": "#2: The run case's owner is #4268; #4599 does not exist.; was: The two example manifests parse and their goldens pass. A scope the model still refuses gets a correct, registered message with a UI snapshot. Proof: jet test Compiler --profile golden --filter Plugin"
-    },
-    {
-      "at": "2026-11-14T14:05:15.783Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c052rw8k",
-      "note": "#58 tests/run/Foundations/Capabilities passes as a run case: a s"
-    },
-    {
-      "at": "2026-11-14T14:04:52.653Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ba2y7a",
-      "note": "#2: The Capabilities run case stays known-failing on #4599 (missing guest wasm), so its green run moves to #4599; this card keeps the manifest parse.; was: The two example manifests parse and their goldens pass. A scope the model still refuses gets a correct, registered message with a UI snapshot. Proof: jet test Compiler --profile golden --filter Plugin"
-    },
-    {
-      "at": "2026-11-14T13:55:21.661Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BOUND-METHOD1",
-      "note": "Whether a method read without parentheses is a function value"
-    },
-    {
-      "at": "2026-11-14T13:55:03.394Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08zzpo5",
-      "note": "#3 Found by the D-BOUND-METHOD1 review (R1, 2026-11-14): a stor"
-    },
-    {
-      "at": "2026-11-14T13:41:58.441Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-14T13:41:58.440Z"
-    },
-    {
-      "at": "2026-11-14T13:41:29.103Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0699zei",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T13:37:12.447Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bs5inj",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-14T13:37:09.529Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qwfnnb",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-14T13:37:07.451Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04vlsgk",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-14T13:37:05.186Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c018v880",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-14T13:36:56.707Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qwfnnb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-14T13:36:55.389Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qwfnnb",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
