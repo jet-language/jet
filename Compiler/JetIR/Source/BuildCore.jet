@@ -174,6 +174,7 @@ ir_core_layout: fn(layout: IRExportLayout) -> String Never! { "{layout.size}/{la
 ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: ModuleID, lowered: [String], threads: CompilerThreads) -> IRCoreLibrary Never! {
     p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     p.sentries = true
+    p.user_values = true
     ir_foreign_index(p, foreign, decls)
     skipped: [IRBuildFailure]{}
     ir_core_library_from(p, entry_module, lowered, skipped, threads)

@@ -547,6 +547,10 @@ IRProgram: struct {
     // ir_build_tests); false for the runtime library the sentry is part of
     // and for compile-time evaluation.
     sentries: Bool{false}
+    // Whether the modules built from it serve the program's own values
+    // (IRModule.user_values): a program, test or Core image, whatever its
+    // checks; false for the runtime library and compile-time evaluation.
+    user_values: Bool{false}
     // Whether each checked `#Pre`/`#Post` clause reports its outcome to the
     // runtime's contract records (BuildContracts.jet ir_contract,
     // JetRuntime TestContracts.jet): true only for a test image
@@ -1188,9 +1192,7 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
     m := ir_module_new()
     loop _ in 0..<p.functions.len() -> m.ids.push(-1)
     m.stop_points = p.stop_points
-    // The images whose `#Unsafe` scopes enter the sentry are the program's
-    // and test images, whose allocations are the program's own values.
-    m.user_values = p.sentries
+    m.user_values = p.user_values
     m
 }
 
@@ -1518,6 +1520,7 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     p.checks = checks
     p.sentries = ir_checks_sentries(checks)
+    p.user_values = true
     if !ir_core_image_fits(p) -> p.checks.core = None
     ir_foreign_index(p, foreign, decls)
     row: ir_function_row(p, entry_key) ?? {
