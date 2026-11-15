@@ -1,7 +1,7 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, ModuleID, PolicyKey, SourceFile, Span, TComptimeValue, TextEdit, Type, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, name_find, name_index, name_intern, name_table, policy_gate_allows, sha256_hex]
+    jet_foundation.[DIAGNOSTIC_ERROR, CompilerThreads, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, ModuleID, PolicyKey, SourceFile, Span, TComptimeValue, TextEdit, Type, compiler_threads_limit, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, name_find, name_index, name_intern, name_table, policy_gate_allows, sha256_hex]
     jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -302,6 +302,21 @@ jet_driver_build_query_stopped: fn(request: &&JetDriverCompileRequest, errors: &
     jet_driver_build_query_empty(request, reports, false, problem)
 }
 
+// Drops the build plan's full load `load` on a detached task, so the
+// staging compile runs while the load drops instead of the plan's return
+// waiting for it: its module rows, source units and tables, which the
+// source query doesn't keep (Compiler's package: about 40 ms of frees). The
+// task owns the load alone; what the source query shares with it drops
+// with the query. On one compiler thread (`threads`) it drops here.
+jet_driver_build_load_aside: fn(threads: CompilerThreads, load: &&JetDriverLoadResult) {
+    held: load.move()
+    if compiler_threads_limit(threads) <= 1 {
+        return
+    }
+    released: task &&held { held.modules.len() }
+    released.detach()
+}
+
 jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
     request := owned_request.move()
     // The plan reads the entry package's modules (its `build: fn`) and
@@ -316,6 +331,9 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // members the staging compile below leaves unloaded (build_entry_reach).
     load_checks: jet_driver_build_load_checks(request, plan_load)
     sources: jet_driver_source_query_loaded(plan_load, request)
+    // The full load is read: it drops on a detached task while the plan
+    // stages, not on this thread as the plan returns.
+    jet_driver_build_load_aside(request.compiler_threads, plan_load.move())
     jet_driver_trace_step_end(request.trace_sink, "build.plan.load", sources.modules.len())
     if !sources.complete {
         return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, None)
