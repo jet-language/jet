@@ -1304,9 +1304,17 @@ sema_stmt_check_subject_switch: fn(subject: Expr, arms: [SwitchArm], else_body: 
     sema_scope_enter(scopes, state, "if.subject@{span.start}")
     carrier := false
     loop arm in arms {
-        if sema_expression_if_condition_consumes_carrier(arm.cond) -> carrier = true
+        if sema_expression_if_condition_tests_carrier(arm.cond, None, environment, program) -> carrier = true
     }
-    checked_subject: if carrier -> sema_check_expression_carrier(subject, None, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(subject, None, environment, program, scopes, state, tail_store, context, diagnostics)
+    checked_subject := if carrier -> sema_check_expression_carrier(subject, None, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(subject, None, environment, program, scopes, state, tail_store, context, diagnostics)
+    success: if carrier -> sema_expression_carrier_success_enum(subject, checked_subject, scopes) else -> None
+    if success != None {
+        names_case := false
+        loop arm in arms {
+            if sema_expression_if_condition_tests_carrier(arm.cond, success, environment, program) -> names_case = true
+        }
+        if names_case -> checked_subject = sema_expression_carrier_case_subject(subject, checked_subject.move(), environment, program, scopes, context, diagnostics)
+    }
     init: checked_subject ?? {
         sema_single_use_leave_scope(scopes, state, diagnostics)
         return SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -5285,8 +5293,7 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
 
 sema_stmt_check_refutable_binding: fn(binding: Binding, pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     before := diagnostics.len()
-    // An `.Ok`/`.Err` pattern consumes the carrier.
-    subject_value: if sema_pattern_consumes_result_carrier(pattern) -> sema_check_expression_carrier(binding.init, binding.ty, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(binding.init, binding.ty, environment, program, scopes, state, tail_store, context, diagnostics)
+    subject_value: sema_check_pattern_subject(binding.init, pattern, binding.ty, environment, program, scopes, state, tail_store, context, diagnostics)
     subject: subject_value ?? {
         sema_stmt_destructure_recover(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names, span: span}, binding.mutable, environment, program, scopes, state, context, diagnostics)
         return None

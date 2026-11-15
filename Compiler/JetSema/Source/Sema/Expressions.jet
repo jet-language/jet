@@ -7464,9 +7464,7 @@ sema_expr_check_err_literal: fn(value: Expr, span: Span, expected: Type?, enviro
 }
 
 sema_expr_check_pattern_test: fn(subject: Expr, pattern: Pattern, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    // An `.Ok`/`.Err` pattern consumes the
-    // subject's Result carrier, so its call root must not propagate.
-    subject_value: if sema_pattern_consumes_result_carrier(pattern) -> sema_check_expression_carrier(subject, None, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(subject, None, environment, program, scopes, state, tail_store, context, diagnostics)
+    subject_value: sema_check_pattern_subject(subject, pattern, None, environment, program, scopes, state, tail_store, context, diagnostics)
     checked_subject: subject_value ?? return None
     if sema_pattern_test_reused_payload_name(pattern, scopes, diagnostics) -> return None
     if sema_pattern_tests_absence(pattern) {
