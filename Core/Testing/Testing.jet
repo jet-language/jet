@@ -466,19 +466,19 @@ EventID: struct {
 // 0..<2^64; `below(bound)` gives the next draw modulo `bound`, and 0 without
 // drawing when `bound` is not positive.
 HistoryRNG: struct {
-    __state: Shared<__HistoryRngState>
+    __state: Shared<HistoryRNGState>
 
     next_u64: fn(self) -> Int Never! { history_rng_next(self) }
     below: fn(self, bound: Int) -> Int Never! { history_rng_below(self, bound) }
 }
 
-__HistoryRngState: struct {
+priv HistoryRNGState: struct {
     word: U64
 }
 
 // A generator seeded by the low 64 bits of a non-negative seed.
 priv history_rng_new: fn(seed: Int) -> HistoryRNG Never! {
-    HistoryRNG{__state: Shared{__HistoryRngState{word: checked(U64{seed % 18446744073709551616}) ?? U64{0}}}}
+    HistoryRNG{__state: Shared{HistoryRNGState{word: checked(U64{seed % 18446744073709551616}) ?? U64{0}}}}
 }
 
 priv history_rng_draw: fn(rng: HistoryRNG) -> U64 Never! {
