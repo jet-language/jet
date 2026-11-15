@@ -2,8 +2,9 @@
 // The region hands out blocks in address order. This allocator keeps released
 // blocks on a free list and gives the newest one out again when it fits, and
 // `resize` shrinks a block in place by splitting its tail onto the free list.
-// No `#Unsafe` is needed: a `mem.Block` is single use, so a block cannot be
-// copied or forged.
+// A `mem.Block` is single use, so a block cannot be copied or forged, and the
+// pool that keeps blocks owes their end: the one `#Unsafe` region discards
+// them with the pool's region, deliberately.
 // Run with: jet run Examples/Memory/Allocation/UserAllocator.jet
 use core.mem
 
@@ -68,4 +69,7 @@ run: fn() {
     pool.release(b)
     pool.release(c)
     print("{pool.free.len()} blocks free")
+    #Unsafe("the pool's free blocks were claimed from its region, which unmaps them all") {
+        consume(pool)
+    }
 }

@@ -237,15 +237,15 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1436,
+  "total": 1449,
   "counts": {
     "Compiler": 651,
     "Core": 178,
     "Docs": 10,
-    "Examples": 42,
+    "Examples": 45,
     "Jetpack": 8,
     "Tools": 11,
-    "tests": 536
+    "tests": 546
   },
   "regions": [
     {
@@ -6270,10 +6270,31 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Examples",
+      "file": "Examples/Memory/Allocation/ContextAllocator.jet",
+      "line": 49,
+      "column": 5,
+      "reason": "the counter's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Memory/Allocation/ContextAllocatorRead.jet",
+      "line": 58,
+      "column": 5,
+      "reason": "the counter's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "Examples",
       "file": "Examples/Memory/Allocation/Uninit.jet",
       "line": 12,
       "column": 5,
       "reason": "uninitialized plain-data storage is filled before every read"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Memory/Allocation/UserAllocator.jet",
+      "line": 72,
+      "column": 5,
+      "reason": "the pool's free blocks were claimed from its region, which unmaps them all"
     },
     {
       "package": "Examples",
@@ -6788,6 +6809,48 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/cases/context/context_allocator_memo_entry_moves_to_the_heap.fixture/memo.jet",
+      "line": 64,
+      "column": 5,
+      "reason": "the reuser's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/context/context_allocator_moves_text_that_leaves_the_block.fixture/text.jet",
+      "line": 106,
+      "column": 5,
+      "reason": "the reuser's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/context/context_allocator_moves_what_leaves_the_block.fixture/moves.jet",
+      "line": 122,
+      "column": 5,
+      "reason": "the reuser's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/context/context_allocator_panic_in_allocate_stops_the_task.fixture/refuse.jet",
+      "line": 38,
+      "column": 5,
+      "reason": "the picky allocator's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/context/context_allocator_reads_back_the_user_allocator.fixture/main.jet",
+      "line": 54,
+      "column": 5,
+      "reason": "the counter's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/context/context_allocator_serves_the_block_and_its_library_calls.fixture/served.jet",
+      "line": 59,
+      "column": 5,
+      "reason": "the counter's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/context/context_scratch_block_rewinds_and_moves_what_leaves.fixture/scratch.jet",
       "line": 18,
       "column": 5,
@@ -6827,6 +6890,13 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 16,
       "column": 5,
       "reason": "the caller's block holds the bytes and stays unused while the adopted region and its blocks live"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/corelib/core_mem_regions_hand_out_blocks_and_a_window_checks_its_index.fixture/main.jet",
+      "line": 43,
+      "column": 5,
+      "reason": "the shelf's blocks were claimed from regions that are closed, and nothing reads them again"
     },
     {
       "package": "tests",
@@ -7096,6 +7166,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/cases/language_features/core_group_import_names_module_traits_and_types.fixture/main.jet",
+      "line": 46,
+      "column": 5,
+      "reason": "the stack's kept block was claimed from its region, which unmaps it"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/language_features/impl_method_inherits_trait_effect_row_on_every_tier.fixture/main.jet",
       "line": 37,
       "column": 5,
@@ -7138,6 +7215,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/after_close.jet",
+      "line": 25,
+      "column": 5,
+      "reason": "the shelf's block was claimed from the closed region, and nothing reads it again"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/keeper.jet",
       "line": 6,
       "column": 5,
@@ -7149,6 +7233,13 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 15,
       "column": 5,
       "reason": "the block holds three Ints of the open region's fresh pages"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/main.jet",
+      "line": 23,
+      "column": 5,
+      "reason": "the shelf's block was claimed from the closed region, and nothing reads it again"
     },
     {
       "package": "tests",
@@ -7552,14 +7643,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "tests",
       "file": "tests/cases/single_use/holder_consumed_compiles.fixture/main.jet",
-      "line": 27,
+      "line": 28,
       "column": 5,
       "reason": "the lease's job is done by hand here"
     },
     {
       "package": "tests",
       "file": "tests/cases/single_use/holder_consumed_compiles.fixture/main.jet",
-      "line": 36,
+      "line": 37,
       "column": 5,
       "reason": "the slot's lease is done by hand here"
     },
@@ -10311,11 +10402,11 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | 651 |
 | Core | 178 |
 | Docs | 10 |
-| Examples | 42 |
+| Examples | 45 |
 | Jetpack | 8 |
 | Tools | 11 |
-| tests | 536 |
-| **total** | **1436** |
+| tests | 546 |
+| **total** | **1449** |
 
 ### Regions
 
@@ -11181,7 +11272,10 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Examples | Examples/LowLevel/PointerCastDeref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
 | Examples | Examples/LowLevel/RawPointerTools.jet | 7:5 | "the block is used only through pointers derived from it, every index stays inside its four Ints, and it is released once" |
 | Examples | Examples/LowLevel/UnsafeObligations.jet | 9:5 | "cell stays live and the pointer remains local" |
+| Examples | Examples/Memory/Allocation/ContextAllocator.jet | 49:5 | "the counter's kept blocks were claimed from its region, which unmaps them all" |
+| Examples | Examples/Memory/Allocation/ContextAllocatorRead.jet | 58:5 | "the counter's kept blocks were claimed from its region, which unmaps them all" |
 | Examples | Examples/Memory/Allocation/Uninit.jet | 12:5 | "uninitialized plain-data storage is filled before every read" |
+| Examples | Examples/Memory/Allocation/UserAllocator.jet | 72:5 | "the pool's free blocks were claimed from its region, which unmaps them all" |
 | Examples | Examples/Memory/ExpiringSecret.jet | 23:5 | "vault key import: expiring secret lifetime" |
 | Examples | Examples/Memory/Pin.jet | 42:5 | "node storage is fixed for the returned pin; self_addr names this place" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentries.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
@@ -11255,12 +11349,19 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/comptime_core_pure_parity/crypto_values_match_aot_comptime_forced_interpreter_and_default_dev/input/o2/run.jet | 11:5 | "fixed RFC interop vectors" |
 | tests | tests/cases/concurrency_boundaries/a_group_task_reads_a_lent_parameter_in_place.fixture/lend.jet | 10:5 | "reads the address of the graph's storage, not its bytes" |
 | tests | tests/cases/concurrency_boundaries/a_group_task_reads_a_lent_parameter_in_place.fixture/lend.jet | 29:5 | "reads the address of the graph's storage, not its bytes" |
+| tests | tests/cases/context/context_allocator_memo_entry_moves_to_the_heap.fixture/memo.jet | 64:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
+| tests | tests/cases/context/context_allocator_moves_text_that_leaves_the_block.fixture/text.jet | 106:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
+| tests | tests/cases/context/context_allocator_moves_what_leaves_the_block.fixture/moves.jet | 122:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
+| tests | tests/cases/context/context_allocator_panic_in_allocate_stops_the_task.fixture/refuse.jet | 38:5 | "the picky allocator's kept blocks were claimed from its region, which unmaps them all" |
+| tests | tests/cases/context/context_allocator_reads_back_the_user_allocator.fixture/main.jet | 54:5 | "the counter's kept blocks were claimed from its region, which unmaps them all" |
+| tests | tests/cases/context/context_allocator_serves_the_block_and_its_library_calls.fixture/served.jet | 59:5 | "the counter's kept blocks were claimed from its region, which unmaps them all" |
 | tests | tests/cases/context/context_scratch_block_rewinds_and_moves_what_leaves.fixture/scratch.jet | 18:5 | "only reads the address of an item the caller keeps alive" |
 | tests | tests/cases/control_and_data/explicit_exit_unmapped_keeps_101_on_every_tier.fixture/main.jet | 5:5 | "this case reports a Jet defect status on purpose" |
 | tests | tests/cases/control_and_data/explicit_process_exit_cleanup_golden_matches_all_execution_tiers.fixture/process_exit_cleanup.jet | 22:5 | "the exit callback has no captured state" |
 | tests | tests/cases/control_and_data/process_exit_leaves_heap_to_kernel_after_user_cleanup.fixture/main.jet | 35:5 | "the exit callback has no captured state" |
 | tests | tests/cases/core_crypto_argon2id/argon2id_parallel_lanes_match_rfc_vector_across_tiers/input/run.jet | 9:5 | "fixed Argon2id parallel-lane known-answer vector" |
 | tests | tests/cases/corelib/core_mem_regions_hand_out_blocks_and_a_window_checks_its_index.fixture/main.jet | 16:5 | "the caller's block holds the bytes and stays unused while the adopted region and its blocks live" |
+| tests | tests/cases/corelib/core_mem_regions_hand_out_blocks_and_a_window_checks_its_index.fixture/main.jet | 43:5 | "the shelf's blocks were claimed from regions that are closed, and nothing reads them again" |
 | tests | tests/cases/corelib/core_mem_regions_hand_out_blocks_and_a_window_checks_its_index.fixture/window.jet | 6:5 | "the four Ints are fresh heap storage, every access stays inside them, and they are released once" |
 | tests | tests/cases/corelib_net/shared_memory_words_order_across_processes.fixture/main.jet | 25:5 | "fork a peer that shares the mapping, and reap it" |
 | tests | tests/cases/cross/web_build_refuses_inline_c_before_codegen.fixture/main.jet | 1:1 | "the scalar ABI contract matches the C definition" |
@@ -11299,14 +11400,17 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/fmt_round_trip_regressions/raw_c_imports_and_module_binding_mutability_are_byte_exact_and_idempotent/input/run.jet | 10:1 | "audited C boundary" |
 | tests | tests/cases/gate_ledger/fixtures/gates/gates.jet | 2:5 | "test unsafe reason" |
 | tests | tests/cases/jet_test/jet_test_reports_each_failing_test_and_runs_the_rest.fixture/parked.jet | 29:5 | "the exit callback has no captured state" |
+| tests | tests/cases/language_features/core_group_import_names_module_traits_and_types.fixture/main.jet | 46:5 | "the stack's kept block was claimed from its region, which unmaps it" |
 | tests | tests/cases/language_features/impl_method_inherits_trait_effect_row_on_every_tier.fixture/main.jet | 37:5 | "the case prints the checked text" |
 | tests | tests/cases/liveness_lints/fallback_err_is_never_an_unused_local.fixture/main.jet | 3:1 | "probe" |
 | tests | tests/cases/liveness_lints/fallback_err_is_never_an_unused_local.fixture/main.jet | 8:5 | "probe" |
 | tests | tests/cases/memory/sentry_policy_off_skips_r0801.fixture/checked.jet | 13:5 | "target's buffer holds eight Ints: its three items and spare capacity past them" |
 | tests | tests/cases/memory/sentry_policy_off_skips_r0801.fixture/off.jet | 13:5 | "target's buffer holds eight Ints: its three items and spare capacity past them" |
 | tests | tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/after_close.jet | 19:5 | "the copy writes into pages the region unmapped, so the sentry stops it before any byte moves" |
+| tests | tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/after_close.jet | 25:5 | "the shelf's block was claimed from the closed region, and nothing reads it again" |
 | tests | tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/keeper.jet | 6:5 | "the program claims pages it never mapped" |
 | tests | tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/main.jet | 15:5 | "the block holds three Ints of the open region's fresh pages" |
+| tests | tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/main.jet | 23:5 | "the shelf's block was claimed from the closed region, and nothing reads it again" |
 | tests | tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/copy_from_past.jet | 4:5 | "the copy reads one Int past the source block" |
 | tests | tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/copy_to_past.jet | 4:5 | "the copy writes one Int past the target block" |
 | tests | tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/main.jet | 5:5 | "every range stays inside the `values` tuple, which outlives each access" |
@@ -11364,8 +11468,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/single_use/drop_inside_unsafe_block_satisfies_single_use.fixture/source-1.jet | 15:5 | "the resource is already gone; nothing to release" |
 | tests | tests/cases/single_use/drop_inside_unsafe_fn_satisfies_single_use.fixture/source-1.jet | 13:1 | "voids a freshly-acquired lock whose resource is already gone" |
 | tests | tests/cases/single_use/drop_inside_unsafe_fn_satisfies_single_use.fixture/source-1.jet | 19:5 | "calling the audited voider" |
-| tests | tests/cases/single_use/holder_consumed_compiles.fixture/main.jet | 27:5 | "the lease's job is done by hand here" |
-| tests | tests/cases/single_use/holder_consumed_compiles.fixture/main.jet | 36:5 | "the slot's lease is done by hand here" |
+| tests | tests/cases/single_use/holder_consumed_compiles.fixture/main.jet | 28:5 | "the lease's job is done by hand here" |
+| tests | tests/cases/single_use/holder_consumed_compiles.fixture/main.jet | 37:5 | "the slot's lease is done by hand here" |
 | tests | tests/cases/single_use/holder_dropped_is_e0140.fixture/main.jet | 33:5 | "the lease's job is done by hand here" |
 | tests | tests/cases/single_use/reuse_after_drop_is_e0121.fixture/source-1.jet | 15:5 | "done with it" |
 | tests | tests/cases/target_machines/fixtures/selected_target_machine_rejects_direct_mmio_outside_region/main.jet | 4:5 | "this address is intentionally outside the board MMIO region" |

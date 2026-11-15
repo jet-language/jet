@@ -1,6 +1,7 @@
 // A record, tuple or enum holding a `#SingleUse` value is consumed by a move
 // of the whole value, by a move of each field that holds the duty, or by
-// returning it; none of these owes anything at its scope's end.
+// returning it; none of these owes anything at its scope's end. A record
+// lent to a function keeps its duty with its owner.
 #SingleUse Lease: struct {
     name: String
 }
@@ -38,8 +39,14 @@ release_slot: fn(slot: &&Slot) {
 
 make: fn(name: String) -> Holder { Holder{lease: acquire(name), count: 1} }
 
+name_of: fn(holder: Holder) -> String { holder.lease.name.copy() }
+
+bump: fn(holder: &Holder) { holder.count += 1 }
+
 run: fn() {
-    whole: make("whole")
+    whole := make("whole")
+    bump(whole)
+    print("lent {name_of(whole)} {whole.count}")
     release_holder(whole)
     split: Holder{lease: acquire("field"), count: 2}
     release(split.lease.move())

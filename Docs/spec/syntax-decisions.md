@@ -3940,7 +3940,12 @@ a body that refills or lends `xs` leaves the list's duty (E0140). Under
 D-LIN-CONTAINER1=A a List, Option, Result, Map, tuple, generic type argument,
 struct field or enum payload holding a single-use value owes the duty too, so
 a dropped `[Lease]`, `Lease?` or record with a `Lease` field is E0140; a record
-or tuple owes nothing once each field holding the duty is moved out. A loop
+or tuple owes nothing once each field holding the duty is moved out. A record
+or enum that owes the duty only through a field or payload may be lent (an
+allocator that keeps released blocks is lent to a `#Context(allocator:)`
+block or a function): the loan cannot take the held value without owning it,
+so the duty stays with the owner; the List, Option, Result, Map, tuple or
+type argument that holds one is moved only (E0142). A loop
 over such a list (or `loop (k, v) in ^table`) hands each element over, and
 each loop name owes its own consume.
 

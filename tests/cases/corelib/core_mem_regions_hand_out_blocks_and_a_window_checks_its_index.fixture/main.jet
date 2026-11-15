@@ -4,8 +4,8 @@
 // blocks hands out blocks of its own.
 use core.mem
 
-// Keeps the blocks this program claims; a block is single use, so it ends
-// with its holder.
+// Keeps the blocks this program claims; a block is single use, so its holder
+// owes its end.
 Shelf: struct {
     blocks: [mem.Block]
 }
@@ -40,4 +40,7 @@ run: fn() {
 
     print("{shelf.blocks.len()} blocks kept")
     region.close()
+    #Unsafe("the shelf's blocks were claimed from regions that are closed, and nothing reads them again") {
+        consume(shelf)
+    }
 }

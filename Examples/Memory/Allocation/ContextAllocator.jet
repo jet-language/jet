@@ -3,7 +3,8 @@
 // claims its blocks from a `mem.Region`, keeps the ones it gets back, and
 // counts both. Each value made in the block goes back to it when dropped, and a
 // value that leaves the block moves out of `a` first, so every block `a`
-// served is back by the time the block ends.
+// served is back by the time the block ends. The blocks `a` keeps are single
+// use, so `a` owes their end: it discards them with its region, deliberately.
 // Run with: jet run Examples/Memory/Allocation/ContextAllocator.jet
 use core.mem
 
@@ -45,4 +46,7 @@ run: fn() {
     }
     print("served by the allocator: {counter.taken > 0}")
     print("all given back: {counter.taken == counter.given}")
+    #Unsafe("the counter's kept blocks were claimed from its region, which unmaps them all") {
+        consume(counter)
+    }
 }

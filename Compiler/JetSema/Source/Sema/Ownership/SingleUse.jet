@@ -99,6 +99,7 @@ sema_single_use_note_binding: fn(state: &SemaOwnershipState, symbol: Symbol, key
     sema_ownership_set_single_use(state, row)
     if sema_single_use_is_task(ty) -> state.declarations[row].owes_join = true
     state.declarations[row].duty_fields = sema_single_use_duty_fields(ty, environment, program)
+    state.declarations[row].lendable = sema_single_use_lendable(ty, environment, program)
 }
 
 // The fields of a tuple or of a struct (not itself `#SingleUse`) that hold
@@ -156,10 +157,35 @@ sema_single_use_argument: fn(state: SemaOwnershipState, expr: Expr, scopes: Sema
     None
 }
 
+// A struct or enum that owes the duty only because a field or payload holds
+// a `#SingleUse` value. A loan of it cannot take that value out without
+// owning what it takes, so the binding that owns the holder keeps the duty
+// and the holder may be lent. A declared `#SingleUse` value, a task, and a
+// List, Option, Result, Map, tuple or type argument holding one are moved
+// only (E0142).
+sema_single_use_lendable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if sema_stmt_for_in_type_requires_owned_iteration(ty) -> return false
+    if ty == {
+        .Named(name) -> return !sema_single_use_declared(name, environment, program)
+        .Apply(name, args) -> {
+            if sema_single_use_declared(name, environment, program) -> return false
+            loop arg in args {
+                if sema_single_use_type(arg, environment, program) -> return false
+            }
+            return true
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .FixedList(_, _) | .Option(_) | .Result(_, _) | .Map(_, _, _) | .Tuple(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
+    }
+}
+
 // E0142: only an owning (`&&`) parameter may receive a `#SingleUse` value.
+// A lendable holder (sema_single_use_lendable) may be lent.
 sema_single_use_check_argument: fn(state: SemaOwnershipState, callee: String, param_convention: AccessConvention, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if param_convention == AccessConvention.Move -> return true
     name: sema_single_use_argument(state, expr, scopes) ?? return true
+    index: sema_scope_resolve_index_at(scopes, name, expr_span(expr)) ?? return true
+    row: sema_ownership_first_row(state, scopes.bindings[index].key)
+    if state.declarations[row].lendable -> return true
     diagnostics.push(sema_single_use_diag_aliased(name, callee, expr_span(expr)))
     false
 }
