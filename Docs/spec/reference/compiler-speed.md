@@ -145,7 +145,9 @@ column, `30M-wall`, gives each phase a wall budget in ns per source line, that
 is a lines-per-second rate (1e9 over it); the phases, with the build steps
 outside the trace, sum to 33.3 ns per line, 30M lines per second end to end.
 Every row and `outside_trace` names its `owners`, the cards whose work brings
-it inside budget. A phase over its budget names them as its root:
+it inside budget, its root criteria on #5479 first: each names one measured
+root of the phase's time, at most an hour of code. A phase over its budget
+names them as its root:
 `Tools/perf/budget/check` lists each phase over budget with its owner cards,
 and fails one that has none. `--budget` keeps that report in each compile's
 `budget.txt`, with the owners of `outside_trace` when the build steps outside
@@ -160,21 +162,21 @@ per second.
 
 | Row | Phase | Spans | ns/line | Lines/s | Owners |
 | --- | --- | --- | ---: | ---: | --- |
-| P1+P2 | read + lex + intern + parse | `sources`, `load` | 2.8 | 357.1M | #6328 c22, #5910 c6, #5479 c7 |
-| P3 | collect / register / resolve | `register` | 1.1 | 909.1M | #6328 c22, #5479 c7 |
-| P4 | comptime: one check + evaluation | `sema.check`, `comptime`, `comptime.bodies`, `comptime.validate` | 2.8 | 357.1M | #6328 c22, #5479 c6 |
-| P5a+P5b | sema bodies + ownership (one pass; P5b is not traced apart) | `sema.bodies`, `sema.recheck` | 7.0 | 142.9M | #5479 c6, #5479 c7 |
-| P5c | effect tracking | `sema.effects` | 0.6 | 1666.7M | #5479 c7 |
-| P5d | failure inference | `sema.failure` | 0.6 | 1666.7M | #5479 c7 |
-| P6 | other whole-program finalize | `sema.finalize` less `sema.bodies`, `sema.recheck`, `sema.effects`, `sema.failure` | 1.7 | 588.2M | #5479 c7 |
-| P7 | typed tree -> IR lowering (driver lower) | `lower` | 0.6 | 1666.7M | #5479 c8 |
-| P8 | IR build | `ir.build` | 3.9 | 256.4M | #5479 c8, #5479 c7 |
-| P9 | IR O1 passes + IR consistency check (ir.lint, once, over the module x64 selection reads) | `ir.opt`, `ir.lint` | 2.8 | 357.1M | #5479 c8, #5479 c6 |
-| P10 | x64 selection, register allocation, encode | `ir.x64` | 1.7 | 588.2M | #5479 c8 |
-| P11 | object write + DWARF debug info (SPEED-500K P13; debug_info is on in stock builds and runs) | `ir.object` | 1.1 | 909.1M | #5479 c8 |
-| P14 | link + foreign objects | `native.link`, `native.foreign`, `native.rust_foreign` | 1.1 | 909.1M | #5479 c8 |
-| P15 | driver, phase boundaries (residual) | the rest of the trace | 2.2 | 454.5M | #5479 c6 |
-| outside | build steps around the traced compile | none | 3.3 | 303.0M | #5479 c6 |
+| P1+P2 | read + lex + intern + parse | `sources`, `load` | 2.8 | 357.1M | #5479 c12, #6328 c22, #5910 c6, #5479 c7 |
+| P3 | collect / register / resolve | `register` | 1.1 | 909.1M | #5479 c13, #6328 c22, #5479 c7 |
+| P4 | comptime: one check + evaluation | `sema.check`, `comptime`, `comptime.bodies`, `comptime.validate` | 2.8 | 357.1M | #5479 c14, #5479 c15, #6328 c22, #5479 c6 |
+| P5a+P5b | sema bodies + ownership (one pass; P5b is not traced apart) | `sema.bodies`, `sema.recheck` | 7.0 | 142.9M | #5479 c16, #5479 c6, #5479 c7 |
+| P5c | effect tracking | `sema.effects` | 0.6 | 1666.7M | #5479 c17, #5479 c18, #5479 c7 |
+| P5d | failure inference | `sema.failure` | 0.6 | 1666.7M | #5479 c19, #5479 c7 |
+| P6 | other whole-program finalize | `sema.finalize` less `sema.bodies`, `sema.recheck`, `sema.effects`, `sema.failure` | 1.7 | 588.2M | #5479 c20, #5479 c7 |
+| P7 | typed tree -> IR lowering (driver lower) | `lower` | 0.6 | 1666.7M | #5479 c21, #5479 c8 |
+| P8 | IR build | `ir.build` | 3.9 | 256.4M | #5479 c22, #5479 c8, #5479 c7 |
+| P9 | IR O1 passes + IR consistency check (ir.lint, once, over the module x64 selection reads) | `ir.opt`, `ir.lint` | 2.8 | 357.1M | #5479 c23, #5479 c8, #5479 c6 |
+| P10 | x64 selection, register allocation, encode | `ir.x64` | 1.7 | 588.2M | #5479 c24, #5479 c8 |
+| P11 | object write + DWARF debug info (SPEED-500K P13; debug_info is on in stock builds and runs) | `ir.object` | 1.1 | 909.1M | #5479 c25, #5479 c8 |
+| P14 | link + foreign objects | `native.link`, `native.foreign`, `native.rust_foreign` | 1.1 | 909.1M | #5479 c26, #5479 c8 |
+| P15 | driver, phase boundaries (residual) | the rest of the trace | 2.2 | 454.5M | #5479 c27, #5479 c28, #5479 c6 |
+| outside | build steps around the traced compile | none | 3.3 | 303.0M | #5479 c29, #5479 c30, #5479 c6 |
 | total | end to end | | 33.3 | 30.0M | |
 
 `--against SEED` is the train speed gate: the compiler `JET` against the seed

@@ -28,7 +28,9 @@ Columns:
 each row's ns per line there is its phase's lines/s rate (1e9 over it), and
 the rows with `outside_trace` compose to the target end to end. Every row and
 `outside_trace` carries `owners`, the cards whose work brings the phase inside
-budget; a phase over budget names them as its root.
+budget, its root criteria on #5479 first (each one measured root of the
+phase's time, at most an hour of code); a phase over budget names them as its
+root.
 
 ```
 jet Tools/perf/budget/check build.trace.jsonl --column 2.5s-wall --clock wall
