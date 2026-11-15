@@ -1997,10 +1997,12 @@ Ran: struct {
     output: String
 }
 
-// Run `argv` in the checkout and keep its whole output in OUT/<name>.log.
+// Run `argv` in the checkout, naming it as the toolchain tree so its checks
+// and tools compile against the checkout's Core, and keep its whole output in
+// OUT/<name>.log.
 command: fn(gate: Gate, name: String, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
     log: "{gate.out}/{name}.log"
-    receipt: process.cmd(argv).cwd(gate.repo).timeout(time.duration_ms(CHECK_TIMEOUT_MS)).output_limit(67108864).run() ?? {
+    receipt: process.cmd(argv).cwd(gate.repo).env("JET_TOOLCHAIN_ROOT", gate.repo).timeout(time.duration_ms(CHECK_TIMEOUT_MS)).output_limit(67108864).run() ?? {
         files.write(log, "{err}\n") ?? ()
         return Ran{code: -1, detail: "error {err}", output: ""}
     }

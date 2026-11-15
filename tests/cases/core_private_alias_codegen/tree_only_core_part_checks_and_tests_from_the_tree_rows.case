@@ -2,7 +2,8 @@
 # Compiler/Prelude/CoreSourceParts.tsv rows, so a part the tree adds loads on a jet built
 # before it (CoreModuleCheck --check runs jet check against the checked tree). Here the
 # tree adds the part __core_text_tree_part, which core.text imports and no jet was built
-# with: a program importing core.text checks, and the part's own #Test runs from it.
+# with: a program importing core.text checks against the named tree, and the part's own #Test
+# runs from it, its entry under the tree's Core/ naming the tree.
 env: NO_COLOR=1
 env: XDG_CACHE_HOME={work}/cache
 env: JET_STORE_DIR={work}/store
@@ -14,7 +15,7 @@ copy: tree-part.txt tree/Core/Text/TreePart.jet
 append: tree/Compiler/Prelude/CoreSourceParts.tsv "__core_text_tree_part\tcore.text\tCore/Text/TreePart.jet\t__core_text_tree_part\t\t\n"
 concat: tree/Core/Text/Text.jet tree/Core/Text/Text.jet owner-import.txt
 step check: jet check tree/app/words.jet
-unset: JET_TOOLCHAIN_ROOT
+env: JET_TOOLCHAIN_ROOT={work}/tree
 exit: 0
 stderr: = "ok: `tree/app/words.jet` has no problems\n"
 step test: jet test tree/Core/Text/TreePart.jet

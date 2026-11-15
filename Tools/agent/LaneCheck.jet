@@ -158,17 +158,24 @@ assembly_env: fn(jet: String) -> [Setting] {
     [Setting]{Setting{name: "JETPACK_WORKER", value: "lanecheck"}, Setting{name: "JET_BIN", value: jet}}
 }
 
-assembly_spec: fn(jet: String, repo: String) -[Exec]> ProcessSpec {
-    spec := process.cmd([String]{jet, "Jetpack/Bootstrap/Assemble.jet", "check"}).cwd(repo)
+assembly_spec: fn(jet: String, repo: String) -[Env, Exec]> ProcessSpec {
+    spec := tool_cmd([String]{jet, "Jetpack/Bootstrap/Assemble.jet", "check"}, repo)
     loop setting in assembly_env(jet) -> spec = spec.env(setting.name, setting.value)
     spec
+}
+
+// `argv`, a tool of this checkout, run in it. A compile names its toolchain
+// tree, so the checkout is named here: the tool compiles against the
+// checkout's Core, which the lane may have changed, not the jet's own.
+tool_cmd: fn(argv: [String], repo: String) -[Env, Exec]> ProcessSpec {
+    process.cmd(argv).cwd(repo).env("JET_TOOLCHAIN_ROOT", process.env_nonempty("JET_TOOLCHAIN_ROOT") ?? repo)
 }
 
 // The unsafe-region ratchet and memory-kernel count with $JET, else the `jet`
 // on PATH; it never writes.
 unsafe_ratchet: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
-    ratchet: process.cmd([String]{jet, "Tools/agent/UnsafeRatchet.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/UnsafeRatchet.jet: {err}")
+    ratchet: tool_cmd([String]{jet, "Tools/agent/UnsafeRatchet.jet", "--check"}, repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/UnsafeRatchet.jet: {err}")
     if ratchet.code == 0 && ratchet.signal == None {
         return
     }
@@ -178,7 +185,7 @@ unsafe_ratchet: fn(repo: String) -[Env, Exec, FS, IO]> () {
 // The vocabulary rows check with $JET, else the `jet` on PATH; it never writes.
 vocabulary_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
-    rows: process.cmd([String]{jet, "Tools/agent/VocabularyRows.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/VocabularyRows.jet: {err}")
+    rows: tool_cmd([String]{jet, "Tools/agent/VocabularyRows.jet", "--check"}, repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/VocabularyRows.jet: {err}")
     if rows.code == 0 && rows.signal == None {
         return
     }
@@ -188,7 +195,7 @@ vocabulary_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
 // The flat body's enum rows check with $JET, else the `jet` on PATH; it never writes.
 body_tree_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
-    rows: process.cmd([String]{jet, "Tools/agent/BodyTreeRows.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/BodyTreeRows.jet: {err}")
+    rows: tool_cmd([String]{jet, "Tools/agent/BodyTreeRows.jet", "--check"}, repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/BodyTreeRows.jet: {err}")
     if rows.code == 0 && rows.signal == None {
         return
     }
@@ -198,7 +205,7 @@ body_tree_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
 // The diagnostic census check with $JET, else the `jet` on PATH; it never writes.
 diagnostic_census: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
-    census: process.cmd([String]{jet, "Tools/agent/DiagnosticCensus.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/DiagnosticCensus.jet: {err}")
+    census: tool_cmd([String]{jet, "Tools/agent/DiagnosticCensus.jet", "--check"}, repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/DiagnosticCensus.jet: {err}")
     if census.code == 0 && census.signal == None {
         return
     }
@@ -208,7 +215,7 @@ diagnostic_census: fn(repo: String) -[Env, Exec, FS, IO]> () {
 // The compiler-data ratchet with $JET, else the `jet` on PATH; it never writes.
 compiler_data: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
-    ratchet: process.cmd([String]{jet, "Tools/agent/CompilerData.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/CompilerData.jet: {err}")
+    ratchet: tool_cmd([String]{jet, "Tools/agent/CompilerData.jet", "--check"}, repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/CompilerData.jet: {err}")
     if ratchet.code == 0 && ratchet.signal == None {
         return
     }
@@ -218,7 +225,7 @@ compiler_data: fn(repo: String) -[Env, Exec, FS, IO]> () {
 // The script-pairing guard with $JET, else the `jet` on PATH; it never writes.
 script_pairing: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
-    pairing: process.cmd([String]{jet, "Tools/agent/ScriptPairing.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/ScriptPairing.jet: {err}")
+    pairing: tool_cmd([String]{jet, "Tools/agent/ScriptPairing.jet", "--check"}, repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/ScriptPairing.jet: {err}")
     if pairing.code == 0 && pairing.signal == None {
         return
     }
@@ -261,7 +268,7 @@ user_cache: fn() -[Env]> String Never! {
 // on PATH.
 runtime_generators: fn(repo: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
-    receipt: process.cmd([String]{jet, "Tools/agent/RuntimeGenerators.jet", "--check"}).cwd(repo).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
+    receipt: tool_cmd([String]{jet, "Tools/agent/RuntimeGenerators.jet", "--check"}, repo).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
         print("CHECK FAILED — {jet} could not run Tools/agent/RuntimeGenerators.jet: {err}")
         return 1
     }

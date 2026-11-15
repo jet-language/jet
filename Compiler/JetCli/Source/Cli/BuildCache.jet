@@ -172,13 +172,14 @@ jet_cli_build_store_off: fn(verbose: Bool, reason: String) -> String Never! {
 }
 
 // The store key of `name`'s executable: this compiler (its identity, else its
-// file's), the runtime pack it links, the Core sources it compiles, the build
-// options and host, every source of the authorized snapshot, every comptime
-// input the compile read (`comptime_inputs`: an edited `embed_file` asset is
-// a new key) and the functions the package lays out first (jet_cli_hot_text:
-// an edited hot-text.list is a new image), each part length-framed and hashed
-// together. None when the compiler, its runtime or its Core sources can't be
-// identified.
+// file's), the runtime pack it links, the Core sources it compiles (the named
+// tree's files, else the Core built into the compiler, which the compiler's
+// part names), the build options and host, every source of the authorized
+// snapshot, every comptime input the compile read (`comptime_inputs`: an
+// edited `embed_file` asset is a new key) and the functions the package lays
+// out first (jet_cli_hot_text: an edited hot-text.list is a new image), each
+// part length-framed and hashed together. None when the compiler, its runtime
+// or a named tree's Core sources can't be identified.
 jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, snapshot: JetDriverAuthorizedSourceSnapshot, comptime_inputs: [JetDriverComptimeInputRecord]) -[FS, Env]> String? Never! {
     parts := [String]{"jet-build-binary-v1", JET_VERSION, name, build_options_key(options), "{cli_sys.arch()}-{cli_sys.name()}"}
     compiler: if jet_cli_compiler_identity() == {
@@ -187,18 +188,14 @@ jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, s
     }
     parts.push(compiler)
     parts.push(jet_cli_runtime_key(jet_cli_runtime_dir()) ?? return None)
-    toolchain: if jet_cli_toolchain_root(file) == {
-        .Found(root) -> root
-        .Missing(_, _) -> {
-            return None
+    if jet_cli_named_toolchain(file) == .Val(toolchain) {
+        core_rows: jet_cli_toolchain_core_rows(toolchain) ?? return None
+        loop row in core_rows {
+            path: jet_cli_authority_path(toolchain, row.path)
+            parts.push(row.path)
+            parts.push(jet_cli_identity_key("file", cli_files.stat(path) ?? return None))
         }
-    }
-    core_rows: jet_cli_toolchain_core_rows(toolchain) ?? return None
-    loop row in core_rows {
-        path: jet_cli_authority_path(toolchain, row.path)
-        parts.push(row.path)
-        parts.push(jet_cli_identity_key("file", cli_files.stat(path) ?? return None))
-    }
+    } else { parts.push("core built in") }
     loop root in snapshot.roots {
         loop source in root.files {
             parts.push(source.path)

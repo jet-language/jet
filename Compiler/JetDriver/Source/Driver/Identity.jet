@@ -455,32 +455,38 @@ JetDriverCompileRequest: struct {
     // (Pipeline.jet jet_driver_deep_checks). Off for a compile no
     // options input reaches.
     deep_checks: DeepChecks{DeepChecks{}}
-    // The toolchain tree `toolchain:` comptime inputs read: the tree this
-    // compile takes Core from, and the reader of which packages may read it
-    // (JetDriverToolchainTree). None: jet compiles against its built-in Core,
-    // and every `toolchain:` read refuses (E0945).
+    // The toolchain tree `toolchain:` comptime inputs read, and the reader of
+    // which packages may read it (JetDriverToolchainTree). None: every
+    // `toolchain:` read refuses (E0945).
     toolchain_tree: Shared<JetDriverToolchainTree>?{None}
 }
 
-// The toolchain tree of a compile's `toolchain:` comptime inputs:
-// `root`, its physical path, which every read is held
-// beneath (no-follow), and the package directories admitted to read it, the
-// toolchain's own packages. `reader` names them on the first `toolchain:`
-// read, which keeps them in `packages`, so a compile that reads none never
-// walks the toolchain's manifests. A file reads the tree when the package it
-// is in (its nearest package directory) is one of them.
+// The toolchain tree of a compile's `toolchain:` comptime inputs. `root` is
+// the physical path of the tree the compile names, the one it takes Core
+// from. With no tree named, a read resolves against the tree that holds the
+// reading file (`reader.tree_of`), while the compile still takes the Core
+// built into jet: a tool that checks a checkout reads that checkout's files
+// as data. Either way the read is held beneath the tree's root (no-follow),
+// and only the tree's own packages may read it. `reader` names them on a
+// tree's first `toolchain:` read and `packages` keeps them by root, so a
+// compile that reads none never walks the toolchain's manifests. A file
+// reads the tree when the package it is in (its nearest package directory)
+// is one of them.
 JetDriverToolchainTree: struct {
-    root: String
+    root: String?
     reader: JetDriverToolchainPackageReader
-    packages: [String]?
+    packages: [String:[String]]
 }
 
 // The host's census of the toolchain's own packages under `root` (the
-// physical directory of each), and the package directory of a physical file:
-// the nearest directory above it, below `root`, holding a package.jet.
+// physical directory of each), the package directory of a physical file
+// (the nearest directory above it, below `root`, holding a package.jet), and
+// the tree that holds a physical file (the nearest directory above it
+// holding `Core/` and `Compiler/Prelude/`).
 JetDriverToolchainPackageReader: trait {
     packages: fn(self, root: String) -[FS.Read]> [String]
     package_of: fn(self, root: String, file: String) -[FS.Read]> String?
+    tree_of: fn(self, file: String) -[FS.Read]> String?
 }
 
 JetDriverGatePolicy: struct {

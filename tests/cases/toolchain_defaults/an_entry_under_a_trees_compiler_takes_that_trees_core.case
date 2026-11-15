@@ -1,0 +1,21 @@
+# Docs/spec/reference/environment.md: an entry under a toolchain tree's `Compiler/` names that
+# tree, so with `JET_TOOLCHAIN_ROOT` unset it compiles against the tree's Core. The tree's
+# core.log carries a type error in a function nothing calls; a JET_KEEP_GOING check loads and
+# checks every Core declaration, so it reports the error only when it reads the tree's Core.
+env: NO_COLOR=1
+requires: os:unix
+fixture: check-core-uncalled.fixture
+copy: {root}/Core tree/Core
+copy: {root}/Compiler/Prelude tree/Compiler/Prelude
+copy: tree/app/probe.jet tree/Compiler/probe/probe.jet
+concat: tree/Core/Log/Log.jet tree/Core/Log/Log.jet uncalled.txt
+step: jet check tree/Compiler/probe/probe.jet
+unset: JET_TOOLCHAIN_ROOT
+env: JET_KEEP_GOING=1
+exit: 1
+stdout+stderr: ~ "not an Int" # the error's source line; the rest of the report names the work directory
+step: jet check tree/app/probe.jet
+unset: JET_TOOLCHAIN_ROOT
+env: JET_KEEP_GOING=1
+exit: 0
+stdout+stderr: ~ "has no problems" # outside Core/ and Compiler/ the entry takes the built-in Core

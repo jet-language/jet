@@ -97,8 +97,8 @@ jet_cli_core_asset_bytes: fn(path: String) -> [U8]? Never! {
 // Whether a compile takes the Core built into this jet, so a native run may
 // bind its Core calls to the Core library's code the jet carries (Host.jet
 // jet_cli_native_executable): the jet carries its runtime
-// (jet_cli_runtime_embedded), no Core source is under test, and the entry
-// has no toolchain tree (jet_cli_toolchain_root) or one whose Core is the
+// (jet_cli_runtime_embedded), no Core source is under test, and the compile
+// names no toolchain tree (jet_cli_named_toolchain) or one whose Core is the
 // built-in one (jet_cli_core_tree_matches). A tree whose Core differs, as
 // while Core is being edited, compiles every Core function a program calls.
 // The tree is compared when a compile first asks
@@ -115,10 +115,7 @@ jet_cli_core_binding: fn(entry: String, core_tests: String) -> Shared<JetCLICore
     if core_tests != "" || !jet_cli_runtime_embedded() {
         return Shared{JetCLICoreBinding{toolchain: "", built_in: false}}
     }
-    toolchain: if jet_cli_toolchain_root(entry) == {
-        .Found(root) -> root
-        .Missing(_, _) -> ""
-    }
+    toolchain: jet_cli_named_toolchain(entry) ?? ""
     built_in: toolchain == ""
     Shared{JetCLICoreBinding{toolchain: toolchain, built_in: built_in}}
 }

@@ -440,8 +440,9 @@ jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, objec
 }
 
 // Names the Jet toolchain source tree: the directory that holds `Core/`.
-// Unset, the tree is found (jet_cli_toolchain_root); with no tree, jet
-// compiles against the Core sources built into it (jet_cli_core_sources).
+// Unset, a compile names a tree only by its entry (jet_cli_named_toolchain);
+// with no tree, jet compiles against the Core sources built into it
+// (jet_cli_core_sources).
 JET_CLI_TOOLCHAIN_ROOT_ENV: ENV_JET_TOOLCHAIN_ROOT
 
 // This compiler's identity (`name@version#<source id>`). Unset, it is the
@@ -476,33 +477,29 @@ jet_cli_identity_missing: fn() -> (what: String, fix: String) Never! {
 
 // Whether `directory` holds a Jet toolchain: the Core library and the
 // compiler prelude.
-jet_cli_is_toolchain: fn(directory: String) -[FS]> Bool Never! {
+jet_cli_is_toolchain: fn(directory: String) -[FS.Read]> Bool Never! {
     cli_files.is_dir(jet_cli_authority_path(directory, "Core")) && cli_files.is_dir(jet_cli_authority_path(directory, "Compiler/Prelude"))
 }
 
 // Whether `directory` is the Core library of the toolchain whose sources a
-// compile there reads (jet_cli_toolchain_root): `jet check Core`.
+// compile there reads (jet_cli_named_toolchain): `jet check Core`.
 jet_cli_is_core_library: fn(directory: String) -[FS, Env]> Bool Never! {
-    if jet_cli_toolchain_root(directory) == {
-        .Found(root) -> {
-            core: cli_files.realpath(jet_cli_authority_path(root, "Core")) ?? return false
-            (cli_files.realpath(directory) ?? return false) == core
-        }
-        .Missing(_, _) -> false
-    }
+    root: jet_cli_named_toolchain(directory) ?? return false
+    core: cli_files.realpath(jet_cli_authority_path(root, "Core")) ?? return false
+    (cli_files.realpath(directory) ?? return false) == core
 }
 
-// Where the toolchain sources a request for `input` (a file or directory) come from.
+// Where the toolchain sources a tool run in `input` (a file or directory) needs come from.
 JetCLIToolchainRoot: enum {
     Found(root: String)
     Missing(what: String, fix: String)
 }
 
-// The toolchain source tree: JET_TOOLCHAIN_ROOT, else the nearest directory at
-// or above `input` that holds a toolchain (a Jet checkout, whose own Core
-// takes precedence for contributors). Missing names both places; a compile
-// then reads the Core sources built into jet, and only the tools that need
-// a checkout's other files refuse.
+// The checkout a tool that reads a checkout's other files works in (`jet
+// fmt`, `jet inspect coverage`, `jet devtools grammars`):
+// JET_TOOLCHAIN_ROOT, else the nearest directory at or above `input` that
+// holds a toolchain. Missing names both places. A compile never searches: it
+// reads the tree it names (jet_cli_named_toolchain).
 jet_cli_toolchain_root: fn(input: String) -> JetCLIToolchainRoot Never! {
     if cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) == .Val(root) {
         return JetCLIToolchainRoot.Found{root: root}
@@ -518,6 +515,30 @@ jet_cli_toolchain_root: fn(input: String) -> JetCLIToolchainRoot Never! {
         what: "can't find the Jet toolchain sources: `{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set and no directory at or above `{start}` holds `Core/` and `Compiler/Prelude/`",
         fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, or run jet inside a Jet checkout",
     }
+}
+
+// The toolchain tree a compile of `input` takes Core from, the one it names,
+// or None for the Core built into jet. JET_TOOLCHAIN_ROOT names a tree. So
+// does an entry in a tree's Core library (a Core test run, `jet check Core`)
+// or in its compiler workspace (a compiler package build): the nearest
+// component of the entry's absolute path named `Core` or `Compiler` whose
+// directory holds `Core/` and `Compiler/Prelude/`. Any other entry, inside a
+// checkout or not, takes the built-in Core. The test reads the path string,
+// so such an entry touches no tree.
+jet_cli_named_toolchain: fn(input: String) -> String? Never! {
+    if cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) == .Val(root) -> return Val(root)
+    parts := [String]{}
+    if !input.starts_with("/") -> parts.extend((cli_files.cwd() ?? ".").split("/").to_list())
+    parts.extend(input.split("/").to_list())
+    index := parts.len() - 1
+    loop index > 0 {
+        if parts[index] == "Core" || parts[index] == "Compiler" {
+            directory: if index == 1 -> "/" else -> jet_cli_prefix(parts, index).join("/")
+            if jet_cli_is_toolchain(directory) -> return Val(directory)
+        }
+        index -= 1
+    }
+    None
 }
 
 JET_CLI_MAX_TREE_DEPTH: 256
@@ -1109,14 +1130,10 @@ jet_cli_locked_git_root: fn(project_root: String, name: String) -[FS, Env]> Stri
 JET_CLI_BATTERIES_DIR: "Jetpack/Provider/Batteries"
 
 // The canonical first-party batteries directory of the toolchain
-// (jet_cli_toolchain_root of `entry`), or None without a toolchain root.
+// (jet_cli_named_toolchain of `entry`), or None when the compile names no
+// tree.
 jet_cli_batteries_dir: fn(entry: String) -[FS, Env]> String? Never! {
-    toolchain: if jet_cli_toolchain_root(entry) == {
-        .Found(root) -> root
-        .Missing(_, _) -> {
-            return None
-        }
-    }
+    toolchain: jet_cli_named_toolchain(entry) ?? return None
     Val(cli_files.realpath(jet_cli_authority_path(toolchain, JET_CLI_BATTERIES_DIR)) ?? return None)
 }
 
@@ -1407,7 +1424,7 @@ jet_cli_threads_left: fn(logical: Int, allowed: Int, busy: Int) -> Int Never! {
     logical
 }
 
-// The Core library rows of the toolchain tree (jet_cli_toolchain_root of
+// The Core library rows of the toolchain tree (jet_cli_named_toolchain of
 // `input`, the entry), else the Core sources built into jet
 // (jet_cli_core_source_text), or the refusal that stops the
 // request. A tree's private parts are its own CoreSourceParts.tsv rows
@@ -1427,7 +1444,7 @@ jet_cli_core_sources: fn(input: String) -> JetCLICoreSources Never! {
         return JetCLICoreSources.Missing{what: missing.what, fix: missing.fix}
     }
     core_sources := [JetDriverCoreSource]{}
-    if jet_cli_toolchain_root(input) == .Found(toolchain) {
+    if jet_cli_named_toolchain(input) == .Val(toolchain) {
         rows: jet_cli_toolchain_core_rows(toolchain) ?? return JetCLICoreSources.Missing{what: err.message, fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, and keep its `{CORE_DECLARATIONS_PARTS_PATH}` rows whole"}
         loop row in rows {
             core_path: jet_cli_authority_path(toolchain, row.path)
@@ -1526,15 +1543,16 @@ JetCLICoreInterface: struct {
     }
 }
 
-// The toolchain tree of `input`'s compile (jet_cli_toolchain_root, the tree
-// its Core rows come from) for `toolchain:` comptime inputs, by its physical
-// path; None without one, so those reads refuse: a built-in Core has no tree.
+// The toolchain tree `toolchain:` comptime inputs of `input`'s compile read:
+// the tree it names (jet_cli_named_toolchain), by its physical path, else
+// the tree that holds the reading package (JetDriverToolchainTree). None
+// when the named tree has no physical path, so those reads refuse.
 jet_cli_toolchain_tree: fn(input: String) -[FS, Env]> Shared<JetDriverToolchainTree>? Never! {
-    if jet_cli_toolchain_root(input) == .Found(toolchain) {
-        root: cli_files.realpath(toolchain) ?? return None
-        return Val(Shared{JetDriverToolchainTree{root: root, reader: JetCLIToolchainPackages{}, packages: None}})
+    root := String?{None}
+    if jet_cli_named_toolchain(input) == .Val(toolchain) {
+        root = Val(cli_files.realpath(toolchain) ?? return None)
     }
-    None
+    Val(Shared{JetDriverToolchainTree{root: root, reader: JetCLIToolchainPackages{}, packages: [String:[String]]{}}})
 }
 
 // The toolchain's own packages, the ones that read its tree with
@@ -1585,6 +1603,15 @@ JetCLIToolchainPackages: struct {
                 directory = cli_files.dirname(directory)
             }
             None
+        }
+
+        tree_of: fn(self, file: String) -[FS.Read]> String? {
+            directory := cli_files.dirname(file)
+            loop {
+                if jet_cli_is_toolchain(directory) -> return Val(directory)
+                if directory == "/" -> return None
+                directory = cli_files.dirname(directory)
+            }
         }
     }
 }
@@ -2374,17 +2401,12 @@ jet_cli_core_check_source: fn() -> String Never! {
 }
 
 // The Core row path of `file` when it is a source of the Core library of the
-// toolchain a compile there reads (jet_cli_toolchain_root), not a runtime
+// toolchain a compile there reads (jet_cli_named_toolchain), not a runtime
 // unit: `jet test Core/Encoding/Cbor.jet` runs that Core unit's #Tests
 // (jet_cli_core_test_source). A runtime unit's exact bytes are their own
 // entry (Loader.jet jet_driver_runtime_entry_row).
 jet_cli_core_test_path: fn(file: String) -[FS, Env]> String? Never! {
-    root: if jet_cli_toolchain_root(file) == {
-        .Found(found) -> cli_files.realpath(found) ?? return None
-        .Missing(_, _) -> {
-            return None
-        }
-    }
+    root: cli_files.realpath(jet_cli_named_toolchain(file) ?? return None) ?? return None
     path: cli_files.realpath(file) ?? return None
     prefix: "{root}/"
     if !path.starts_with(prefix) -> return None
@@ -2400,12 +2422,7 @@ jet_cli_core_test_path: fn(file: String) -[FS, Env]> String? Never! {
 // (jet_cli_core_test_path): one import of the module that loads it, its
 // owner when it is a compiler-private part, under an alias no code names.
 jet_cli_core_test_source: fn(file: String, path: String) -[FS, Env]> String Never! {
-    toolchain: if jet_cli_toolchain_root(file) == {
-        .Found(found) -> found
-        .Missing(_, _) -> {
-            return ""
-        }
-    }
+    toolchain: jet_cli_named_toolchain(file) ?? return ""
     rows: jet_cli_toolchain_core_rows(toolchain) ?? return ""
     loop row in rows {
         if row.path == path {
@@ -2425,12 +2442,7 @@ JetCLICoreTestFiles: struct {
 }
 
 jet_cli_core_test_files: fn(directory: String) -[FS, Env]> JetCLICoreTestFiles? Never! {
-    root: if jet_cli_toolchain_root(directory) == {
-        .Found(found) -> cli_files.realpath(found) ?? return None
-        .Missing(_, _) -> {
-            return None
-        }
-    }
+    root: cli_files.realpath(jet_cli_named_toolchain(directory) ?? return None) ?? return None
     path: cli_files.realpath(directory) ?? return None
     if path != "{root}/Core" && !path.starts_with("{root}/Core/") -> return None
     within: "{path.removeprefix("{root}/")}/"

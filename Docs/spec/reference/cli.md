@@ -720,9 +720,9 @@ the file's own directory for a loose file, with every `.jet` file under it (dot 
 `target`, `build`, `node_modules`, `bin`, and nested projects stay out) and the
 generated C/C++ binding caches. The Core library bodies are read from the Jet
 toolchain source tree, the directory that holds `Core/` and `Compiler/Prelude/`:
-`JET_TOOLCHAIN_ROOT` when set, else the nearest such directory at or above the
-input, so a checkout's own Core wins; with neither, `jet` compiles against the
-Core sources built into it ([`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet),
+`JET_TOOLCHAIN_ROOT` when set, else the tree whose `Core/` or `Compiler/` holds the
+input (a `jet check Core`, a Core test run, a compiler package build). Any other
+compile, inside a checkout or not, compiles against the Core sources built into it ([`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet),
 see [Environment variables](environment.md)). A tree's compiler-private Core
 parts are its own `Compiler/Prelude/CoreSourceParts.tsv` rows, so a part the
 tree adds loads, checks and tests on a `jet` built before it. A Core file's `embed_bytes` and

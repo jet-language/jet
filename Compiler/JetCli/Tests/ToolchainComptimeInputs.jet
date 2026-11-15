@@ -1,9 +1,10 @@
-// `toolchain:` comptime inputs read the toolchain tree the
-// compile takes Core from, beneath its root with the no-follow rooted read, and
-// only from the toolchain's own packages: the compiler workspace, its members
-// and the packages their path dependencies reach inside the tree. A vendored
-// package nested in the tree, a file outside it and a compile with no tree
-// refuse with E0945; every read is recorded under its `toolchain:` name.
+// `toolchain:` comptime inputs read the toolchain tree the compile names,
+// else the tree that holds the reading file, beneath its root with the
+// no-follow rooted read, and only from the toolchain's own packages: the
+// compiler workspace, its members and the packages their path dependencies
+// reach inside the tree. A vendored package nested in the tree, a file
+// outside it and a compile with no tree refuse with E0945; every read is
+// recorded under its `toolchain:` name.
 use {
     jet_cli.[JetCLIBuildInputs, JetCLIToolchainPackages]
     jet_driver.[JetDriverComptimeInputLog, JetDriverComptimeInputRecord, JetDriverComptimeInputs, JetDriverToolchainTree, jet_driver_shared_build_inputs]
@@ -53,7 +54,7 @@ toolchain_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: Str
     root: cli_files.realpath(made) ?? panic("test root")
     log: Shared{JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}}
     // copy: each adapter shares the one tree cell, so the package census runs once.
-    tree: Shared{JetDriverToolchainTree{root: root.copy(), reader: JetCLIToolchainPackages{}, packages: None}}
+    tree: Shared{JetDriverToolchainTree{root: Val(root.copy()), reader: JetCLIToolchainPackages{}, packages: [String:[String]]{}}}
     member: toolchain_inputs_test_adapter("{root}/Compiler/Member/main.jet", Val(tree.copy()), log.copy())
     if toolchain_inputs_test_text(member, "embed_file", "toolchain:Data/table.txt") == .String(text) {
         assert_eq(text, "row\n")
@@ -65,7 +66,7 @@ toolchain_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: Str
             panic("find gives paths")
         }
     } else { panic("find gives a list") }
-    assert_eq(tree.guard_read().value.packages, Val([String]{"{root}/Compiler", "{root}/Compiler/Member", "{root}/Dep"}))
+    assert_eq(tree.guard_read().value.packages[root], [String]{"{root}/Compiler", "{root}/Compiler/Member", "{root}/Dep"})
     names: loop record in log.guard_read().value.records -> record.path
     assert_eq(names, [String]{"toolchain:Data/table.txt", "toolchain:Data/rows/a.txt", "toolchain:Data/rows/b.txt", "toolchain:Data/rows/*.txt"})
     assert_eq(log.guard_read().value.records[0].file, "{root}/Data/table.txt")
@@ -82,6 +83,40 @@ toolchain_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: Str
     untreed: toolchain_inputs_test_adapter("{root}/Compiler/Member/main.jet", None, log.copy())
     assert_eq(toolchain_inputs_test_refused(untreed, "embed_bytes", "toolchain:Data/table.txt"), "E0945")
     assert_eq(toolchain_inputs_test_refused(member, "embed_file", "beside.txt"), "E0955")
+    cli_files.remove_all(made) ?? panic("test root cleanup")
+    cli_files.remove_all("{made}-outside") ?? panic("test outside cleanup")
+}
+
+// A tree no compile names, found from the reading file, with a fresh log.
+toolchain_inputs_test_found: fn() -> Shared<JetDriverToolchainTree>? {
+    Val(Shared{JetDriverToolchainTree{root: None, reader: JetCLIToolchainPackages{}, packages: [String:[String]]{}}})
+}
+
+toolchain_inputs_test_log: fn() -> Shared<JetDriverComptimeInputLog> {
+    Shared{JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}}
+}
+
+#Test("toolchain: comptime inputs with no tree named read the tree that holds the reading package") {
+    made: "{cli_sys.temp_dir()}/jet-toolchain-found-{cli_process.current_pid()}"
+    toolchain_inputs_test_write("{made}/Core/Core.jet", "\n")
+    toolchain_inputs_test_write("{made}/Compiler/Prelude/Effects.jet", "\n")
+    toolchain_inputs_test_write("{made}/Compiler/package.jet", "name: \"compiler\"\nversion: \"0.0.1\"\nmembers: [\n    \"Member\",\n]\n")
+    toolchain_inputs_test_write("{made}/Compiler/Member/package.jet", "name: \"member\"\nversion: \"0.0.1\"\n")
+    toolchain_inputs_test_write("{made}/Vendored/package.jet", "name: \"vendored\"\nversion: \"0.0.1\"\n")
+    toolchain_inputs_test_write("{made}/Data/table.txt", "row\n")
+    toolchain_inputs_test_write("{made}-outside/Tool/package.jet", "name: \"tool\"\nversion: \"0.0.1\"\n")
+    root: cli_files.realpath(made) ?? panic("test root")
+    outside: cli_files.realpath("{made}-outside") ?? panic("test outside root")
+    log: toolchain_inputs_test_log()
+    member: toolchain_inputs_test_adapter("{root}/Compiler/Member/main.jet", toolchain_inputs_test_found(), log)
+    if toolchain_inputs_test_text(member, "embed_file", "toolchain:Data/table.txt") == .String(text) {
+        assert_eq(text, "row\n")
+    } else { panic("embed_file gives text") }
+    assert_eq(log.guard_read().value.records[0].file, "{root}/Data/table.txt")
+    vendored: toolchain_inputs_test_adapter("{root}/Vendored/main.jet", toolchain_inputs_test_found(), toolchain_inputs_test_log())
+    assert_eq(toolchain_inputs_test_refused(vendored, "embed_file", "toolchain:Data/table.txt"), "E0945")
+    tool: toolchain_inputs_test_adapter("{outside}/Tool/main.jet", toolchain_inputs_test_found(), toolchain_inputs_test_log())
+    assert_eq(toolchain_inputs_test_refused(tool, "embed_file", "toolchain:Data/table.txt"), "E0945")
     cli_files.remove_all(made) ?? panic("test root cleanup")
     cli_files.remove_all("{made}-outside") ?? panic("test outside cleanup")
 }

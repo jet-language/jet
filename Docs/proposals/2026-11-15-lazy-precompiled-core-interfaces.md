@@ -60,7 +60,11 @@ What landed since revision 3:
   of the unit's text. Its waves count the unit under
   `parse.core_heads_decoded`, not `parse.core_input_bytes`. Held
   declarations and kept bodies still parse from text (4.1).
-- **The T1 search removal (step T)** is still to come.
+- **The T1 search removal (step T) is in.** A compile takes its Core from
+  a tree only when one is named (section 5). A `toolchain:` comptime read
+  with no tree named resolves against the tree that holds the reading file,
+  and only from that tree's own packages, so checkout tools that embed tree
+  files run without `JET_TOOLCHAIN_ROOT`.
 
 ## 1. Measured baseline
 
@@ -952,7 +956,7 @@ These are all 14 callers at dev `313533b9f3`:
 | `CoreSources.jet` 115, `jet_cli_core_binding` | whether a run binds to the built-in Core | named tree only. With no tree named the binding is built-in, with no test. |
 | `Request.jet` 1003, `jet_cli_batteries_dir` | the batteries directory | named tree only. Otherwise the built-in batteries. |
 | `Request.jet` 1227, `jet_cli_core_sources` | the Core sources of a compile | named tree, or the recognized Core test or compiler package root below. Otherwise built-in. |
-| `Request.jet` 1310, `jet_cli_toolchain_tree` | the toolchain tree of a compile | as `jet_cli_core_sources` |
+| `Request.jet` 1310, `jet_cli_toolchain_tree` | the tree `toolchain:` comptime inputs read | the named or recognized tree. With none named, the tree that holds the reading file, which must be one of that tree's own packages. |
 | `ScriptCache.jet` 105, `jet_cli_script_toolchain` | the Core root a script cache keys on | named tree only |
 | `Request.jet` 438, `jet_cli_is_core_library` | `jet check Core` | recognition rule below |
 | `Request.jet` 2033, 2052, 2073: `jet_cli_core_test_path`, `jet_cli_core_test_source`, `jet_cli_core_test_files` | Core test runs | recognition rule below |

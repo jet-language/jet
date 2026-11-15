@@ -193,10 +193,13 @@ jet_driver_comptime_toolchain_fail: fn(what: String, why: String, fix: String, s
 
 // A `toolchain:` input (`relative` after the prefix): read beneath the
 // toolchain tree's root with the same no-follow read and glob walk as an
-// input beside the file, and recorded under its `toolchain:` name. There is
-// no built-in copy to fall back to: a compile without a toolchain tree, and a
-// file outside the toolchain's own packages (JetDriverToolchainTree), refuse
-// with E0945.
+// input beside the file, and recorded under its `toolchain:` name. The tree
+// is the one the compile names. With none named, it is the tree that holds
+// the reading file, though the compile takes the Core built into jet: a tool
+// that checks a checkout reads that checkout's text as data. Either way only
+// the tree's own packages read it (jet_driver_toolchain_admits). There is no
+// built-in copy to fall back to: a compile without a toolchain tree, and a
+// file outside the toolchain's own packages, refuse with E0945.
 jet_driver_comptime_toolchain_input: fn(adapter: JetDriverComptimeInputs, builtin: String, relative: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
     named: "{JET_COMPTIME_TOOLCHAIN_PREFIX}{relative}"
     tree: adapter.toolchain ?? return Err(jet_driver_comptime_toolchain_fail("`{builtin}` can't read `{named}`: this compile has no toolchain tree", "jet compiles against its built-in Core here, and a `toolchain:` input reads only the tree Core comes from; there is no built-in copy of it", "set `JET_TOOLCHAIN_ROOT` to the Jet toolchain source tree, the directory that holds `Core/`", span))
@@ -209,20 +212,22 @@ jet_driver_comptime_toolchain_input: fn(adapter: JetDriverComptimeInputs, builti
     jet_driver_comptime_input_value(builtin, named, bytes, span)
 }
 
-// The tree's root when `file` (a physical path) is in one of the toolchain's
-// own packages (its nearest package directory is one of them), naming them on
-// first use; else None.
+// The root of the tree `file` (a physical path) reads, when the file is in
+// one of that tree's own packages (its nearest package directory is one of
+// them): the tree the compile names, else the one that holds the file.
+// Names a tree's packages on its first read; else None.
 jet_driver_toolchain_admits: fn(tree: Shared<JetDriverToolchainTree>, file: String) -[FS.Read]> String? {
     permit: tree.guard_edit()
-    root: permit.value.root.copy()
+    root: if permit.value.root == {
+        .Val(named) -> named.copy()
+        None -> permit.value.reader.tree_of(file) ?? return None
+    }
     if !file.starts_with("{root}/") -> return None
     package: permit.value.reader.package_of(root, file) ?? return None
-    if permit.value.packages == None {
-        permit.value.packages = Val(permit.value.reader.packages(root))
+    if !permit.value.packages.has_key(root) {
+        permit.value.packages[root] = permit.value.reader.packages(root)
     }
-    if permit.value.packages == .Val(packages) {
-        if packages.contains(package) -> return Val(root)
-    }
+    if permit.value.packages[root].contains(package) -> return Val(root)
     None
 }
 

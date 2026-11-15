@@ -102,10 +102,7 @@ JetCLIScriptToolchain: struct {
 // compile reads only the few its imports reach, so the record names those
 // (jet_cli_script_core_rows).
 jet_cli_script_toolchain: fn(identity: String, options: BuildOptions, entry: String) -> JetCLIScriptToolchain? {
-    core_root: if jet_cli_toolchain_root(entry) == {
-        .Found(root) -> root
-        .Missing(_, _) -> ""
-    }
+    core_root: jet_cli_named_toolchain(entry) ?? ""
     runtime_dir: jet_cli_runtime_dir()
     if jet_cli_runtime_key(runtime_dir) == None -> return None
     runtime_row := "runtime built in"
