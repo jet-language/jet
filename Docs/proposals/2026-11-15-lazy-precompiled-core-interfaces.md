@@ -527,8 +527,15 @@ and `ModuleID` as its position in a list kept beside the bytes, so the
 caller resolves ids to keys once per body, not once per use. A body-local
 symbol is written as it is. A read past the end or of a malformed value
 sets `failed` and later reads give zeros and fallback variants, so a bad
-part ends the read without a panic. `Compiler/JetSema/Tests/BodyCodec.jet`
-round-trips every checked body of a program.
+part ends the read without a panic. The same tool writes a second codec,
+`Compiler/JetSema/Source/Sema/BodyPacketCodec.jet`, for what a function's
+check leaves for its module pass besides the body (`SemaParallelBody`: the
+check's result, diagnostics, call facts, comptime requests and name
+references). A shipped packet stands in for the check the way a packet from
+another compiler thread already does. That codec imports the body's puts
+from JetFoundation and adds only the JetSema types.
+`Compiler/JetSema/Tests/BodyCodec.jet` round-trips every checked body of a
+program and a packet per checked function.
 
 #### 3.3.1 Fields that whole-program passes write (H10)
 
