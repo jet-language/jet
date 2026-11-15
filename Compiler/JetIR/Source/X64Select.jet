@@ -679,7 +679,30 @@ ir_x64_tail_jump: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
     floats := 0
     // Sources are callee-saved registers, r8 and r9 (a silent tail call's,
     // X64Alloc.jet ir_x64_tail_silent: its General arguments go to rdi,
-    // rsi, rdx and rcx only), frame homes and immediates.
+    // rsi, rdx and rcx only), rsi and rdi (a leaf's open slots,
+    // X64Alloc.jet ir_x64_leaf_open), frame homes and immediates. A source
+    // in the argument register of an argument before it moves to r10 or
+    // r11 first, which no slot holds, so the registers fill in order.
+    staged := [Int]{}
+    filled := 0
+    loop position in f.b[at]..<(f.b[at] + f.c[at]) {
+        source: f.args[position]
+        word: ir_x64_slot_class(m, f, source) == .General
+        held: if word && !al.consts[source] && al.frames[source] == 0 -> al.regs[source] else -> -1
+        taken := false
+        loop row in 0..<filled {
+            if held >= 0 && row < IR_X64_ARGUMENT_REGISTERS.len() && IR_X64_ARGUMENT_REGISTERS[row] == held -> taken = true
+        }
+        if word -> filled += 1
+        if !taken {
+            staged.push(-1)
+            next
+        }
+        if staged.contains(X64_R11) -> return ir_x64_fail(e, f, at, "tail call with three sources in argument registers")
+        spot: if staged.contains(X64_R10) -> X64_R11 else -> X64_R10
+        x64_mov_rr(e.code, spot, held)
+        staged.push(spot)
+    }
     loop position in f.b[at]..<(f.b[at] + f.c[at]) {
         slot: f.args[position]
         class: ir_x64_slot_class(m, f, slot)
@@ -691,7 +714,12 @@ ir_x64_tail_jump: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
             next
         }
         if general >= IR_X64_ARGUMENT_REGISTERS.len() -> return ir_x64_fail(e, f, at, "tail call with a stack argument")
-        ir_x64_load(e, m, f, al, slot, IR_X64_ARGUMENT_REGISTERS[general])
+        aside: staged[position - f.b[at]]
+        if aside >= 0 {
+            x64_mov_rr(e.code, IR_X64_ARGUMENT_REGISTERS[general], aside)
+        } else {
+            ir_x64_load(e, m, f, al, slot, IR_X64_ARGUMENT_REGISTERS[general])
+        }
         general += 1
     }
     if e.streams -> x64_sfence(e.code)
@@ -4400,8 +4428,8 @@ ir_x64_wrap: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
     }
     // Per register: the slot holding it, -1 for none, -2 for one it keeps
     // to the end (a parameter's, which its import still reads, or one a
-    // body slot lives in, which may be r8 or r9, so the prefix's values
-    // reach their places in any order).
+    // body slot lives in, which may be r8 or r9, or rsi or rdi in a leaf,
+    // so the prefix's values reach their places in any order).
     owner := [Int]{}
     loop _ in 0..<16 -> owner.push(-1)
     loop slot in 0..<count {
@@ -5653,6 +5681,78 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     assert_eq(al.saved.len(), 0)
     assert(al.regs[pointer] == X64_R8 || al.regs[pointer] == X64_R9)
     assert(al.regs[value] == X64_R8 || al.regs[value] == X64_R9)
+}
+
+// spill(x) keeps x and three values of it live at once, all by wrapping
+// arithmetic: the values take rsi and rdi besides r8 and r9, so it saves no
+// callee-saved register. pass(x) tail-calls slow(a, b) with a and b in rsi
+// and rdi: b, whose source the first argument's load would overwrite when
+// it lives in rdi, moves to r10 before it.
+#Test("A small leaf keeps its values in rsi and rdi too") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    spill := ir_function_new("spill", "test:open.jet::spill", "", "open.jet", 1)
+    x: ir_slot(spill, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+    spill.result = word
+    doubled: ir_slot(spill, word, IRSlotKind.Temp, -1, 0)
+    tripled: ir_slot(spill, word, IRSlotKind.Temp, -1, 0)
+    fived: ir_slot(spill, word, IRSlotKind.Temp, -1, 0)
+    eight: ir_slot(spill, word, IRSlotKind.Temp, -1, 0)
+    ten: ir_slot(spill, word, IRSlotKind.Temp, -1, 0)
+    eleven: ir_slot(spill, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(spill, IROp.Add, doubled, x, x, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(spill, IROp.Add, tripled, doubled, x, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(spill, IROp.Add, fived, tripled, doubled, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(spill, IROp.Add, eight, fived, tripled, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(spill, IROp.Add, ten, eight, doubled, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(spill, IROp.Add, eleven, ten, x, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(spill, IROp.Return, -1, eleven, -1, -1, 2)
+    m.functions.push(spill)
+    spilled: ir_x64_allocate(m, m.functions[0])
+    assert_eq(spilled.saved.len(), 0)
+    assert(spilled.regs[x] == X64_R8 || spilled.regs[x] == X64_R9)
+    wide := false
+    loop reg in spilled.regs {
+        if reg == X64_RSI || reg == X64_RDI -> wide = true
+    }
+    assert(wide)
+
+    slow := ir_function_new("slow", "test:open.jet::slow", "", "open.jet", 3)
+    _ := ir_slot(slow, word, IRSlotKind.Param, ir_intern_name(m, "first"), 3)
+    _ := ir_slot(slow, word, IRSlotKind.Param, ir_intern_name(m, "second"), 3)
+    _ := ir_emit(slow, IROp.Return, -1, -1, -1, -1, 3)
+    m.functions.push(slow)
+    pass := ir_function_new("pass", "test:open.jet::pass", "", "open.jet", 4)
+    y: ir_slot(pass, word, IRSlotKind.Param, ir_intern_name(m, "y"), 4)
+    a: ir_slot(pass, word, IRSlotKind.Temp, -1, 0)
+    b: ir_slot(pass, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(pass, IROp.Add, a, y, y, IR_OVERFLOW_WRAP, 5)
+    _ := ir_emit(pass, IROp.Add, b, a, y, IR_OVERFLOW_WRAP, 5)
+    handed: ir_args(pass, [Int]{a, b})
+    _ := ir_emit(pass, IROp.Call, -1, 1, handed, 2, 6)
+    _ := ir_emit(pass, IROp.Return, -1, -1, IR_TAIL_JUMP, -1, 6)
+    m.functions.push(pass)
+    passed: ir_x64_allocate(m, m.functions[2])
+    assert_eq(passed.saved.len(), 0)
+    assert(passed.regs[a] == X64_RSI || passed.regs[a] == X64_RDI)
+    assert(passed.regs[b] == X64_RSI || passed.regs[b] == X64_RDI)
+    assert(passed.regs[a] != passed.regs[b])
+    code: ir_x64_compile_function(m, ir_x64_tables(m), 2).function.code
+    aside := x64_code()
+    x64_mov_rr(aside, X64_R10, X64_RDI)
+    first := x64_code()
+    x64_mov_rr(first, X64_RDI, X64_RSI)
+    second := x64_code()
+    x64_mov_rr(second, X64_RSI, X64_R10)
+    at_aside: ir_x64_code_find(code, aside.bytes, 0)
+    if passed.regs[b] == X64_RDI {
+        assert(at_aside >= 0)
+        at_first: ir_x64_code_find(code, first.bytes, at_aside)
+        assert(at_first > at_aside)
+        assert(ir_x64_code_find(code, second.bytes, at_first) > at_first)
+    } else {
+        assert(at_aside < 0)
+    }
 }
 
 // spread(n) sums n + 1 .. n + 7, all seven live at once, by exact Int Adds
