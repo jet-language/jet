@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6880,
-    "rev": 103350,
+    "rev": 103369,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35256,6 +35256,11 @@
       "assignee": "Main",
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Progress criteria c13 and c14 went to #6875."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -35651,20 +35656,22 @@
         {
           "n": 13,
           "text": "[#2995] The canonical progress example covers exhaustion, early break, filter, unknown total and ParseError through the real adapter. Counts reflect actual pulls. TTY, non-TTY and machine output are distinct (io/progress golden, every level). Time.Wait authority is reconciled.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:42.699Z"
+          "evidence": "Merged into #6875 c2: the progress example's cases are PROG c1-c2",
+          "at": "2026-11-15T03:05:14.926Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
           "text": "[#3005] progress_each, progress_bytes (failed buffer not counted) and scoped/owned progress_task with child tasks and unknown totals, on one ProgressTask model and renderer (io/progress_helpers golden).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:43.386Z"
+          "evidence": "Moved to #6875 c4: progress is its own stream",
+          "at": "2026-11-15T03:05:15.982Z",
+          "closure": "obsolete"
         },
         {
           "n": 15,
@@ -35713,7 +35720,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:03.647Z",
-      "updated": "2026-11-15T03:03:20.467Z",
+      "updated": "2026-11-15T03:05:18.383Z",
       "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-13T01:49:48.348Z",
       "goals": [
@@ -61724,7 +61731,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -61733,6 +61740,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed (Map card replaced). New cards: #6870, #6871, #6872, #6873, #6874, #6875, #6876, #6877, #6878, #6879. Added to existing cards: #3593 (#3593 c16-#3593 c20), #3549 (#3549 c17, #3549 c18), #6700 (#6700 c10), #4022 (#4022 c19-#4022 c21), #6518 (#6518 c7), #6851 (#6851 c13, #6851 c14), #6853 (#6853 c8), #6846 (#6846 c12), #4761 (#4761 c3), #6445 (#6445 c10), #6366 (#6366 c44), #3665 (#3665 c24), #3262 (#3262 c32), #3325 (#3325 c20, #3325 c21), #3317 (#3317 c45-#3317 c47), #3329 (#3329 c24), #3236 (#3236 c29-#3236 c32), #4695 (#4695 c5, #4695 c6), #4268 (#4268 c59, #4268 c60). Merged: c34 into #6637 c14, c37 into #4022 c2. c76 met on dev."
+        },
         {
           "at": "2026-11-11",
           "by": "Main",
@@ -62156,10 +62168,10 @@
           "n": 32,
           "text": "(was #5978) (was #4877) Retired authority vocabulary still in source: 'Capability' in Core/compiler/lang.jet and the CLI syntax dictionary; '#Grant' in generated selfhost_terminators data",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: w12 tree (code-shape): `rg -n -w Capability Core/Compiler/Lang.jet` finds no match (rc 1). `rg -w Capability Compiler Core` finds only the data-invalidation enum variant DataInvalidationCause.Capability (Core/Data/Data.jet:190 and its mirrors in RuntimeRoutes/CompilerOwned/CoreEnumRows/StructureRegistry:46), the devserver style kind (TerminalStyleReload.jet:131) and a formatter comment (Items.jet:1711 \"Capability is a sigil, never a word\"). None is authority vocabulary, and no CLI syntax-dictionary entry remains. `#Grant` appears only in the retired-marker teaching row E0077 (Compiler/Prelude/Diagnostics.jet:81 \"The `#Grant` scope marker is retired\"). Compiler/JetLexer/Tests/SelfhostTerminators.jet has no `#Grant`",
-          "at": "2026-10-31T19:52:24.225Z"
+          "evidence": "dev 6aaa5c8879: `git grep -n -w Capability -- Core/Compiler/Lang.jet` prints nothing; `git grep -n -w Capability -- Core Compiler` finds only the DataInvalidationCause.Capability variant (Core/Data/Data.jet:196 and its CompilerOwned/RuntimeRoutes mirrors), a Formatter comment and a Canvas JS label, none authority vocabulary.",
+          "at": "2026-11-15T03:05:42.580Z"
         },
         {
           "n": 33,
@@ -62714,74 +62726,82 @@
         {
           "n": 100,
           "text": "(was #3000) Reopening yields the whole committed transaction or its absence, never a partial accepted transaction; integrity and cleanup are checked. (was #3239 c42)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:46:27.067Z"
+          "evidence": "Merged into #6876 c1: whole-or-absent reopen is DBCRASH c1",
+          "at": "2026-11-15T03:05:03.435Z",
+          "closure": "obsolete"
         },
         {
           "n": 101,
           "text": "(was #3000) The actual emitted DB bridge is exercised, with exact build, storage, target, and execution identity. (was #3239 c43)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:46:31.266Z"
+          "evidence": "Merged into #6876 c1: the real bridge is named in DBCRASH c1",
+          "at": "2026-11-15T03:05:04.417Z",
+          "closure": "obsolete"
         },
         {
           "n": 102,
           "text": "(was #3000) Timeout, invalid oracle, unsupported storage, and incomplete schedules never count as passes. Network filesystems receive no untested atomicity promise. (was #3239 c44)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:46:36.160Z"
+          "evidence": "Moved to #6876 c2: crash testing is its own stream",
+          "at": "2026-11-15T03:05:05.492Z",
+          "closure": "obsolete"
         },
         {
           "n": 103,
           "text": "(was #3000) The smallest failure has replayable seed/schedule and a reduced counterexample on the existing evidence rail. (was #3239 c45)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:46:40.197Z"
+          "evidence": "Merged into #6876 c1: replay and reduction are in DBCRASH c1",
+          "at": "2026-11-15T03:05:06.445Z",
+          "closure": "obsolete"
         },
         {
           "n": 104,
           "text": "(was #3000) A Jet test, db_crash_reopen, crashes every reachable write and sync boundary of a two-transaction workload under the stated model (including dropped and reordered unsynced writes); each reopen shows whole-or-absent transactions with `PRAGMA integrity_check` = ok, and a seeded failing schedule replays and reduces. (was #3239 c46)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:46:44.379Z"
+          "evidence": "Moved to #6876 c1: crash testing is its own stream",
+          "at": "2026-11-15T03:05:07.384Z",
+          "closure": "obsolete"
         },
         {
           "n": 105,
           "text": "(was #3000) [#3001] Metamorphic SQL pairs over generated data compare equal under core.testing.compare. A planted wrong query yields the first difference plus a reduced replay. Malformed DB/SQL input reports typed failures. Empty, timeout or contaminated evidence never passes. The real DB adapter is exercised. (was #3239 c47)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:46:49.146Z"
+          "evidence": "Moved to #6876 c3: crash testing is its own stream",
+          "at": "2026-11-15T03:05:08.357Z",
+          "closure": "obsolete"
         },
         {
           "n": 106,
           "text": "(was #3309 c1) Capture exact parser/writer/default-source and malformed-input rules rather than treating netrc as INI [precut audit: no dev test, golden, case or snapshot proves this today] (was #4268 c47)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:47:41.383Z"
+          "evidence": "Moved to #4268 c59: back to the credential-safety card it came from (archived #3309); Jetpack reads netrc",
+          "at": "2026-11-15T03:05:09.299Z",
+          "closure": "obsolete"
         },
         {
           "n": 107,
           "text": "(was #3309 c2) Keep credentials out of diagnostics and do not add ambient file discovery or network authentication as a parsing side effect [precut audit: no dev test, golden, case or snapshot proves this today] (was #4268 c48)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:47:44.801Z"
+          "evidence": "Moved to #4268 c60: back to the credential-safety card it came from (archived #3309); Jetpack reads netrc",
+          "at": "2026-11-15T03:05:10.272Z",
+          "closure": "obsolete"
         },
         {
           "n": 109,
@@ -62795,11 +62815,12 @@
         {
           "n": 110,
           "text": "(Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reprobe on dev first) The Core HTTP server can upgrade a TLS connection to WebSocket (Http.jet:271-275 needs fd >= 0 today); a case covers wss on the server side.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T03:52:07.883Z"
+          "evidence": "Moved to #6878 c4: the server stream card",
+          "at": "2026-11-15T03:05:11.162Z",
+          "closure": "obsolete"
         },
         {
           "n": 111,
@@ -62813,20 +62834,22 @@
         {
           "n": 112,
           "text": "D-NET-READINTO1=A is built. `read_into(buffer, limit)` appends up to `limit` bytes to the caller's `[U8]` and returns the count, as an inherent method on TCPStream, UnixStream, TLSStream and file readers, with a deadline form. It returns 0 at end of stream, and a limit below 1 is invalid input. The Reader trait is unchanged. The HTTP server, the HTTP client and the TLS record reader switch to it. A paired two-program cell (a read(4096) loop against read_into: wall time, allocations per read, peak memory) is in the measurement manifest, and read_into strictly wins it. Goldens run on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T16:32:35.042Z"
+          "evidence": "Moved to #6878 c1: the server stream card; split into NETSRV c1 and c2",
+          "at": "2026-11-15T03:05:12.106Z",
+          "closure": "obsolete"
         },
         {
           "n": 113,
           "text": "D-WS-ROUTE1=A is built. `mux.websocket(pattern, handler)` and `#Server.WebSocket(path)`: the server runs authentication and Origin policy, then validates and upgrades, and the handler returns nothing. One route-table adapter and handshake serve TCP and TLS. The route owns GET, so an equivalent GET registration is refused, HEAD gets 405 without an upgrade, and OPTIONS lists GET. Upgraded tasks stay inside the server limits and shutdown. Protocol close codes are kept; an application failure may send 1011 only before the transport closes. OpenAPI describes handshake responses only. This depends on the concurrent serve loop (#4635). Goldens on O0, O1 and O2, plus a TLS case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T16:32:37.393Z"
+          "evidence": "Moved to #6878 c3: the server stream card",
+          "at": "2026-11-15T03:05:13.004Z",
+          "closure": "obsolete"
         },
         {
           "n": 114,
@@ -62840,11 +62863,12 @@
         {
           "n": 115,
           "text": "Derived codecs work across modules. Found by G1Lead4 porting scaling tools on 2026-11-11 (a0.0.44): (1) a derived encode() is private to its declaring module (E0605 when another module calls it), so Tools write tree-building workarounds (receipt_tree/config_tree in the scaling Gate); (2) derivation fails for a field whose type is declared in another file (enqueue's Planned{config: Dyn}); (3) encode drops None fields with no way to keep them as null. Fix: a derived codec has the visibility of its type; field types from any imported module derive; and the None policy is one documented rule (omit or null) with a typed option for the other where JSON needs it. Proof: a multi-module example with a golden at O0, O1 and O2 that encodes and decodes a type whose fields come from two other modules, and UI snapshots for any refusal.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T17:27:10.971Z"
+          "evidence": "Moved to #3236 c32: derived codecs belong on the typed codec card",
+          "at": "2026-11-15T03:05:13.956Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -62855,12 +62879,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-15T03:05:02.179Z",
+      "updated": "2026-11-15T03:05:45.170Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 115
+      "criteriaLastN": 115,
+      "completedAt": "2026-11-15T03:05:45.170Z"
     },
     {
       "id": "c0h4r83r",
@@ -208134,6 +208159,139 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:05:45.170Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0iuv3zr",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T03:05:42.580Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#32"
+    },
+    {
+      "at": "2026-11-15T03:05:41.479Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-reopen",
+      "ref": "c0iuv3zr",
+      "note": "#32: legacy evidence names no commit; re-proving on dev"
+    },
+    {
+      "at": "2026-11-15T03:05:18.384Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0fi6uj5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:05:17.226Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0iuv3zr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:05:15.982Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fi6uj5",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T03:05:14.926Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fi6uj5",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T03:05:13.956Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#115"
+    },
+    {
+      "at": "2026-11-15T03:05:13.004Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#113"
+    },
+    {
+      "at": "2026-11-15T03:05:12.106Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#112"
+    },
+    {
+      "at": "2026-11-15T03:05:11.163Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#110"
+    },
+    {
+      "at": "2026-11-15T03:05:10.272Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#107"
+    },
+    {
+      "at": "2026-11-15T03:05:09.299Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#106"
+    },
+    {
+      "at": "2026-11-15T03:05:08.358Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#105"
+    },
+    {
+      "at": "2026-11-15T03:05:07.384Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#104"
+    },
+    {
+      "at": "2026-11-15T03:05:06.445Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#103"
+    },
+    {
+      "at": "2026-11-15T03:05:05.492Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#102"
+    },
+    {
+      "at": "2026-11-15T03:05:04.417Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#101"
+    },
+    {
+      "at": "2026-11-15T03:05:03.435Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0iuv3zr",
+      "note": "#100"
+    },
     {
       "at": "2026-11-15T03:05:02.179Z",
       "by": "TowerKeeper-1",
