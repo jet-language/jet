@@ -384,7 +384,7 @@ sema_expression_struct_field_fact: fn(field: Field, owner: Symbol, names: [Strin
     symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner.module_identity, owner: Val(owner_key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
     holds_view := false
     if program.registration_graph == .Val(graph) {
-        seen := [String:Bool]{}
+        seen := [U32:Bool]{}
         holds_view = sema_check_type_contains_view(graph, owner.module_identity, field_ty, seen)
     }
     SemaStructFieldFact{field_ty: field_ty, string_view: sema_stmt_string_view_type(field_ty), symbol: symbol, boxed: sema_scope_environment_boxed_edge(environment, program, owner.id, field.name), holds_view: holds_view}

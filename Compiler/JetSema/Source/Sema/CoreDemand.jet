@@ -351,7 +351,8 @@ sema_check_demand_module_in_shared: fn(shared_state: Shared<SemaCheckShared>, ho
     environment := sema_check_shared_take_environment(shared_state)
     program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
-    scopes := sema_check_module_summary_scopes(environment, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, None, counter_phase, trace_sink)
+    summary_checked := 0
+    scopes := sema_check_module_summary_scopes(environment, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, None, counter_phase, trace_sink, summary_checked)
     checked: sema_check_demand_module_lent(environment, program, host_hooks, memory_plan, module_index, kind, scopes, sema_check_prepared_none(), comptime_functions, comptime_rows, pending_obligations, trace_sink, result)
     sema_check_shared_fill(shared_state, environment, program, memory_plan)
     checked

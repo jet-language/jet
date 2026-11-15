@@ -933,9 +933,9 @@ sema_function_publish_return_views: fn(scopes: &SemaScopeTable, rows: &[U32:Int]
 
 // Rust `contains_view` (`check_module_bodies`): a declared return type carries
 // view provenance across its signature when it structurally holds a `View`,
-// `ViewMut` or `Pin` directly or through struct fields. `seen` names every
-// nominal already entered, so recursive structs terminate.
-sema_check_type_contains_view: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, seen: &[String:Bool]) -> Bool {
+// `ViewMut` or `Pin` directly or through struct fields. `seen` holds every
+// struct already entered, by its symbol id, so recursive structs terminate.
+sema_check_type_contains_view: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, seen: &[U32:Bool]) -> Bool {
     if ty == {
         .Apply(name, args) -> {
             if (name == "View" || name == "ViewMut" || name == "Pin") && args.len() == 1 {
@@ -981,13 +981,13 @@ sema_check_type_contains_view: fn(graph: SemaRegistrationGraph, module_identity:
 }
 
 // Rust `seen.insert(name) && registry.struct_fields(name)...`: field types
-// resolve in the struct's own module; `seen` is keyed (Rust `HashSet`).
-sema_check_struct_contains_view: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, name: String, seen: &[String:Bool]) -> Bool {
-    if seen.get(name) != None -> return false
-    seen[name] = true
+// resolve in the struct's own module, and each struct is entered once.
+sema_check_struct_contains_view: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, name: String, seen: &[U32:Bool]) -> Bool {
     nominal_row: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, module_identity) ?? return false
     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
+    if seen.get(nominal.symbol.id.id) != None -> return false
+    seen[nominal.symbol.id.id] = true
     loop field in nominal.fields {
         if sema_check_type_contains_view(graph, nominal.symbol.module_identity, field.ty, seen) {
             return true
@@ -1008,7 +1008,7 @@ sema_check_view_summary_jobs: fn(environment: SemaScopeEnvironment, program: Sem
             if graph.modules[module_index].program.items[item_index] == .Func(func) {
                 if func.inline_foreign != None || sema_function_is_guest_import(func) -> next
                 return_type: func.return_type ?? next
-                seen := [String:Bool]{}
+                seen := [U32:Bool]{}
                 if sema_check_type_contains_view(graph, graph.modules[module_index].module_identity, return_type, seen) {
                     jobs.push(item_index)
                 }
@@ -4352,8 +4352,9 @@ sema_pass_facts_claimed: fn(graph: SemaRegistrationGraph?, queue: SemaFinalizeCo
 // round's per-job provenance is the fixed point; jobs + 1 rounds is the upper
 // bound, and no jobs means no summary checks. `view_jobs`: the jobs a
 // declaration check found ahead (SemaDeclarationCheck), else None.
-// `summary_functions_checked` counts the function jobs only.
-sema_check_view_summaries: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, module_index: Int, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], view_jobs: [Int]?, counter_phase: String, trace_sink: CompilerTraceSink?) {
+// Returns how many function jobs it checked, which the trace counter
+// `summary_functions_checked` reports.
+sema_check_view_summaries: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, module_index: Int, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], view_jobs: [Int]?, counter_phase: String, trace_sink: CompilerTraceSink?) -> Int {
     summary_jobs: if view_jobs == .Val(found) -> found.copy() else -> sema_check_sorted_view_summary_jobs(environment, program, module_index)
     method_jobs: sema_check_view_summary_method_jobs(program, module_index)
     job_count: summary_jobs.len() + method_jobs.len()
@@ -4381,7 +4382,7 @@ sema_check_view_summaries: fn(environment: &SemaScopeEnvironment, program: SemaP
                     summary_comptime_requests := [SemaComptimeRequest]{}
                     summary_name_references := [SemaNameReferenceFact]{}
                     memory_position: sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
-                    if trace_sink == .Val(_) -> summary_functions_checked += 1
+                    summary_functions_checked += 1
                     checked := sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, summary_diagnostics, summary_calls, summary_comptime_requests, summary_name_references)
                     if checked.value == .Val(function) {
                         _ := sema_function_publish_return_views(scopes, return_view_rows, function, owner_id)
@@ -4402,6 +4403,7 @@ sema_check_view_summaries: fn(environment: &SemaScopeEnvironment, program: SemaP
         sink.progress("counters.{counter_phase}.items_scanned", sema_check_registered_module_item_count(environment, program, module_index), -1)
         sink.progress("counters.{counter_phase}.summary_functions_checked", summary_functions_checked, -1)
     }
+    summary_functions_checked
 }
 
 // The module's methods whose declared return type structurally contains a
@@ -4436,7 +4438,7 @@ sema_check_view_summary_method_selected: fn(graph: SemaRegistrationGraph, module
         return false
     }
     return_type: declaration.return_type ?? return false
-    seen := [String:Bool]{}
+    seen := [U32:Bool]{}
     sema_check_type_contains_view(graph, graph.modules[module_index].module_identity, return_type, seen)
 }
 
@@ -5097,13 +5099,15 @@ sema_check_module_summary_scope_init: fn(environment: SemaScopeEnvironment, prog
     panic("an owning registered-module pass lost its registration graph")
 }
 
-sema_check_module_summary_scopes: fn(environment: &SemaScopeEnvironment, program: &SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], view_jobs: [Int]?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaScopeTable {
+// `summary_checked` gains the view summary functions it checked
+// (sema_check_view_summaries).
+sema_check_module_summary_scopes: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], view_jobs: [Int]?, counter_phase: String, trace_sink: CompilerTraceSink?, summary_checked: &Int) -> SemaScopeTable {
     scopes := sema_check_module_summary_scope_init(environment, program, module_index)
     // copy: a handle copy (Shared facts plus length and frontier ints): the summary scopes read a
     // frozen prefix while environment.comptime_body_publication keeps advancing.
     body_values := environment.comptime_body_publication.copy()
     sema_scope_environment_enter_module(environment, program, module_index, body_values)
-    sema_check_view_summaries(environment, program, scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, view_jobs, counter_phase, trace_sink)
+    summary_checked += sema_check_view_summaries(environment, program, scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, view_jobs, counter_phase, trace_sink)
     scopes.move()
 }
 
@@ -5496,7 +5500,7 @@ sema_check_registration_module_head: fn(environment: &SemaScopeEnvironment, prog
     if check_bodies {
         if ready.scopes.len() > 0 -> scopes = ready.scopes.pop() ?? sema_scope_init(module_identity) else {
             if precomputed -> sema_check_registration_module_scopes(program, module_index, scopes)
-            sema_check_view_summaries(environment, program, scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, view_jobs, counter_phase, trace_sink)
+            _ := sema_check_view_summaries(environment, program, scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, view_jobs, counter_phase, trace_sink)
         }
         // The static-product markers bind their signatures in module scope.
         sema_marker_rules_check_static_sites(environment, program, module_index, scopes, module_result.diagnostics)
@@ -10800,9 +10804,10 @@ sema_check_body_wave: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Sema
     checked_functions
 }
 
-// A body wave on `workers` threads (sema_check_body_wave): builds the wave
-// modules' post-summary scopes and the wave's plan, then runs the threads
-// and the module checks; returns how many functions the modules checked.
+// A body wave on `workers` threads (sema_check_body_wave): prepares the wave
+// modules side by side on those threads (sema_check_wave_prep_parts), builds
+// the wave's plan, then runs the threads and the module checks; returns how
+// many functions the modules checked.
 // Every module of a Core demand, codec or derive wave (`kind`) has bodies
 // the wave names, so each builds its scope. A codec or derive wave counts
 // the methods its threads may check as `<phase>.wave_jobs`.
@@ -10824,35 +10829,36 @@ sema_check_body_wave_run: fn(shared_state: Shared<SemaCheckShared>, host_hooks: 
     environment := sema_check_shared_take_environment(shared_state)
     program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
+    preps := [SemaWaveModulePrep?]{}
+    loop _ in 0..<module_count -> preps.push(None)
+    prep_queue: SemaFinalizeCoreQueue{next: 0}
+    prep_parts: if workers < module_count -> workers else -> module_count
+    sema_check_wave_prep_parts(environment, program, memory_plan, wave_modules, firsts, view_jobs, comptime_functions, comptime_rows, kind, prep_queue, prep_parts, preps)
     loop wave_module in 0..<module_count {
         method_firsts.push(wave_jobs.len())
         loop rank in firsts[wave_module]..<firsts[wave_module + 1] {
             wave_order.push(top_order[rank])
         }
-        // The method jobs the module check would hand a method wave
-        // (sema_check_registration_module). A module with methods and no
-        // top-level job joins the wave too, so no module check starts a
-        // method wave of its own while the wave's threads run.
-        scanned := 0
-        all_method_jobs: sema_check_registered_method_jobs(environment, program, wave_modules[wave_module], scanned, false)
-        held := [SemaScopeEnvironment]{}
-        if kind != SemaWaveKind.Modules || firsts[wave_module + 1] > firsts[wave_module] || all_method_jobs.len() > 0 {
-            scopes := sema_check_module_summary_scopes(environment, program, host_hooks, memory_plan, wave_modules[wave_module], comptime_functions, comptime_rows, view_jobs[wave_module], counter_phase, trace_sink)
-            entered := environment.copy()
-            // Selected against the entered environment, as the module check does.
-            weights := [Int]{}
-            method_jobs: sema_check_registered_parallel_method_jobs(entered, program, wave_modules[wave_module], memory_plan, all_method_jobs, comptime_rows, weights)
+        // Slots hold the preparations last module first (sema_check_wave_prep_place).
+        slot := preps.pop() ?? panic("a body-wave module lost its preparation")
+        prep := slot.move() ?? panic("a body-wave module lost its preparation")
+        if prep.wanted_hooks {
+            prep = sema_check_wave_module_prep(environment, program, host_hooks, memory_plan, wave_modules, firsts, view_jobs, comptime_functions, comptime_rows, kind, wave_module)
+        }
+        if prep.environments.len() > 0 {
+            if trace_sink == .Val(sink) {
+                sink.progress("counters.{counter_phase}.items_scanned", sema_check_registered_module_item_count(environment, program, wave_modules[wave_module]), -1)
+                sink.progress("counters.{counter_phase}.summary_functions_checked", prep.summary_checked, -1)
+            }
             first: wave_jobs.len()
-            loop index in compiler_threads_heaviest_first(weights) -> wave_order.push(first + index)
-            loop job in method_jobs {
+            loop index in compiler_threads_heaviest_first(prep.weights) -> wave_order.push(first + index)
+            loop job in prep.method_jobs {
                 wave_jobs.push(job)
                 wave_job_modules.push(wave_module)
             }
-            entered.module_scope = Val(scopes.move())
-            held.push(entered)
             prepared.push(true)
         } else { prepared.push(false) }
-        cell: Shared{SemaWaveEnvironment{environments: held.move()}}
+        cell: Shared{SemaWaveEnvironment{environments: prep.environments.move()}}
         cells.push(cell)
         out: Shared{SemaWaveOut{bodies: [SemaParallelBody]{}, positions: [Int]{}}}
         outs.push(out)
@@ -10883,6 +10889,92 @@ sema_check_body_wave_run: fn(shared_state: Shared<SemaCheckShared>, host_hooks: 
     checked_functions
 }
 
+// A body wave module's preparation (sema_check_wave_module_prep): its
+// environment entered in the module with its post-summary scope moved in
+// (none when the wave checks no body of it), its parallel method jobs and
+// their weights, and how many view summary functions its scope checked.
+// `wanted_hooks`: a summary check wanted the host callbacks, which a
+// compiler thread holds withheld, so the wave's lead prepares it again.
+SemaWaveModulePrep: struct {
+    wave_module: Int
+    environments: [SemaScopeEnvironment]
+    method_jobs: [SemaBodyJob]
+    weights: [Int]
+    summary_checked: Int
+    wanted_hooks: Bool
+}
+
+// Prepares wave module `wave_module` on its own copy of `environment`: the
+// method jobs the module check would hand a method wave
+// (sema_check_registration_module) and, when the wave checks any body of
+// the module, its post-summary scope (sema_check_module_summary_scopes) with
+// the jobs selected against the entered environment, as the module check
+// selects them. A module with methods and no top-level job joins the wave
+// too, so no module check starts a method wave of its own while the wave's
+// threads run. Entering a module replaces every module field of the
+// environment and a summary check writes only the module's scope, so a
+// preparation depends on its module alone, whatever thread makes it.
+sema_check_wave_module_prep: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, wave_modules: [Int], firsts: [Int], view_jobs: [[Int]?], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], kind: SemaWaveKind, wave_module: Int) -> SemaWaveModulePrep {
+    module_index: wave_modules[wave_module]
+    scanned := 0
+    all_method_jobs: sema_check_registered_method_jobs(environment, program, module_index, scanned, false)
+    held := [SemaScopeEnvironment]{}
+    if kind == SemaWaveKind.Modules && firsts[wave_module + 1] == firsts[wave_module] && all_method_jobs.len() == 0 {
+        return SemaWaveModulePrep{wave_module: wave_module, environments: held.move(), method_jobs: [SemaBodyJob]{}, weights: [Int]{}, summary_checked: 0, wanted_hooks: false}
+    }
+    entered := environment.copy()
+    summary_checked := 0
+    scopes := sema_check_module_summary_scopes(entered, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, view_jobs[wave_module], "", None, summary_checked)
+    weights := [Int]{}
+    method_jobs := sema_check_registered_parallel_method_jobs(entered, program, module_index, memory_plan, all_method_jobs, comptime_rows, weights)
+    entered.module_scope = Val(scopes.move())
+    held.push(entered)
+    SemaWaveModulePrep{wave_module: wave_module, environments: held.move(), method_jobs: method_jobs.move(), weights: weights.move(), summary_checked: summary_checked, wanted_hooks: false}
+}
+
+// The wave module preparations one thread claims from `queue` until none is
+// left, each against withheld host callbacks.
+sema_check_wave_prep_claimed: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, wave_modules: [Int], firsts: [Int], view_jobs: [[Int]?], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], kind: SemaWaveKind, queue: SemaFinalizeCoreQueue) -> [SemaWaveModulePrep] {
+    claimed := [SemaWaveModulePrep]{}
+    wanted: Shared{SemaHostHookWanted{wanted: false}}
+    loop {
+        wave_module: sema_finalize_core_claim(queue)
+        if wave_module >= wave_modules.len() -> break
+        sema_host_hook_unwant(wanted)
+        prep := sema_check_wave_module_prep(environment, program, Val(SemaHostHookAccess.Withheld{wanted: wanted}), memory_plan, wave_modules, firsts, view_jobs, comptime_functions, comptime_rows, kind, wave_module)
+        prep.wanted_hooks = sema_host_hook_was_wanted(wanted)
+        claimed.push(prep.move())
+    }
+    claimed
+}
+
+// Prepares a body wave's modules on `parts` threads, this one among them,
+// each claiming modules from `queue` (sema_check_wave_prep_claimed), and
+// places each preparation (sema_check_wave_prep_place).
+sema_check_wave_prep_parts: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, wave_modules: [Int], firsts: [Int], view_jobs: [[Int]?], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], kind: SemaWaveKind, queue: SemaFinalizeCoreQueue, parts: Int, preps: &[SemaWaveModulePrep?]) {
+    if parts <= 1 {
+        claimed := sema_check_wave_prep_claimed(environment, program, memory_plan, wave_modules, firsts, view_jobs, comptime_functions, comptime_rows, kind, queue)
+        sema_check_wave_prep_place(claimed, preps)
+        return
+    }
+    task.group sema_wave_prep_threads {
+        head: task sema_check_wave_prep_claimed(environment, program, memory_plan, wave_modules, firsts, view_jobs, comptime_functions, comptime_rows, kind, queue)
+        sema_check_wave_prep_parts(environment, program, memory_plan, wave_modules, firsts, view_jobs, comptime_functions, comptime_rows, kind, queue, parts - 1, preps)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        sema_check_wave_prep_place(claimed, preps)
+    }
+}
+
+// Puts wave module k's preparation in slot `preps.len() - 1 - k`, so the
+// wave takes them in module order by popping.
+sema_check_wave_prep_place: fn(claimed: &[SemaWaveModulePrep], preps: &[SemaWaveModulePrep?]) {
+    loop claimed.len() > 0 {
+        prep := claimed.pop() ?? break
+        slot: preps.len() - 1 - prep.wave_module
+        preps[slot] = Val(prep.move())
+    }
+}
+
 sema_check_module_scope_rows_in_shared: fn(shared_state: Shared<SemaCheckShared>, module_index: Int) -> Int {
     inputs: shared_state.guard_read()
     sema_check_registered_module_scope_rows(inputs.value.environments[0], inputs.value.programs[0], module_index)
@@ -10900,7 +10992,8 @@ sema_check_prepare_module: fn(shared_state: Shared<SemaCheckShared>, host_hooks:
     environment := sema_check_shared_take_environment(shared_state)
     program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
-    scopes := sema_check_module_summary_scopes(environment, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, None, counter_phase, trace_sink)
+    summary_checked := 0
+    scopes := sema_check_module_summary_scopes(environment, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, None, counter_phase, trace_sink, summary_checked)
     sema_check_shared_fill(shared_state, environment, program, memory_plan)
     sema_check_bodies_parallel(shared_state, module_index, scopes, jobs, weights, workers, trace_sink)
 }
