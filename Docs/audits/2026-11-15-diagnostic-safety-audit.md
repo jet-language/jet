@@ -91,7 +91,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0227 | MarkedFunctionValue | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:1241 | a function type with the same marks reaches the program |
 | E0231 | InvalidReceiverFootprint | Compiler/JetSema/Source/Sema/Footprint.jet:217 | the footprint must name the fields the body touches |
 | E0301 | ImplOnBuiltinType | Compiler/JetSema/Source/Sema/CheckProgram.jet:1974 | an operator hook belongs to the package that declares an operand type |
-| E0302 | UnknownField | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:610 | no opt-in reaches a field the type does not declare |
+| E0302 | UnknownField | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:609 | no opt-in reaches a field the type does not declare |
 | E0303 | InvalidConstructionField | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:668 | a value is built from exactly its declared fields |
 | E0304 | UnknownEnumCase | Compiler/JetSema/Source/Sema/Calls/Data.jet:1033 | an enum holds only its declared variants |
 | E0305 | PatternTypeMismatch | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:217 | an explicit conversion reaches the program; nothing reinterprets the value |
@@ -430,10 +430,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1297 | ToolJobConflict | Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:714 | the tool or the job takes another name |
 | E1298 | ToolProviderUnavailable | Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:717 | use a provider with a handler |
 | E1299 | ReservedStorePathComponent | Jetpack/PackageModel/Source/Store/SourceStore.jet:56 | store paths use portable names |
-| E1301 | FlagArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:112 | `flag` gets its two arguments |
-| E1302 | OptionArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:114 | `option` gets its three arguments |
-| E1303 | PositionalArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:116 | `positional` gets its two arguments |
-| E1304 | ParseArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:119 | `parse` gets the argument list |
+| E1301 | FlagArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:113 | `flag` gets its two arguments |
+| E1302 | OptionArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:115 | `option` gets its three arguments |
+| E1303 | PositionalArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:117 | `positional` gets its two arguments |
+| E1304 | ParseArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:120 | `parse` gets the argument list |
 | E1305 | UnmappedCliFieldType | Compiler/JetSema/Source/Sema/Registration/Items.jet:3592 | the field uses a type that maps to a flag |
 | E1306 | DuplicateCliFlag | Compiler/JetSema/Source/Sema/Registration/Items.jet:3601 | each field derives a distinct, unreserved flag |
 | E1308 | RunParameterNotCli | Compiler/JetSema/Source/Sema/Outputs.jet:362 | the parameter type is a `#CLI` struct |
