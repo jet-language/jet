@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6880,
-    "rev": 103400,
+    "nextNum": 6882,
+    "rev": 103425,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34725,30 +34725,31 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every foundational declaration has a real Jet body or typed provider leaf.",
+          "text": "Every foundation member (text, collections, math, units, time, encoding, regex, args, files and path, io and mem, portable crypto) has a Jet body in Core or a typed provider leaf. Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` exits 0 and lists no unowned foundation member.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-22T00:15:52.248Z"
+          "at": "2026-11-15T03:14:16.522Z"
         },
         {
           "n": 2,
           "text": "All foundation callers, routes, and generated projections use the canonical contract.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-22T00:15:52.881Z"
+          "evidence": "Merged into #3548 c8: callers, routes and projections are part of c8",
+          "at": "2026-11-15T03:14:21.950Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
-          "text": "Foundation APIs pass hostile-case proof on O0, O1 and O2 through their Core/<module> Jet bodies (Core #Tests under `jet test Compiler --profile core`).",
+          "text": "Each foundation module's Core #Tests pass, including hostile cases, on O0, O1 and O2. Proof: `jet test Compiler --profile core --filter Core/<Module>` for text, collections, math, units, time, encoding, regex, args, files, io, mem and crypto.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:19:31.418Z"
+          "at": "2026-11-15T03:14:17.437Z"
         },
         {
           "n": 4,
@@ -34770,39 +34771,40 @@
         },
         {
           "n": 8,
-          "text": "After each foundation module cutover, `Compiler/Prelude/Core.jet` has no `dispatcher_row` for any member that module's `source_module` line owns. Proof: `node Tools/agent/check-core-surface-ledger.mjs` passes with a count of 0 Jet-owned foundation rows, the Core foundation tests for each module (text, encoding, regex, time, files, io, memory, units, args, crypto, set, array) pass, and `jet test Compiler --profile golden text/` and `jet test Compiler --profile golden serde/` pass on O0, O1 and O2.",
+          "text": "Compiler/Prelude/Core.rows has no dispatcher_row for a member that its module's source_module line owns (on dev 168e1e9e92 the foundation modules still carry 85 plain and 117 adapter rows), and every caller, route and generated projection uses the canonical contract. Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` reports 0 Jet-owned foundation rows, and `jet test Compiler --profile golden --filter text/` and `--filter serde/` pass on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:21:10.257Z"
+          "at": "2026-11-15T03:14:18.353Z"
         },
         {
           "n": 9,
           "text": "[#3449] The caller-backed Fixed.over example shows typed allocation, reuse, close and exhaustion inside caller storage, with no heap fallback, matching on every level and web.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:34.101Z"
+          "evidence": "Moved to #6314 c11: caller-backed allocators belong on the allocator card",
+          "at": "2026-11-15T03:14:22.836Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
-          "text": "[#3515] Core/units owns constructor semantics. No core.units.from host row remains (CoreHostSignatures.jet:267). Projections are regenerated. units/from conformance matches on every level.",
+          "text": "Core/Units owns constructor semantics: no core.units.from host row remains (none on dev 168e1e9e92), projections are regenerated, and units/from conformance matches on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter units/from`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:59:35.383Z"
+          "at": "2026-11-15T03:14:19.299Z"
         },
         {
           "n": 11,
-          "text": "[#3553] Core Unit validators no longer bind to `_`. Equivalent multi-way branches use ordered arm tables (no side-effect reorder). After #3521, Core constants use plain names. Each migrated module passes `jet fmt --check` and `jet check` with no E0402/L0507/L0514.",
+          "text": "Core unit validators no longer bind to `_`, equivalent multi-way branches use ordered arm tables (no side-effect reorder), and Core constants use plain names; each migrated module passes `jet fmt --check` and `jet check` with no tidy error. Proof: `jet fmt --check Core` and `jet check Core` exit 0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:59:36.091Z"
+          "at": "2026-11-15T03:14:20.179Z"
         },
         {
           "n": 12,
@@ -34825,11 +34827,12 @@
         {
           "n": 15,
           "text": "[#4184] Typed JSON decode allocates no DataTree. Failure values and messages are byte-identical to the DataTree path on every fixture.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:40.220Z"
+          "evidence": "Moved to #6877 c7: typed decode belongs on the DataTree card",
+          "at": "2026-11-15T03:14:23.718Z",
+          "closure": "obsolete"
         },
         {
           "n": 16,
@@ -34960,38 +34963,42 @@
         {
           "n": 33,
           "text": "(was #1631 c2) No core.os fact value is computed inside the host; the fact logic exists once, in the Prelude [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:22.501Z"
+          "evidence": "Moved to #3549 c19: os facts belong on the CoreLib system card",
+          "at": "2026-11-15T03:14:24.622Z",
+          "closure": "obsolete"
         },
         {
           "n": 34,
           "text": "(was #1631 c3) Every core.os fact reports the same value on O0, O1 and O2 [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:41:23.168Z"
+          "evidence": "Merged into #3549 c19: tier agreement is OS1's proof",
+          "at": "2026-11-15T03:14:25.581Z",
+          "closure": "obsolete"
         },
         {
           "n": 35,
           "text": "(was #1631 c4) Targeted tests pass, including the core.os examples and goldens.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:21:14.383Z"
+          "evidence": "Merged into #3549 c19: the core.os examples are part of OS1's proof",
+          "at": "2026-11-15T03:14:26.986Z",
+          "closure": "obsolete"
         },
         {
           "n": 36,
           "text": "(was #1680 c1) One stated rule decides the tier for every core.mem item (for example: owning allocators are import-gated, raw pointer dereference is audit-gated), written in Docs/spec beside the S58 gate.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:21:15.791Z"
+          "evidence": "Moved to #4524 c12: core.mem tiering belongs on the unsafe-boundary card",
+          "at": "2026-11-15T03:14:27.950Z",
+          "closure": "obsolete"
         },
         {
           "n": 37,
@@ -35112,12 +35119,12 @@
         },
         {
           "n": 52,
-          "text": "(was #3230) A hello program with five unused Core imports (including core.archive) and the plain hello both build and run on AOT from one identified source, and the imported variant's checked program has no unresolved Core call (each archive call resolves to a checked Core body or a registered provider leaf); a tests/cases row proves it on O0, O1 and O2. It replaces the retired Rust test ice_regressions b14_unused_core_imports_build. (was #4275 c121)",
+          "text": "A hello program with five unused Core imports (including core.archive) and the plain hello both build and run from one identified source, and the imported variant has no unresolved Core call (each archive call resolves to a Core body or a registered provider leaf). Proof: `jet test Compiler --profile cases --filter unused_core_imports_build` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:32:33.695Z"
+          "at": "2026-11-15T03:14:21.068Z"
         },
         {
           "n": 53,
@@ -35238,8 +35245,8 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:02.908Z",
-      "updated": "2026-11-14T22:27:43.197Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:14:27.950Z",
+      "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-09T19:32:04.021Z",
       "goals": [
         "G3"
@@ -35717,6 +35724,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:03:20.467Z"
+        },
+        {
+          "n": 19,
+          "text": "Each core.os fact is computed once, in Core, not inside the runtime host, and reports the same value on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter os/facts` on O0, O1 and O2, with the core.os examples passing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:10.381Z"
         }
       ],
       "refs": [],
@@ -35729,13 +35745,13 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:03.647Z",
-      "updated": "2026-11-15T03:05:18.383Z",
+      "updated": "2026-11-15T03:14:10.381Z",
       "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-13T01:49:48.348Z",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 18
+      "criteriaLastN": 19
     },
     {
       "id": "c0qus24o",
@@ -42191,6 +42207,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T22:51:49.032Z"
+        },
+        {
+          "n": 15,
+          "text": "One copy meaning: `.copy()` forks every component whose type has a fork meaning (Clock, or any type with __fork), recursively, whatever holds it (list, option, struct, tuple, map, enum payload or a nesting of these), by one type-driven walk; today only list and option are covered. Proof: `jet test Compiler --profile cases --filter copy_forks_` with one case per holder kind on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:15.651Z"
         }
       ],
       "refs": [
@@ -42204,12 +42229,12 @@
       "parentId": "c00e9u2p",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:08.223Z",
-      "updated": "2026-11-14T22:51:49.032Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:14:15.651Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 14
+      "criteriaLastN": 15
     },
     {
       "id": "c0flvd7x",
@@ -47428,6 +47453,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:47:13.326Z"
+        },
+        {
+          "n": 12,
+          "text": "One stated rule decides the tier of every core.mem item (owning allocators import-gated, raw pointer dereference audit-gated, and so on), written in Docs/spec beside the S58 gate. Proof: `git grep -n 'S58' -- Docs/spec` shows the rule next to the gate.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:11.260Z"
+        },
+        {
+          "n": 13,
+          "text": "Every core.mem item is classified against that rule in one table, any item the rule would move is moved or recorded as a named exception, and a test fails when the table and the checker disagree, so no new core.mem item ships without a tier. Proof: `jet test tests/guards --filter core_mem_tiers`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:12.135Z"
         }
       ],
       "refs": [],
@@ -47437,12 +47480,12 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-04T14:14:26.629Z",
-      "updated": "2026-11-13T01:50:19.649Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:14:12.135Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 11
+      "criteriaLastN": 13
     },
     {
       "id": "c0yncw8c",
@@ -61186,7 +61229,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -61730,12 +61773,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-15T03:11:25.854Z",
+      "updated": "2026-11-15T03:11:29.222Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 45
+      "criteriaLastN": 45,
+      "completedAt": "2026-11-15T03:11:29.222Z"
     },
     {
       "id": "c0iuv3zr",
@@ -72350,6 +72394,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T12:41:38.604Z"
+        },
+        {
+          "n": 11,
+          "text": "The caller-backed `Fixed.over` example shows typed allocation, reuse, close and exhaustion inside caller storage with no heap fallback, with the same output on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter memory/fixed_over`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:08.559Z"
         }
       ],
       "refs": [],
@@ -72360,9 +72413,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-12T21:43:24.164Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 10
+      "updated": "2026-11-15T03:14:08.559Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 11
     },
     {
       "id": "c0vqsfl8",
@@ -74809,6 +74862,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T04:46:05.188Z"
+        },
+        {
+          "n": 11,
+          "text": "A survey under Docs/research covers the most-used libraries by real usage evidence across Python, JS/TS, Rust, Go, Java/Kotlin, C#, Swift, Ruby and PHP. Proof: the research note exists and cites its usage sources.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:13.011Z"
+        },
+        {
+          "n": 12,
+          "text": "Each surveyed candidate is mapped to: already in Core (with evidence), a gap worth absorbing (proposed surface) or explicitly out (reason); the report ranks absorption candidates by user reach, cross-references existing Core coverage, and mints a card per accepted gap (no implementation in the survey). Proof: the report's table and the minted cards.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:13.872Z"
         }
       ],
       "refs": [],
@@ -74819,9 +74890,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:54.632Z",
-      "updated": "2026-11-13T02:09:12.853Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 10
+      "updated": "2026-11-15T03:14:13.872Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 12
     },
     {
       "id": "c0ozzmvc",
@@ -102333,6 +102404,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:03:08.645Z"
+        },
+        {
+          "n": 5,
+          "text": "UTC leap-second parsing, formatting and ordering live in Core time (23:59:60 is accepted and labelled), and checked Civil and Period methods route through one core.time method identity on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter time/leap_seconds` and its UI snapshots.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:14.772Z"
         }
       ],
       "refs": [],
@@ -102346,8 +102426,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:08.645Z",
-      "updated": "2026-11-15T03:03:08.645Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:14:14.772Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 5
     },
     {
       "id": "c0qpy1t3",
@@ -102614,6 +102695,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:03:12.288Z"
+        },
+        {
+          "n": 7,
+          "text": "Typed JSON decode allocates no DataTree, and its failure values and messages are byte-identical to the DataTree path on every fixture. Proof: `jet test Compiler --profile golden --filter serde/typed_json_decode` and its allocation count in the measurement manifest.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:09.486Z"
         }
       ],
       "refs": [],
@@ -102627,8 +102717,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:12.288Z",
-      "updated": "2026-11-15T03:03:12.288Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:14:09.486Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 7
     },
     {
       "id": "c0ejfsdq",
@@ -102769,6 +102860,255 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:14.050Z",
       "updated": "2026-11-15T03:03:14.050Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0jjbpij",
+      "num": 6880,
+      "title": "Core names, modules and prelude follow the ratified contracts: one name, one owner, one prelude",
+      "body": "Destination: Core spells each operation once, each job has one owning module under the ratified module map, the prelude is one short readable module with the ratified contents, and foreign spellings are taught by fixes, never aliased.\n\nWhy it matters: duplicate names and plural/singular module twins make every port and every doc guess; the decisions are ratified and only the cutovers remain.\n\nDecisions: D-CORE-ONE-NAME1=A, D-CORE-MODULE-MAP1=A, D-CORE-SPELLING1=A, D-LISTREMOVE1=F, D-ONCE-VERB1=A, D-ONCE-PRINT1=A, D-VERDICT-1321-1, D-CORE-PRELUDE1=A, D-CORE-PRELUDE2=B, D-NAME-ALIAS1=A, D-LANGNS-NAME1=A, D-RULEARG-TYPES1=A. Greenfield: each cutover migrates every caller in one change with no alias or teaching row for the retired name.\n\nSource: #3548 c45, c47-c49, c51; #4022 c2, c4 (ballots ratified) and c21; #5976 c37.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One Jet name per Core operation (D-CORE-ONE-NAME1=A): each family's kept name is listed in core-library.md and every duplicate (such as loads/load) is deleted with its callers migrated. Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` exits 0 and reports no alias pair.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        },
+        {
+          "n": 2,
+          "text": "The 20 most common Python collection and string spellings in the ScriptBench Python programs (`sorted`, `list(range(...))`, `Counter`, `join`, `split`, `strip`, `startswith` and so on) each map to one Jet name or get an E0311 whose `fix_edits` names it; `xs.sorted()` and `(0..<8).to_list()` no longer fail without a fix (today E0311 for both). Proof: `jet test Compiler --profile ui --filter python_spelling_fix_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        },
+        {
+          "n": 3,
+          "text": "The module renames of D-CORE-MODULE-MAP1=A are done: collections to collection, files to file, jobs to job, tasks to task, units to unit, testing to test, args to cli, sync to replica, and tui nests as term.ui (Core/ still has the old directories on dev 168e1e9e92). Proof: `git ls-files Core | cut -d/ -f2 | sort -u` shows none of the old names, and `jet test Compiler --profile golden` passes on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        },
+        {
+          "n": 4,
+          "text": "Each job has one owning module (D-CORE-MODULE-MAP1=A): process owns the working directory, environment, pid, arguments and exit; Session lives in auth; app folds away; and a guard lists any export carried by two modules. Proof: `jet test tests/guards --filter core_module_owners` reports none.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        },
+        {
+          "n": 5,
+          "text": "Core names use one English (American) spelling (D-CORE-SPELLING1=A). Proof: a guard over Core's public names reports no British spelling: `jet test tests/guards --filter core_spelling`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        },
+        {
+          "n": 6,
+          "text": "`remove(x)` deletes the first item equal to x, `remove(i, .Slot)` deletes a slot and `remove(x, .Val)` states the default (D-LISTREMOVE1=F). Proof: `jet test Compiler --profile golden --filter collections/list_remove` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        },
+        {
+          "n": 7,
+          "text": "One verb per collection job (D-ONCE-VERB1=A): pop removes and returns on every collection, replace keeps only the List swap meaning, bare `.from()` is the conversion constructor, and retired verbs are gone. Proof: `jet test Compiler --profile cases --filter corelib/collection_verbs`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        },
+        {
+          "n": 8,
+          "text": "One print family (D-ONCE-PRINT1=A, D-VERDICT-1321-1): ambient print ends the line and prints each argument on its own line, io.print is its #NoPrelude twin, and io.println, io.sprint and io.repr are gone with callers migrated. Proof: `git grep -n -E 'io\\.(println|sprint|repr)\\(' -- '*.jet'` prints nothing, and `jet test Compiler --profile golden --filter Basics/` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        },
+        {
+          "n": 9,
+          "text": "The prelude is one short readable Core module (D-NAME-ALIAS1=A, D-CORE-PRELUDE1=A): ambient basics are declared there, the rest are `pub use` aliases into the Core tree, the compiler opens it for every file, a user declaration replaces a prelude alias, and #NoPrelude opts a file out. Proof: `jet test Compiler --profile cases --filter prelude_module_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        },
+        {
+          "n": 10,
+          "text": "read_file, write_file and file_exists are ambient prelude names with their file effects visible in signatures; random stays in core.math.random (D-CORE-PRELUDE2=B). Proof: `jet test Compiler --profile golden --filter Basics/prelude_files` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        },
+        {
+          "n": 11,
+          "text": "Language declarations live in core.lang (D-LANGNS-NAME1=A) and marker argument types are the 14 generated prelude enums (D-RULEARG-TYPES1=A). Proof: `jet test tests/guards --filter core_declarations` passes and `git grep` shows the enums in the generated prelude.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        },
+        {
+          "n": 12,
+          "text": "reactive.unsubscribe, reactive.is_active and the text.combinators module are admitted by canonical export generation, with import and call goldens. Proof: `jet test Compiler --profile golden --filter reactive/` and `--filter text/combinators` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:06.513Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "naming"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:14:06.513Z",
+      "updated": "2026-11-15T03:14:06.513Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0zii3oj",
+      "num": 6881,
+      "title": "Core I/O failures and producers: one IOError, typed failure paths, line, accept and resolve contracts",
+      "body": "Destination: every Core I/O failure is one canonical IOError with complete context, every failure path cleans up in one order and reports a repairable, redacted diagnostic, and the I/O producers (lines, accepts, address resolution) state exactly what each outcome means on every tier.\n\nWhy it matters: an I/O error that loses its kind or context, or a producer that blurs waiting, failure and end, makes servers and tools misbehave under exactly the conditions they must survive.\n\nSpec: F030 (cleanup of iterator items), F031 (channel readiness). Related: #3239 (task outcomes), #6878 (read_into).\n\nSource: #3548 c53, c54, c56-c63 (archived #3248, #3226, #3395, #4910; first carried by #3239).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Malformed input, EOF, limits, I/O failure, cancellation and an unsupported target each give a repairable, redacted diagnostic; Core failure paths follow one cleanup order; archive deflate, compress and tar_add return ArchiveError. Proof: `jet test Compiler --profile golden --filter errors/core_failure_paths` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:07.479Z"
+        },
+        {
+          "n": 2,
+          "text": "I/O behaves under one semantic law on O0, O1 and O2, and process execution in the browser is a typed Unsupported failure, not a fake. Proof: `jet test Compiler --profile cases --filter web/process_exec_is_unsupported`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:07.479Z"
+        },
+        {
+          "n": 3,
+          "text": "The line producer observes delimiter stripping, a partial final line, byte errors and resumption after an error per source. Proof: `jet test Compiler --profile golden --filter io/line_producer_contract` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:07.479Z"
+        },
+        {
+          "n": 4,
+          "text": "Accept iterators tell waiting, a failed accept and permanent end apart, and keep the supported-platform gates. Proof: `jet test Compiler --profile golden --filter net/accept_outcomes` shows all three.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:07.479Z"
+        },
+        {
+          "n": 5,
+          "text": "Address resolution yields the required sequence of addresses and is network I/O with its effects, never a pure source. Proof: `jet test Compiler --profile cases --filter net/resolve_sequence`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:07.479Z"
+        },
+        {
+          "n": 6,
+          "text": "Owned and borrowed items from I/O and network iterators are cleaned up as F030 states, and channel readiness follows F031. Proof: `jet test Compiler --profile golden --filter io/iterator_cleanup` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:07.479Z"
+        },
+        {
+          "n": 7,
+          "text": "The canonical IOError enum, its generated views and the runtime boundary agree on all eleven kinds, complete IOContext payloads and the ResourceLimit payload, on O0, O1 and O2 with real providers; callers and sandbox job settings migrate with no alias. Proof: `jet test Compiler --profile cases --filter io/io_error_kinds_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:07.479Z"
+        },
+        {
+          "n": 8,
+          "text": "The io_error unit tests pass, a collect-all regression shows later independent cases still run after a failure with a nonzero aggregate, and a missing provider or build artifact is reported BLOCKED, never PASS. Proof: `jet test Compiler --profile cases --filter io/io_error_collect_all`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:14:07.479Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "io",
+        "errors"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:14:07.479Z",
+      "updated": "2026-11-15T03:14:07.479Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -208189,6 +208529,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T03:14:27.950Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-15T03:14:26.986Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-15T03:14:25.581Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-15T03:14:24.623Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-15T03:14:23.718Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-15T03:14:22.836Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T03:14:21.950Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03ai7mm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T03:14:21.068Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03ai7mm",
+      "note": "#52: strip debris; add proof; was: (was #3230) A hello program with five unused Core imports (including core.archive) and the plain hello both build and run on AOT from one identified source, and the imported variant's checked program "
+    },
+    {
+      "at": "2026-11-15T03:14:20.179Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03ai7mm",
+      "note": "#11: strip debris; no warnings (D-NO-WARNINGS1=A); was: [#3553] Core Unit validators no longer bind to `_`. Equivalent multi-way branches use ordered arm tables (no side-effect reorder). After #3521, Core constants use plain names. Each migrated module pas"
+    },
+    {
+      "at": "2026-11-15T03:14:19.299Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03ai7mm",
+      "note": "#10: strip debris; add proof; was: [#3515] Core/units owns constructor semantics. No core.units.from host row remains (CoreHostSignatures.jet:267). Projections are regenerated. units/from conformance matches on every level."
+    },
+    {
+      "at": "2026-11-15T03:14:18.353Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03ai7mm",
+      "note": "#8: file moved to Core.rows; tool is now Jet; absorbs c2; was: After each foundation module cutover, `Compiler/Prelude/Core.jet` has no `dispatcher_row` for any member that module's `source_module` line owns. Proof: `node Tools/agent/check-core-surface-ledger.mjs"
+    },
+    {
+      "at": "2026-11-15T03:14:17.437Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03ai7mm",
+      "note": "#3: one observable outcome with a proof; was: Foundation APIs pass hostile-case proof on O0, O1 and O2 through their Core/<module> Jet bodies (Core #Tests under `jet test Compiler --profile core`)."
+    },
+    {
+      "at": "2026-11-15T03:14:16.522Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03ai7mm",
+      "note": "#1: one observable outcome with a proof; was: Every foundational declaration has a real Jet body or typed provider leaf."
+    },
+    {
+      "at": "2026-11-15T03:14:15.651Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jxsy7l",
+      "note": "#15 One copy meaning: `.copy()` forks every component whose type"
+    },
+    {
+      "at": "2026-11-15T03:14:14.772Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0blttm0",
+      "note": "#5 UTC leap-second parsing, formatting and ordering live in Cor"
+    },
+    {
+      "at": "2026-11-15T03:14:13.872Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0ov7lce",
+      "note": "#12 Each surveyed candidate is mapped to: already in Core (with "
+    },
+    {
+      "at": "2026-11-15T03:14:13.011Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0ov7lce",
+      "note": "#11 A survey under Docs/research covers the most-used libraries "
+    },
+    {
+      "at": "2026-11-15T03:14:12.135Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c08rdp62",
+      "note": "#13 Every core.mem item is classified against that rule in one t"
+    },
+    {
+      "at": "2026-11-15T03:14:11.260Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c08rdp62",
+      "note": "#12 One stated rule decides the tier of every core.mem item (own"
+    },
+    {
+      "at": "2026-11-15T03:14:10.381Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fi6uj5",
+      "note": "#19 Each core.os fact is computed once, in Core, not inside the "
+    },
+    {
+      "at": "2026-11-15T03:14:09.486Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0zutf08",
+      "note": "#7 Typed JSON decode allocates no DataTree, and its failure val"
+    },
+    {
+      "at": "2026-11-15T03:14:08.560Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0ct4a0i",
+      "note": "#11 The caller-backed `Fixed.over` example shows typed allocatio"
+    },
+    {
+      "at": "2026-11-15T03:14:07.479Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0zii3oj",
+      "note": "Core I/O failures and producers: one IOError, typed failure paths, line, accept and resolve contracts"
+    },
+    {
+      "at": "2026-11-15T03:14:06.513Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0jjbpij",
+      "note": "Core names, modules and prelude follow the ratified contracts: one name, one owner, one prelude"
+    },
+    {
+      "at": "2026-11-15T03:11:29.222Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c08s0ppt",
+      "note": "phase"
+    },
+    {
       "at": "2026-11-15T03:11:25.854Z",
       "by": "TowerKeeper-1",
       "action": "card.update",
@@ -211526,713 +212041,6 @@
       "action": "card.criteria-meet",
       "ref": "c0y4zfcp",
       "note": "#22"
-    },
-    {
-      "at": "2026-11-15T02:26:03.381Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zfcp",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-15T02:26:02.471Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zfcp",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-15T02:26:01.530Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zfcp",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T02:26:00.518Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zfcp",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T02:25:59.459Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zfcp",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T02:25:57.797Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zfcp",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-15T02:25:56.689Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zfcp",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-15T02:25:55.471Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zfcp",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T02:25:54.357Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zfcp",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T02:25:53.333Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zfcp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T02:25:52.228Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T02:25:51.130Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-15T02:25:49.959Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#32"
-    },
-    {
-      "at": "2026-11-15T02:25:48.903Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-15T02:25:47.948Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-15T02:25:46.971Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-15T02:25:45.975Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-15T02:25:44.928Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-15T02:25:43.841Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-15T02:25:42.691Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T02:25:41.455Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T02:25:40.313Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T02:25:38.820Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T02:25:37.096Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T02:25:35.705Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w1wcfc",
-      "note": "#52: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: D-CORE-LOWER1=A, entry half: the entry package's own unreached bodies follow dead_code=remove. Every entry root (jobs, C exports, CLI commands, callbacks and other roots) is kept, and an unreached ent"
-    },
-    {
-      "at": "2026-11-15T02:25:34.291Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w1wcfc",
-      "note": "#46: D-FLOAT-INT1=A unblocks the scalar conversions (BoardPlanner 2026-11-09); the SIMD bridges are kept by ratified D-SIMD1/D-SIMD2 (Main 2026-11-12).; was: (was #6255) No source-owned to_array/to_* conversion remains in core.math, and callers are migrated"
-    },
-    {
-      "at": "2026-11-15T02:25:32.741Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w1wcfc",
-      "note": "#39: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6163 Build core.build and the fn build host on the public compile) A user package can write a build helper with the same API core.build uses (example with golden output)."
-    },
-    {
-      "at": "2026-11-15T02:25:31.547Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w1wcfc",
-      "note": "#38: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6163 Build core.build and the fn build host on the public compile) BuildAdapter.jet dispatches no member-name strings; JetBuildSession is either deleted or a public library package."
-    },
-    {
-      "at": "2026-11-15T02:25:30.177Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w1wcfc",
-      "note": "#15: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6155 Bind format, decode, precise math and line loops through pub) A user type implements each trait and works with the language form (format selector, decode, line loop); an example has golden"
-    },
-    {
-      "at": "2026-11-15T02:25:29.019Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w1wcfc",
-      "note": "#14: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6155 Bind format, decode, precise math and line loops through pub) CoreReach.jet matches no Core file path or helper name."
-    },
-    {
-      "at": "2026-11-15T02:25:27.801Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w1wcfc",
-      "note": "#12: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6154) Codegen for a user call and a Core call to the same jet.runtime function is the same IR shape (an IR dump test)."
-    },
-    {
-      "at": "2026-11-15T02:25:26.348Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w1wcfc",
-      "note": "#11: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6154 Lower Core calls through host-leaf declarations, not IR rout) RouteHandle.jet, RouteBuiltin.jet and RouteBrowser.jet hold no Core member names; the runtime Route*.jet tables are deleted or"
-    },
-    {
-      "at": "2026-11-15T02:25:24.868Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w1wcfc",
-      "note": "#53: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: D-EMBED-TOOLCHAIN1=A, table cutover part 2: the five Core-declaration tables (CoreSourceOwned, EnumRows, StructureRows, the EnumPayload tail, CoreCallRows) are computed at build time from toolchain: r"
-    },
-    {
-      "at": "2026-11-15T02:25:23.264Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w1wcfc",
-      "note": "#48: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: Single-source census F1 (Docs/audits/2026-11-05-single-source-census.md): Effects each Core call performs. One hand-written home: Effect rows on the Core declarations. Fix: gen: build CoreCallRows fro"
-    },
-    {
-      "at": "2026-11-15T02:25:22.050Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w1wcfc",
-      "note": "#2: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: Every Core member that had a CORE_CALLS row is declared in Core source; Compiler/Prelude/Core.jet holds no member rows and the generated and hand-written signature tables are deleted. CoreSourceRows -"
-    },
-    {
-      "at": "2026-11-15T02:25:20.775Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0r6d7ja",
-      "note": "#11 The Compiler value's method list is generated from Core decl"
-    },
-    {
-      "at": "2026-11-15T02:25:19.560Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0fymc7l",
-      "note": "#9 A library author retires an API with `#Deprecated(…)` carryi"
-    },
-    {
-      "at": "2026-11-15T02:25:18.355Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0fymc7l",
-      "note": "#8 A package marker refuses code with its own declared diagnost"
-    },
-    {
-      "at": "2026-11-15T02:25:17.221Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0fymc7l",
-      "note": "#7 Importing a package never turns its lints on; a root enables"
-    },
-    {
-      "at": "2026-11-15T02:25:16.023Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0fymc7l",
-      "note": "#6 `syntax.rewrite` takes resolved callable identities, keeps a"
-    },
-    {
-      "at": "2026-11-15T02:25:14.705Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0fymc7l",
-      "note": "#5 A package lint is a checked compile-event subscriber over re"
-    },
-    {
-      "at": "2026-11-15T02:25:13.440Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0fymc7l",
-      "note": "#4 Diagnostic, the only finding carrier, gains `tier` and `stru"
-    },
-    {
-      "at": "2026-11-15T02:25:12.098Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0ho9o8j",
-      "note": "Build tools, package sources and JetOS options are package providers"
-    },
-    {
-      "at": "2026-11-15T02:25:11.055Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c00fktgk",
-      "note": "Packages extend the editor, formatter, debugger and law tests through declared hooks"
-    },
-    {
-      "at": "2026-11-15T02:25:10.153Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0lidgow",
-      "note": "Taint kinds, effect roots, devices and schedulers come from declared rows and providers"
-    },
-    {
-      "at": "2026-11-15T02:25:09.261Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c06r6neu",
-      "note": "Open vocabularies: the compiler reads Core members as trait impls, never by name (D-EXTEND-ARCH1)"
-    },
-    {
-      "at": "2026-11-15T02:25:08.392Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0sdz4q0",
-      "note": "Copy, resource, typestate, effect, sink and layout facts come from declarations, not Core names"
-    },
-    {
-      "at": "2026-11-15T02:25:07.534Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0e6znz4",
-      "note": "Core gets no privilege a package lacks: host-leaf gates, per-domain call checks, Core-only constructs, #Unsafe and lexing"
-    },
-    {
-      "at": "2026-11-15T02:18:55.381Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0w6dky2",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T02:18:53.707Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c03pi177",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T02:18:51.491Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0699zei",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T02:18:48.937Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c02m1p02",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T02:18:46.795Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0yfcz0w",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T02:18:44.597Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0699zei",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:18:43.705Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0yfcz0w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:18:42.764Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0yfcz0w",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T02:18:41.621Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0yfcz0w",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T02:18:40.658Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0yfcz0w",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T02:18:39.706Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0yfcz0w",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T02:18:38.776Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0yfcz0w",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T02:18:37.855Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0yfcz0w",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T02:18:36.963Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0yfcz0w",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T02:18:35.930Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0yfcz0w",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T02:18:34.737Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0yfcz0w",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T02:18:33.654Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0699zei",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T02:18:32.754Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w6dky2",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T02:18:31.588Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w6dky2",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T02:18:30.573Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c02m1p02",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T02:18:29.683Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c02m1p02",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T02:18:28.669Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T02:18:27.589Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T02:18:26.334Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T02:18:25.034Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T02:18:23.687Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0r6d7ja",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T02:18:22.553Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0apk7x9",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T02:18:21.504Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0apk7x9",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T02:18:20.434Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c07ywjvi",
-      "note": "#10 A compile-time record collection holding named function valu"
-    },
-    {
-      "at": "2026-11-15T02:13:32.034Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c031o59x",
-      "note": "#11 The speed gate decides each phase from the median of 3 or mo"
-    },
-    {
-      "at": "2026-11-15T02:13:07.057Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c06lr0kz",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T02:12:08.193Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0xb6zik",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:12:07.285Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0gmf0y4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:12:06.413Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c073cvg9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:12:05.548Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0w6dky2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:12:04.608Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c06lr0kz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:12:03.711Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c03pi177",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:12:02.824Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0699zei",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:12:01.796Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c02m1p02",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:12:00.473Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0yfcz0w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T02:11:59.414Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0w7t4qu",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T02:11:57.855Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0xb6zik",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T02:11:55.784Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0w7t4qu",
-      "note": "blockedBy,parentId"
-    },
-    {
-      "at": "2026-11-15T02:11:53.114Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c073cvg9",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T02:11:52.050Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c073cvg9",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T02:11:51.180Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0w6dky2",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T02:11:50.271Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T02:11:49.334Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T02:11:48.416Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T02:11:47.466Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-15T02:11:46.397Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T02:11:45.527Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-15T02:11:44.643Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#12"
     }
   ],
   "nextNum": 368,
