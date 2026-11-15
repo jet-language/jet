@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6894,
-    "rev": 103878,
+    "rev": 103900,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -53140,7 +53140,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -53200,10 +53200,10 @@
           "n": 2,
           "text": "(was #4927) Native Dyn bridge: project Dyn DateTime (ZonedDateTime) instead of raising E3001",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11 gold4 dyn/bytes_datetime: Dyn.DateTime(time.zoned(instant, india)) prints 2024-03-15T18:00:00+05:30, and projecting it back (`.DateTime(zoned) -> zoned.offset_seconds()`) prints 19800; stdout == expected on jet run o0/o1/o2 and the AOT build, exit 0 x4 (no E3001); golden-wave \"passed dyn/bytes_datetime\" (also dyn/codecs)",
-          "at": "2026-10-31T17:25:53.733Z"
+          "evidence": "dev 8be29ffe9a with gate-p141: jet test Compiler --profile golden --filter Data/Dyn/BytesDateTime -> PASS 3 (o0, o1, o2), FAIL 0.",
+          "at": "2026-11-15T03:43:10.988Z"
         },
         {
           "n": 3,
@@ -53243,12 +53243,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-10T10:41:20.799Z",
-      "updated": "2026-11-15T03:42:40.866Z",
+      "updated": "2026-11-15T03:43:12.449Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 9
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-15T03:43:12.449Z"
     },
     {
       "id": "c0acg7c2",
@@ -59666,6 +59667,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "p142 gate (dev 0487a6552b, p141 binary), 2026-11-14 22:45, Speed-3 analysis: the jet-bare phase FAILs (ir.build 0.93 to 8.06 s, release, prelower) are an attribution artifact. Per-phase proc_cpu bills the whole process, and the runtime compile's late phases now overlap the Core object compile's 16-thread ir.opt window. Own-thread cpu: ir.build 0.26 to 0.34 s at 6778 to 6787 functions. Real change: jet-bare wall 9.41 to 10.06 s, process cpu +2.5%, critical path +2.16 s. The only per-phase cpu rise at equal items is sema.codecs, proc 3.68 to 4.53 s at 696 items (likely 04e397982f's codec cutover, sent to GoalsB-5). Gate fix for c11: judge each compile on per-thread or whole-process cpu, not per-phase proc."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Under the owner order above, c4 (guards walk the tree once) and its ballot D-TEST-FIXTURE1 are not in steps 1-5, so Speed-3 does not work on them before G11."
         },
         {
@@ -60057,7 +60063,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T02:13:32.034Z",
+      "updated": "2026-11-15T03:44:31.313Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -80008,6 +80014,15 @@
           "evidence": "Moved to #6889 c1: core.db stays in Core; db tooling gets its own card",
           "at": "2026-11-15T03:31:07.679Z",
           "closure": "obsolete"
+        },
+        {
+          "n": 13,
+          "text": "The `auth` package verifies tokens per D-AUTH-TOKENPOLICY1=A: JWT verification requires a named nonempty audience, exp and a matching aud (the empty-audience bypass is gone), HS256 only with constant-time comparison, and the selected PASETO mode. Proof: `jet test Compiler --profile golden --filter Auth/TokenPolicyHostile` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:44:27.841Z"
         }
       ],
       "refs": [],
@@ -80018,8 +80033,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:11:14.430Z",
-      "updated": "2026-11-15T03:31:18.096Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:44:27.841Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 13
     },
     {
       "id": "c0y7kqfw",
@@ -82493,39 +82509,57 @@
       "criteria": [
         {
           "n": 1,
-          "text": "(was #785 c1) One Service record supports a run-only beginner form and expert probes, restart, watch, ports, sockets, dependencies, shutdown, logs, and limits [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "One Service record (D-SERVICE-WORD1=A) covers the run-only beginner form and the expert fields: readiness probes, restart, watch, ports, sockets, dependencies, shutdown, logs and limits. Proof: `jet test Compiler --profile cases --filter service/record_fields_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:48:26.474Z"
+          "at": "2026-11-15T03:44:28.708Z"
         },
         {
           "n": 2,
-          "text": "(was #785 c2) The supervisor separates process start from readiness, reserves resources before release, reports port and socket conflicts, and rejects dependency cycles [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "The supervisor separates process start from readiness, reserves ports and sockets before release and reports a conflict as a typed error, and refuses dependency cycles. Proof: `jet test Compiler --profile cases --filter service/supervisor_readiness_` and `jet test Compiler --profile ui --filter service_dependency_cycle`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:48:27.491Z"
+          "at": "2026-11-15T03:44:29.589Z"
         },
         {
           "n": 3,
-          "text": "(was #785 c3) Restart budgets, backoff, watch debounce, readiness transitions, generation identity, and failure states are bounded and tested [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Restart budgets, backoff, watch debounce, readiness transitions, generation identity and failure states are bounded: each has a case that drives it past its bound. Proof: `jet test Compiler --profile cases --filter service/bounded_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:48:28.451Z"
+          "at": "2026-11-15T03:44:30.470Z"
         },
         {
           "n": 4,
-          "text": "(was #785 c4) Task and service order, process-tree cleanup, cancellation, D-JPK-SERVICEAUTH1 failure, plans, logs, and receipts use existing mechanisms [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Service start and stop order, process-tree cleanup on stop and cancel, and the D-JPK-SERVICEAUTH1 failure path run on task groups and core.process, and plans, logs and receipts use the existing log and receipt types, with no second scheduler. Proof: `jet test Compiler --profile cases --filter service/process_tree_cleanup`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:48:29.592Z"
+          "at": "2026-11-15T03:44:32.138Z"
+        },
+        {
+          "n": 6,
+          "text": "A pipeline value: `tasks.pipeline(source).map(f).filter(p).sink(g)` builds a value whose pure stages run in parallel and fuse, and whose writing stage runs on one task; the spelling waits on an owner ballot (no decision yet). Proof: `jet test Compiler --profile golden --filter Concurrency/Pipeline` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:44:26.096Z"
+        },
+        {
+          "n": 7,
+          "text": "Restart policy is declared, not set: `restart: .OneForOne(max:, within:)` is a field on the tree or worker line with an intensity budget, and `set_restart` (Core/Service/Service.jet) is deleted in the same cutover; the spelling waits on an owner ballot (no decision yet). Proof: `git grep -n set_restart -- Core Examples` prints nothing and `jet test Compiler --profile cases --filter service/restart_intensity_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:44:26.967Z"
         }
       ],
       "refs": [],
@@ -82540,9 +82574,9 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:06.066Z",
-      "updated": "2026-11-13T02:09:19.966Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5
+      "updated": "2026-11-15T03:44:32.138Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 7
     },
     {
       "id": "c0odfeu7",
@@ -87330,57 +87364,57 @@
       "criteria": [
         {
           "n": 2,
-          "text": "(was #1147 c2) Storage, views, operations, precision, placement, streams, kernels, derivatives, serialization, and backend receipts preserve the declared tensor meaning and CPU-oracle result for the named slice (moved from #5454 c29)",
+          "text": "Tensor storage, views, operations, precision, placement, streams, kernels, derivatives and serialization match the CPU oracle: a differential test runs each operation family on every available backend against the CPU result. Proof: `jet test Compiler --profile cases --filter compute/cpu_oracle_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:25:17.042Z"
+          "at": "2026-11-15T03:44:33.027Z"
         },
         {
           "n": 3,
-          "text": "(was #1147 c3) Shape, alias, bounds, race, barrier, precision, device loss, transfer, gradient, corrupt-model, and unsupported-operation failures are checked at the owning layer and cannot silently fabricate fallback success (moved from #5454 c30)",
+          "text": "Shape, alias, bounds, race, barrier, precision, device-loss, transfer, gradient and unsupported-operation failures are checked at the owning layer and give typed errors, never a fabricated success. Proof: `jet test Compiler --profile cases --filter compute/failure_` with a negative case per failure.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:25:17.909Z"
+          "at": "2026-11-15T03:44:33.908Z"
         },
         {
           "n": 4,
-          "text": "(was #1147 c4) Focused algebraic, edge, hostile, and CPU-differential checks exercise the real implementation, include negative proof for safety claims, and prove default `jet run` plus AOT parity (moved from #5454 c31)",
+          "text": "compute_autodiff runs (no internal compiler error) and prints its expected output on O0, O1, O2 and the AOT build. Proof: `jet test Compiler --profile golden --filter Compute/ComputeAutodiff`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:25:18.734Z"
+          "at": "2026-11-15T03:44:34.791Z"
         },
         {
           "n": 6,
-          "text": "(moved from #4599 c106) (was #1143 c6) The ufunc/kernel set that must lower to SIMD is named on the card; a scalar-vs-SIMD differential test proves byte-equal results for each [precut audit: failing on 9c7ddf1359: X:features/tooling/compute_autodiff KNOWN-FAILING o0 #4599 ir.build unlowered: `jet check` is clean, but `jet run` is an internal compiler error (exit 101) with 7 faults \"generic Core call core.co…]",
+          "text": "The ufunc and kernel set that must lower to SIMD is listed in Core/Compute, and a scalar-versus-SIMD differential test proves byte-equal results for each. Proof: `jet test Compiler --profile cases --filter compute/simd_differential_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:48:29.440Z"
+          "at": "2026-11-15T03:44:35.691Z"
         },
         {
           "n": 7,
-          "text": "(moved from #4599 c107) (was #1143 c7) Runtime dispatch is proven across AVX2 and SSE2 paths via jet_compute_simd_backend [precut audit: failing on 9c7ddf1359: X:features/tooling/compute_autodiff KNOWN-FAILING o0 #4599 ir.build unlowered: `jet check` is clean, but `jet run` is an internal compiler error (exit 101) with 7 faults \"generic Core call core.co…]",
+          "text": "Runtime dispatch picks the AVX2 or SSE2 path through jet_compute_simd_backend, and both paths give the same results. Proof: `jet test Compiler --profile cases --filter compute/simd_dispatch_avx2_sse2`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:41:08.714Z"
+          "at": "2026-11-15T03:44:36.558Z"
         },
         {
           "n": 8,
-          "text": "D-GPU-HELPER-SCOPE1=A (ratified 2026-09-12) is built. A #Kernel that calls a pure helper (for example a helper fn returning `x * 3`) checks and runs on every applicable tier instead of failing with E1102 at the marker. Today Sema/Kernel.jet:157 rejects every call edge and keeps no span (D-RUN-WHERE1 probe k05, a0.0.43). Done means the helper proof, a diagnostic for a rejected helper that keeps its span, a golden example and a UI snapshot.",
+          "text": "D-GPU-HELPER-SCOPE1=A is built: a #Kernel that calls a pure helper (for example a function returning `x * 3`) checks and runs on every applicable tier instead of E1102 at the marker (Sema/Kernel.jet rejects every call edge today), and a rejected helper's diagnostic keeps its span. Proof: `jet test Compiler --profile golden --filter Compute/KernelHelper` and `jet test Compiler --profile ui --filter kernel_helper_rejected`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T15:47:20.401Z"
+          "at": "2026-11-15T03:44:37.445Z"
         }
       ],
       "refs": [],
@@ -87391,8 +87425,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:15.413Z",
-      "updated": "2026-11-13T02:20:04.636Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:44:37.445Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 8
     },
     {
@@ -88953,12 +88987,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "(moved from #4717 c20) (was #3690) (was #3667) [#999] Real WASI preview1 and preview2 `random_get` runs under a WASI runtime, with a bounded retry and trap lifecycle matrix and typed outcomes.",
+          "text": "Real WASI preview1 and preview2 `random_get` runs under a WASI runtime, with a bounded retry, a trap lifecycle matrix and typed outcomes. Proof: `jet test Compiler --profile cases --filter wasi/random_get_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:40:56.057Z"
+          "at": "2026-11-15T03:44:41.909Z"
         },
         {
           "n": 2,
@@ -88978,8 +89012,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:40:55.176Z",
-      "updated": "2026-11-14T06:10:29.662Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:44:41.909Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
     {
@@ -93948,12 +93982,12 @@
         },
         {
           "n": 4,
-          "text": "[#4289] D-CRYPTO-SALTROW1: password_hash_with_salt leaves the public core.crypto surface and all public compiler rows. Fixed-salt tests migrate to expert.argon2id. (was #4268 c15)",
+          "text": "password_hash_with_salt leaves the public core.crypto surface and all public compiler rows, and fixed-salt tests use expert.argon2id (D-CRYPTO-SALTROW1=A). Proof: `git grep -n password_hash_with_salt -- Core Compiler/Prelude Examples` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:47:14.481Z"
+          "at": "2026-11-15T03:44:38.349Z"
         },
         {
           "n": 5,
@@ -93966,12 +94000,12 @@
         },
         {
           "n": 6,
-          "text": "(was #1473 c6) No new external dependency is added (I6), and the New, generate_key, private_encrypt, private_decrypt, public_encrypt and public_decrypt rows stay an unimplemented owner gate rather than closed. (was #4268 c28)",
+          "text": "No external dependency is added (I6), and the RSA rows New, generate_key, private_encrypt, private_decrypt, public_encrypt and public_decrypt stay refused as not built until an owner decision on RSA. Proof: `jet test Compiler --profile ui --filter crypto_rsa_not_built`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:47:22.281Z"
+          "at": "2026-11-15T03:44:39.214Z"
         }
       ],
       "refs": [],
@@ -93982,8 +94016,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:49:47.742Z",
-      "updated": "2026-11-09T20:47:22.281Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:44:39.214Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 6
     },
     {
@@ -100334,21 +100368,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "(was #5694) pure: store record generations and nested pretty rendering of compile-time values differ (moved from #5454 c3)",
+          "text": "Compile-time values match run time in the pure suite: store record generations and nested pretty rendering of compile-time values print the same as at run time. Proof: `jet test Compiler --profile cases --filter pure/comptime_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T23:11:25.961Z"
+          "at": "2026-11-15T03:44:40.131Z"
         },
         {
           "n": 2,
-          "text": "(was #5923) Authority testkit: 24 cases still fail after #5070's follow-ups (grants/providers, E0119, non-hosted verbs, core.process.run, fixtures, jet query, fix status on stderr): each failing case fixed or re-pointed at (moved from #5454 c13)",
+          "text": "The authority testkit cases that still fail (grants and providers, E0119, non-hosted verbs, core.process.run, fixtures, jet query, fix status on stderr) each pass or have their known-failing row re-pointed at the card that owns the unbuilt feature. Proof: `jet test Compiler --profile cases --filter authority/` shows no FAIL and no KNOWN-FAILING row naming #6843.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T23:11:25.961Z"
+          "at": "2026-11-15T03:44:41.017Z"
         },
         {
           "n": 3,
@@ -100379,8 +100413,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T23:11:25.962Z",
-      "updated": "2026-11-14T23:14:50.380Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T03:44:41.017Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0ct5o6i",
@@ -210556,6 +210590,160 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:44:41.909Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0axja0l",
+      "note": "#1: strip debris; proof; was: (moved from #4717 c20) (was #3690) (was #3667) [#999] Real WASI preview1 and preview2 `random_get` runs under a WASI runtime, with a bounded retry and trap lifecycle matrix and typed outcomes."
+    },
+    {
+      "at": "2026-11-15T03:44:41.017Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0in2dft",
+      "note": "#2: strip debris; proof; was: (was #5923) Authority testkit: 24 cases still fail after #5070's follow-ups (grants/providers, E0119, non-hosted verbs, core.process.run, fixtures, jet query, fix status on stderr): each failing case "
+    },
+    {
+      "at": "2026-11-15T03:44:40.131Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0in2dft",
+      "note": "#1: strip debris; proof; was: (was #5694) pure: store record generations and nested pretty rendering of compile-time values differ (moved from #5454 c3)"
+    },
+    {
+      "at": "2026-11-15T03:44:39.214Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0miof6j",
+      "note": "#6: strip debris; owner gate row added; was: (was #1473 c6) No new external dependency is added (I6), and the New, generate_key, private_encrypt, private_decrypt, public_encrypt and public_decrypt rows stay an unimplemented owner gate rather tha"
+    },
+    {
+      "at": "2026-11-15T03:44:38.349Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0miof6j",
+      "note": "#4: strip debris; proof; was: [#4289] D-CRYPTO-SALTROW1: password_hash_with_salt leaves the public core.crypto surface and all public compiler rows. Fixed-salt tests migrate to expert.argon2id. (was #4268 c15)"
+    },
+    {
+      "at": "2026-11-15T03:44:37.445Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04pj0wn",
+      "note": "#8: proof; was: D-GPU-HELPER-SCOPE1=A (ratified 2026-09-12) is built. A #Kernel that calls a pure helper (for example a helper fn returning `x * 3`) checks and runs on every applicable tier instead of failing with E1"
+    },
+    {
+      "at": "2026-11-15T03:44:36.558Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04pj0wn",
+      "note": "#7: strip debris; proof; was: (moved from #4599 c107) (was #1143 c7) Runtime dispatch is proven across AVX2 and SSE2 paths via jet_compute_simd_backend [precut audit: failing on 9c7ddf1359: X:features/tooling/compute_autodiff KNOW"
+    },
+    {
+      "at": "2026-11-15T03:44:35.691Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04pj0wn",
+      "note": "#6: strip debris; proof; was: (moved from #4599 c106) (was #1143 c6) The ufunc/kernel set that must lower to SIMD is named on the card; a scalar-vs-SIMD differential test proves byte-equal results for each [precut audit: failing o"
+    },
+    {
+      "at": "2026-11-15T03:44:34.791Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04pj0wn",
+      "note": "#4: strip debris; the concrete failing proof the old audit named; was: (was #1147 c4) Focused algebraic, edge, hostile, and CPU-differential checks exercise the real implementation, include negative proof for safety claims, and prove default `jet run` plus AOT parity (mo"
+    },
+    {
+      "at": "2026-11-15T03:44:33.908Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04pj0wn",
+      "note": "#3: strip debris; proof; was: (was #1147 c3) Shape, alias, bounds, race, barrier, precision, device loss, transfer, gradient, corrupt-model, and unsupported-operation failures are checked at the owning layer and cannot silently fa"
+    },
+    {
+      "at": "2026-11-15T03:44:33.027Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04pj0wn",
+      "note": "#2: strip debris; proof; was: (was #1147 c2) Storage, views, operations, precision, placement, streams, kernels, derivatives, serialization, and backend receipts preserve the declared tensor meaning and CPU-oracle result for the n"
+    },
+    {
+      "at": "2026-11-15T03:44:32.138Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0s9rdnu",
+      "note": "#4: strip debris; one outcome with proof; was: (was #785 c4) Task and service order, process-tree cleanup, cancellation, D-JPK-SERVICEAUTH1 failure, plans, logs, and receipts use existing mechanisms [precut audit: no dev test, golden, case or snap"
+    },
+    {
+      "at": "2026-11-15T03:44:31.313Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:44:30.470Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0s9rdnu",
+      "note": "#3: strip debris; proof; was: (was #785 c3) Restart budgets, backoff, watch debounce, readiness transitions, generation identity, and failure states are bounded and tested [precut audit: no dev test, golden, case or snapshot prove"
+    },
+    {
+      "at": "2026-11-15T03:44:29.589Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0s9rdnu",
+      "note": "#2: strip debris; proof; was: (was #785 c2) The supervisor separates process start from readiness, reserves resources before release, reports port and socket conflicts, and rejects dependency cycles [precut audit: no dev test, gol"
+    },
+    {
+      "at": "2026-11-15T03:44:28.708Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0s9rdnu",
+      "note": "#1: strip debris; proof; was: (was #785 c1) One Service record supports a run-only beginner form and expert probes, restart, watch, ports, sockets, dependencies, shutdown, logs, and limits [precut audit: no dev test, golden, case "
+    },
+    {
+      "at": "2026-11-15T03:44:27.841Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0du93i4",
+      "note": "#13 The `auth` package verifies tokens per D-AUTH-TOKENPOLICY1=A"
+    },
+    {
+      "at": "2026-11-15T03:44:26.967Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0s9rdnu",
+      "note": "#7 Restart policy is declared, not set: `restart: .OneForOne(ma"
+    },
+    {
+      "at": "2026-11-15T03:44:26.096Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0s9rdnu",
+      "note": "#6 A pipeline value: `tasks.pipeline(source).map(f).filter(p).s"
+    },
+    {
+      "at": "2026-11-15T03:43:12.449Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c086hhzb",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T03:43:10.988Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c086hhzb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T03:43:10.089Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-reopen",
+      "ref": "c086hhzb",
+      "note": "#2: legacy evidence names no dev commit; re-proving on dev"
+    },
     {
       "at": "2026-11-15T03:42:45.507Z",
       "by": "TowerKeeper-1",
