@@ -186,8 +186,11 @@ trace_text: fn() -> I64 {
 // its function when `with_function`); it returns whether one was written.
 // That form allocates nothing, so a stop raised in Core (Trap.jet
 // trap_user_location) links no allocator into an image that never
-// allocates.
+// allocates. A host that reports the chain itself (trace_host) answers
+// first.
 trace_walk: fn(text: I64, with_function: Bool) -> Bool {
+    hosted: trace_host(text, with_function)
+    if (hosted >= I64{0}) -> return hosted == I64{1}
     // The frame walk needs rbp, which no admitted asm leaf reads. As
     // alloc_check_start does, this maps the four-byte stub `mov rax, rbp;
     // ret`. os_call_address_i64 is an inline leaf, so the stub returns this
@@ -195,7 +198,6 @@ trace_walk: fn(text: I64, with_function: Bool) -> Bool {
     // caller. The stub, path and image pages are untracked: the runtime
     // alone reads them.
     stub: alloc_map_try(I64{4096})
-    if (stub == I64{0}) -> return false
     frame := I64{0}
     #Unsafe("stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call") {
         os_store_i64(stub, I64{3286796616})
@@ -240,6 +242,81 @@ trace_unmap: fn(address: I64, bytes: I64) {
     #Unsafe("the trace made this mapping and holds no pointer into it past this call") {
         _ := os_unmap_untracked_i64(address, bytes)
     }
+}
+
+// The calling chain's Jet frames as the host reports them, innermost first,
+// one trace_text line each: up to `capacity` bytes written at `buffer`, and
+// the full length returned. A machine whose code the runtime can't walk
+// answers here: a web page's linear memory never runs as code, so the web
+// host (JetWeb Host.jet) defines this in its place (JetIR IR.jet
+// IR_HOST_PROVIDER) and reads its frames from the program module's location
+// table, as trace_frames reads the image's. This native definition reports
+// no host chain (-1), so trace_walk walks the frame pointers.
+#Export(c) jet_rt_host_frames: fn(buffer: I64, capacity: I64) -> I64 { I64{-1} }
+
+// trace_walk through the host's frames (jet_rt_host_frames): 1 when a `-->`
+// line was written, 0 when none was, -1 when the host reports no chain. Its
+// lines go in a page the trace maps, so this form allocates nothing either.
+trace_host: fn(text: I64, with_function: Bool) -> I64 {
+    length: jet_rt_host_frames(I64{0}, I64{0})
+    if (length < I64{0}) -> return I64{-1}
+    if (length == I64{0}) -> return I64{0}
+    bytes: alloc_align(length, I64{4096})
+    page: alloc_map_try(bytes)
+    if (page == I64{0}) -> return I64{0}
+    written: jet_rt_host_frames(page, bytes)
+    kept: if (written > bytes) -> bytes else -> written
+    found := I64{0}
+    if (kept > I64{0}) {
+        if (text != I64{0}) {
+            rt_text_append(text, page, kept)
+        } else if trace_host_user(page, kept, with_function) {
+            found = I64{1}
+        }
+    }
+    trace_unmap(page, bytes)
+    found
+}
+
+// The innermost of the host's frame lines [at, at + length) whose file is
+// not Core's, written as its `-->` line (Trap.jet trap_user_frame).
+trace_host_user: fn(at: I64, length: I64, with_function: Bool) -> Bool {
+    end: wrapping(at + length)
+    cursor := at
+    loop cursor < end {
+        name_len: trace_field_len(cursor, end, I64{9})
+        file: wrapping(wrapping(cursor + name_len) + I64{1})
+        file_len: trace_field_len(file, end, I64{9})
+        line: wrapping(wrapping(file + file_len) + I64{1})
+        line_len: trace_field_len(line, end, I64{10})
+        if trap_user_frame(cursor, name_len, file, file_len, trace_decimal(line, line_len), with_function) -> return true
+        cursor = wrapping(wrapping(line + line_len) + I64{1})
+    }
+    false
+}
+
+// The length of the field at `at` that byte `stop` ends; it ends at `end`
+// at the latest.
+trace_field_len: fn(at: I64, end: I64, stop: I64) -> I64 {
+    length := I64{0}
+    loop wrapping(at + length) < end && trace_u8(wrapping(at + length)) != stop {
+        length = wrapping(length + I64{1})
+    }
+    length
+}
+
+// The decimal number of the `length` digits at `at`, up to the first byte
+// that is no digit.
+trace_decimal: fn(at: I64, length: I64) -> I64 {
+    value := I64{0}
+    index := I64{0}
+    loop index < length {
+        digit: wrapping(trace_u8(wrapping(at + index)) - I64{48})
+        if (digit < I64{0} || digit > I64{9}) -> return value
+        value = wrapping(wrapping(value * I64{10}) + digit)
+        index = wrapping(index + I64{1})
+    }
+    value
 }
 
 // Each Jet frame of the chain from `start`, read from the .debug_jetline
@@ -376,7 +453,7 @@ trace_cstr_len: fn(at: I64, end: I64) -> I64 {
 
 priv trace_u8: fn(at: I64) -> I64 {
     byte := I64{0}
-    #Unsafe("at lies in the executable's read-only mapping: its ELF header, section table or location table") {
+    #Unsafe("at lies in a mapping the trace reads: the executable's read-only ELF header, section table or location table, or the page the host's frames were written to") {
         byte = os_load_u8(at)
     }
     byte

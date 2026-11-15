@@ -329,15 +329,17 @@ ir_frame_bound_add: fn(bound: Int, inlined: Int) -> Int Never! {
     bound + inlined
 }
 
-// The leaves of the UI provider seam (JetRuntime UiHostProvider.jet), by C
-// symbol: the native runtime defines them headless, and a host with its own
-// provider (the web, JetWeb Host.jet web_host_functions) defines them in
-// their place at every call (JetWeb Select.jet web_direct_call). Inlining
-// never takes one (OptInline.jet), so every call stays one the host can
-// replace.
+// The runtime's host seams, by C symbol: the leaves of the UI provider
+// (JetRuntime UiHostProvider.jet) and the host's calling chain (JetRuntime
+// Fault.jet jet_rt_host_frames). The native runtime defines them headless,
+// and a host with its own (the web, JetWeb Host.jet web_host_functions)
+// defines them in their place at every call (JetWeb Select.jet
+// web_direct_call). Inlining never takes one (OptInline.jet), so every call
+// stays one the host can replace.
 IR_HOST_PROVIDER: [String]{
     "jet_ui_provider_capability", "jet_ui_provider_clipboard_get", "jet_ui_provider_clipboard_set",
     "jet_ui_provider_dialog_request", "jet_ui_provider_dialog_result", "jet_ui_provider_event_pop", "jet_ui_provider_key_claim", "jet_ui_provider_take",
+    "jet_rt_host_frames",
 }
 
 // One counted loop sema proved (AutoVectorizationFacts, JetSema

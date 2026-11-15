@@ -13,8 +13,8 @@ use {
 WEB_HOST_C: [String]{"getauxval"}
 
 // Each host C function: true when it replaces the runtime's own definition,
-// as each leaf of the UI provider seam (IR_HOST_PROVIDER) does: the host
-// forwards it to the page's browser provider.
+// as each runtime host seam (IR_HOST_PROVIDER) does: the host forwards a UI
+// leaf to the page's browser provider and answers the calling chain itself.
 web_host_functions: fn() -> [String:Bool] Never! {
     hosts := [String:Bool]{}
     loop name in WEB_HOST_C -> hosts[name.copy()] = false
@@ -247,6 +247,63 @@ async function load(url) {
   return new Uint8Array(await response.arrayBuffer());
 }
 
+// The program module's location table, its `jet.lines` custom section
+// (Module.jet web_location_table), by function index: each function's name,
+// file and line rows, [code offset, line] in offset order.
+function locationTable(module) {
+  const table = new Map();
+  const [section] = module ? WebAssembly.Module.customSections(module, "jet.lines") : [];
+  if (!section) return table;
+  const bytes = new Uint8Array(section);
+  let at = 0;
+  const leb = (signed) => {
+    let value = 0;
+    let scale = 1;
+    let byte;
+    do {
+      byte = bytes[at++];
+      value += (byte & 127) * scale;
+      scale *= 128;
+    } while (byte & 128);
+    return signed && (byte & 64) !== 0 ? value - scale : value;
+  };
+  const text = () => {
+    const length = leb(false);
+    const value = decoder.decode(bytes.subarray(at, at + length));
+    at += length;
+    return value;
+  };
+  const files = [];
+  for (let count = leb(false); count > 0; count -= 1) files.push(text());
+  for (let count = leb(false); count > 0; count -= 1) {
+    const index = leb(false);
+    const name = text();
+    const file = files[leb(false)];
+    const rows = [];
+    let offset = 0;
+    let line = 0;
+    for (let left = leb(false); left > 0; left -= 1) {
+      offset += leb(false);
+      line += leb(true);
+      rows.push([offset, line]);
+    }
+    table.set(index, { name, file, rows });
+  }
+  return table;
+}
+
+// The line of code offset `offset` in a function with line rows `rows`: the
+// last row at or before it, 0 before the first, as the native walk reads
+// its table (JetRuntime Fault.jet trace_line).
+function lineAt(rows, offset) {
+  let line = 0;
+  for (const [at, row] of rows) {
+    if (at > offset) break;
+    line = row;
+  }
+  return line;
+}
+
 class Host {
   constructor(manifest) {
     this.runtime = manifest.partitions?.find((partition) => partition.name === "runtime");
@@ -277,8 +334,10 @@ class Host {
     const base = new URL(".", url);
     const manifest = JSON.parse(decoder.decode(await load(new URL("web.manifest.json", base))));
     const host = new Host(manifest);
-    host.rt = (await host.instantiate(new URL(host.runtime.module, base), {})).exports;
-    host.app = (await host.instantiate(url, { rt: host.rt })).exports;
+    host.rt = (await host.instantiate(new URL(host.runtime.module, base), {})).instance.exports;
+    const app = await host.instantiate(url, { rt: host.rt });
+    host.app = app.instance.exports;
+    host.appModule = app.module;
     host.enter(() => host.rt.jet_web_init());
     // A page (or a DOM harness) shows the core.ui scene the program paints.
     if (globalThis.document?.createElement && globalThis.document.body) {
@@ -290,6 +349,7 @@ class Host {
     return host;
   }
 
+  // The module at `url` and its instance.
   async instantiate(url, extra) {
     const bytes = await load(url);
     const imports = {
@@ -301,10 +361,28 @@ class Host {
       ...extra,
     };
     try {
-      return (await WebAssembly.instantiate(bytes, imports)).instance;
+      return await WebAssembly.instantiate(bytes, imports);
     } catch (error) {
       throw new JetHostAbiError("cannot instantiate " + url.href + ": " + error.message, { cause: error });
     }
+  }
+
+  // The calling chain's Jet frames, innermost first, one
+  // `function\tfile\tline\n` line each (JetRuntime Fault.jet
+  // jet_rt_host_frames): each frame of the program module (named `app`) that
+  // its location table holds, at the line of its call's code offset.
+  trace() {
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = 4096;
+    const stack = new Error().stack ?? "";
+    Error.stackTraceLimit = limit;
+    this.locations ??= locationTable(this.appModule);
+    let text = "";
+    for (const frame of stack.matchAll(/(?:wasm:\/\/wasm\/app-[0-9a-f]+|\/app\.wasm):wasm-function\[(\d+)\]:0x([0-9a-f]+)/g)) {
+      const location = this.locations.get(Number(frame[1]));
+      if (location) text += location.name + "\t" + location.file + "\t" + lineAt(location.rows, parseInt(frame[2], 16)) + "\n";
+    }
+    return text;
   }
 
   u8() {
@@ -710,6 +788,13 @@ class Host {
       jet_ui_provider_take: (buffer) => {
         if (staged !== null) host.u8().set(staged, Number(buffer));
         staged = null;
+      },
+      // The calling chain (trace): up to `capacity` bytes of its lines at
+      // `buffer`, and their full length.
+      jet_rt_host_frames: (buffer, capacity) => {
+        const lines = encoder.encode(host.trace());
+        if (capacity > 0n) host.u8().set(lines.subarray(0, Math.min(lines.length, Number(capacity))), Number(buffer));
+        return BigInt(lines.length);
       },
       getauxval: (type) => {
         if (type === 6n) return 4096n;

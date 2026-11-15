@@ -410,9 +410,18 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
         segments += 1
     }
     wat_put_vec_section(out, WEB_SECTION_DATA, segments, section)
-    // Function names, for the host's stack traces.
+    if app -> wat_put_section(out, WEB_SECTION_CUSTOM, web_location_table(m, lines, defined_base))
+    // Function names, for the host's stack traces; the program module is
+    // named `app`, so the host tells its frames from the runtime's.
     section = [U8]{}
     wat_put_name(section, "name")
+    if app {
+        module_name := [U8]{}
+        wat_put_name(module_name, WEB_APP_MODULE)
+        section.push(0x00)
+        wasm_put_unsigned(section, module_name.len())
+        section.extend(module_name)
+    }
     entries := [U8]{}
     total := m.functions.len() + names.len()
     loop row in 0..<total {
@@ -434,6 +443,67 @@ web_function_name: fn(f: IRFunction) -> String Never! {
     if f.symbol != "" -> return f.symbol.copy()
     if f.key != "" -> return f.key.copy()
     f.name.copy()
+}
+
+// The program module's name (its name section's module name), which the
+// host's stack traces show on its frames.
+WEB_APP_MODULE: "app"
+
+// The custom section of the program module's location table
+// (web_location_table).
+WEB_LOCATION_SECTION: "jet.lines"
+
+// The program module's location table, what an image's .debug_jetline is to
+// the native runtime (JetBackend Image/Dwarf.jet dwarf_jet_line): the host
+// reads it for the calling chain's Jet frames (Host.jet, JetRuntime Fault.jet
+// jet_rt_host_frames). After the section's name: the count of the source
+// files and each file, then the count of the functions it holds and for each
+// its function index, its name, its file's index and its line rows: their
+// count, then per row the code's module offset and its source line, each the
+// difference from the row before (the first from 0). `lines` are the
+// module's line rows (WebModule.lines). A function with no source file or
+// declaration line is left out, as the native table leaves it.
+web_location_table: fn(m: IRModule, lines: [Int], defined_base: Int) -> [U8] Never! {
+    files := [Int]{}
+    body := [U8]{}
+    count := 0
+    cursor := 0
+    loop (row, f) in m.functions {
+        first: cursor
+        loop cursor < lines.len() && lines[cursor + 1] == row -> cursor += 3
+        if f.source_file == "" || f.line <= 0 -> next
+        wasm_put_unsigned(body, defined_base + row)
+        wat_put_name(body, f.name)
+        wasm_put_unsigned(body, web_file_index(m, files, row))
+        wasm_put_unsigned(body, (cursor - first) /% 3)
+        offset := 0
+        line := 0
+        loop pair in (first /% 3)..<(cursor /% 3) {
+            wasm_put_unsigned(body, lines[3 * pair] - offset)
+            wasm_put_signed(body, lines[3 * pair + 2] - line)
+            offset = lines[3 * pair]
+            line = lines[3 * pair + 2]
+        }
+        count += 1
+    }
+    section := [U8]{}
+    wat_put_name(section, WEB_LOCATION_SECTION)
+    wasm_put_unsigned(section, files.len())
+    loop named in files -> wat_put_name(section, m.functions[named].source_file)
+    wasm_put_unsigned(section, count)
+    section.extend(body)
+    section
+}
+
+// The index of function `row`'s source file among `files`, which hold the
+// row of the first function naming each file; `row` joins them when its file
+// is new. Linear in the files, which are few next to the functions.
+web_file_index: fn(m: IRModule, files: &[Int], row: Int) -> Int Never! {
+    loop (index, named) in files {
+        if m.functions[named].source_file == m.functions[row].source_file -> return index
+    }
+    files.push(row)
+    files.len() - 1
 }
 
 // An `i32.const value; end` constant expression.
