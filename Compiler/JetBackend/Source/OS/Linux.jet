@@ -193,11 +193,11 @@ os_store_byte: fn(address: Int, value: Int) {
 }
 
 // Like os_copy_in, but borrowing one range avoids allocating image chunks.
-// A byte at a time: a whole word whose top bit is set is Int arithmetic past
-// the inline range.
+// The range moves in one copy and its padding to the next word is zeroed in
+// one fill.
 #Unsafe("the caller owns `count` rounded up to 8 bytes at `address`") os_copy_in_range: fn(address: Int, bytes: [U8], start: Int, count: Int) {
-    loop at in 0..<count -> os_store_byte(address + at, Int{bytes[start + at]})
-    loop at in count..<((count + 7) /% 8 * 8) -> os_store_byte(address + at, 0)
+    mem.list_copy<U8>(mem.Ptr<U8>.from_addr(address), bytes, start, count)
+    mem.fill<U8>(mem.Ptr<U8>.from_addr(address + count), U8{0}, (count + 7) /% 8 * 8 - count)
 }
 
 // The call-code-address primitive: call the System V function at `address`

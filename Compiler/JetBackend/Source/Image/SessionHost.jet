@@ -5,6 +5,7 @@
 // refused effect or a crash never reaches the compiler; seccomp refuses its
 // effects.
 
+use core.mem
 use jet_foundation.[NameTable, name_find, name_find_bytes, name_index, name_intern_bytes, name_table_sized]
 
 // The child's descriptors are kept above every descriptor the child is given
@@ -324,11 +325,10 @@ x64_comptime_drain: fn(child: &X64ComptimeChild, errors: Bool) -> Bool {
     true
 }
 
-// Appends the `count` bytes at `address` (in our mapping) to `bytes`, a
-// byte at a time: shifting bytes out of a loaded word costs Int arithmetic
-// past the inline range on every word whose top bit is set.
+// Appends the `count` bytes at `address` (in our mapping) to `bytes` in one
+// move.
 #Unsafe("the caller's `count` bytes at `address` lie in our mapping") x64_comptime_take: fn(address: Int, count: Int, bytes: &[U8]) {
-    loop at in 0..<count -> bytes.push(U8{os_load_byte(address + at).bit_and(255)})
+    if !mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(address), count) -> panic("the comptime child's {count} reply bytes don't fit in memory")
 }
 
 // Monotonic milliseconds.

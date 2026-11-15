@@ -1,0 +1,55 @@
+// The loader's bulk copies and fills (Image/Loader.jet, OS/Linux.jet
+// os_copy_in_range) write raw mappings: the memfd's name page, the image's
+// segments, its patches and its file view. Each mapping is made through
+// os_map or os_map_with, which tell the memory sentry about it, so loading
+// an image in a test build never stops on a copy into one.
+use {
+    jet_backend.[
+        link_synth,
+        link_synth_code,
+        link_synth_function,
+        link_synth_object,
+        x64_bind_runtime_image,
+        x64_executable_load,
+        x64_image_file_read,
+        x64_image_load,
+        x64_image_unload,
+    ]
+    raw_files: core.files
+    raw_process: core.process
+    raw_sys: core.sys
+}
+
+// The runtime image of the compiler under test, never this test binary's.
+raw_image_path: fn() -> String {
+    jet: raw_sys.get("JET") ?? (raw_process.which("jet") ?? panic("set JET to the compiler under test"))
+    parts := jet.split("/").to_list()
+    _ := parts.pop()
+    "{parts.join("/")}/jet-runtime/jet_runtime.image"
+}
+
+// A program object whose one function, `name`, returns.
+raw_object: fn(name: String) -> [U8] Never! {
+    s := link_synth()
+    link_synth_function(s, name)
+    link_synth_code(s, [Int]{0xc3})
+    link_synth_object(s)
+}
+
+#Test("a whole image loads through a fresh memfd and its segment copies") {
+    bytes: raw_files.read_bytes(raw_image_path()) ?? panic("the compiler under test has no runtime image")
+    image: x64_image_load(bytes)
+    assert(image.failure == "", "the image loads: {image.failure}")
+    x64_image_unload(image)
+}
+
+#Test("a bound program loads over its image file with the image's patches and view") {
+    path: raw_image_path()
+    read: x64_image_file_read(path)
+    assert(read.failure == "", "the image file is read: {read.failure}")
+    entry := x64_bind_runtime_image("entry", raw_object("main"), read.bytes.move(), path, read.stamp.move(), 0, read.gap_at, read.gap, true)
+    assert(entry.errors.len() == 0, "the entry program binds: {entry.errors.join("; ")}")
+    image: x64_executable_load(entry.executable)
+    assert(image.failure == "", "the bound program loads: {image.failure}")
+    x64_image_unload(image)
+}
