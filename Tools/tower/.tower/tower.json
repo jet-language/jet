@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106450,
+    "rev": 106458,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59983,6 +59983,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "Gate p185 (dev b6b255de57, pinned to CPUs 0-23 with worker tests pinned to 24-31): wall 28.89 s, CPU 117.97 s, parallelism 4.1, peak 4,399 MiB; sema.finalize 4.23 s (p184 8.10 s, noisy), comptime 1.53 s, instructions -1.5%. The runtime step still spans 8.9 s; its per-phase rows dropped out of the speed report after the monotonic trace clock landed. Thread admission (default = CPUs in the affinity mask) is in the next batch."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c7 plan (Main, 2026-11-15): PrecompiledCore-4 measured InspectBuild check peak 3,054 MB on p184 (AST about 600 MB, checked body trees about 600 MB, name_references 136 MB, local keys about 120 MB; String-map probes under 0.1 s). Order: S4 flat AST (final API, then codemod migration in a few large SUBs, then the swap to columns with the tree layer deleted, about 6 SUBs, about -0.45 GB at the swap), then S3 interned symbol ids with a SymbolID to Symbol table (name_references -110 MB, local keys folded in). Interning map keys alone and early AST release were measured and rejected as trims."
         },
         {
@@ -60444,7 +60449,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T15:39:28.603Z",
+      "updated": "2026-11-15T15:57:07.990Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -74583,6 +74588,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c22 load path works on p185 (dev b6b255de57): RunColdContext checked outside the tree loads 2348 Core bodies from core.bodies (14 from text, 23.6 MB read); jet check 0.78-0.84 s against 1.27-1.52 s on p182, core_demand about 175 ms. Open: max RSS of that check rose to about 540 MB from about 345 MB on p184, and InspectBuild's check peak rose to 3,544 MB from 3,054 MB; both are back with PrecompiledCore-4."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Regression and gap (Main, 2026-11-15, gate p183 at 41f95a5016). The self-build went from 28.90 s (p182) to 38.31 s: the runtime step's Core compile spends 8.02 s in sema.bodies, against about 2.7 s in its finalize before. Suspect b193e874a1 (core-bodies-all keeps Core modules off the threads, which serializes a compile of Core itself). Separately, the gate-built jet loads no Core bodies: RunColdContext outside the tree shows bodies_loaded 0 and bodies_from_text 2362, and jet check is 1.2-2.0 s against p182's 1.27-1.52 s. Both went back to PrecompiledCore-4 as top priority; b193e874a1 is reverted if no fix lands in the next batch."
         },
         {
@@ -75366,7 +75376,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T14:13:11.339Z",
+      "updated": "2026-11-15T15:57:07.037Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -99799,11 +99809,11 @@
         {
           "n": 3,
           "text": "get, put, insert and query on a typed table record read and write sets for D-INVALIDATE1, so a query's read set invalidates a live query after a write. Proof: `jet test Compiler --profile cases --filter web_app/table_read_set_invalidates_live_query`. The table declaration form follows open decision D-DB-TABLE1.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:38:00.604Z"
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: cases --filter web_app/table_read_set_invalidates_live_query 1/1 PASS (landed 143bcde2e8, case fixed in f1a25b1980)",
+          "at": "2026-11-15T15:57:06.061Z"
         },
         {
           "n": 4,
@@ -99823,7 +99833,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:36.307Z",
-      "updated": "2026-11-15T14:48:09.859Z",
+      "updated": "2026-11-15T15:57:06.061Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -101887,20 +101897,20 @@
         {
           "n": 5,
           "text": "TypeInfo lists associated constants with their values and the generic bindings of a specialized type, and a numeric type reports its signedness and bit width. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/TypeFacts`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:40.963Z"
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: golden --filter Metaprogramming/Reflection/TypeFacts 3/3 PASS (landed 9557198431)",
+          "at": "2026-11-15T15:57:01.039Z"
         },
         {
           "n": 6,
           "text": "A type's implemented traits read as the typed `traits` list; no string `implements(\"X\")` read remains in Compiler/, Core or Examples (one cutover). Proof: `jet test Compiler --profile cases --filter reflect_traits_are_typed`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:40.963Z"
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: cases --filter reflect_traits_are_typed 1/1 PASS (landed 24845e3af9)",
+          "at": "2026-11-15T15:57:02.028Z"
         },
         {
           "n": 7,
@@ -101914,11 +101924,11 @@
         {
           "n": 8,
           "text": "An engine-style library marks entity types with its own marker and derives the count, the sorted names, per-type `Rows<T>` storage and default constructors from `Entity.reflect().uses`, with no hand-kept list; adding one marked struct, including a generated one, is the only edit needed for it to appear. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/EntityBuckets`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:40.963Z"
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: golden --filter EntityBuckets 1/1 PASS (landed 2eb629ef41; its sidecar case runs jet build then the built program, see #6846 c13)",
+          "at": "2026-11-15T15:57:03.008Z"
         },
         {
           "n": 9,
@@ -101969,7 +101979,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:40.964Z",
-      "updated": "2026-11-15T15:56:59.867Z",
+      "updated": "2026-11-15T15:57:03.009Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -104334,20 +104344,20 @@
         {
           "n": 2,
           "text": "Crewboard's policies hold: a Member's update of its own member row to Owner is refused; the creator rule admits an Owner member insert only for a project whose row names the caller as created_by and has no members, so create_project makes the caller its owner and nothing else can; an outsider's search and my_projects return nothing. Proof: `jet test Compiler --profile cases --filter web_app/crewboard_row_policies`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:54:11.163Z"
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: cases --filter web_app/crewboard_row_policies 1/1 PASS (landed 054383bbe1)",
+          "at": "2026-11-15T15:57:04.051Z"
         },
         {
           "n": 3,
           "text": "The guard runs on every path that reads or writes a guarded table: live queries, endpoints, jobs and webhooks; a seeded test tries each path with an unauthorized caller and every attempt is refused. Proof: `jet test Compiler --profile cases --filter db/row_policy_no_bypass`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:54:11.163Z"
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: cases --filter db/row_policy_no_bypass 1/1 PASS (landed f1a25b1980)",
+          "at": "2026-11-15T15:57:05.077Z"
         },
         {
           "n": 4,
@@ -104371,7 +104381,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:11.163Z",
-      "updated": "2026-11-15T14:48:11.775Z",
+      "updated": "2026-11-15T15:57:05.077Z",
       "updatedBy": "Main"
     },
     {
@@ -218069,6 +218079,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T15:57:07.990Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T15:57:07.037Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T15:57:06.061Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0429qak",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T15:57:05.077Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ems7zb",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T15:57:04.051Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ems7zb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T15:57:03.009Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T15:57:02.028Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T15:57:01.039Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#5"
+    },
     {
       "at": "2026-11-15T15:56:59.867Z",
       "by": "Main",
