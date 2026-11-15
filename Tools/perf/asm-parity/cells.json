@@ -44,6 +44,18 @@
     }
   },
   {
+    "name": "memfill",
+    "what": "the memory kernel's byte fill (mem.fill<U8>), 1 byte to 16 KiB at any alignment",
+    "gauntlet": [],
+    "jet": "memfill",
+    "args": ["4000"],
+    "expect": "sum 4189960000\n",
+    "kernel": {
+      "jet": { "routines": ["jet_rt_mem_fill"], "source": "run.jet", "use": "mem.fill<U8>(" },
+      "ref": { "routines": ["dispatch", "fill_avx2", "fill_sse2"], "source": "ref.S", "use": "call [rsp]", "data": 8 }
+    }
+  },
+  {
     "name": "sieve",
     "what": "the gauntlet numerics.int-kernel cell",
     "gauntlet": ["numerics.int-kernel"],

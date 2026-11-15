@@ -315,15 +315,15 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
         if rest != "" -> return Val("instruction takes no operands")
         x64_byte(s.code.bytes, if mnemonic == "cld" -> 0xfc else -> 0xfd)
     } else if mnemonic == "rep" {
-        // String moves and the word store: rcx counts and rdi writes, both
-        // advance; a move also reads and advances rsi, a store repeats rax.
+        // String moves and stores: rcx counts and rdi writes, both advance;
+        // a move also reads and advances rsi, a store repeats al or rax.
         // The template's #Unsafe contract owns every range.
-        if rest != "movsb" && rest != "movsq" && rest != "stosq" -> return Val("unsupported rep instruction")
+        if rest != "movsb" && rest != "movsq" && rest != "stosb" && rest != "stosq" -> return Val("unsupported rep instruction")
         x64_byte(s.code.bytes, 0xf3)
-        if rest != "movsb" -> x64_byte(s.code.bytes, 0x48)
-        x64_byte(s.code.bytes, if rest == "movsb" -> 0xa4 else if rest == "movsq" -> 0xa5 else -> 0xab)
+        if rest == "movsq" || rest == "stosq" -> x64_byte(s.code.bytes, 0x48)
+        x64_byte(s.code.bytes, if rest == "movsb" -> 0xa4 else if rest == "movsq" -> 0xa5 else if rest == "stosb" -> 0xaa else -> 0xab)
         s.written[1] = true
-        if rest != "stosq" -> s.written[6] = true
+        if rest == "movsb" || rest == "movsq" -> s.written[6] = true
         s.written[7] = true
     } else if mnemonic == "mov" || mnemonic == "movzx" {
         if operands.len() != 2 -> return Val("expected two operands")
@@ -419,6 +419,14 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
         }
         x64_modrm_mem(s.code, reg, mem.base, mem.disp)
         written = if mnemonic == "cmpxchg" -> X64_RAX else -> reg
+    } else if mnemonic == "movq" {
+        // A word register into an xmm register's low half, the high half
+        // cleared (66 REX.W 0F 6E /r).
+        if operands.len() != 2 -> return Val("expected two operands")
+        dst: x64_asm_xmm(first)
+        src: x64_asm_reg(s, second, true)
+        if dst < 0 || src < 0 -> return Val("expected an xmm register and a word register or operand")
+        x64_sse(s.code, 0x66, true, 0x6e, dst, src)
     } else if mnemonic == "movups" {
         // Sixteen unaligned bytes between an xmm register and memory.
         if operands.len() != 2 -> return Val("expected two operands")
