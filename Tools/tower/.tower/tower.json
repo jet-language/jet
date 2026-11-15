@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6893,
-    "rev": 103800,
+    "rev": 103811,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35452,6 +35452,11 @@
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: c1, c3, c11 restated; c2 merged into #3551 c6; c15, c16 moved to #6884 (sockets and TLS)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
           "text": "Progress criteria c13 and c14 went to #6875."
         },
         {
@@ -35778,11 +35783,12 @@
         {
           "n": 2,
           "text": "All system callers, routes, and generated projections use the canonical contract.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-22T00:15:54.870Z"
+          "evidence": "Merged into #3551 c6: callers using the canonical contract is the no-dispatcher-row outcome; #3551 c6 runs CoreSurfaceLedger --check over all Core modules",
+          "at": "2026-11-15T03:37:50.067Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
@@ -35870,20 +35876,22 @@
         {
           "n": 15,
           "text": "[#3557] One opaque connected TCP stream carrier consumed by TLS (no redial from host:port, no fd alias). TLS typed success and failure agree on every level.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:44.083Z"
+          "evidence": "Moved to #6884 c7: sockets and TLS streams live on #6884",
+          "at": "2026-11-15T03:37:51.069Z",
+          "closure": "obsolete"
         },
         {
           "n": 16,
           "text": "[#3747] Fix the defects found proving #3127: a TCPStream read through a by-value param ICEs (\"MIR place is not writable\") or sema must require `&`; TCPStream copies through net.set_timeout; slice semantics. Each gets a golden or UI proof, and #3127 is then re-proved.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:44.779Z"
+          "evidence": "Moved to #6884 c8: sockets and TLS streams live on #6884",
+          "at": "2026-11-15T03:37:52.157Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
@@ -35923,7 +35931,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:03.647Z",
-      "updated": "2026-11-15T03:37:43.465Z",
+      "updated": "2026-11-15T03:37:54.459Z",
       "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-13T01:49:48.348Z",
       "goals": [
@@ -39011,6 +39019,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: c3, c7, c9, c13, c14, c15 restated with proofs."
+        },
+        {
           "at": "2026-11-14",
           "by": "Main",
           "text": "Owner gate (found by G3Core-2 on dev 81b426cf46): c14`s \"ReadDir per-item errors\" and c15`s \"borrowed remaining-path projections\" each need public core.files API that does not exist. list_dir, iterdir and Directory.list return one IOError! for the whole directory, and core.files.path has only parts() -> [String], with no components cursor. Each needs an owner ballot with same-program alternatives before code. Decision (Main): the golden io/path_components goes ahead now for c14`s rows the existing surface covers (roots, empty paths, separators and prefixes over parts, root, anchor and drive), and the per-item-error and projection rows join it once their ballots are ratified."
@@ -39144,12 +39157,12 @@
         },
         {
           "n": 7,
-          "text": "(was #2385 c1) The ratified ASCII, path, walk, and args APIs ship with exact contracts and tier proofs; semantic guidance covers only complete fold ladders, normalized string-prefix containment, and directory-only walk filters, with negative fixtures and targeted expert allows.",
+          "text": "The ratified ASCII, path, walk and args APIs ship with exact contracts on O0, O1 and O2; the semantic lints cover only complete fold ladders, normalized string-prefix containment and directory-only walk filters, with negative fixtures. Proof: `jet test Compiler --profile golden --filter Systems/Files/Path` and `jet test Compiler --profile ui --filter path_prefix_containment`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T06:19:18.221Z"
+          "at": "2026-11-15T03:37:45.411Z"
         },
         {
           "n": 8,
@@ -39162,12 +39175,12 @@
         },
         {
           "n": 9,
-          "text": "(was #2385 c3) Path.is_within compares normalized lexical components across separator, dot, dot-dot, partial-name and root cases; docs and tests state it is not symlink truth, and canonicalized physical policy plus String-only legacy helpers stay quiet [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Path.is_within compares normalized lexical components across separator, dot, dot-dot, partial-name and root cases, and its docs and tests say it is not symlink truth. Proof: `jet test Compiler --profile cases --filter files/path_is_within`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:46:54.033Z"
+          "at": "2026-11-15T03:37:46.390Z"
         },
         {
           "n": 10,
@@ -39198,30 +39211,30 @@
         },
         {
           "n": 13,
-          "text": "Free space: Core reports a filesystem's available bytes and used percent for a path (statvfs) on every tier. chain.sh's store choice (40 GB free) and clean-nix-tmp's /tmp warning use it instead of df.",
+          "text": "Core reports a filesystem's available bytes and used percent for a path (statvfs) on every tier, so the lane scripts (chain.sh store choice, clean-nix-tmp /tmp warning) can drop df. Proof: `jet test Compiler --profile cases --filter files/free_space` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T16:17:46.853Z"
+          "at": "2026-11-15T03:37:49.167Z"
         },
         {
           "n": 14,
-          "text": "(was #3226) [#3374]  • Roots, empty paths, separators and prefixes (`/a/b`, `a/b`, empty, `.`, `//srv/share/x`, `C:\\x\\y`, `C:x`, `a//b/`). • ReadDir per-item errors, with no sorted-order promise. • Golden `io/path_components`. (was #3239 c19)",
+          "text": "Path components handle roots, empty paths, separators and prefixes (`/a/b`, `a/b`, empty, `.`, `//srv/share/x`, `C:\\x\\y`, `C:x`, `a//b/`), and ReadDir gives per-item errors with no sorted-order promise. Proof: `jet test Compiler --profile golden --filter Systems/Files/PathComponents`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:46:15.851Z"
+          "at": "2026-11-15T03:37:47.300Z"
         },
         {
           "n": 15,
-          "text": "(was #3374) Borrowed remaining-path projections keep the source lifetime and the exact current cursor position. Golden `io/path_components` shows both. (Re-homed 2026-11-04 by the #6563 c1 audit: this requirement was merged into a card that was later deleted and survived on no card.) (was #3239 c64)",
+          "text": "Borrowed remaining-path projections keep the source lifetime and the exact cursor position. Proof: `jet test Compiler --profile golden --filter Systems/Files/PathComponents`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:46:19.330Z"
+          "at": "2026-11-15T03:37:48.254Z"
         },
         {
           "n": 16,
@@ -39283,7 +39296,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:24.292Z",
-      "updated": "2026-11-15T03:37:44.345Z",
+      "updated": "2026-11-15T03:37:55.555Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -75150,6 +75163,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: c4-c9 restated with D-API-COMPOSE1=A, D-CALL-VARTAIL1=A and proofs (they came from #6375)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 1 criteria from archived #44: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -75260,7 +75278,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:54.632Z",
-      "updated": "2026-11-15T03:37:40.678Z",
+      "updated": "2026-11-15T03:37:53.171Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 12
     },
@@ -210296,6 +210314,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:37:55.555Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0iiv9ft",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:37:54.459Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0fi6uj5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:37:53.171Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ov7lce",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:37:52.157Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fi6uj5",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T03:37:51.069Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fi6uj5",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-15T03:37:50.067Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fi6uj5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T03:37:49.167Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0iiv9ft",
+      "note": "#13: proof; was: Free space: Core reports a filesystem's available bytes and used percent for a path (statvfs) on every tier. chain.sh's store choice (40 GB free) and clean-nix-tmp's /tmp warning use it instead of df."
+    },
+    {
+      "at": "2026-11-15T03:37:48.254Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0iiv9ft",
+      "note": "#15: strip debris; proof; was: (was #3374) Borrowed remaining-path projections keep the source lifetime and the exact current cursor position. Golden `io/path_components` shows both. (Re-homed 2026-11-04 by the #6563 c1 audit: this"
+    },
+    {
+      "at": "2026-11-15T03:37:47.300Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0iiv9ft",
+      "note": "#14: strip debris; proof; was: (was #3226) [#3374]  • Roots, empty paths, separators and prefixes (`/a/b`, `a/b`, empty, `.`, `//srv/share/x`, `C:\\x\\y`, `C:x`, `a//b/`). • ReadDir per-item errors, with no sorted-order promise. • Go"
+    },
+    {
+      "at": "2026-11-15T03:37:46.390Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0iiv9ft",
+      "note": "#9: strip debris; proof; was: (was #2385 c3) Path.is_within compares normalized lexical components across separator, dot, dot-dot, partial-name and root cases; docs and tests state it is not symlink truth, and canonicalized physic"
+    },
+    {
+      "at": "2026-11-15T03:37:45.411Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0iiv9ft",
+      "note": "#7: strip debris; proof; was: (was #2385 c1) The ratified ASCII, path, walk, and args APIs ship with exact contracts and tier proofs; semantic guidance covers only complete fold ladders, normalized string-prefix containment, and d"
+    },
     {
       "at": "2026-11-15T03:37:44.346Z",
       "by": "TowerKeeper-1",
