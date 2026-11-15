@@ -88,9 +88,9 @@ int_hazard_push_retired: fn(node: I64) {
 
 int_hazard_reload: fn(place: I64, callback: I64, context: I64) -> I64 {
     if (callback == I64{0}) -> return sync_load(place)
-    #Unsafe("the native numeric forwarder lends a pure reload callback and its live closure context for this synchronous call") {
-        return os_call_address_i64(callback, context)
-    }
+    // The native numeric forwarder lends a pure reload callback and its live
+    // closure context for this synchronous call.
+    coll_call_box(callback, context)
 }
 
 int_hazard_clone: fn(place: I64, initial: I64, callback: I64, context: I64) -> I64 {

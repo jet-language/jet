@@ -89,9 +89,9 @@ test_suite_state_ensure: fn() -> I64 {
     // The two inline result words go directly to TLS, never to the receiver.
     // Tuple result stores happen on return, after the runner's user code, so
     // no extra heap workspace or Rust/C pair-return convention is needed.
-    #Unsafe("the pinned named-fn box code takes its box and writable inline 16B result storage") {
-        _ := os_call_address_two_i64(trap_word(wrapping(runner + I64{8})), runner, state)
-    }
+    // The pinned named-fn box code takes its box and writable inline 16B result
+    // storage.
+    _ := coll_call_box_two(trap_word(wrapping(runner + I64{8})), runner, state)
     jet_int_owned_from_i64(trap_word(wrapping(state + I64{8})))
 }
 

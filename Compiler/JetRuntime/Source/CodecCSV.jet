@@ -261,9 +261,9 @@ csv_errors_free: fn(errors: I64) {
 // invoke(borrowed tree, value out, tag out, errors out, length out) ->
 // consumed mask, which is always zero: the callback borrows the tree.
 csv_invoke: fn(invoke: I64, tree: I64, value: I64, status: I64, errors: I64, count: I64) -> I64 {
-    #Unsafe("checked native Decode callback; the tree, value slot and out words stay live for the synchronous call") {
-        return os_call5_i64(invoke, tree, value, status, errors, count)
-    }
+    // A checked native Decode callback; the tree, value slot and out words stay
+    // live for the synchronous call.
+    coll_call5(invoke, tree, value, status, errors, count)
 }
 
 #Export(c) jet_rt_codec_csv: fn(text: I64, invoke: I64, meta: I64, values: I64, errors: I64, errors_len: I64) -> I64 {

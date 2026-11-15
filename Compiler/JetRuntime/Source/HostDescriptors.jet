@@ -129,9 +129,9 @@ host_descriptor_release: fn(token: I64) {
     }
     sync_mutex_unlock(host_descriptor_table)
     if (address != I64{0}) {
-        #Unsafe("the retired entry owned this mapping of exactly `size` bytes and no token names it now") {
-            _ := os_syscall_i64(I64{11}, address, size, I64{0}, I64{0}, I64{0}, I64{0})
-        }
+        // The retired entry owned this mapping of exactly `size` bytes and no
+        // token names it now.
+        alloc_unmap(address, size)
     }
     // close is not retried: Linux releases the descriptor even when it reports EINTR.
     if (descriptor >= I64{0}) -> _ := host_call(I64{3}, descriptor, I64{0}, I64{0})
@@ -452,9 +452,9 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
     if (failure >= I64{0}) -> failure = host_call_restarting(I64{72}, descriptor, I64{1033}, I64{6})
     address := I64{0}
     if (failure >= I64{0}) {
-        #Unsafe("a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size") {
-            address = os_syscall_i64(I64{9}, I64{0}, bytes, I64{3}, I64{1}, descriptor, I64{0})
-        }
+        // A fresh shared mapping of this sealed memfd; host_descriptor_release
+        // unmaps it exactly once with this size.
+        address = alloc_map_shared(bytes, descriptor)
         if (address < I64{0} && address >= I64{-4095}) {
             failure = address
             address = I64{0}
@@ -466,9 +466,8 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
     }
     filed: host_descriptor_insert(descriptor, address, bytes)
     if (filed < I64{0}) {
-        #Unsafe("the mapping made above was never filed, so this is its only owner") {
-            _ := os_syscall_i64(I64{11}, address, bytes, I64{0}, I64{0}, I64{0}, I64{0})
-        }
+        // The mapping made above was never filed, so this is its only owner.
+        alloc_unmap(address, bytes)
         _ := host_call(I64{3}, descriptor, I64{0}, I64{0})
         return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, I64{24}, error)
     }

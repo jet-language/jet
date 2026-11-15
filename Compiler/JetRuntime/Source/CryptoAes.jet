@@ -240,11 +240,11 @@ rt_aes_xts_double: fn(t: I64) {
     zero: wrapping(table + I64{16})
     at := wrapping(data + start)
     left := blocks
+    // H, H^2, H^3, H^4 for the four-block steps: each power is (H^k ^ 0) * H.
+    powers: if (left >= I64{4}) -> jet_rt_alloc(I64{64}, I64{8}) else -> I64{0}
+    if (powers != I64{0}) -> rt_text_bytes_copy(powers, h, I64{16})
     #Unsafe("y and h hold one block, the range check keeps every block inside the length borrowed bytes, and the powers table holds four") {
-        if (left >= I64{4}) {
-            // H, H^2, H^3, H^4: each power is (H^k ^ 0) * H.
-            powers: jet_rt_alloc(I64{64}, I64{8})
-            rt_text_bytes_copy(powers, h, I64{16})
+        if (powers != I64{0}) {
             k := I64{1}
             loop k < (I64{4}) {
                 power: wrapping(powers + k * I64{16})
@@ -257,18 +257,20 @@ rt_aes_xts_double: fn(t: I64) {
                 at = wrapping(at + I64{64})
                 left -= I64{4}
             }
-            k = I64{0}
-            loop k < (I64{64}) {
-                rt_text_store(wrapping(powers + k), I64{0})
-                k += I64{8}
-            }
-            jet_rt_free(powers, I64{64}, I64{8})
         }
         loop left > (I64{0}) {
             os_ghash1_i64(y, at, h, table)
             at = wrapping(at + I64{16})
             left -= I64{1}
         }
+    }
+    if (powers != I64{0}) {
+        k := I64{0}
+        loop k < (I64{64}) {
+            rt_text_store(wrapping(powers + k), I64{0})
+            k += I64{8}
+        }
+        jet_rt_free(powers, I64{64}, I64{8})
     }
     true
 }

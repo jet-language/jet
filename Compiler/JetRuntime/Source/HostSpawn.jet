@@ -490,8 +490,9 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
     fd_put(entry, I64{0}, rt_process_spawn_child_address())
     fd_put(entry, I64{8}, block)
     pid := I64{-1}
-    #Unsafe("mprotect makes the lowest page of this spawn's fresh mapping the guard; the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes") {
-        _ := os_syscall_i64(I64{10}, stack, I64{4096}, I64{0}, I64{0}, I64{0}, I64{0})
+    // The lowest page of this spawn's fresh stack mapping is the guard.
+    alloc_guard(stack, I64{4096})
+    #Unsafe("the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes") {
         _ := os_syscall_i64(I64{14}, I64{2}, block, wrapping(block + I64{8}), I64{8}, I64{0}, I64{0})
         pid = os_clone_i64(I64{16657}, entry, I64{0}, I64{0})
         _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})

@@ -194,6 +194,23 @@ alloc_unmap: fn(address: I64, bytes: I64) {
     }
 }
 
+// A fresh read/write shared mapping of `bytes` of the open `descriptor`, or
+// the kernel's negative errno; the caller unmaps a mapping exactly once with
+// alloc_unmap and this size.
+alloc_map_shared: fn(bytes: I64, descriptor: I64) -> I64 {
+    #Unsafe("a fresh shared mapping of the descriptor aliases no heap block; a failed syscall maps nothing") {
+        return os_syscall_i64(I64{9}, I64{0}, bytes, I64{3}, I64{1}, descriptor, I64{0})
+    }
+}
+
+// Makes `bytes` at the page-aligned `address` of a mapping the caller owns
+// inaccessible, as a stack guard.
+alloc_guard: fn(address: I64, bytes: I64) {
+    #Unsafe("the caller owns these whole pages of its own mapping and keeps no live value in them") {
+        _ := os_syscall_i64(I64{10}, address, bytes, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+
 // The page map: every region core.mem.Region.reserve maps
 // is registered by address, so growth and drop find the allocator that
 // served a block from the block's address alone, with no header word; a miss

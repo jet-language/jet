@@ -48,9 +48,9 @@ rt_crypto_entropy_step: fn(out: I64, count: I64) -> I64 {
     if (crypto_entropy_key != I64{0}) {
         state: jet_rt_tls_get(crypto_entropy_key)
         if (state != I64{0}) {
-            #Unsafe("the test/fault harness owns the synchronous callback and context until reset; the callback borrows only this writable suffix") {
-                return os_call3_i64(rt_text_word(state), rt_text_word(wrapping(state + I64{8})), out, count)
-            }
+            // The test/fault harness owns the synchronous callback and context
+            // until reset; the callback borrows only this writable suffix.
+            return coll_call3(rt_text_word(state), rt_text_word(wrapping(state + I64{8})), out, count)
         }
     }
     #Unsafe("Linux getrandom flags0 writes only the exclusively borrowed writable span and retains no address; kernel negative errno is preserved") {

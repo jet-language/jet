@@ -270,9 +270,9 @@ main_call_stopped: fn() {
     #Unsafe("an idempotent install: every writer stores the same code address") {
         main_process_stop_code = rt_process_stop_claim_address()
     }
-    #Unsafe("entry is the loader/object's checked executable System V void(void) address, not a closure header") {
-        os_call0_unit(entry)
-    }
+    // `entry` is the loader/object's checked executable System V void(void)
+    // address, not a closure header.
+    coll_call0_unit(entry)
     stopped: main_stopped_code
     if (stopped != I64{0}) -> _ := coll_call2(stopped, root, save)
     jet_rt_root_leave(root, save)

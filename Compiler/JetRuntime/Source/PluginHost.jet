@@ -120,9 +120,9 @@ pg_munmap: fn(address: I64, bytes: I64) {
 }
 
 pg_call: fn(code: I64, op: I64, instance: I64, area: I64) -> I64 {
-    #Unsafe("the linked guest entry reads the live instance and argument area only for this synchronous call") {
-        return os_call3_i64(code, op, instance, area)
-    }
+    // The linked guest entry reads the live instance and argument area only for
+    // this synchronous call.
+    coll_call3(code, op, instance, area)
 }
 
 pg_guest: fn(plugin: I64, op: I64) -> I64 {

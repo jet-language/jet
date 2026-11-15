@@ -140,14 +140,14 @@ trap_stop: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) {
     if (code == I64{0}) {
         rail: context_on_stop_rail_code
         if (rail == I64{0}) -> return
-        #Unsafe("jet_ctx_on_stop_arm installed jet_rt_context_on_stop, a runtime export whose System V signature takes these five words") {
-            _ := os_call5_i64(rail, kind, a, b, c, d)
-        }
+        // jet_ctx_on_stop_arm installed jet_rt_context_on_stop, a runtime export
+        // whose System V signature takes these five words.
+        _ := coll_call5(rail, kind, a, b, c, d)
         return
     }
-    #Unsafe("the serve entry installed jet_rt_comptime_serve_stop, a runtime export whose System V signature takes these five words") {
-        _ := os_call5_i64(code, kind, a, b, c, d)
-    }
+    // The serve entry installed jet_rt_comptime_serve_stop, a runtime export
+    // whose System V signature takes these five words.
+    _ := coll_call5(code, kind, a, b, c, d)
 }
 
 // A failed GS syscall cannot establish ownership of any TCB. Host stdout

@@ -48,9 +48,9 @@ parallel_worker_run: fn(worker: I64) {
         sync_store(wrapping(control + I64{104}), SCHEDULER_SCOPE_TASK)
         scheduler_control_enter(control, save)
         body: scheduler_body_enter()
-        #Unsafe("checked System V (env,start,end)->Unit callback; env remains borrowed and each range has exclusive output slots") {
-            os_call3_unit_i64(sync_load(wrapping(worker + I64{48})), sync_load(wrapping(worker + I64{40})), start, end)
-        }
+        // A checked System V (env,start,end)->Unit callback; env remains
+        // borrowed and each range has exclusive output slots.
+        coll_call3_unit(sync_load(wrapping(worker + I64{48})), sync_load(wrapping(worker + I64{40})), start, end)
         scheduler_body_leave(body)
         record: scheduler_control_take_stop(control)
         scheduler_control_leave(save)

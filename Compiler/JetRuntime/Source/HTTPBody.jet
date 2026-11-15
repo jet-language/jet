@@ -90,9 +90,9 @@ http_body_closure_drop: fn(closure: I64) {
         return
     }
     release: http_body_word(wrapping(closure + I64{16}))
-    #Unsafe("the last closure reference calls its generated release(box), which drops captures and frees the box") {
-        _ := os_call_address_i64(release, closure)
-    }
+    // The last closure reference calls its generated release(box), which drops
+    // captures and frees the box.
+    _ := coll_call_box(release, closure)
     // Cleanup must still finish if a captured finalizer delivers a stop.
     _ := http_body_stopped()
 }
@@ -195,9 +195,9 @@ http_body_close: fn(body: I64) -> I64 {
     if (http_body_cas(wrapping(body + I64{96}), I64{0}, I64{1}) != I64{0}) { return I64{0} }
     closer: http_body_word(wrapping(body + I64{40}))
     if (closer == I64{0}) { return I64{0} }
-    #Unsafe("the claimed closer code has the audited code(box) ABI, with no transition lock held") {
-        _ := os_call_address_i64(http_body_word(wrapping(closer + I64{8})), closer)
-    }
+    // The claimed closer code has the audited code(box) ABI, with no transition
+    // lock held.
+    _ := coll_call_box(http_body_word(wrapping(closer + I64{8})), closer)
     if http_body_stopped() -> I64{-5} else -> I64{0}
 }
 
@@ -307,10 +307,9 @@ http_body_list: fn(count: I64) -> I64 {
                 // Advertise the remaining bounded capacity on every callback.
                 http_body_store(wrapping(chunks + I64{40}), count)
                 reader: http_body_word(wrapping(body + I64{32}))
-                status := I64{0}
-                #Unsafe("reader code(box, descriptor) borrows exactly count writable U8 bytes; no body lock is held") {
-                    status = os_call_address_two_i64(http_body_word(wrapping(reader + I64{8})), reader, wrapping(chunks + I64{32}))
-                }
+                // Reader code(box, descriptor) borrows exactly `count` writable
+                // U8 bytes; no body lock is held.
+                status := coll_call_box_two(http_body_word(wrapping(reader + I64{8})), reader, wrapping(chunks + I64{32}))
                 if http_body_stopped() {
                     jet_rt_http_body_error_drop(http_body_word(wrapping(chunks + I64{56})))
                     http_body_store(wrapping(chunks + I64{56}), I64{0})

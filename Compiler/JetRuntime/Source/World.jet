@@ -90,9 +90,9 @@ world_monotonic_ns: fn(output: I64) -> Bool {
 controlled_monotonic_ns: fn(output: I64) -> Bool {
     provider: rt_time_monotonic_provider_get()
     if (provider == I64{0}) -> return false
-    #Unsafe("registered provider code remains live at this world/lease boundary; output lends one writable word") {
-        return (os_call_address_i64(provider, output).bit_and(I64{255})) != I64{0}
-    }
+    // Registered provider code remains live at this world/lease boundary;
+    // `output` lends one writable word.
+    (coll_call_box(provider, output).bit_and(I64{255})) != I64{0}
 }
 #Export(c) jet_rt_time_monotonic_provider_set: fn(provider: I64) -> I64 {
     rt_time_monotonic_provider_set(provider)

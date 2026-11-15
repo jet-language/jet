@@ -23,12 +23,11 @@ storage_arena_release: fn(bytes: I64) { jet_rt_mem_arena_release(bytes) }
 // FixedHeader32 lives INSIDE the backing=[previous,value-offset,drop-thunk,size].
 ARENA_BLOCKS: I64{80}
 ARENA_BYTES: I64{88}
-storage_word: fn(address: I64) -> I64 {
-    #Unsafe("address borrows an initialized word in a native allocator header, descriptor, drop record, or Fixed metadata span") { return os_load_i64(address) }
-}
-storage_put: fn(address: I64, value: I64) {
-    #Unsafe("address exclusively owns one aligned writable allocator or Fixed metadata word") { os_store_i64(address, value) }
-}
+// `storage_word` borrows an initialized word in a native allocator header,
+// descriptor, drop record, or Fixed metadata span; `storage_put` exclusively
+// owns one aligned writable allocator or Fixed metadata word.
+storage_word: fn(address: I64) -> I64 { rt_text_word(address) }
+storage_put: fn(address: I64, value: I64) { rt_text_store(address, value) }
 storage_zero: fn(address: I64, bytes: I64) {
     offset := I64{0}
     loop offset < bytes {
@@ -85,9 +84,10 @@ storage_list_free: fn(list: I64, stride: I64) {
     if (capacity != I64{0}) -> jet_rt_free(storage_word(wrapping(list + I64{16})), capacity * stride, I64{8})
 }
 storage_drop_at: fn(code: I64, pointer: I64) {
-    #Unsafe("code is the Lower-generated address-based lazy.drop thunk for the initialized value at pointer; its SysV result is Unit and discarded, and no allocator lock is held") {
-        _ := os_call1_i64(code, pointer)
-    }
+    // `code` is the Lower-generated address-based lazy.drop thunk for the
+    // initialized value at `pointer`; its SysV result is Unit and discarded, and
+    // no allocator lock is held.
+    _ := coll_call1(code, pointer)
 }
 storage_record: fn(handle: I64, pointer: I64, bytes: I64, drop_fn: I64) {
     drops: wrapping(handle + I64{32})

@@ -123,10 +123,10 @@ comptime_serve_loop: fn(frame: I64) -> I64 {
         e: trap_word(wrapping(frame + I64{40}))
         f: trap_word(wrapping(frame + I64{48}))
         if (kind == I64{1}) {
-            result := I64{0}
-            #Unsafe("the compiler calls an entry of this image's table, or a runtime export it resolved, on the word arguments that entry's System V signature takes") {
-                result = os_call5_i64(a, b, c, d, e, f)
-            }
+            // The compiler calls an entry of this image's table, or a runtime
+            // export it resolved, on the word arguments that entry's System V
+            // signature takes.
+            result: coll_call5(a, b, c, d, e, f)
             // The call runs as jet_rt_main's entry (the serve entry's root):
             // a stop it published there rather than served (process.exit,
             // whose status is no stop to serve) ends the child here, as

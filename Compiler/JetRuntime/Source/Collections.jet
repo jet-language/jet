@@ -5,17 +5,8 @@
 // The native [U8] carrier is packed, matching checked StorageLayout(U8)
 // and the generated C ABI's u8 elements. Every host byte-list seam shares it.
 RT_HOST_U8_STRIDE: I64{1}
-host_u8_get: fn(data: I64, index: I64) -> I64 {
-    #Unsafe("data lends index's initialized packed native U8 element") {
-        return os_load_u8(wrapping(data + index * RT_HOST_U8_STRIDE))
-    }
-}
-host_u8_put: fn(data: I64, index: I64, byte: I64) {
-    #Unsafe("data owns index's writable packed native U8 element") {
-        address: wrapping(data + index * RT_HOST_U8_STRIDE)
-        os_store_u8(address, byte)
-    }
-}
+host_u8_get: fn(data: I64, index: I64) -> I64 { rt_text_byte(wrapping(data + index * RT_HOST_U8_STRIDE)) }
+host_u8_put: fn(data: I64, index: I64, byte: I64) { rt_text_put(wrapping(data + index * RT_HOST_U8_STRIDE), byte) }
 
 // core.mem.__list_reserve_exact (Lists.jet lower_encoding_list_leaf): grow the
 // exclusively lent native List header to exactly len + additional elements of
@@ -97,166 +88,6 @@ coll_copy: fn(source: I64, target: I64, size: I64) {
     }
 }
 
-// memmove for native lowering: moves `count` bytes from `source` to `target`;
-// the ranges may overlap. List growth, Map insertion and Map removal move
-// their entries with one call instead of a per-element IR loop. Up to 128
-// bytes, one leaf of the count's class moves them, loading every byte before
-// it stores any, so an overlap either way moves as if through a buffer. A
-// longer move steps 64 bytes at a time, each step's loads before its stores:
-// downward from the end when the target starts inside the source, else
-// upward. The steps leave under 64 bytes, at the bottom or the top, to the
-// short classes. A longer move between disjoint ranges of at least
-// RT_MOVE_STRING_FROM bytes is one ascending string move instead.
-RT_MOVE_STRING_FROM: I64{2048}
-
-#Export(c) jet_rt_mem_move: fn(target: I64, source: I64, count: I64) {
-    #Unsafe("native lowering owns both live ranges of count bytes; each leaf loads all its bytes before it stores any, and the steps run in the order the overlap requires") {
-        to := target
-        from := source
-        left := count
-        if (left > I64{128}) {
-            if (from < to && to < wrapping(from + left)) {
-                loop left >= (I64{64}) {
-                    left = wrapping(left - I64{64})
-                    os_move_64_i64(wrapping(to + left), wrapping(from + left))
-                }
-            } else if (left >= RT_MOVE_STRING_FROM && (wrapping(to + left) <= from || wrapping(from + left) <= to)) {
-                os_copy_ascending_i64(to, from, left)
-                return
-            } else {
-                loop left >= (I64{64}) {
-                    os_move_64_i64(to, from)
-                    to = wrapping(to + I64{64})
-                    from = wrapping(from + I64{64})
-                    left = wrapping(left - I64{64})
-                }
-            }
-        }
-        if (left <= I64{16}) {
-            if (left >= I64{8}) {
-                os_move_8_16_i64(to, from, left)
-            } else if (left >= I64{4}) {
-                os_move_4_7_i64(to, from, left)
-            } else if (left > I64{0}) {
-                os_move_1_3_i64(to, from, left)
-            }
-        } else if (left <= I64{32}) {
-            os_move_16_32_i64(to, from, left)
-        } else if (left <= I64{64}) {
-            os_move_32_64_i64(to, from, left)
-        } else {
-            os_move_64_128_i64(to, from, left)
-        }
-    }
-}
-
-// List fill for native lowering (JetIR BuildRoutes.jet ir_list_fill_span):
-// `total` bytes at `target` become the `period` bytes at `source` repeated,
-// so a total that is not a whole number of periods ends with a partial one.
-// The source lies outside the target bytes. A period of 1, 2, 4 or 8 bytes
-// is one repeated word, stored with `rep stosq` and the tail's bytes. Any
-// other period is copied once, the filled prefix doubles onto itself up to
-// a chunk of at least RT_FILL_CHUNK bytes (a whole number of periods, so
-// every copy starts on a period), and that chunk repeats over the rest.
-RT_FILL_CHUNK: I64{16384}
-
-#Export(c) jet_rt_mem_fill: fn(target: I64, source: I64, period: I64, total: I64) {
-    if (total <= I64{0} || period <= I64{0}) -> return
-    #Unsafe("native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes") {
-        if (I64{8} % period == I64{0}) {
-            word := I64{0}
-            lane := I64{0}
-            loop lane < (I64{8}) {
-                byte: os_load_u8(wrapping(source + lane % period))
-                word = word.bit_or(byte << (lane << I64{3}))
-                lane += I64{1}
-            }
-            words: total >> I64{3}
-            if (words > I64{0}) -> os_fill_words_i64(target, word, words)
-            // Every word starts on a period, so the tail is the word's low bytes.
-            at := words << I64{3}
-            shift := I64{0}
-            loop at < total {
-                os_store_u8(wrapping(target + at), (word >> shift).bit_and(I64{255}))
-                at += I64{1}
-                shift += I64{8}
-            }
-            return
-        }
-        filled := if (period < total) -> period else -> total
-        os_copy_ascending_i64(target, source, filled)
-        loop filled < total && filled < RT_FILL_CHUNK {
-            moved: if (filled < total - filled) -> filled else -> total - filled
-            os_copy_ascending_i64(wrapping(target + filled), target, moved)
-            filled += moved
-        }
-        chunk: filled
-        loop filled < total {
-            moved: if (chunk < total - filled) -> chunk else -> total - filled
-            os_copy_ascending_i64(wrapping(target + filled), target, moved)
-            filled += moved
-        }
-    }
-}
-
-// C's memory functions, under their C names, for the C a program links
-// beside the runtime (vendored and user C, and the code a C compiler writes
-// for struct copies): the runtime pack carries no libc copy of them (#6693).
-// Each returns its target, as C's do; a count of zero or less touches nothing.
-#Export(c) memmove: fn(target: I64, source: I64, count: I64) -> I64 {
-    jet_rt_mem_move(target, source, count)
-    target
-}
-
-// Overlap is undefined for C's memcpy; the move handles it anyway.
-#Export(c) memcpy: fn(target: I64, source: I64, count: I64) -> I64 {
-    jet_rt_mem_move(target, source, count)
-    target
-}
-
-// The low byte of `value` in each of `count` bytes: whole words first, then
-// the tail.
-#Export(c) memset: fn(target: I64, value: I64, count: I64) -> I64 {
-    if (count <= I64{0}) -> return target
-    byte: value.bit_and(I64{255})
-    words: count >> I64{3}
-    #Unsafe("C's caller owns count writable bytes at target") {
-        // The byte in all eight lanes of a word.
-        pattern: wrapping(byte * I64{72340172838076673})
-        word := I64{0}
-        loop word < words {
-            os_store_i64(wrapping(target + (word << I64{3})), pattern)
-            word += I64{1}
-        }
-        at := words << I64{3}
-        loop at < count {
-            os_store_u8(wrapping(target + at), byte)
-            at += I64{1}
-        }
-    }
-    target
-}
-
-// The first differing byte of the two ranges, as unsigned bytes: below zero
-// when `left`'s is lower, above when higher, 0 when the ranges are equal.
-// Equal words are skipped whole.
-#Export(c) memcmp: fn(left: I64, right: I64, count: I64) -> I64 {
-    at := I64{0}
-    last_word: count - I64{8}
-    #Unsafe("C's caller owns count readable bytes at left and at right") {
-        loop at <= last_word && os_load_i64(wrapping(left + at)) == os_load_i64(wrapping(right + at)) {
-            at += I64{8}
-        }
-        loop at < count {
-            a: os_load_u8(wrapping(left + at))
-            b: os_load_u8(wrapping(right + at))
-            if (a != b) -> return a - b
-            at += I64{1}
-        }
-    }
-    I64{0}
-}
-
 coll_meta_copy: fn(source: I64) -> I64 {
     if (source == I64{0}) { return I64{0} }
     target: jet_rt_alloc(I64{72}, I64{8})
@@ -273,42 +104,6 @@ coll_meta_drop: fn(meta: I64) {
     coll_meta_drop(trap_word(wrapping(meta + I64{56})))
     coll_meta_drop(trap_word(wrapping(meta + I64{64})))
     jet_rt_free(meta, I64{72}, I64{8})
-}
-
-coll_call1: fn(code: I64, a: I64) -> I64 {
-    #Unsafe("checked native value-returning callback; its raw argument stays valid for the synchronous call") {
-        return os_call1_i64(code, a)
-    }
-}
-
-coll_call2: fn(code: I64, a: I64, b: I64) -> I64 {
-    #Unsafe("checked native value-returning callback; both raw arguments stay valid for the synchronous call") {
-        return os_call2_i64(code, a, b)
-    }
-}
-
-coll_call3: fn(code: I64, a: I64, b: I64, c: I64) -> I64 {
-    #Unsafe("checked unary closure adapter with borrowed environment, input and output slots") {
-        return os_call3_i64(code, a, b, c)
-    }
-}
-
-coll_call4: fn(code: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
-    #Unsafe("checked binary closure adapter with live environment, inputs and output slots") {
-        return os_call4_i64(code, a, b, c, d)
-    }
-}
-
-coll_call1_unit: fn(code: I64, a: I64) {
-    #Unsafe("checked native Unit callback; its raw argument stays valid for the synchronous call") {
-        os_call1_unit_i64(code, a)
-    }
-}
-
-coll_call2_unit: fn(code: I64, a: I64, b: I64) {
-    #Unsafe("checked Unit clone callback; source remains live and target lends writable output storage") {
-        os_call2_unit_i64(code, a, b)
-    }
 }
 
 coll_slot_new: fn(meta: I64) -> I64 {
