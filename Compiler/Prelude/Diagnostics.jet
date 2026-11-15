@@ -22445,6 +22445,32 @@ CallerWithoutSignedInPath: struct {
     }
 }
 
+LiveNotOneRemoteCall: struct {
+    found: String
+
+    impl Diagnostic {
+        code: "E2816"
+        safety_class: .Soundness
+        safety_reason: "A live query is keyed by the one endpoint call it makes; a closure that did anything else would share and cache results under a key that does not name what it ran."
+        expert_path: "none: a named source function, `app.live(source, args…)`, is the form for a query that is not one remote call"
+        stage: [.Compile]
+        meaning: "An `app.live` closure that is not one call of an `app.Remote` endpoint with codable arguments"
+        detail: true
+
+        what: fn(self) -> String {
+            "This `app.live` closure is not one call of an `app.Remote` endpoint: {self.found}."
+        }
+
+        why: fn(self) -> String {
+            "A live query is keyed by the endpoint it calls and that call's encoded arguments, so its subscription, its cache and the readers that share it all name that one call; a closure that does anything else has no such key."
+        }
+
+        fix: fn(self) -> String {
+            "Make the closure's whole body one call, `remote.method(args)`, where `remote` names an `app.Remote<S>`, `method` is an `#App.SignedIn` or `#App.Public` method of `S`, and each argument's type derives `Encode` and `Decode`; or pass a named source, `app.live(source, args…)`."
+        }
+    }
+}
+
 UnmountedHttpRoutes: struct {
     method: String
     type: String
