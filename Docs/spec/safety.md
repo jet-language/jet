@@ -2064,84 +2064,84 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 236,
+      "line": 238,
       "column": 5,
       "reason": "the descriptor is this map's own; mmap creates exactly length read-only private bytes; the map owner alone unmaps them"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 241,
+      "line": 255,
       "column": 5,
       "reason": "closes a temp-file descriptor this map alone owns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 248,
+      "line": 262,
       "column": 5,
       "reason": "fcntl releases the lease on the map's own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 258,
+      "line": 272,
       "column": 5,
       "reason": "fstatfs writes one 120-byte statfs into the map's 160-byte scratch"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 304,
+      "line": 318,
       "column": 5,
       "reason": "FICLONE shares the file's blocks with the empty unnamed spare this map owns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 321,
+      "line": 335,
       "column": 9,
       "reason": "copy_file_range and sendfile move bytes between two descriptors this map owns; the offset word is the caller's"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 335,
+      "line": 349,
       "column": 5,
       "reason": "ftruncate sizes the unnamed temp file this map owns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 371,
+      "line": 385,
       "column": 5,
       "reason": "fcntl names the lease-break signal for, then takes a read lease on, the map's own read-only descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 395,
+      "line": 409,
       "column": 9,
       "reason": "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 399,
+      "line": 413,
       "column": 9,
       "reason": "written under the map registry mutex, before any lease can name a slot"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 454,
+      "line": 468,
       "column": 9,
       "reason": "memfd_create reads the slot's NUL-terminated name word; MFD_CLOEXEC"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerMapped.jet",
-      "line": 475,
+      "line": 489,
       "column": 5,
       "reason": "MAP_FIXED replaces exactly the held map's own read-only private pages with the same length of its copy; borrowed views keep their addresses"
     },
@@ -4234,7 +4234,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Trap.jet",
-      "line": 79,
+      "line": 102,
       "column": 9,
       "reason": "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes"
     },
@@ -10580,18 +10580,18 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 9:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 152:5 | "page is a fresh private page: the path, then the [type, value] pairs read into it" |
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 48:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 236:5 | "the descriptor is this map's own; mmap creates exactly length read-only private bytes; the map owner alone unmaps them" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 241:5 | "closes a temp-file descriptor this map alone owns" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 248:5 | "fcntl releases the lease on the map's own descriptor" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 258:5 | "fstatfs writes one 120-byte statfs into the map's 160-byte scratch" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 304:5 | "FICLONE shares the file's blocks with the empty unnamed spare this map owns" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 321:9 | "copy_file_range and sendfile move bytes between two descriptors this map owns; the offset word is the caller's" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 335:5 | "ftruncate sizes the unnamed temp file this map owns" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 371:5 | "fcntl names the lease-break signal for, then takes a read lease on, the map's own read-only descriptor" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 395:9 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 399:9 | "written under the map registry mutex, before any lease can name a slot" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 454:9 | "memfd_create reads the slot's NUL-terminated name word; MFD_CLOEXEC" |
-| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 475:5 | "MAP_FIXED replaces exactly the held map's own read-only private pages with the same length of its copy; borrowed views keep their addresses" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 238:5 | "the descriptor is this map's own; mmap creates exactly length read-only private bytes; the map owner alone unmaps them" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 255:5 | "closes a temp-file descriptor this map alone owns" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 262:5 | "fcntl releases the lease on the map's own descriptor" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 272:5 | "fstatfs writes one 120-byte statfs into the map's 160-byte scratch" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 318:5 | "FICLONE shares the file's blocks with the empty unnamed spare this map owns" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 335:9 | "copy_file_range and sendfile move bytes between two descriptors this map owns; the offset word is the caller's" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 349:5 | "ftruncate sizes the unnamed temp file this map owns" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 385:5 | "fcntl names the lease-break signal for, then takes a read lease on, the map's own read-only descriptor" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 409:9 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 413:9 | "written under the map registry mutex, before any lease can name a slot" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 468:9 | "memfd_create reads the slot's NUL-terminated name word; MFD_CLOEXEC" |
+| Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 489:5 | "MAP_FIXED replaces exactly the held map's own read-only private pages with the same length of its copy; borrowed views keep their addresses" |
 | Compiler | Compiler/JetRuntime/Source/Comptime.jet | 15:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 89:5 | "the filter is installed once, on the image's only thread, before any call it traps" |
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 174:13 | "the compiler admits between calls of the one thread it drives; the handler only reads the flag" |
@@ -10890,7 +10890,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 963:9 | "a credential system call takes word arguments and retains no memory" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 975:13 | "written under the registry mutex, before any handler can run" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 21:5 | "audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 79:9 | "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes" |
+| Compiler | Compiler/JetRuntime/Source/Trap.jet | 102:9 | "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 59:5 | "a web page's module runs on one thread" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 71:5 | "only an attached web build records, on its one thread" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 81:5 | "a web page's module runs on one thread" |
