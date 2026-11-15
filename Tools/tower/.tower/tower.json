@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 106550,
+    "rev": 106575,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -82583,6 +82583,87 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T11:33:48.242Z"
+        },
+        {
+          "n": 3,
+          "text": "The three C-library gallery programs (libm, zlib, libpng) call C through `use c.<lib>` with no `#Unsafe`, pointer or binding file and print the card's outputs. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/CLibraries` on O0, O1 and O2. (was #6505 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:45:00.212Z"
+        },
+        {
+          "n": 4,
+          "text": "The three callback programs (qsort with a capturing comparator, an event loop, foreign-thread delivery) honor each retention fact and print the card's outputs, and a capture the retention forbids is a registered error. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/Callbacks` on O0, O1 and O2, and `jet test Compiler --profile ui --filter ffi_callback_retention_refused`. (was #6506 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:45:08.693Z"
+        },
+        {
+          "n": 5,
+          "text": "A prototype binds one C++ class (constructor, method, destructor) and prints identical output on O0, O1 and O2, or a note records exactly which tier blocked it and why. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/CppClass`. (was #6507 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:45:16.457Z"
+        },
+        {
+          "n": 6,
+          "text": "`#Export(c, python, js)` libraries build with `jet build --lib --host <host>`, and the card's host programs in C, Python and JavaScript call them with the shown output. Proof: `jet test Compiler --profile cases --filter ffi_export/host_programs_`. (was #6508 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:45:23.761Z"
+        },
+        {
+          "n": 7,
+          "text": "The eight Examples/Interop/FFI/Projections/*/guest.jet exports with a declared failure carrier (document_open, document_bytes, view_at, document_replace, document_close: `-> T? ProjectionError!`) project their errors into C, C++, Go, JavaScript, Python, Rust and Zig. Sema's E3203 refusal of a carrier on `#Export(c)` (from #5454 c98) is lifted only together with the built projection, so sema and codegen agree, and build.sh uses the PascalCase directories. Proof: `jet test Compiler --profile golden --filter Interop/FFI/Projections` on every applicable tier. (was #6508 c2)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:45:26.981Z"
+        },
+        {
+          "n": 8,
+          "text": "The R, Perl, PHP, Ruby, PowerShell and Octave binding generators emit one typed decode_response helper per binding; every generated operation delegates through it, raw extern access stays available, and generated error domains are valid. Proof: `jet test Compiler --profile cases --filter binding_generators/decode_response_` plus an Octave round-trip case. (was #6508 c3)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:45:30.369Z"
+        },
+        {
+          "n": 9,
+          "text": "The three isolation programs (a C decoder under `.Wasm`, a closed binary under `.Process`, the hardened profile) run with one `isolate:` line and no call-site change and print the card's outputs. Proof: `jet test Compiler --profile cases --filter ffi_isolation/gallery_`. (was #6509 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:45:36.257Z"
+        },
+        {
+          "n": 10,
+          "text": "The three Python programs (statistics, numpy, pandas with matplotlib) run through `use py.<package>` and print the card's outputs. Proof: `jet test Compiler --profile cases --filter ffi_python/gallery_`. (was #6510 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:45:41.636Z"
+        },
+        {
+          "n": 11,
+          "text": "The three Rust-crate programs (regex, serde_json, a crate with its own threads) run through `use rust.<crate>` and print the card's outputs. Proof: `jet test Compiler --profile cases --filter ffi_rust/gallery_`. (was #6511 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T22:45:46.853Z"
         }
       ],
       "refs": [],
@@ -82597,9 +82678,9 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:23.352Z",
-      "updated": "2026-11-15T11:35:57.293Z",
-      "updatedBy": "TowerKeeper-2",
-      "criteriaLastN": 2
+      "updated": "2026-11-15T22:45:46.853Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 11
     },
     {
       "id": "c0x2wq8a",
@@ -82610,7 +82691,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -82619,6 +82700,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6505 cN). Board cleanup, one card per stream."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -82629,11 +82715,12 @@
         {
           "n": 1,
           "text": "The three C-library gallery programs (libm, zlib, libpng) call C through `use c.<lib>` with no `#Unsafe`, pointer or binding file and print the card's outputs. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/CLibraries` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:30.935Z"
+          "evidence": "Merged into #6504 c3 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:03.207Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -82648,9 +82735,10 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:26.144Z",
-      "updated": "2026-11-15T05:12:30.935Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 1
+      "updated": "2026-11-15T22:45:06.744Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:06.743Z"
     },
     {
       "id": "c03t8ic0",
@@ -82661,7 +82749,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -82670,6 +82758,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6506 cN). Board cleanup, one card per stream."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -82680,11 +82773,12 @@
         {
           "n": 1,
           "text": "The three callback programs (qsort with a capturing comparator, an event loop, foreign-thread delivery) honor each retention fact and print the card's outputs, and a capture the retention forbids is a registered error. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/Callbacks` on O0, O1 and O2, and `jet test Compiler --profile ui --filter ffi_callback_retention_refused`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:31.829Z"
+          "evidence": "Merged into #6504 c4 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:10.715Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -82699,9 +82793,10 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:28.728Z",
-      "updated": "2026-11-15T05:12:31.829Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 1
+      "updated": "2026-11-15T22:45:14.379Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:14.379Z"
     },
     {
       "id": "c0xf8qpl",
@@ -82712,7 +82807,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -82721,6 +82816,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6507 cN). Board cleanup, one card per stream."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -82736,11 +82836,12 @@
         {
           "n": 1,
           "text": "A prototype binds one C++ class (constructor, method, destructor) and prints identical output on O0, O1 and O2, or a note records exactly which tier blocked it and why. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/CppClass`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:32.725Z"
+          "evidence": "Merged into #6504 c5 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:18.545Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -82755,8 +82856,9 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:30.519Z",
-      "updated": "2026-11-15T05:12:32.725Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T22:45:21.706Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-15T22:45:21.706Z"
     },
     {
       "id": "c03yyxl3",
@@ -82767,7 +82869,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -82776,6 +82878,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 3 open criteria now live there, each tagged (was #6508 cN). Board cleanup, one card per stream."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -82786,29 +82893,32 @@
         {
           "n": 1,
           "text": "`#Export(c, python, js)` libraries build with `jet build --lib --host <host>`, and the card's host programs in C, Python and JavaScript call them with the shown output. Proof: `jet test Compiler --profile cases --filter ffi_export/host_programs_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:33.623Z"
+          "evidence": "Merged into #6504 c6 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:25.485Z",
+          "closure": "duplicate"
         },
         {
           "n": 2,
           "text": "The eight Examples/Interop/FFI/Projections/*/guest.jet exports with a declared failure carrier (document_open, document_bytes, view_at, document_replace, document_close: `-> T? ProjectionError!`) project their errors into C, C++, Go, JavaScript, Python, Rust and Zig. Sema's E3203 refusal of a carrier on `#Export(c)` (from #5454 c98) is lifted only together with the built projection, so sema and codegen agree, and build.sh uses the PascalCase directories. Proof: `jet test Compiler --profile golden --filter Interop/FFI/Projections` on every applicable tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:34.565Z"
+          "evidence": "Merged into #6504 c7 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:28.874Z",
+          "closure": "duplicate"
         },
         {
           "n": 3,
           "text": "The R, Perl, PHP, Ruby, PowerShell and Octave binding generators emit one typed decode_response helper per binding; every generated operation delegates through it, raw extern access stays available, and generated error domains are valid. Proof: `jet test Compiler --profile cases --filter binding_generators/decode_response_` plus an Octave round-trip case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:35.528Z"
+          "evidence": "Merged into #6504 c8 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:32.068Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -82823,9 +82933,10 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:33.092Z",
-      "updated": "2026-11-15T05:12:35.528Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 3
+      "updated": "2026-11-15T22:45:34.715Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-15T22:45:34.715Z"
     },
     {
       "id": "c05aa8kj",
@@ -82836,7 +82947,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -82845,6 +82956,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6509 cN). Board cleanup, one card per stream."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -82855,11 +82971,12 @@
         {
           "n": 1,
           "text": "The three isolation programs (a C decoder under `.Wasm`, a closed binary under `.Process`, the hardened profile) run with one `isolate:` line and no call-site change and print the card's outputs. Proof: `jet test Compiler --profile cases --filter ffi_isolation/gallery_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:36.444Z"
+          "evidence": "Merged into #6504 c9 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:37.883Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -82874,9 +82991,10 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:35.348Z",
-      "updated": "2026-11-15T05:12:36.444Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 1
+      "updated": "2026-11-15T22:45:40.238Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:40.238Z"
     },
     {
       "id": "c03kbmfy",
@@ -82887,7 +83005,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -82896,6 +83014,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6510 cN). Board cleanup, one card per stream."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -82906,11 +83029,12 @@
         {
           "n": 1,
           "text": "The three Python programs (statistics, numpy, pandas with matplotlib) run through `use py.<package>` and print the card's outputs. Proof: `jet test Compiler --profile cases --filter ffi_python/gallery_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:37.392Z"
+          "evidence": "Merged into #6504 c10 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:43.203Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -82925,9 +83049,10 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:37.420Z",
-      "updated": "2026-11-15T05:12:37.392Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 1
+      "updated": "2026-11-15T22:45:45.492Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:45.492Z"
     },
     {
       "id": "c00n89mp",
@@ -94518,7 +94643,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -94526,7 +94651,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6727: its 1 open criterion now lives there, tagged (was #6724 c3). Board cleanup, one card per stream."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -94550,11 +94681,12 @@
         {
           "n": 3,
           "text": "A census confirms that no other lowering in Compiler/JetIR lowers user code inside a branch without saving and joining binding ownership. Proof: `jet test tests/guards --filter ir_branch_ownership_join`, which fails on a branch lowering that skips the shared save/restore and ir_meet_paths join.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:46:12.142Z"
+          "evidence": "Merged into #6727 c5 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:44:47.798Z",
+          "closure": "duplicate"
         },
         {
           "n": 4,
@@ -94574,9 +94706,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:13:43.430Z",
-      "updated": "2026-11-15T04:46:21.849Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 4
+      "updated": "2026-11-15T22:44:49.962Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-15T22:44:49.962Z"
     },
     {
       "id": "c0qwfnnb",
@@ -218755,6 +218888,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T22:45:46.854Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mwaylu",
+      "note": "#11 The three Rust-crate programs (regex, serde_json, a crate wi"
+    },
+    {
+      "at": "2026-11-15T22:45:45.492Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03kbmfy",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:45:43.203Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03kbmfy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T22:45:41.636Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mwaylu",
+      "note": "#10 The three Python programs (statistics, numpy, pandas with ma"
+    },
+    {
+      "at": "2026-11-15T22:45:40.238Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05aa8kj",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:45:37.883Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05aa8kj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T22:45:36.257Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mwaylu",
+      "note": "#9 The three isolation programs (a C decoder under `.Wasm`, a c"
+    },
+    {
+      "at": "2026-11-15T22:45:34.715Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03yyxl3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:45:32.068Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03yyxl3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T22:45:30.369Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mwaylu",
+      "note": "#8 The R, Perl, PHP, Ruby, PowerShell and Octave binding genera"
+    },
+    {
+      "at": "2026-11-15T22:45:28.874Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03yyxl3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T22:45:26.981Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mwaylu",
+      "note": "#7 The eight Examples/Interop/FFI/Projections/*/guest.jet expor"
+    },
+    {
+      "at": "2026-11-15T22:45:25.485Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03yyxl3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T22:45:23.761Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mwaylu",
+      "note": "#6 `#Export(c, python, js)` libraries build with `jet build --l"
+    },
+    {
+      "at": "2026-11-15T22:45:21.707Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xf8qpl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:45:18.545Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xf8qpl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T22:45:16.457Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mwaylu",
+      "note": "#5 A prototype binds one C++ class (constructor, method, destru"
+    },
+    {
+      "at": "2026-11-15T22:45:14.379Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03t8ic0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:45:10.715Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03t8ic0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T22:45:08.693Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mwaylu",
+      "note": "#4 The three callback programs (qsort with a capturing comparat"
+    },
+    {
+      "at": "2026-11-15T22:45:06.744Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x2wq8a",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:45:03.207Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x2wq8a",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T22:45:00.212Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mwaylu",
+      "note": "#3 The three C-library gallery programs (libm, zlib, libpng) ca"
+    },
+    {
+      "at": "2026-11-15T22:44:49.962Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pxauid",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-15T22:44:47.799Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pxauid",
+      "note": "#3"
+    },
     {
       "at": "2026-11-15T22:44:34.543Z",
       "by": "Main",
