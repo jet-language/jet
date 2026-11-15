@@ -1903,6 +1903,19 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
                     compiled_request.core_excluded_reasons = facts.reasons.move()
                 }
             }
+            // A `jet run` of a program whose Core is the built-in one checks
+            // the sealed Core functions its demand reaches as stand-ins of
+            // this jet's Core seal rows (JetSema CoreSeal.jet), which the
+            // image the run links checked: a build that keeps `#Off(.Release)`
+            // code and no `--deep-checks` bodies, as that image does.
+            stand_ins: built_in && options.command == "run" && compiled_request.mode == JetDriverCompileMode.Program && options.profile != "release" && options.profile != "hardened" && !options.deep_checks.all && options.deep_checks.scopes.len() == 0
+            if stand_ins {
+                if compiled_request.core_bound_keys.len() == 0 {
+                    sealed_facts: jet_cli_core_facts(jet_cli_runtime_part(JET_CLI_CORE_FACTS_FILE))
+                    compiled_request.core_bound_keys = sealed_facts.sealed.move()
+                }
+                compiled_request.core_stand_in_seal = String.from_bytes(jet_cli_runtime_part(JET_CLI_CORE_SEAL_FILE)) ?? ""
+            }
             front := jet_cli_lowering_inputs(compiled_request, trace_sink)
             front.compile.core_built_in = built_in
             // The native route traces through the same sink and builds on the

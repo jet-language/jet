@@ -821,6 +821,12 @@ FnBody: struct {
     // each keyed by its block's span (the lowered region's): the IR builder
     // enters one around its block (JetIR ir_effect_scope_region).
     effect_scope_regions: [BodyEffectScopeRegion]{[BodyEffectScopeRegion]{}}
+    // A Core function a bound `jet run` checked as a stand-in (JetSema
+    // CoreSeal.jet): its signature only, with the Core seal's effect and
+    // failure facts and an empty body. Every call of it binds to the Core
+    // image's code, so the IR builder never builds it (JetIR
+    // ir_function_row_id).
+    stand_in: Bool{false}
     // The function's nodes, statements and expression-type column.
     tree: BodyTree
 }

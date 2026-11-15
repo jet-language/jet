@@ -579,6 +579,12 @@ SemaGraphResult: struct {
     // SemaRegistrationGraph.core_seal: the Core seal's lines
     // (sema_core_seal_lines); empty otherwise.
     core_seal: [String]{[String]{}}
+    // A run bound to the Core image (SemaRegistrationGraph.core_stand_ins):
+    // how many Core functions its demand checked as stand-ins, and, when
+    // something they assume did not hold, why the finalization must run
+    // again without stand-ins (sema_finalize_program), else "".
+    core_stand_ins: Int{0}
+    core_stand_in_rerun: String{""}
     // The registration graph finalization checked against (values and
     // failure projections applied), handed back by sema_finalize_graph so its
     // caller can undo the edits (sema_graph_trail_undo); None otherwise.
@@ -2361,6 +2367,10 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     module_name := updated.module_name
     fallback_source_file := updated.source_file
     complete := generics.complete
+    // A Core stand-in of a run bound to the Core image checks its signature
+    // alone, with the Core seal's effect and failure facts (CoreSeal.jet
+    // sema_core_stand_in): its body is the image's.
+    stand_in: sema_core_stand_in(program, owner_key, func.span)
     // copy: the generic parameter lists stay with `generics` for the next pass;
     // the context owns this pass's.
     function_generic_params := generics.own.copy()
@@ -2481,7 +2491,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` must not return a value", "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value", "drop the return type, or use `#Reactive {{ … }}` inside a plain `fn`"))
         }
     }
-    if func.is_pure -> sema_check_pure_live_blocks(context.function_name, func.body, diagnostics)
+    if func.is_pure && stand_in == None -> sema_check_pure_live_blocks(context.function_name, func.body, diagnostics)
 
     params := [TParameter]{}
     // The symbol id of an explicit read `self` (sema_place_borrow_function).
@@ -2608,7 +2618,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     markers_valid: sema_marker_rules_check_rule_signatures(func.markers, updated, program, scopes, state, tail_store, context, diagnostics)
     deadline_guards := [TContextGuard]{}
     loop marker in func.markers {
-        if !markers_valid || !sema_marker_is_hook(marker, MarkerHook.Deadline) || marker.negated || marker.args.len() != 1 {
+        if stand_in != None || !markers_valid || !sema_marker_is_hook(marker, MarkerHook.Deadline) || marker.negated || marker.args.len() != 1 {
             next
         }
         if marker.args[0] == .Expr(value) {
@@ -2642,69 +2652,72 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     contract: sema_contract_check_function(func, updated, program, scopes, state, tail_store, context, diagnostics)
     if !contract.complete -> complete = false
 
-    // With no written return type the function returns
-    // nothing, so a value on its last line is lost (E0433). With a value
-    // return (not a generator; written, or projected by the bundle failure
-    // solve) the last line is the value handed back, and a table on the last
-    // line hands back the value its arms end in. A `Never` function hands
-    // back no value: E2423 (sema_check_never_fallthrough) owns its end.
-    returns_value: sema_function_returns_value(effective_return) && !sema_function_promises_never(func)
-    if func.body.len() > 0 && func.body[func.body.len() - 1] == .Expr(tail) {
-        if {
-            returns_value -> context.value_tail_span = Val(expr_span(tail))
-            func.return_type_span == None && !func.compiler_generated -> {
-                context.lost_tail_span = Val(expr_span(tail))
+    body := [TStmt]{}
+    if stand_in == None {
+        // With no written return type the function returns
+        // nothing, so a value on its last line is lost (E0433). With a value
+        // return (not a generator; written, or projected by the bundle failure
+        // solve) the last line is the value handed back, and a table on the last
+        // line hands back the value its arms end in. A `Never` function hands
+        // back no value: E2423 (sema_check_never_fallthrough) owns its end.
+        returns_value: sema_function_returns_value(effective_return) && !sema_function_promises_never(func)
+        if func.body.len() > 0 && func.body[func.body.len() - 1] == .Expr(tail) {
+            if {
+                returns_value -> context.value_tail_span = Val(expr_span(tail))
+                func.return_type_span == None && !func.compiler_generated -> {
+                    context.lost_tail_span = Val(expr_span(tail))
+                }
+                else -> {}
             }
-            else -> {}
         }
-    }
-    if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Switch(_, _, _, table_span) {
-        context.value_tail_span = Val(table_span)
-    }
-    // Rust check_value_tail: a last-line `#Unsafe { … }` region checks its
-    // body as the value block, so the region's own last line is the value.
-    if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Unsafe(_, _, unsafe_body, _) {
-        context.value_tail_span = sema_stmt_value_tail_marker(unsafe_body)
-    }
-    // A fallback-free arm table followed by a default return needs no `else`
-    // arm; imported Core bodies and generated functions have no user source
-    // to fix, so only user code is linted (L0513, L0530).
-    if returns_value {
-        sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !module_is_core(updated.module_identity), updated, program, context.fallback_tables, diagnostics)
-    }
-    statements := sema_check_statements(func.body, Val(effective_return), updated, program, scopes, state, tail_store, context, diagnostics, 0)
-    // The caller's group joins every task this body spawned into a `Group`
-    // parameter, so those handles owe no `join` here.
-    sema_taskgroup_mark_spawns_owned(context, SemaTaskGroupOrigin.Parameter, scopes, state, diagnostics)
-    context.lost_tail_span = None
-    context.value_tail_span = None
-    context.fallback_tables = [Int]{}
-    loop site in state.share_found -> share_found.push(site)
-    loop retype in context.number_retypes_found -> number_found.push(retype)
-    if !statements.complete -> complete = false
-    if !sema_check_never_fallthrough(func, updated, program, scopes, diagnostics) {
-        complete = false
-    }
-    sema_lint_inferred_never_return(func, owner_key, updated, program, diagnostics)
-    sema_function_header_external_target(func, diagnostics, diagnostics_start)
-    // Rust `check_value_block` over the body: a value body reports E0114 when
-    // it can reach its end without a value.
-    if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, scopes, diagnostics) {
-        complete = false
-    }
-    // Validation borrows the original checked rows. Once that loan ends the
-    // same vector moves into the function; no owning TStmt-vector copy.
-    body := statements.value.move()
-    if deadline_guards.len() > 0 {
-        body = [TStmt]{TStmt.ContextBlock{guards: deadline_guards, body: body, span: func.span}}
-    }
-    if contract.complete && contract.post.len() > 0 {
-        body = [TStmt]{TStmt.ContractScope{pre: [TContract]{}, body: body, post: contract.post, result: contract.result, span: func.span}}
+        if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Switch(_, _, _, table_span) {
+            context.value_tail_span = Val(table_span)
+        }
+        // Rust check_value_tail: a last-line `#Unsafe { … }` region checks its
+        // body as the value block, so the region's own last line is the value.
+        if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Unsafe(_, _, unsafe_body, _) {
+            context.value_tail_span = sema_stmt_value_tail_marker(unsafe_body)
+        }
+        // A fallback-free arm table followed by a default return needs no `else`
+        // arm; imported Core bodies and generated functions have no user source
+        // to fix, so only user code is linted (L0513, L0530).
+        if returns_value {
+            sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !module_is_core(updated.module_identity), updated, program, context.fallback_tables, diagnostics)
+        }
+        statements := sema_check_statements(func.body, Val(effective_return), updated, program, scopes, state, tail_store, context, diagnostics, 0)
+        // The caller's group joins every task this body spawned into a `Group`
+        // parameter, so those handles owe no `join` here.
+        sema_taskgroup_mark_spawns_owned(context, SemaTaskGroupOrigin.Parameter, scopes, state, diagnostics)
+        context.lost_tail_span = None
+        context.value_tail_span = None
+        context.fallback_tables = [Int]{}
+        loop site in state.share_found -> share_found.push(site)
+        loop retype in context.number_retypes_found -> number_found.push(retype)
+        if !statements.complete -> complete = false
+        if !sema_check_never_fallthrough(func, updated, program, scopes, diagnostics) {
+            complete = false
+        }
+        sema_lint_inferred_never_return(func, owner_key, updated, program, diagnostics)
+        sema_function_header_external_target(func, diagnostics, diagnostics_start)
+        // Rust `check_value_block` over the body: a value body reports E0114 when
+        // it can reach its end without a value.
+        if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, scopes, diagnostics) {
+            complete = false
+        }
+        // Validation borrows the original checked rows. Once that loan ends the
+        // same vector moves into the function; no owning TStmt-vector copy.
+        body = statements.value.move()
+        if deadline_guards.len() > 0 {
+            body = [TStmt]{TStmt.ContextBlock{guards: deadline_guards, body: body, span: func.span}}
+        }
+        if contract.complete && contract.post.len() > 0 {
+            body = [TStmt]{TStmt.ContractScope{pre: [TContract]{}, body: body, post: contract.post, result: contract.result, span: func.span}}
+        }
     }
     // Unused-binding lints and E0514 address authored code; a
     // compiler-generated body (derived codec scaffolding) binds every slot it
     // may need.
-    if !context.compiler_generated {
+    if !context.compiler_generated && stand_in == None {
         sema_ownership_finalize_references(state, diagnostics)
         sema_ownership_report_never_written(state, diagnostics)
     }
@@ -2724,20 +2737,26 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     name_references.extend(context.name_references.move())
     context.name_references = [SemaNameReferenceFact]{}
-    sema_single_use_leave_scope(scopes, state, diagnostics)
+    if stand_in == None {
+        sema_single_use_leave_scope(scopes, state, diagnostics)
+    } else {
+        sema_scope_leave(scopes, state)
+    }
     source_line := sema_source_line_at(updated.source_segments, func.name_span)
     if source_line == None {
         complete = false
         sema_check_unsupported(context, "no source segment covers the declaration of `{func.name}` at offset {func.name_span.start}")
     }
-    return_view_provenance := sema_function_return_view_provenance(func, context.return_view_provenance, diagnostics, complete)
+    return_view_provenance := ViewProvenanceMap?{None}
+    if stand_in == None -> return_view_provenance = sema_function_return_view_provenance(func, context.return_view_provenance, diagnostics, complete)
     if !complete -> return sema_function_result(None, owner_key, context.move())
     source_line_value: source_line ?? return sema_function_result(None, owner_key, context.move())
     source_file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, func.span)
     visibility := TVisibility.Private
     if func.is_pub -> visibility = TVisibility.Public
-    effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}, module_writes: context.module_writes.move()}
+    effects := TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}, module_writes: context.module_writes.move()}
     context.module_writes = [TEffectSpan]{}
+    if stand_in == .Val(seal_facts) -> effects = seal_facts.effects
     unsafe_gate := TUnsafeGate?{None}
     if func.is_unsafe && unsafe_gate_valid && func.unsafe_reason != None {
         reason: func.unsafe_reason ?? ""
@@ -2812,8 +2831,12 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     context.origin_facts = [TOriginProjection]{}
     context.typed_goals = [TTypedGoal]{}
     context.index_proofs = [TIndexProof]{}
-    flat: body_flat_function(built, context.arena.tree)
-    sema_function_result(Val(flat), owner_key, context.move())
+    flat := body_flat_function(built, context.arena.tree)
+    if stand_in == None -> return sema_function_result(Val(flat), owner_key, context.move())
+    flat.stand_in = true
+    result := sema_function_result(Val(flat), owner_key, context.move())
+    result.failure = Val(stand_in.failure)
+    result
 }
 
 check_program: fn(input: Program, module_name: String, source_file: String, source_segments: [SemaSourceSegment]) -> SemaResult {
@@ -7761,7 +7784,13 @@ sema_graph_module_rollback: fn(module_row: &SemaRegistrationModule, mark: SemaGr
 // Undoes every edit `trail` recorded on `graph`, newest first, leaving the
 // trail empty.
 sema_graph_trail_undo: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTrail) Never! {
-    loop trail.entries.len() > 0 {
+    sema_graph_trail_undo_to(graph, trail, 0)
+}
+
+// Undoes the edits `trail` recorded on `graph` after its first `kept`
+// entries, newest first, leaving those entries.
+sema_graph_trail_undo_to: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTrail, kept: Int) Never! {
+    loop trail.entries.len() > kept {
         entry: trail.entries.pop() ?? break
         if entry == {
             .SymbolType(module_index, position) -> {
@@ -7820,13 +7849,14 @@ sema_graph_trail_undo: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTrail)
                 graph.nominal_symbol_rows = symbol_rows
                 graph.nominal_row_slots = slots
                 graph.nominal_row_buckets = buckets
+                trail.nominal_indexes_saved = false
             }
             .Counting(old) -> { graph.counting = old }
             .FailureSolved(old) -> { graph.failure_solved = old }
             .CodecBody(module_index, row) -> sema_codec_undo_body(graph, module_index, row)
         }
     }
-    trail.nominal_indexes_saved = false
+    if kept == 0 -> trail.nominal_indexes_saved = false
 }
 
 // Applies staged values to a graph in place. A row already typed by an
@@ -12139,6 +12169,12 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     after_body_graph := owned.move()
     held := bodies.move()
     sema_core_demand_counters(after_body_graph, held.core_tally, trace_sink)
+    // A run bound to the Core image checked `stood_in` Core functions as
+    // stand-ins (CoreDemand.jet); `rerun` is why this finalization must run
+    // again without them, else "": its demand named one where a stand-in
+    // will not do, or a pass below read what a stand-in leaves out.
+    stood_in: held.core_tally.names.stood_in.len()
+    rerun := held.core_tally.names.rerun.move()
     modules := held.modules.move()
     checked_types: held.checked_types.move()
     complete := held.complete
@@ -12160,7 +12196,11 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // one contract.
     union_start: diagnostics.len()
     unions: sema_failure_union_infer(after_body_graph, modules, diagnostics, trail)
-    if diagnostics.len() > union_start -> complete = false
+    if diagnostics.len() > union_start {
+        complete = false
+        // A union report may name what a stand-in's union row summarizes.
+        if stood_in > 0 && rerun == "" -> rerun = "reports"
+    }
     infallible: sema_failure_project_infallible(after_body_graph, inferred_infallible, trail)
     trail.entries.push(SemaGraphUndo.FailureSolved{old: after_body_graph.failure_solved})
     after_body_graph.failure_solved = true
@@ -12205,7 +12245,10 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     }
     // The C-safe export law reads the solved carriers: an `#Export(c)` that
     // declares no carrier is refused when its body infers one.
-    if sema_guest_check_export_failures(final_graph, modules, diagnostics) -> complete = false
+    if sema_guest_check_export_failures(final_graph, modules, diagnostics) {
+        complete = false
+        if stood_in > 0 && rerun == "" -> rerun = "reports"
+    }
     // The failure-domain obligations recorded against unannotated callees
     // are discharged or emitted.
     infallible_keys := [String:Bool]{}
@@ -12226,6 +12269,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     loop dedupe_index in 0..<modules.len() {
         sema_failure_domain_dedupe(modules[dedupe_index].diagnostics, module_domains)
     }
+    // An error a whole-program pass reports from here on may name a call
+    // chain through Core bodies, which stand-ins cut short.
+    late_start: diagnostics.len()
     // The `#Inline(Always)` promise (E0917-E0919) needs every body's
     // function-value references first. These read-only checks, the effect
     // inputs with each module's effect-graph rows, and the liveness verdicts
@@ -12291,6 +12337,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
+    if stood_in > 0 && rerun == "" && effects.walks -> rerun = "walks"
     // `sema.late`: the partition, target, typestate and compute checks that
     // read the solved effects, and the publish of those effects.
     if trace_sink == .Val(sink) -> sink.begin("sema.late", "", -1, -1)
@@ -12338,6 +12385,14 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
             .None -> { diagnostics.push(diagnostic) }
         }
         complete = false
+    }
+    // The autodiff purity check walks each obligation's reach.
+    if stood_in > 0 && rerun == "" {
+        loop module_result in modules {
+            loop facts in module_result.compute_facts {
+                if facts.autodiff_obligations.len() > 0 -> rerun = "autodiff"
+            }
+        }
     }
     // A generic call whose type argument can't cross threads where its
     // callee, or a generic it passes the argument on to, moves it.
@@ -12489,6 +12544,11 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     loop module_index in 0..<final_graph.modules.len() {
         sema_lint_allowances(final_graph.modules[module_index].program, final_graph.modules[module_index].source_segments, allowances)
     }
+    if stood_in > 0 && rerun == "" && sema_has_error_since(diagnostics, late_start) -> rerun = "reports"
+    if stood_in > 0 && trace_sink == .Val(sink) {
+        sink.progress("counters.sema.core_seal.stand_ins", stood_in, -1)
+        if rerun != "" -> sink.progress("counters.sema.core_seal.reruns.{rerun}", 1, -1)
+    }
     reported := [Diagnostic]{}
     loop diagnostic in diagnostics {
         if !sema_core_source_lint(diagnostic) && !sema_lint_allowed(diagnostic, allowances) {
@@ -12519,6 +12579,8 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         complete: complete,
         inferred_infallible: inferred_infallible,
         core_seal: core_seal,
+        core_stand_ins: stood_in,
+        core_stand_in_rerun: rerun,
         programs: programs,
         outputs: outputs.move(),
         memory_declarations: effects.memory_declarations.move(),

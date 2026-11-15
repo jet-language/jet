@@ -224,7 +224,16 @@ when it may stop (`P`): the effects the line lists, with `W` when its reach
 writes module state, `I` when the failure solve proves it infallible from
 its reach alone, and `G` when its failure union is the general `Err`. A
 line with `I` alone names another function that solve proves infallible;
-a program that takes one as a value checks the Core bodies instead.
+a program that takes one as a value checks the Core bodies instead. A
+function whose result carries borrowed views gets no `S`. A `jet run` whose
+Core is the built-in one (no release profile, no `--deep-checks`) checks a
+sealed function with an `S` line by its signature alone, with the line's
+facts, and its Core demand stops there; a function a body names as a value,
+a shared global's initializer, an error conversion or a template item is
+checked in full. When a stand-in can't stand for its body (an error a
+whole-program pass reports, whose call chain may run through Core; a
+memory, stack, kernel or cap check that walks the call graph; autodiff),
+the finalization runs again with every Core body it reaches checked.
 `core.threads` is
 its thread receipt, read over the runtime's receipt, since Core starts
 threads through the runtime. A Core build failure fails the step with

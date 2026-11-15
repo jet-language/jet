@@ -1297,6 +1297,9 @@ ir_function_id: fn(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) -
 // ir_function_id of the checked function at row `row`.
 ir_function_row_id: fn(m: &IRModule, p: IRProgram, row: Int, type_args: [Type]) -> Int? Never! {
     function: p.functions[row]
+    // A Core stand-in has no body to build: only calls bound to the Core
+    // image reach it.
+    if function.stand_in -> return None
     if type_args.len() == 0 || (function.generic_params.len() == 0 && ir_owner_binders(p, function).len() == 0) {
         if m.ids[row] >= 0 -> return Val(m.ids[row])
         id: m.functions.len()

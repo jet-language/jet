@@ -24,6 +24,15 @@
 // call edge, an unnamed Core caller's too.
 // A retaining compile that reads only the user modules (`jet fix`,
 // SemaRegistrationGraph.retained_core_demand) demands as a Check compile does.
+//
+// A `jet run` bound to the Core image (SemaRegistrationGraph.core_stand_ins)
+// checks a demanded Core function whose seal line is a stand-in by its
+// signature alone (CoreSeal.jet sema_core_stand_in), so the demand stops
+// there: its body is the image's, and nothing it reaches is checked for it.
+// Such keys wait until the demand names nothing else
+// (sema_core_stand_in_flush): a key a body names where a stand-in will not
+// do (a function value, a shared global's initializer, an error conversion,
+// a template item; SemaCoreDemandNames.full) is checked in full instead.
 use jet_foundation.[
     BodyCallArg,
     BodyNode,
@@ -45,6 +54,8 @@ use jet_foundation.[
     compiler_threads_failure_text,
     compiler_threads_partition,
     compiler_transfer_rows,
+    decl_id_index,
+    decl_table_find,
     symbol_find,
     symbol_is_local,
     symbol_key_text,
@@ -58,6 +69,7 @@ use jet_foundation.[
 // the same graph demands afresh.
 sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
     graph.core_wave_rows = [String:Bool]{}
+    graph.core_stand_in_wave = false
     graph.core_checked = [String:Bool]{}
     rows := [String:Int]{}
     if enabled {
@@ -178,10 +190,29 @@ sema_core_demand_tally_new: fn() -> SemaCoreDemandTally Never! {
 // and demanded at the first. Demanding a key again changes nothing within
 // a finalization: the deferred rows stay as indexed, and a key checked
 // stays so (sema_core_demand_add).
+//
+// The keys a body names where a stand-in will not do wait in `values` (a
+// function value: CoreSeal.jet sema_core_seal_valued) and `full` (a shared
+// global's initializer, an error conversion, a template item), each site's
+// own. Under a bound run's stand-ins (graph.core_stand_ins): `full_rows`,
+// the callable rows so named, whose bodies are checked in full; `pending`,
+// the stand-in declarations demanded and not yet checked
+// (sema_core_stand_in_wait); `stood_in`, the rows checked as stand-ins;
+// `valued`, whether a body named as a value a function the seal's facts
+// rely on, after which none stands in; and `rerun`, why the finalization
+// runs again without stand-ins (a key checked as a stand-in was then named
+// where none will do), else "".
 SemaCoreDemandNames: struct {
     keys: [String]
     symbols: [U32:Bool]
     decls: [Int:Bool]
+    full: [String]{[String]{}}
+    values: [String]{[String]{}}
+    full_rows: [Int:Bool]{[Int:Bool]{}}
+    pending: [DeclID]{[DeclID]{}}
+    stood_in: [Int:Bool]{[Int:Bool]{}}
+    valued: Bool{false}
+    rerun: String{""}
 }
 
 sema_core_demand_names_new: fn() -> SemaCoreDemandNames Never! {
@@ -219,18 +250,26 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     if graph.core_lowering_roots != None {
         loop result in comptime_functions {
             if result.demand_round != round -> next
-            if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, tally.names)
+            if result.function == .Val(function) -> sema_core_demand_body_names(function, graph.decls, graph.symbols, tally.names)
             loop fact in result.call_facts {
                 if fact.callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, tally.names)
             }
         }
     }
-    if trace_sink == .Val(sink) -> sink.end("sema.core_demand.seeds", tally.names.keys.len())
+    if trace_sink == .Val(sink) -> sink.end("sema.core_demand.seeds", tally.names.keys.len() + tally.names.values.len() + tally.names.full.len())
     loop {
         if trace_sink == .Val(sink) -> sink.begin("sema.core_demand.name", "", -1, -1)
         wave := [String:Bool]{}
         affected := [Int]{}
+        graph.core_stand_in_wave = false
         sema_core_demand_named(graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected, threads)
+        if wave.len() == 0 {
+            loop id in sema_core_stand_in_flush(graph, tally.names) {
+                wave[graph.decls.rows[id.row].key] = true
+                module_index: graph.core_demand_rows.get(graph.decls.rows[id.row].key) ?? next
+                if !affected.contains(module_index) -> affected.push(module_index)
+            }
+        }
         if trace_sink == .Val(sink) -> sink.end("sema.core_demand.name", wave.len())
         if wave.len() == 0 -> break
         graph.core_wave_rows = wave.move()
@@ -289,6 +328,7 @@ sema_core_demand_pass: fn(owned: &&SemaRegistrationGraph, first_affected: &&[Int
         held := program.registration_graph.move()
         program.registration_graph = None
         pass_graph := held.move() ?? panic("a Core demand pass lost its registration graph")
+        pass_graph.core_stand_in_wave = false
         sema_core_demand_named(pass_graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected, threads)
         size = wave.len()
         pass_graph.core_wave_rows = wave.move()
@@ -625,9 +665,17 @@ sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphMo
     loop read_functions.len() < modules.len() -> read_functions.push(0)
     loop read_facts.len() < modules.len() -> read_facts.push(0)
     loop {
-        if names.keys.len() > 0 {
-            loop key in names.keys -> sema_core_demand_key(graph, key, wave, affected)
-            names.keys = [String]{}
+        if names.keys.len() > 0 || names.values.len() > 0 || names.full.len() > 0 {
+            // A key named where a stand-in will not do is marked before any
+            // key is demanded, so none of them waits as a stand-in.
+            valued: sema_core_demand_take(names.values)
+            full: sema_core_demand_take(names.full)
+            keys: sema_core_demand_take(names.keys)
+            loop key in valued -> sema_core_stand_in_full(graph, key, true, names)
+            loop key in full -> sema_core_stand_in_full(graph, key, false, names)
+            loop key in valued -> sema_core_demand_key(graph, key, names, wave, affected)
+            loop key in full -> sema_core_demand_key(graph, key, names, wave, affected)
+            loop key in keys -> sema_core_demand_key(graph, key, names, wave, affected)
         }
         parts := sema_core_demand_read(modules, read_functions, threads)
         loop part_index in 0..<parts.len() {
@@ -642,7 +690,7 @@ sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphMo
                 read_facts[module_index] = modules[module_index].call_facts.len()
             }
         }
-        if names.keys.len() == 0 -> return
+        if names.keys.len() == 0 && names.values.len() == 0 && names.full.len() == 0 -> return
     }
 }
 
@@ -665,7 +713,8 @@ SemaCoreDemandPart: struct {
 }
 
 // The names read bodies hold, in walk order (sema_core_demand_body_reads),
-// each declaration row and run-wide symbol at its first site in the read.
+// each declaration row and run-wide symbol at its first site in the read,
+// and each site that names one where a stand-in will not do.
 // The declared error conversions' keys wait in `conversions`, last first
 // once the read ends (sema_core_demand_reads_end), so demanding them in
 // walk order pops each.
@@ -677,11 +726,14 @@ SemaCoreDemandReads: struct {
 }
 
 // One name a body holds: a declaration row, a run-wide symbol, or the next
-// key of a declared error conversion.
+// key of a declared error conversion. `full`: named where a stand-in will
+// not do; `value`: named as a function value.
 SemaCoreDemandRead: struct {
     decl: DeclID?
     symbol: SymbolID?
     conversion: Bool
+    full: Bool{false}
+    value: Bool{false}
 }
 
 sema_core_demand_reads_new: fn() -> SemaCoreDemandReads Never! {
@@ -778,27 +830,110 @@ sema_core_demand_read_part: fn(part: &&SemaCoreDemandPart) -> SemaCoreDemandPart
 // conversion key moved out of the read.
 sema_core_demand_apply: fn(reads: &SemaCoreDemandReads, start: Int, end: Int, decls: DeclTable, symbols: SymbolTable, names: &SemaCoreDemandNames) Never! {
     loop at in start..<end {
-        if reads.names[at].decl == .Val(id) -> sema_core_demand_decl_key(decls, id, names)
-        if reads.names[at].symbol == .Val(id) -> sema_core_demand_symbol_key(symbols, id, names)
-        if reads.names[at].conversion -> names.keys.push(reads.conversions.pop() ?? panic("a Core demand read lost a conversion key"))
+        whole: reads.names[at].full || reads.names[at].value
+        if reads.names[at].decl == .Val(id) {
+            if whole {
+                sema_core_demand_decl_full(decls, id, reads.names[at].value, names)
+            } else {
+                sema_core_demand_decl_key(decls, id, names)
+            }
+        }
+        if reads.names[at].symbol == .Val(id) {
+            if whole {
+                sema_core_demand_symbol_full(symbols, id, names)
+            } else {
+                sema_core_demand_symbol_key(symbols, id, names)
+            }
+        }
+        if reads.names[at].conversion -> names.full.push(reads.conversions.pop() ?? panic("a Core demand read lost a conversion key"))
     }
 }
 
 // Demands the deferred body `key` names; a call at type arguments names its
 // generic declaration.
-sema_core_demand_key: fn(graph: &SemaRegistrationGraph, key: String, wave: &[String:Bool], affected: &[Int]) {
-    sema_core_demand_add(graph, key, wave, affected)
+sema_core_demand_key: fn(graph: &SemaRegistrationGraph, key: String, names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int]) {
+    sema_core_demand_add(graph, key, names, wave, affected)
     template: sema_core_demand_template_key(key)
-    if template != key -> sema_core_demand_add(graph, template, wave, affected)
+    if template != key -> sema_core_demand_add(graph, template, names, wave, affected)
 }
 
-// A deferred body not yet checked joins the wave.
-sema_core_demand_add: fn(graph: &SemaRegistrationGraph, key: String, wave: &[String:Bool], affected: &[Int]) {
+// A deferred body not yet checked joins the wave, or waits as a stand-in
+// (sema_core_stand_in_wait).
+sema_core_demand_add: fn(graph: &SemaRegistrationGraph, key: String, names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int]) {
     if graph.core_checked.get(key) != None -> return
     module_index: graph.core_demand_rows.get(key) ?? return
     graph.core_checked[key] = true
+    if sema_core_stand_in_wait(graph, key, names) -> return
     wave[key] = true
     if !affected.contains(module_index) -> affected.push(module_index)
+}
+
+// Marks `key`, which a body names where a stand-in will not do (`value`:
+// as a function value), for a check in full under a bound run's stand-ins.
+// A key checked as a stand-in already reruns the finalization (`named`),
+// and so does every stand-in once a body takes as a value a function the
+// seal's facts rely on (`valued`), after which none stands in.
+sema_core_stand_in_full: fn(graph: SemaRegistrationGraph, key: String, value: Bool, names: &SemaCoreDemandNames) Never! {
+    if graph.core_stand_ins == .Val(seal) {
+        row: sema_core_seal_row(graph, key) ?? return
+        names.full_rows[row] = true
+        if names.stood_in.get(row) != None && names.rerun == "" -> names.rerun = "named"
+        if value && !names.valued && sema_core_seal_valued(seal, graph, key) {
+            names.valued = true
+            if names.stood_in.len() > 0 && names.rerun == "" -> names.rerun = "valued"
+        }
+    }
+}
+
+// Whether demanded `key` waits in `names.pending` to be checked as a
+// stand-in: under a bound run's stand-ins, its seal line is one, and no body
+// named it, or took a function the seal relies on, where a stand-in will
+// not do.
+sema_core_stand_in_wait: fn(graph: SemaRegistrationGraph, key: String, names: &SemaCoreDemandNames) -> Bool Never! {
+    if names.valued -> return false
+    if graph.core_stand_ins == .Val(seal) {
+        id: decl_table_find(graph.decls, key) ?? return false
+        row: decl_id_index(id)
+        if names.full_rows.get(row) != None || sema_core_seal_stand_in_at(seal, row) == None -> return false
+        names.pending.push(id)
+        return true
+    }
+    false
+}
+
+// The next wave's rows once the demand names nothing else, from the
+// stand-ins waiting in `names`: those since named where a stand-in will not
+// do, all of them once a body took a valued function, checked in full, the
+// rest waiting on; else all of them, as a stand-in wave
+// (graph.core_stand_in_wave), whose checks name nothing.
+sema_core_stand_in_flush: fn(graph: &SemaRegistrationGraph, names: &SemaCoreDemandNames) -> [DeclID] {
+    flushed := [DeclID]{}
+    if names.pending.len() == 0 -> return flushed
+    full := names.valued
+    loop id in names.pending {
+        if names.full_rows.get(decl_id_index(id)) != None -> full = true
+    }
+    reversed := [DeclID]{}
+    loop names.pending.len() > 0 {
+        id: names.pending.pop() ?? break
+        reversed.push(id)
+    }
+    waiting := [DeclID]{}
+    loop reversed.len() > 0 {
+        id: reversed.pop() ?? break
+        waiting.push(id)
+    }
+    loop id in waiting.move() {
+        row: decl_id_index(id)
+        if full && !names.valued && names.full_rows.get(row) == None {
+            names.pending.push(id)
+            next
+        }
+        if !full -> names.stood_in[row] = true
+        flushed.push(id)
+    }
+    graph.core_stand_in_wave = !full
+    flushed
 }
 
 // `key` without the type arguments of its last `<...>`, or `key` itself.
@@ -819,11 +954,36 @@ sema_core_demand_template_key: fn(key: String) -> String Never! {
     key.copy()
 }
 
-// Every function key checked body `function` names, into `names`: its
+// Every function key checked body `function` names, into `names.keys`: its
 // direct and method calls, index hooks, functions named as values, shared
 // globals' initializers and declared error conversions, in its parameter
 // defaults and body (sema_core_demand_body_reads).
 sema_core_demand_body_keys: fn(function: FnBody, decls: DeclTable, symbols: SymbolTable, names: &SemaCoreDemandNames) Never! {
+    sema_core_demand_body_names(function, decls, symbols, names)
+    values := sema_core_demand_take(names.values)
+    loop key in values.move() -> names.keys.push(key)
+    full := sema_core_demand_take(names.full)
+    loop key in full.move() -> names.keys.push(key)
+}
+
+// Every key of `list`, in order, leaving it empty.
+sema_core_demand_take: fn(list: &[String]) -> [String] Never! {
+    reversed := [String]{}
+    loop list.len() > 0 {
+        key: list.pop() ?? break
+        reversed.push(key)
+    }
+    taken := [String]{}
+    loop reversed.len() > 0 {
+        key: reversed.pop() ?? break
+        taken.push(key)
+    }
+    taken
+}
+
+// sema_core_demand_body_keys with the keys named where a stand-in will not
+// do kept apart, in `names.values` and `names.full`.
+sema_core_demand_body_names: fn(function: FnBody, decls: DeclTable, symbols: SymbolTable, names: &SemaCoreDemandNames) Never! {
     reads := sema_core_demand_reads_new()
     sema_core_demand_body_reads(function, reads)
     sema_core_demand_reads_end(reads)
@@ -870,11 +1030,11 @@ sema_core_demand_expr_reads: fn(node: BodyNode, reads: &SemaCoreDemandReads) Nev
         }
         .FnValue(kind) -> {
             if kind == .NamedFn(function, _) {
-                if function == .Val(id) -> sema_core_demand_read_decl(id, reads)
+                if function == .Val(id) -> sema_core_demand_read_whole_decl(id, true, reads)
             }
         }
         .ConstRef(symbol) -> sema_core_demand_read_symbol(symbol, reads)
-        .GlobalShared(initializer, _) -> sema_core_demand_read_decl(initializer, reads)
+        .GlobalShared(initializer, _) -> sema_core_demand_read_whole_decl(initializer, false, reads)
         .Try(_, conversion, _) -> sema_core_demand_read_conversion(conversion, reads)
         .TryWithContext(_, _, conversion, _, _, _) -> sema_core_demand_read_conversion(conversion, reads)
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
@@ -897,6 +1057,24 @@ sema_core_demand_symbol_key: fn(symbols: SymbolTable, id: SymbolID, names: &Sema
     names.keys.push(symbol_table_key(symbols, id))
 }
 
+// The key of declaration row `id`, named where a stand-in will not do
+// (`value`: as a function value), at each such site.
+sema_core_demand_decl_full: fn(decls: DeclTable, id: DeclID, value: Bool, names: &SemaCoreDemandNames) Never! {
+    if id.row.index() >= decls.rows.len() -> return
+    if value {
+        names.values.push(decls.rows[id.row].key)
+    } else {
+        names.full.push(decls.rows[id.row].key)
+    }
+}
+
+// The key of run-wide `id`, named where a stand-in will not do, at each
+// such site.
+sema_core_demand_symbol_full: fn(symbols: SymbolTable, id: SymbolID, names: &SemaCoreDemandNames) Never! {
+    if symbol_is_local(id) -> return
+    names.full.push(symbol_table_key(symbols, id))
+}
+
 // Declaration row `id`, unless read before.
 sema_core_demand_read_decl: fn(id: DeclID, reads: &SemaCoreDemandReads) Never! {
     index: id.row.index()
@@ -913,10 +1091,25 @@ sema_core_demand_read_symbol: fn(id: SymbolID, reads: &SemaCoreDemandReads) Neve
     reads.names.push(SemaCoreDemandRead{decl: None, symbol: Val(id), conversion: false})
 }
 
+// The functions a call's template items name, each where a stand-in will
+// not do.
 sema_core_demand_read_items: fn(args: [BodyCallArg], reads: &SemaCoreDemandReads) Never! {
     loop argument in args {
-        loop item in argument.template_items -> sema_core_demand_read_symbol(item, reads)
+        loop item in argument.template_items -> sema_core_demand_read_whole_symbol(item, reads)
     }
+}
+
+// Declaration row `id` at a site that names it where a stand-in will not do
+// (`value`: as a function value), read at every such site.
+sema_core_demand_read_whole_decl: fn(id: DeclID, value: Bool, reads: &SemaCoreDemandReads) Never! {
+    reads.names.push(SemaCoreDemandRead{decl: Val(id), symbol: None, conversion: false, full: !value, value: value})
+}
+
+// Run-wide symbol `id` at a site that names it where a stand-in will not
+// do, read at every such site; a body's own id names no Core body.
+sema_core_demand_read_whole_symbol: fn(id: SymbolID, reads: &SemaCoreDemandReads) Never! {
+    if symbol_is_local(id) -> return
+    reads.names.push(SemaCoreDemandRead{decl: None, symbol: Val(id), conversion: false, full: true})
 }
 
 sema_core_demand_read_conversion: fn(conversion: TTryConvert, reads: &SemaCoreDemandReads) Never! {

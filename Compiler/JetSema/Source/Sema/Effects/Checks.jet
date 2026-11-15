@@ -194,6 +194,10 @@ SemaEffectGraphResult: struct {
     // With `seal`, the Core library's check: each Core function's effect
     // summary a bound program may take for its reach (sema_effect_core_seal_rows).
     core_seal: [SemaCoreSealEffects]{[SemaCoreSealEffects]{}}
+    // Whether a check walked the call graph past a body for what its reach
+    // does (a memory or stack denial, a kernel, a program function's cap),
+    // which a Core stand-in's missing edges would cut short.
+    walks: Bool{false}
     // The run's symbol table the check borrowed, handed back to its graph.
     symbols: SymbolTable
 }
@@ -5699,7 +5703,13 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     calls = sema_effect_stack_bodies(modules, inputs, nodes, calls, threads, bodies, closed: closed)
     frames: sema_effect_stack_frames(nodes, calls.node_by_key, bodies, closed: closed)
     stack := sema_effect_stack_walk(nodes)
+    // Whether a check walks the call graph past a body for what its reach
+    // does: a memory or stack denial, a kernel's obligations, a cap over a
+    // program function. A Core stand-in has no call edges, so such a walk
+    // reads less of the program than the run binds (CoreSeal.jet).
+    walks := false
     loop node_index in 0..<nodes.len() {
+        if nodes[node_index].memory_denials.len() > 0 || nodes[node_index].kernel != None -> walks = true
         memory_diagnostics := [Diagnostic]{}
         sema_effect_check_memory_denials(nodes, calls.node_by_key, node_index, stack, frames, memory_diagnostics, memory_facts)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, memory_diagnostics)
@@ -5714,6 +5724,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         name: denial.name
         provenance: if denial.organization == "" -> "manifest denial `authority: {{ deny: [{name}] }}`" else -> "organization denial `authority: {{ deny: [{name}] }}`"
         if sema_effect_stack_bound(name) != None {
+            walks = true
             loop root in 0..<nodes.len() {
                 stack_diagnostics := [Diagnostic]{}
                 sema_effect_check_stack(stack, frames, nodes, root, EffectRowEntry{name: name, span: Span{start: 0, end: 0}}, provenance, stack_diagnostics)
@@ -5722,6 +5733,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             next
         }
         fact: sema_effect_memory_fact(name) ?? next
+        walks = true
         source: if denial.organization == "" -> "package.jet" else -> denial.organization
         declaration: SemaMemoryFactDeclaration{fact: fact, roots: loop node in nodes -> node.display_key, span: Span{start: 0, end: 0}, source: source, provenance: provenance}
         memory_facts.declarations.push(declaration)
@@ -5775,6 +5787,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         }
         cap_frames.push(sema_effect_cap_frames(caps))
         if caps.len() == 0 -> next
+        if !module_is_core(nodes[node_index].module_identity) -> walks = true
         cap_diagnostics := [Diagnostic]{}
         notes: sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index])
         loop cap in caps -> sema_effect_check_module_cap(nodes, calls.node_by_key, node_index, solved[node_index], cap, notes, stack, frames, cap_diagnostics)
@@ -5817,7 +5830,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     core_seal: if seal -> sema_effect_core_seal_rows(nodes.move(), calls, solved, table) else -> [SemaCoreSealEffects]{}
     complete: !sema_has_error_since(diagnostics, 0)
-    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), core_seal: core_seal, symbols: calls.symbols.move()}
+    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), core_seal: core_seal, walks: walks, symbols: calls.symbols.move()}
 }
 
 // The rows of the effect graph each input module contributes on its own:

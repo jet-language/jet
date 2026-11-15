@@ -85,11 +85,13 @@ use {
         sema_comptime_value_sites_empty,
         sema_copy_facts_table_empty,
         sema_core_bound_counters,
+        sema_core_seal_read,
         sema_core_source_lint,
         sema_finalize_bodies,
         sema_finalize_bodies_empty,
         sema_finalize_demand,
         sema_local_splice_demand_snapshot,
+        sema_local_splice_demand_swap,
         SemaLocalSpliceDemand,
         SemaLocalSpliceInto,
         sema_finalize_program,
@@ -101,6 +103,7 @@ use {
         sema_host_hook_access,
         sema_graph_trail_init,
         sema_graph_trail_undo,
+        sema_graph_trail_undo_to,
         sema_name_build_facts_threads,
         sema_name_facts_empty,
         sema_name_structure_facts,
@@ -4847,6 +4850,38 @@ jet_driver_registration_package_policies: fn(request: JetDriverCompileRequest, l
     package_policies
 }
 
+// One finalization of the comptime run's `graph`: the bodies, the local
+// values landed before the whole-program half (jet_driver_land_local_values),
+// the Core demand rounds with the landings between them, and the
+// whole-program half. The landings append to `values`, `functions` and
+// `trace`; every graph edit is recorded on `trail`.
+jet_driver_finalize_program: fn(
+    graph: &&SemaRegistrationGraph,
+    trail: &SemaGraphTrail,
+    stage: SemaComptimeDeclarationStage,
+    values: &[SemaComptimeItemValue],
+    functions: &[SemaComptimeFunctionResult],
+    trace: &JetDriverCompileTrace,
+    request: JetDriverCompileRequest,
+) -> SemaGraphResult {
+    bodies := sema_finalize_bodies_empty()
+    body_graph: sema_finalize_bodies(graph, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, None, request.trace_sink, bodies)
+    landing := JetDriverLanding{stopped: false}
+    early_graph: jet_driver_land_local_values(body_graph, bodies, SemaLocalSpliceInto.Undemanded, stage, values, functions, trace, request, landing)
+    demand_graph := sema_finalize_demand(early_graph, trail, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
+    loop {
+        held_functions: functions.len()
+        demand_graph = jet_driver_land_local_values(demand_graph, bodies, SemaLocalSpliceInto.Unstamped, stage, values, functions, trace, request, landing)
+        demand_graph = sema_finalize_demand(demand_graph, trail, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
+        if functions.len() == held_functions -> break
+    }
+    // A traced run whose Core is the built-in one counts how its Core
+    // demand's checks split over the Core facts' sealed and excluded keys
+    // (sema_core_bound_counters).
+    if request.core_bound_keys.len() > 0 || request.core_excluded_keys.len() > 0 -> sema_core_bound_counters(demand_graph, bodies.modules, functions, request.core_bound_keys, request.core_excluded_keys, request.core_excluded_reasons, request.trace_sink)
+    sema_finalize_program(demand_graph, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
+}
+
 // The checked front-end stages every compile runs.
 jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, owned_load: &&JetDriverLoadResult, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture) -> JetDriverCompileResult {
     load := owned_load.move()
@@ -5106,23 +5141,43 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     if request.recheck_verify {
         verify_start = Val(sema_local_splice_demand_snapshot(finalize_graph))
     }
-    bodies := sema_finalize_bodies_empty()
-    body_graph := sema_finalize_bodies(finalize_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, request.eval_config.host_hooks, request.compiler_threads, None, request.trace_sink, bodies)
-    staged_values := comptime_run.values.len()
-    landing := JetDriverLanding{stopped: false}
-    early_graph := jet_driver_land_local_values(body_graph, bodies, SemaLocalSpliceInto.Undemanded, comptime_stage, comptime_run.values, comptime_run.functions, trace, request, landing)
-    demand_graph := sema_finalize_demand(early_graph, trail, comptime_run.values, comptime_run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
-    loop {
-        held_functions: comptime_run.functions.len()
-        demand_graph = jet_driver_land_local_values(demand_graph, bodies, SemaLocalSpliceInto.Unstamped, comptime_stage, comptime_run.values, comptime_run.functions, trace, request, landing)
-        demand_graph = sema_finalize_demand(demand_graph, trail, comptime_run.values, comptime_run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
-        if comptime_run.functions.len() == held_functions -> break
+    // A `jet run` program bound to the built-in Core image checks the Core
+    // functions its demand reaches as stand-ins of the image's seal rows
+    // (JetSema CoreSeal.jet). When the finalization reports why a stand-in
+    // will not do (SemaGraphResult.core_stand_in_rerun), its edits, its
+    // demand, the values it landed and the trace they printed go back to
+    // where it started, and it runs again over the Core bodies themselves.
+    if request.core_stand_in_seal != "" {
+        finalize_graph.core_stand_ins = Val(sema_core_seal_read(request.core_stand_in_seal, finalize_graph, request.core_bound_keys))
     }
-    // A traced run whose Core is the built-in one counts how its Core
-    // demand's checks split over the Core facts' sealed and excluded keys
-    // (sema_core_bound_counters).
-    if request.core_bound_keys.len() > 0 || request.core_excluded_keys.len() > 0 -> sema_core_bound_counters(demand_graph, bodies.modules, comptime_run.functions, request.core_bound_keys, request.core_excluded_keys, request.core_excluded_reasons, request.trace_sink)
-    checked_graph := sema_finalize_program(demand_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
+    rerun_start := SemaLocalSpliceDemand?{None}
+    if finalize_graph.core_stand_ins != None {
+        rerun_start = Val(sema_local_splice_demand_snapshot(finalize_graph))
+    }
+    finalize_mark: trail.entries.len()
+    staged_values: comptime_run.values.len()
+    staged_functions: comptime_run.functions.len()
+    printed_stdout: trace.stdout.len()
+    printed_stderr: trace.stderr.len()
+    printed_soft_stop: trace.soft_stop
+    printed_exit_code: trace.exit_code
+    checked_graph := jet_driver_finalize_program(finalize_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, trace, request)
+    if checked_graph.core_stand_in_rerun != "" {
+        stood_graph: checked_graph.registration_graph.move()
+        checked_graph.registration_graph = None
+        rerun_graph := stood_graph.move() ?? return jet_driver_compile_internal_result(load, trace, "semantic finalization lost the registration graph")
+        start: rerun_start.move() ?? return jet_driver_compile_internal_result(load, trace, "the Core stand-in finalization lost the demand it started from")
+        sema_graph_trail_undo_to(rerun_graph, trail, finalize_mark)
+        _ := sema_local_splice_demand_swap(rerun_graph, start)
+        rerun_graph.core_stand_ins = None
+        loop comptime_run.values.len() > staged_values -> _ := comptime_run.values.pop()
+        loop comptime_run.functions.len() > staged_functions -> _ := comptime_run.functions.pop()
+        loop trace.stdout.len() > printed_stdout -> _ := trace.stdout.pop()
+        loop trace.stderr.len() > printed_stderr -> _ := trace.stderr.pop()
+        trace.soft_stop = printed_soft_stop
+        trace.exit_code = printed_exit_code
+        checked_graph = jet_driver_finalize_program(rerun_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, trace, request)
+    }
     if request.trace_sink == .Val(sink) -> sink.end("sema.finalize", checked_graph.modules.len())
     if checked_graph.modules.len() != registration_module_count {
         loop diagnostic in checked_graph.diagnostics -> load.diagnostics.push(diagnostic)
@@ -5142,6 +5197,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // the counting flag, and every later pass (the pre-lowering threads)
     // would serialize on the shared counters' permit.
     registration_graph.counting = false
+    registration_graph.core_stand_ins = None
     if request.recheck_verify && comptime_run.values.len() > staged_values {
         start := verify_start.move() ?? return jet_driver_compile_internal_result(load, trace, "JET_RECHECK_VERIFY lost the demand the finalization started from")
         verify_problem := String?{None}

@@ -1,6 +1,6 @@
 // The Core seal's failure fixpoint and its stand-in facts.
 use {
-    jet_sema.[SemaCoreSeal, sema_core_seal_fixpoint, sema_core_seal_stand_in_effects, sema_core_seal_stand_in_failure]
+    jet_sema.[SemaCoreSeal, sema_core_seal_fixpoint, sema_core_seal_stand_in_at, sema_core_seal_stand_in_effects, sema_core_seal_stand_in_failure]
     jet_foundation.[Span]
 }
 
@@ -38,4 +38,11 @@ use {
     if !general.direct || !general.union_general {
         panic("a fallible stand-in keeps its failure source and its general union")
     }
+}
+
+#Test("core_seal_stand_in_at") {
+    seal := SemaCoreSeal{rows: [Int:Int]{3: 0, 4: 1}, flags: [String]{"SPWI", "PG"}, effects: [[String]]{[String]{}, [String]{}}}
+    if sema_core_seal_stand_in_at(seal, 3) != Val(0) -> panic("a row with an S line stands in at its seal row")
+    if sema_core_seal_stand_in_at(seal, 4) != None -> panic("a row with no S line never stands in")
+    if sema_core_seal_stand_in_at(seal, 5) != None -> panic("a row the seal does not hold never stands in")
 }
