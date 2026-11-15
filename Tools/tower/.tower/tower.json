@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6966,
-    "rev": 105600,
+    "rev": 105616,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47439,20 +47439,22 @@
         {
           "n": 6,
           "text": "[#3976] Comptime on native O0 supports Shared values, tasks, select, native calls and fixed backing (the operations the retired JetEval host adapter lacked).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:47:51.280Z"
+          "evidence": "Moved to #6847 c13: comptime capability belongs with compile-time evaluation",
+          "at": "2026-11-15T05:29:50.014Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
           "text": "[#4469] Comptime on native O0 supports: • Every CoreClosureCall kind (Spawn, Realtime, Serve, OnInterrupt, OnCommit, Rollback, Reactive, UI, ...). • Typed-text kernels (SQL, HTML, Sh, URL, Path, DateTime). • DMAStart and DMAWait.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:47:51.987Z"
+          "evidence": "Moved to #6847 c14: comptime capability belongs with compile-time evaluation",
+          "at": "2026-11-15T05:29:50.905Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
@@ -47492,7 +47494,7 @@
       "parentId": "c0gomix3",
       "needsAcceptance": false,
       "created": "2026-10-02T19:54:04.358Z",
-      "updated": "2026-11-15T05:29:26.224Z",
+      "updated": "2026-11-15T05:29:50.905Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G11"
@@ -60919,6 +60921,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15 by TowerKeeper-1: the card keeps compile-memory work. Moved: SIMD lexer to #6796, comptime census to #6847, test-suite speed to #6610, the nested-join deadlock to #6964, measurement helpers to #6965 (megaproject canary to #6311), JetDriver tests to #6637; resident Core merged into #6328 c22."
+        },
+        {
           "at": "2026-11-11",
           "by": "Main",
           "text": "HELD by owner order 2026-11-11 (no small optimizations until the language is mostly stable; architecture and regression fixes go first, per #5479 c5-c8). These criteria stay open and unworked: c6 (#5479 c9 (SIMD lexer) is held by owner order 2026-11-11)."
@@ -61078,11 +61085,12 @@
         {
           "n": 6,
           "text": "(was #5914) (was #5055) SIMD lexer on the public vector tools: #Multiversion + Lanes + core.arch block classifier (SPEED-500K M5): Lexer classification is at or below 1 ns/byte on the self-host unit",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:19.459Z"
+          "evidence": "Moved to #6796 c5: front-end lexing speed",
+          "at": "2026-11-15T05:29:51.804Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
@@ -61105,11 +61113,12 @@
         {
           "n": 40,
           "text": "(was #4551) [#4274] D-BENCH-KEEP1 (native keep barrier), D-CLAIM-BENCH1 (#Test .measure replaces #Bench), D-MEGAPROJ1 (owner-used scale canary) and D-TEST-COMPARE1 (Testing comparison API).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:12:05.948Z"
+          "evidence": "Moved to #6965 c1: keep and compare go to MEASHELP; D-MEGAPROJ1 to #6311; D-CLAIM-BENCH1 shipped in #2082 and its teaching rows are #6637 c11",
+          "at": "2026-11-15T05:29:56.249Z",
+          "closure": "obsolete"
         },
         {
           "n": 41,
@@ -61141,11 +61150,12 @@
         {
           "n": 44,
           "text": "(was #5094) (was #5056) D2 census: probe references vs run references for every comptime item (D-COMPTIME-PROBE1): The census covers the self-host unit and the comptime corpus and lists every item whose probe",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:26:39.055Z"
+          "evidence": "Moved to #6847 c12: comptime meaning",
+          "at": "2026-11-15T05:29:57.235Z",
+          "closure": "obsolete"
         },
         {
           "n": 46,
@@ -61159,20 +61169,22 @@
         {
           "n": 54,
           "text": "(moved from #6035 c7) (Owner 2026-11-04: tests should take seconds, a minute at most for a few thousand, and must not run out of memory unless something leaks) The full ui, golden and cases suites, a few thousand tests, finish in at most about 60 s of wall time on the dev machine, and no test job is killed for memory. Today suite.sh gives each job 3 GiB because 2 GiB was memory-killed, allows a 6800 s timeout, and the cases runs take hours and were OOM-killed on 2026-11-04. Yet the compiler floor is small: jet check and jet run of a hello program take ~180 ms CPU and 15-19 MB peak (Main 2026-11-04, base 52d3e9cf79, systemd-run accounting). Proof: a per-test wall-time and peak-RSS table for every suite, from a testkit report; every outlier fixed at its root (leak, an unbounded fixture, durable-state fsync stalls, engine or jetpack spawn); and a timed full run that meets the budget.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-05T13:50:23.359Z"
+          "evidence": "Moved to #6610 c14: test-suite speed card",
+          "at": "2026-11-15T05:29:58.137Z",
+          "closure": "obsolete"
         },
         {
           "n": 55,
           "text": "(moved from #6035 c10) Root found by Prep 2026-11-04 for c7 (report $JET_SCRATCH_ROOT/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R3: every compile parses and checks the whole Core closure (66 units, 0.8 s and 700 MiB per call; 72% of ui CPU and 97% of golden CPU). A resident checked Core, or lazy Core modules, make a use core.math check finish under 0.2 s and 150 MiB, with one meaning on every tier. (Also #5910.)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-05T13:50:24.875Z"
+          "evidence": "Merged into #6328 c22: precompiled Core in the jet binary removes the per-compile Core check; target use core.math check under 0.2 s and 150 MiB",
+          "at": "2026-11-15T05:29:59.040Z",
+          "closure": "obsolete"
         },
         {
           "n": 56,
@@ -61186,38 +61198,42 @@
         {
           "n": 57,
           "text": "Running one test costs about that test's own time. The testkit's fixed startup cost is measured phase by phase (building or loading the kit, compiling the harness, scanning the corpora, loading Core, starting workers), each phase is listed with its time, and everything that is not the test itself is cut, cached or done once, so a run filtered to one golden entry at --jobs 1 finishes within 0.5 s of that entry's own compile-and-run time. Today a single golden entry pays about 35 s of fixed kit overhead (2026-11-04 gate run: cli_args.jet 3.1 s and fidelity.jet 5.5 s alone, plus about 35 s each run). This also speeds every agent's A/B proof run.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-05T16:14:50.485Z"
+          "evidence": "Moved to #6610 c15: test-suite speed card",
+          "at": "2026-11-15T05:29:59.937Z",
+          "closure": "obsolete"
         },
         {
           "n": 58,
           "text": "Jet's test runner is the fastest of any language, shown by a peer-matched cell in the canonical performance manifest. The same test corpus (a few thousand small unit tests with assertions, plus a set of whole-program golden tests) is written in Jet and in each peer (Rust with cargo test and nextest, Go with go test, Zig with zig build test, TypeScript with Bun test and Vitest, Python with pytest), and the cell measures, per peer: a cold full run, a warm full run, and the edit-one-test-and-rerun loop, in wall time and peak memory on the same machine. Jet/peer is below 1.00 for every peer in every metric, per the AGENTS performance gate; any loss stays logged here.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-05T16:14:51.176Z"
+          "evidence": "Moved to #6610 c16: test-suite speed card",
+          "at": "2026-11-15T05:30:00.821Z",
+          "closure": "obsolete"
         },
         {
           "n": 59,
           "text": "Runtime deadlock (found by TestSpeedLead 2026-11-05): with more running tasks than about (cores+8)/2, nested joins hang. Every thread waits in futex_wait on a task that never gets a worker, because the scheduler adds at most 8 workers to cover blocked waits (Compiler/JetRuntime Scheduler.jet:1097). Reproduced by a testkit pool whose entries each join a child and its resident watcher task, on the AOT and run tiers; JET_SCHEDULER_THREADS=256 avoids it. Met when a join on a child that hasn't started yet runs that child on the joining thread (or an equivalent that never deadlocks), a cases fixture nests joins inside a task group whose limit is at least the core count and finishes on O0, O1 and O2, and the testkit's default pool no longer needs its workaround.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-05T20:15:02.929Z"
+          "evidence": "Moved to #6964 c1: runtime scheduler bug",
+          "at": "2026-11-15T05:30:01.730Z",
+          "closure": "obsolete"
         },
         {
           "n": 60,
           "text": "Compiler/JetDriver/Tests doesn't compile on dev 8219108260: errors in CLISeams.jet, RustForeign.jet and SchemaIngress.jet, the same on the base tree. Met when the package checks and its tests run in lane-check, so a driver test can't rot unseen again.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-05T20:15:03.830Z"
+          "evidence": "Moved to #6637 c21: compiler package test health",
+          "at": "2026-11-15T05:30:02.652Z",
+          "closure": "obsolete"
         },
         {
           "n": 61,
@@ -61245,7 +61261,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-15T05:29:33.717Z",
+      "updated": "2026-11-15T05:30:03.559Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G11"
@@ -69168,21 +69184,21 @@
         },
         {
           "n": 9,
-          "text": "(was #3239 c26) The pair `para_map_stream_vs_batched` is below 1.00 with the gauntlet method.",
+          "text": "The pair `para_map_stream_vs_batched` is below 1.00 with the gauntlet method. Proof: `node Tools/gauntlet/harness/run.mjs --entry para_map_stream_vs_batched`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:43:45.553Z"
+          "at": "2026-11-15T05:29:46.457Z"
         },
         {
           "n": 10,
-          "text": "(was #3239 c29) The `para_worker_state_bench` table (per-worker initialize, clone and drop counts with timings) is attached to the gauntlet report.",
+          "text": "The `para_worker_state_bench` table (per-worker initialize, clone and drop counts with timings) is attached to the gauntlet report. Proof: `node Tools/gauntlet/harness/run.mjs --entry para_worker_state_bench` prints the table.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:43:49.965Z"
+          "at": "2026-11-15T05:29:47.364Z"
         },
         {
           "n": 11,
@@ -69205,7 +69221,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:20.042Z",
-      "updated": "2026-11-15T05:29:45.388Z",
+      "updated": "2026-11-15T05:29:47.364Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G11"
@@ -69288,12 +69304,12 @@
         },
         {
           "n": 2,
-          "text": "ScriptBench workload w02 (Tools/perf/scriptbench), measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#2858); same output on O0, O1 and O2.",
+          "text": "ScriptBench workload w02, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/perf/scriptbench/Bench.jet --data DIR --out DIR --only w02` receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T18:29:26.707Z"
+          "at": "2026-11-15T05:29:48.258Z"
         }
       ],
       "refs": [
@@ -69307,8 +69323,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:22.602Z",
-      "updated": "2026-11-11T12:45:03.669Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:29:48.258Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G11"
       ]
@@ -69435,12 +69451,12 @@
         },
         {
           "n": 2,
-          "text": "ScriptBench workloads w03 and w14 (Tools/perf/scriptbench), measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#2858); same output on O0, O1 and O2.",
+          "text": "ScriptBench workloads w03 and w14, measured with the manifest method (hyperfine -N, interleaved, same machine), beat every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/perf/scriptbench/Bench.jet --data DIR --out DIR --only w03,w14` receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T18:29:28.884Z"
+          "at": "2026-11-15T05:29:49.130Z"
         },
         {
           "n": 5,
@@ -69534,8 +69550,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:24.863Z",
-      "updated": "2026-11-13T01:54:18.448Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:29:49.130Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G11"
       ],
@@ -217666,6 +217682,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:30:03.559Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T05:30:02.652Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#60"
+    },
+    {
+      "at": "2026-11-15T05:30:01.730Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#59"
+    },
+    {
+      "at": "2026-11-15T05:30:00.821Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#58"
+    },
+    {
+      "at": "2026-11-15T05:29:59.937Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#57"
+    },
+    {
+      "at": "2026-11-15T05:29:59.040Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#55"
+    },
+    {
+      "at": "2026-11-15T05:29:58.137Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#54"
+    },
+    {
+      "at": "2026-11-15T05:29:57.235Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-15T05:29:56.249Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#40"
+    },
+    {
+      "at": "2026-11-15T05:29:51.804Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T05:29:50.905Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0dv8dlk",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T05:29:50.014Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0dv8dlk",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T05:29:49.130Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0a0gmpl",
+      "note": "#2: #2858 closed; proof; was: ScriptBench workloads w03 and w14 (Tools/perf/scriptbench), measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/p"
+    },
+    {
+      "at": "2026-11-15T05:29:48.258Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08m4yum",
+      "note": "#2: #2858 closed; proof; was: ScriptBench workload w02 (Tools/perf/scriptbench), measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below"
+    },
+    {
+      "at": "2026-11-15T05:29:47.364Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02a1ynr",
+      "note": "#10: strip debris; proof; was: (was #3239 c29) The `para_worker_state_bench` table (per-worker initialize, clone and drop counts with timings) is attached to the gauntlet report."
+    },
+    {
+      "at": "2026-11-15T05:29:46.457Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02a1ynr",
+      "note": "#9: strip debris; proof; was: (was #3239 c26) The pair `para_map_stream_vs_batched` is below 1.00 with the gauntlet method."
+    },
     {
       "at": "2026-11-15T05:29:45.388Z",
       "by": "TowerKeeper-1",
