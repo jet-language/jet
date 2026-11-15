@@ -227,6 +227,7 @@ jet_driver_compiler_check_parse_only: fn(load: JetDriverLoadResult) -> Bool Neve
 
 jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCompilerCheckResult {
     load := jet_driver_load(input.request)
+    if load.internal_problem == .Val(internal) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Parse, Val(internal))
     parse_only := jet_driver_compiler_check_parse_only(load)
     if (!load.complete || jet_driver_has_errors(load.diagnostics)) && !parse_only -> return jet_driver_compiler_check_failure(load, load.failed_stage ?? JetDriverStage.Load, None)
     canonical_option := jet_driver_canonical_effect_module(input.request.canonical_effects, load.module_table)

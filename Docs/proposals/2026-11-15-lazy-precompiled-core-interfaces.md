@@ -53,6 +53,13 @@ What landed since revision 3:
   moved from `#run` to generated data, because a `#run` that reaches the
   parser checks the parser's closure in every compile of compiler sources
   (section 3.6).
+- **A lazy Core unit's head parse is gone.** `core.interface` holds the
+  program each unit's declaration heads parse to, in the syntax codec
+  (`JetFoundation/Facts/SyntaxCodec.jet`, generated beside the body codec).
+  A load whose unit text hashes the same reads that program and lexes none
+  of the unit's text. Its waves count the unit under
+  `parse.core_heads_decoded`, not `parse.core_input_bytes`. Held
+  declarations and kept bodies still parse from text (4.1).
 - **The T1 search removal (step T)** is still to come.
 
 ## 1. Measured baseline

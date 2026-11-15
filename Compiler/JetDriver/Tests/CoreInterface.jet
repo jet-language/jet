@@ -1,5 +1,5 @@
-// The Core interface (CoreInterface.jet): each Core unit's load rows and
-// body spans, encoded once and read back unit by unit.
+// The Core interface (CoreInterface.jet): each Core unit's load rows, body
+// spans and declaration heads, encoded once and read back unit by unit.
 use {
     fs: core.files
     interface_process: core.process
@@ -8,8 +8,9 @@ use {
     jet_driver.[
         JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode,
         JetDriverCompileRequest, JetDriverCoreInterfaceEntry, JetDriverCoreInterfaceReader, JetDriverCoreInterfaceUnit, JetDriverCoreSource,
-        JetDriverLoadResult, jet_driver_core_interface_bytes, jet_driver_core_interface_entries, jet_driver_core_interface_text_hash,
-        jet_driver_core_interface_unit, jet_driver_core_interface_unit_bytes, jet_driver_core_interface_units, jet_driver_core_text,
+        JetDriverLoadResult, jet_driver_core_heads_bytes, jet_driver_core_heads_program, jet_driver_core_interface_bytes,
+        jet_driver_core_interface_entries, jet_driver_core_interface_text_hash, jet_driver_core_interface_unit, jet_driver_core_interface_unit_bytes,
+        jet_driver_core_interface_units, jet_driver_core_text,
         jet_driver_load, jet_driver_runtime_interface_sources,
     ]
     jet_foundation.[CORE_SOURCE_OWNED_ROWS, CompilerTraceSink, Func, Item, Program, Span, compiler_threads_single]
@@ -45,6 +46,13 @@ interface_test_round_trip: fn(units: [JetDriverCoreInterfaceUnit], texts: [Strin
         assert_eq(read.text_bytes, source.len())
         assert_eq(read.words.words, unit.words.words)
         assert_eq(read.demand.bare_names, unit.demand.bare_names)
+        assert(read.heads == unit.heads)
+        assert_eq(read.holds, unit.holds)
+        if read.heads.len() > 0 {
+            // The heads read back as one program, which writes the same bytes.
+            program: jet_driver_core_heads_program(read.heads) ?? panic("{unit.path}: its heads do not read back")
+            assert(jet_driver_core_heads_bytes(program) == read.heads)
+        }
         loop body in read.bodies {
             if body.start >= body.end || body.end > source.len() -> panic("{unit.path}: the body span {body.start}..{body.end} is not inside its {source.len()} bytes")
             // `{` and `}`.
@@ -65,6 +73,11 @@ interface_test_round_trip: fn(units: [JetDriverCoreInterfaceUnit], texts: [Strin
     held: loop declaration in unit.words.held -> declaration.name
     assert_eq(held, [String]{"twice", "nothing", "LIMIT"})
     assert_eq(unit.lines, 19)
+    // Its heads parse cleanly, holding those three declarations back.
+    assert(unit.heads.len() > 0)
+    assert(unit.holds)
+    heads: jet_driver_core_heads_program(unit.heads) ?? panic("the fixture's heads do not read back")
+    assert_eq(heads.items.len(), 5)
     interface_test_round_trip(units, [String]{INTERFACE_FIXTURE})
 }
 
@@ -78,8 +91,16 @@ interface_test_round_trip: fn(units: [JetDriverCoreInterfaceUnit], texts: [Strin
     }
     units: jet_driver_core_interface_units(rows.move(), compiler_threads_single())
     bodies := 0
-    loop unit in units -> bodies += unit.bodies.len()
+    headless := [String]{}
+    loop unit in units {
+        bodies += unit.bodies.len()
+        if unit.heads.len() == 0 -> headless.push(unit.path)
+    }
     assert(bodies > 5000)
+    // Every unit's heads parse cleanly, but for a unit whose heads parse
+    // holds other declarations than its whole parse does (Core/Http's
+    // client and server today): a load parses it whole, so it keeps none.
+    assert(headless.len() <= 2, "units with no heads: {headless}")
     interface_test_round_trip(units, texts)
 }
 
@@ -132,7 +153,7 @@ InterfaceTestTrace: struct {
         end: fn(self, name: String, items: Int) Never! -[FS, Time]> {}
 
         progress: fn(self, name: String, done: Int, total: Int) Never! -[FS]> {
-            if name.starts_with("counters.load.") || name == "counters.parse.core_tokens" -> fs.append_all(self.path, "{name} = {done}\n") ?? panic("cannot write the trace: {err}")
+            if name.starts_with("counters.load.") || name == "counters.parse.core_tokens" || name == "counters.parse.core_heads_decoded" || name == "counters.parse.core_input_bytes" -> fs.append_all(self.path, "{name} = {done}\n") ?? panic("cannot write the trace: {err}")
         }
 
         functions: fn(self) -[]> Bool Never! {
@@ -303,8 +324,9 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     differ
 }
 
-// A lazy load parses each Core module from its declaration heads, then
-// only the bodies reach keeps: the program is the one the whole parse gives.
+// A lazy load reads each Core module's declaration heads from the
+// interface, then parses only the bodies reach keeps: the program is the one
+// the whole parse gives.
 #Test("a load that reads the Core interface gives the program and spans of one that parses Core whole") {
     source: "use {{\n    files: core.files\n    sys: core.sys\n    process: core.process\n}}\n\nrun: fn() {{\n    path: files.join(sys.temp_dir(), \"probe-{{process.current_pid()}}\")\n    text: files.read(path) ?? \"none\"\n    print(\"{{text.len()}} {{path}} {{[Int]{{3, 1, 2}}.sorted()}}\")\n}}\n"
     units: jet_driver_core_interface_units(interface_test_core_rows(), compiler_threads_single())
@@ -315,11 +337,16 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     assert_eq(eager.counters.get("counters.load.core_lazy_modules"), Val(0))
     assert((lazy.counters.get("counters.load.core_lazy_modules") ?? 0) > 5)
     assert((lazy.counters.get("counters.load.core_bodies_restored") ?? 0) > 0)
+    // Each lazy module read its heads, none parsed them (a lazy unit with
+    // no body is read too, though it is no lazy module).
+    assert_eq(eager.counters.get("counters.parse.core_heads_decoded"), Val(0))
+    assert((lazy.counters.get("counters.parse.core_heads_decoded") ?? 0) >= (lazy.counters.get("counters.load.core_lazy_modules") ?? 0))
+    assert((lazy.counters.get("counters.parse.core_input_bytes") ?? 0) < (eager.counters.get("counters.parse.core_input_bytes") ?? 0))
     // The same bodies stay; the lazy load parsed fewer.
     assert_eq(lazy.counters.get("counters.load.core_bodies"), eager.counters.get("counters.load.core_bodies"))
     assert((lazy.counters.get("counters.load.core_bodies_parsed") ?? 0) < (eager.counters.get("counters.load.core_bodies_parsed") ?? 0))
-    // The lazy load counts the tokens it lexed: the heads, then the bodies
-    // it parsed back, fewer than the whole texts.
+    // The lazy load counts the tokens it lexed: the bodies it parsed back,
+    // fewer than the whole texts.
     assert((lazy.counters.get("counters.parse.core_tokens") ?? 0) > 0)
     assert((lazy.counters.get("counters.parse.core_tokens") ?? 0) < (eager.counters.get("counters.parse.core_tokens") ?? 0))
 }
@@ -337,11 +364,25 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     assert_eq(stale.counters.get("counters.load.core_lazy_modules"), Val(0))
     fresh: interface_test_load(source, interface_test_fixture_rows(), interface)
     assert_eq(fresh.counters.get("counters.load.core_lazy_modules"), Val(1))
+    assert_eq(fresh.counters.get("counters.parse.core_heads_decoded"), Val(1))
     assert((fresh.counters.get("counters.load.core_bodies_restored") ?? 0) > 0)
     eager: interface_test_load(source, interface_test_fixture_rows(), [U8]{})
     assert_eq(interface_test_differ(eager.load, fresh.load, units), [String]{})
 }
 
+// Heads that don't read back as a program leave the unit to parse them from
+// its text, still lazily.
+#Test("a Core unit whose interface heads don't read back parses its heads from its text") {
+    source: "use d: core.devtools\nrun: fn() {{ print(d.twice(d.Shape{{width: 2}}.area())) }}\n"
+    units := jet_driver_core_interface_units(interface_test_fixture_rows(), compiler_threads_single())
+    units[0].heads = units[0].heads[0..<units[0].heads.len() - 1]
+    cut: interface_test_load(source, interface_test_fixture_rows(), jet_driver_core_interface_bytes(units))
+    assert(cut.load.complete)
+    assert_eq(cut.counters.get("counters.load.core_lazy_modules"), Val(1))
+    assert_eq(cut.counters.get("counters.parse.core_heads_decoded"), Val(0))
+    eager: interface_test_load(source, interface_test_fixture_rows(), [U8]{})
+    assert_eq(interface_test_differ(eager.load, cut.load, units), [String]{})
+}
 // A unit whose first item's marker shares its line (`#SingleUse Token: …`),
 // then a function, a type with a method and a second function. The unit
 // holds a declaration either way, so the parse that reads its kept bodies
