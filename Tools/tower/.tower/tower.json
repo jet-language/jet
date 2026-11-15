@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6974,
-    "rev": 106092,
+    "nextNum": 6975,
+    "rev": 106094,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -114144,6 +114144,45 @@
       "created": "2026-11-15T05:41:54.524Z",
       "updated": "2026-11-15T05:41:54.524Z",
       "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0dphagz",
+      "num": 6974,
+      "title": "A runtime stop names the same source site on every tier: web images carry the location table native images use",
+      "body": "Since ae7fe7adaf, a stop raised inside Core names the user's call that reached Core, read from the image's location table (.debug_jetline). A web image has no such table, so it prints the Core site instead; the spec allows that fallback for an image with no location table. That makes one program report different stop sites on native and web, which breaks I9's one meaning across tiers. Found by SweepFix-162 (web-no-exec, 2026-11-15): the web host had also answered mprotect(PROT_EXEC) with success, so the frame walk trapped. That trap is fixed, and the e1003 web case now pins the two sites separately instead of comparing bytes.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A stop raised inside Core reports the user's call site (file and line) on web exactly as on native: the web image carries the location table (or its equivalent), and the stop report reads it. Proof: the e1003 case and the golden stops IntPowNegativeStop, FloatBitsRangeStop and TypedAbsI64Min compare their web output byte for byte with native's user-line report.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T10:30:22.933Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T10:30:21.968Z",
+      "updated": "2026-11-15T10:30:22.933Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -217803,6 +217842,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T10:30:22.933Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0dphagz",
+      "note": "#1 A stop raised inside Core reports the user's call site (file"
+    },
+    {
+      "at": "2026-11-15T10:30:21.968Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0dphagz",
+      "note": "A runtime stop names the same source site on every tier: web images carry the location table native images use"
+    },
     {
       "at": "2026-11-15T10:24:14.593Z",
       "by": "Main",
