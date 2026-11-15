@@ -9,7 +9,7 @@
 // signature), `{prefix}.facts` (ir_core_facts_text: each Core function's key
 // and whether the library seals it), `{prefix}.seal` (the Core check's
 // summaries a bound program may take for a Core function's reach, JetSema
-// CoreSeal.jet), `{prefix}.bodies` (the Core check's Core function checks
+// CoreSeal.jet), `{prefix}.bodies` (the Core check's Prelude function checks
 // as packets, JetSema CoreBodies.jet) and `{prefix}.threads`, the exports
 // whose call can start a second thread (ir_thread_exports over the
 // runtime's own receipt, since Core starts threads through the runtime;
@@ -54,7 +54,7 @@ JetCLICoreLibrary: struct { bytes: [U8], problem: String }
 
 // The Core library's IR (jet_cli_core_library_ir): built from its own Core
 // check, linted and optimized, with the build's and the lint's issue rows,
-// the check's seal lines (`{prefix}.seal`) and Core bodies file
+// the check's seal lines (`{prefix}.seal`) and Prelude bodies file
 // (`{prefix}.bodies`), and the threads its machine code compiles on. Else
 // the problem that stopped the Core check.
 JetCLICoreLibraryIR: enum {
@@ -143,7 +143,7 @@ jet_cli_core_library_made: fn(built: &&JetCLICoreLibraryIR, prefix: String, runt
 
 // The Core library's machine code, from its IR `library`, the issue rows
 // `found` its build and lint left, the Core check's `seal` lines and its
-// Core bodies file `bodies`, once the runtime's thread receipt
+// Prelude bodies file `bodies`, once the runtime's thread receipt
 // `runtime_threads` is known.
 jet_cli_core_library: fn(prefix: String, library: &&IRCoreLibrary, found: &&[String], seal: String, bodies: [U8], runtime_threads: [String], threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
     issues := found.move()

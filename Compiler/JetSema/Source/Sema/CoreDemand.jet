@@ -321,7 +321,7 @@ sema_core_demand_counters: fn(graph: SemaRegistrationGraph, tally: SemaCoreDeman
 // `core.prelude`, module `core` and the compiler-owned Prelude modules
 // (Prelude/Errors, Prelude/Effects.jet), checked from their build-time
 // syntax rows. A body checked by its signature alone (FnBody.stand_in) is
-// not one, nor is a Core body loaded from the Core library's check
+// not one, nor is a Prelude body loaded from the Core library's check
 // (CoreBodies.jet, SemaRegistrationHostHooks.core_bodies_loaded), which
 // counts as `counters.core.bodies_loaded`. Each body counts under the first
 // kind it is, in this order:
@@ -358,7 +358,7 @@ sema_core_text_count: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
         if !in_prelude && !module_is_core(checked.module_identity) -> next
         loop function in checked.functions {
             if function.stand_in -> next
-            if sema_core_body_was_loaded(bodies, loaded_rows, function.key) {
+            if in_prelude && sema_core_body_was_loaded(bodies, loaded_rows, function.key) {
                 loaded += 1
                 next
             }

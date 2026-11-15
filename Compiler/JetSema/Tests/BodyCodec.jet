@@ -84,14 +84,13 @@ body_codec_source: fn() -> String {
 }
 
 // The check of body_codec_source() as module `main` of package `package`,
-// with the canonical effect module, under the host hooks `hooks`; with
-// `core`, `main` is a Core module. Under the canonical effect module's
-// package `main` is a Prelude module. A Prelude or Core `main` with no
-// bodies file in `hooks` is checked as the Core library's check checks it
-// (SemaRegistrationGraph.core_seal), so its function checks are captured
+// with the canonical effect module, under the host hooks `hooks`. Under the
+// canonical effect module's package `main` is a Prelude module. With no
+// bodies file in `hooks` it is checked as the Core library's check checks
+// it (SemaRegistrationGraph.core_seal), so its function checks are captured
 // (CoreBodies.jet); with one, as a compile bound to the built-in Core is,
 // which loads them.
-body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaRegistrationHostHooks>, core: Bool{false}) -> SemaGraphResult? Err! {
+body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaRegistrationHostHooks>) -> SemaGraphResult? Err! {
     source: body_codec_source()
     threads: compiler_threads_single()
     parsed := parse_source(source.bytes())
@@ -100,7 +99,7 @@ body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaReg
         return None
     }
     table := module_table()
-    main_id: module_intern(table, if core -> "<corelib>/body-codec" else -> "body-codec::main")
+    main_id: module_intern(table, "body-codec::main")
     canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
         failures.push("canonical effect module declares no effects")
         return None
@@ -114,7 +113,7 @@ body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaReg
         return None
     }
     loading: hooks.guard_read().value.core_bodies != None
-    graph.core_seal = (package == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || core) && !loading
+    graph.core_seal = package == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY && !loading
     // Declaration checking loans the graph to its stage, which returns it.
     stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, threads, None)
     declared := stage.graph.move()
@@ -302,24 +301,12 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
 }
 
 #Test("a Prelude function check loaded from the Core library's check is the check from text") {
-    body_codec_load(JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, false)
-}
-
-#Test("a Core function check loaded from the Core library's check is the check from text") {
-    body_codec_load("core", true)
-}
-
-// Checks `main` (body_codec_check of `package`, `core`) as the Core
-// library's check does, then again with the bodies file that check wrote:
-// every function check is loaded, and each module's result and the
-// compile's diagnostics are those of the check from text.
-body_codec_load: fn(package: String, core: Bool) {
     failures := [String]{}
-    captured := body_codec_check(failures, package, body_codec_hooks(), core) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
+    captured := body_codec_check(failures, JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, body_codec_hooks()) ?? panic("BodyCodec could not check the Prelude module:\n{failures.join("\n")}")
     bodies: sema_core_bodies_read(captured.core_bodies.move()) ?? panic("BodyCodec: the bodies file does not read back")
     count: bodies.rows.len()
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, core_bodies: Val(bodies)}}
-    loaded := body_codec_check(failures, package, hooks, core) ?? panic("BodyCodec could not load module `main`:\n{failures.join("\n")}")
+    loaded := body_codec_check(failures, JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, hooks) ?? panic("BodyCodec could not load the Prelude module:\n{failures.join("\n")}")
     permit: hooks.guard_read()
     loaded_count := 0
     loop marked in permit.value.core_bodies_loaded {

@@ -271,18 +271,14 @@ only the text of the items that hold them, and take their functions'
 places (`jet_driver_core_restore_bodies`). Any other unit, or any unit of a load
 without reach or of jet-bare, which carries no part, parses whole.
 `core.bodies` (`JetSema/Sema/CoreBodies.jet`) holds the checks of the
-Core library's functions, the Prelude's among them, as that library's
-check left them, each as the packet a compiler thread hands the module
-pass, its ids written as keys, with the facts of that check's compile
-(target, profile, OS, artifact build, keep-going and test modes). A native
-compile already bound to the built-in Core, or a `jet check` of a program
-whose Core is the built-in one, without `--deep-checks`, loads a Core
-function's packet in place of checking its body, in the module pass and in
-each Core demand wave, when those facts are its own and every key resolves.
-It records again the codecs and derived methods the check demanded. Such a
-compile, like the capturing check, keeps its Core modules' checks off the
-compiler threads (`SemaRegistrationGraph.core_bodies_held`). A stand-in or
-any other function is checked from text. A `jet run` whose Core is jet's built-in Core sources (a
+Prelude's functions as the Core library's check left them, each as the
+packet a compiler thread hands the module pass, its ids written as keys,
+with the facts of that check's compile (target, profile, OS, artifact
+build, keep-going and test modes). A native compile already bound to the
+built-in Core, without `--deep-checks`, loads a Prelude function's packet
+in place of checking its body when those facts are its own and every key
+resolves, and records again the codecs and derived methods the check
+demanded; any other function is checked from text. A `jet run` whose Core is jet's built-in Core sources (a
 compile outside a toolchain tree) binds its Core calls to that Core code
 (`JetCli/Cli/Host.jet` `jet_cli_native_executable`, `IRChecks.core`): a
 call of a non-generic Core function whose bounds checks are the stock ones
