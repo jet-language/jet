@@ -199,6 +199,52 @@ sema_compiler_identity_path: fn(identity: String) -> String Never! {
     (identity.split_once(":") ?? return identity.copy()).after
 }
 
+// The DeclarationKind variant of `symbol`: what a definition and every
+// reference to it say it declares. A function a type or trait owns is a
+// Method; a type is the kind of its nominal declaration, an impl's
+// associated type AssociatedType, and a type no module declares (a builtin
+// carrier) Builtin.
+sema_compiler_index_declaration_kind: fn(symbol: Symbol, registration: SemaRegistrationGraph) -> String Never! {
+    if symbol.kind == {
+        .Module -> "Module"
+        .Function -> if symbol.owner == None -> "Function" else -> "Method"
+        .Trait -> "Trait"
+        .Impl -> "Impl"
+        .Constant -> "Constant"
+        .Field -> "Field"
+        .Variant -> "Variant"
+        .Parameter -> "Parameter"
+        .Local -> "Local"
+        .Import -> "Import"
+        .Foreign -> "Foreign"
+        .Label -> "Label"
+        .Type -> {
+            if symbol.owner != None -> return "AssociatedType"
+            caller: sema_registration_module_index(registration, symbol.module_identity) ?? return "Builtin"
+            nominal: loop row in registration.modules[caller].nominals {
+                if row.symbol.id == symbol.id -> break row.kind
+            } ?? return "Builtin"
+            if nominal == {
+                .Struct -> "Struct"
+                .Enum -> "Enum"
+                .Distinct -> "Distinct"
+                .TypeAlias -> "Alias"
+                .Trait -> "Trait"
+                .Tag -> "Tag"
+                .UnitFamily -> "UnitFamily"
+                .ForeignHandle -> "ForeignHandle"
+            }
+        }
+    }
+}
+
+sema_compiler_index_declaration_kind_value: fn(symbol: Symbol, registration: SemaRegistrationGraph) -> TComptimeValue Never! {
+    TComptimeValue.Enum{type_name: "DeclarationKind", variant: sema_compiler_index_declaration_kind(symbol, registration), args: [TComptimeEnumArg]{}}
+}
+
+// The kind word a definition's derivation keys hash (its stable and
+// signature ids). It is key text, never a reflected value: the index reports
+// a definition's kind as its DeclarationKind.
 sema_compiler_index_definition_kind: fn(symbol: Symbol, registration: SemaRegistrationGraph) -> String Never! {
     if symbol.kind == {
         .Module -> return "module"
@@ -247,7 +293,6 @@ sema_compiler_index_parameter_values: fn(registration: SemaRegistrationGraph, ca
 // The CompilerSymbolKind of `symbol`, declared in the module at row `caller`.
 sema_compiler_index_symbol_kind: fn(registration: SemaRegistrationGraph, caller: Int, symbol: Symbol) -> TComptimeValue {
     registered_module: registration.modules[caller]
-    kind := "type"
     params := TComptimeValue.List{values: [TComptimeValue]{}}
     ret := sema_compiler_index_type_id_option(registration, caller, None)
     // The owner as the index names definitions (`type:app.Shape` for a
@@ -256,50 +301,33 @@ sema_compiler_index_symbol_kind: fn(registration: SemaRegistrationGraph, caller:
     fields := [TComptimeValue]{}
     variants := [String]{}
     mutable := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Bool}}
-    if symbol.kind == {
-        .Module -> kind = "module"
-        .Function -> {
-            kind = "function"
-            loop function in registered_module.functions {
-                if function.symbol.id != symbol.id -> next
-                params = sema_compiler_index_parameter_values(registration, caller, function.parameters)
-                if function.signature == .Fn(_, return_type, _, _, _, _) {
-                    if return_type != None -> ret = sema_compiler_index_type_id_option(registration, caller, return_type)
-                }
+    if symbol.kind == .Function {
+        loop function in registered_module.functions {
+            if function.symbol.id != symbol.id -> next
+            params = sema_compiler_index_parameter_values(registration, caller, function.parameters)
+            if function.signature == .Fn(_, return_type, _, _, _, _) {
+                if return_type != None -> ret = sema_compiler_index_type_id_option(registration, caller, return_type)
             }
         }
-        .Type -> {
-            kind = "type"
-            loop nominal in registered_module.nominals {
-                if nominal.symbol.id != symbol.id -> next
-                if nominal.kind == SemaRegistrationNominalKind.Struct {
-                    kind = "struct"
-                    loop field in nominal.fields {
-                        fields.push(TComptimeValue.Struct{type_name: "CompilerField", fields: [TComptimeField]{
-                            TComptimeField{name: "name", value: sema_compiler_index_string(field.symbol.name)},
-                            TComptimeField{name: "type", value: sema_comptime_reflection_type_id(registration, caller, field.ty)},
-                        }})
-                    }
-                }
-                if nominal.kind == SemaRegistrationNominalKind.Enum {
-                    kind = "enum"
-                    loop variant in nominal.variants -> variants.push(variant.symbol.name)
+    }
+    if symbol.kind == .Type {
+        loop nominal in registered_module.nominals {
+            if nominal.symbol.id != symbol.id -> next
+            if nominal.kind == SemaRegistrationNominalKind.Struct {
+                loop field in nominal.fields {
+                    fields.push(TComptimeValue.Struct{type_name: "CompilerField", fields: [TComptimeField]{
+                        TComptimeField{name: "name", value: sema_compiler_index_string(field.symbol.name)},
+                        TComptimeField{name: "type", value: sema_comptime_reflection_type_id(registration, caller, field.ty)},
+                    }})
                 }
             }
+            if nominal.kind == SemaRegistrationNominalKind.Enum {
+                loop variant in nominal.variants -> variants.push(variant.symbol.name)
+            }
         }
-        .Trait -> kind = "trait"
-        .Impl -> kind = "impl"
-        .Constant -> kind = "const"
-        .Field -> kind = "field"
-        .Variant -> kind = "enum_variant"
-        .Parameter -> kind = "param"
-        .Local -> kind = "local"
-        .Import -> kind = "import"
-        .Foreign -> kind = "foreign"
-        .Label -> kind = "label"
     }
     TComptimeValue.Struct{type_name: "CompilerSymbolKind", fields: [TComptimeField]{
-        TComptimeField{name: "kind", value: sema_compiler_index_string(kind)},
+        TComptimeField{name: "kind", value: sema_compiler_index_declaration_kind_value(symbol, registration)},
         TComptimeField{name: "params", value: params},
         TComptimeField{name: "ret", value: ret},
         TComptimeField{name: "parent", value: sema_compiler_index_option_string(parent)},
@@ -374,9 +402,17 @@ sema_compiler_index_view_provenance_values: fn(map: ViewProvenanceMap?) -> TComp
 }
 
 // `caller` is the row of the module that declares `symbol`, keyed `key`.
+// Its `path` is its identity's dotted path, which the identity of its
+// per-kind record (TypeInfo, FunctionInfo, TraitInfo, ConstantInfo) spells;
+// its `scope` is the path of the declaration that holds it, or its module's
+// name for a declaration at module scope.
 sema_compiler_index_definition: fn(registration: SemaRegistrationGraph, key: String, caller: Int, symbol: Symbol, view_provenance: TComptimeValue) -> TComptimeValue {
+    identity: sema_compiler_identity(registration, key)
+    scope: if symbol.owner == .Val(owner) -> sema_compiler_identity_path(sema_compiler_identity(registration, owner)) else -> "{registration.modules[caller].module_name}"
     TComptimeValue.Struct{type_name: "CompilerDefinition", fields: [TComptimeField]{
-        TComptimeField{name: "identity", value: sema_compiler_index_string(sema_compiler_identity(registration, key))},
+        TComptimeField{name: "identity", value: sema_compiler_index_string(identity)},
+        TComptimeField{name: "path", value: sema_compiler_index_string(sema_compiler_identity_path(identity))},
+        TComptimeField{name: "scope", value: sema_compiler_index_string(scope)},
         TComptimeField{name: "name", value: sema_compiler_index_string(symbol.name)},
         TComptimeField{name: "module", value: sema_compiler_index_string(registration.modules[caller].module_path)},
         TComptimeField{name: "span", value: sema_compiler_index_span(symbol.span, registration.modules[caller].source_file)},
@@ -391,7 +427,7 @@ sema_compiler_index_anchor: fn(symbol: Symbol, key: String?, registration: SemaR
     if key == .Val(text) -> identity = Val(sema_compiler_identity(registration, text))
     TComptimeValue.Struct{type_name: "CompilerDefinitionAnchor", fields: [TComptimeField]{
         TComptimeField{name: "module", value: sema_compiler_index_string(sema_compiler_index_module_path(registration, module_text(registration.module_table, symbol.module_identity)))},
-        TComptimeField{name: "kind", value: sema_compiler_index_string(sema_compiler_index_definition_kind(symbol, registration))},
+        TComptimeField{name: "kind", value: sema_compiler_index_declaration_kind_value(symbol, registration)},
         TComptimeField{name: "semantic_identity", value: sema_compiler_index_option_string(identity)},
         TComptimeField{name: "span", value: sema_compiler_index_span(symbol.span, sema_compiler_index_module_file(registration, module_text(registration.module_table, symbol.module_identity)))},
     }}

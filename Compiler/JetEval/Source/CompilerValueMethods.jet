@@ -38,7 +38,7 @@ jet_eval_compiler_value_method_record: fn(owner: String, method: String) -> Bool
 
 jet_eval_compiler_value_method_supported: fn(owner: String, method: String, arg_count: Int) -> Bool Never! {
     if arg_count != 0 && owner != "EffectInfo" -> return false
-    if owner == "ProgramInfo" -> return method == "types" || method == "functions" || method == "packages" || method == "foreign" || method == "definitions" || method == "references" || method == "call_edges" || method == "structural_nodes" || method == "revision"
+    if owner == "ProgramInfo" -> return method == "types" || method == "functions" || method == "traits" || method == "constants" || method == "packages" || method == "foreign" || method == "definitions" || method == "references" || method == "call_edges" || method == "structural_nodes" || method == "revision" || method == "complete"
     if jet_eval_compiler_value_method_record(owner, method) -> return true
     if owner == "FunctionInfo" -> return method == "reaches_panic"
     if owner == "EffectInfo" -> return method == "has" && arg_count == 1
@@ -97,6 +97,10 @@ jet_eval_compiler_value_answer: fn(owner: String, method: String, args: [TCompti
     if method == "revision" {
         if projected == .String(_) -> return JetEvalCompilerValueAnswer.Value{value: projected}
         return jet_eval_compiler_value_fault("ProgramInfo.revision projection is not a String")
+    }
+    if method == "complete" {
+        if projected == .Bool(_) -> return JetEvalCompilerValueAnswer.Value{value: projected}
+        return jet_eval_compiler_value_fault("ProgramInfo.complete projection is not a Bool")
     }
     if projected == .List(_) -> return JetEvalCompilerValueAnswer.Value{value: projected}
     jet_eval_compiler_value_fault("{owner}.{method} projection is not a list")

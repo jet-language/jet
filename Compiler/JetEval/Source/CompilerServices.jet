@@ -154,7 +154,9 @@ use {
         sema_compiler_semantic_index_from_checked,
         sema_comptime_reflection_arithmetic_facts,
         sema_comptime_reflection_callable_signature,
+        sema_comptime_reflection_declared_constants,
         sema_comptime_reflection_declared_effect_names,
+        sema_comptime_reflection_declared_traits,
         sema_comptime_reflection_declared_function_facts,
         sema_comptime_reflection_doc_source,
         sema_comptime_reflection_documentation,
@@ -804,7 +806,12 @@ JetCompilerServicesProgramInfo: enum {
 // `foreign` holds the ForeignInfo of every checked foreign declaration, in
 // module order (jet_eval_compiler_services_foreign_info). The view is the
 // program's own: a module the compiler supplies adds no row.
-jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> JetCompilerServicesProgramInfo {
+// `traits` and `constants` hold the TraitInfo of each trait and the
+// ConstantInfo of each constant a module declares at module scope, in
+// module order. `complete` is `checked_complete`: whether every function
+// body checked, false when a build that keeps going checked a failed one
+// as a trap of its declared signature.
+jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource], *, checked_complete: Bool) -> JetCompilerServicesProgramInfo {
     if !registration.complete -> return .Missing(fact: "the registration graph is incomplete")
     if !graph.complete -> return .Missing(fact: "the checked graph is incomplete")
     index: sema_compiler_semantic_index_from_checked(registration, graph, source, module_sources)
@@ -812,6 +819,8 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     types := [TComptimeValue]{}
     functions := [TComptimeValue]{}
+    traits := [TComptimeValue]{}
+    constants := [TComptimeValue]{}
     packages := [JetCompilerServicesPackageRows]{}
     foreign := [TComptimeValue]{}
     build_keys := [String]{}
@@ -853,7 +862,9 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
         }
         if checked == .Val(module_result) {
             loop function in module_result.foreign_functions -> foreign.push(jet_eval_compiler_services_foreign_info(function, module_result.foreign_providers, module_row.source_segments, module_row.source_file))
+            constants.extend(sema_comptime_reflection_declared_constants(registration, module_index, module_result.declarations.constants))
         }
+        traits.extend(sema_comptime_reflection_declared_traits(registration, module_index, catalog) ?? return .Missing(fact: "module `{module_row.module_name}` has no marker registry"))
         at := -1
         loop (row, package) in packages {
             if package.identity == module_row.package_identity -> at = row
@@ -904,8 +915,11 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     fields := [TComptimeField]{
         {name: "types", value: TComptimeValue.List{values: types}},
         {name: "functions", value: TComptimeValue.List{values: functions}},
+        {name: "traits", value: TComptimeValue.List{values: traits}},
+        {name: "constants", value: TComptimeValue.List{values: constants}},
         {name: "packages", value: TComptimeValue.List{values: package_values}},
         {name: "revision", value: jet_eval_compiler_services_string(record_key_digest(revision_fields))},
+        {name: "complete", value: TComptimeValue.Bool{value: checked_complete}},
         {name: "foreign", value: TComptimeValue.List{values: foreign}},
         {name: "root_calls", value: TComptimeValue.List{values: jet_eval_compiler_services_root_calls(registration, graph, build_keys)}},
         {name: "root_types", value: TComptimeValue.List{values: type_names.root}},
@@ -986,13 +1000,14 @@ jet_eval_compiler_services_type_names: fn(registration: SemaRegistrationGraph) -
 }
 
 // The whole-program view of a build no body can read (no source outside
-// Core spells `program` or `compiler`): ProgramInfo's fields, every one
-// empty, so the build skips the snapshot.
+// Core spells `program` or `compiler`): ProgramInfo's lists, every one
+// empty, and not complete, so the build skips the snapshot.
 jet_eval_compiler_services_program_unread: fn() -> TComptimeValue Never! {
     fields := [TComptimeField]{}
-    loop name in ([String]{"types", "functions", "packages", "foreign", "root_calls", "root_types", "scope_types", "definitions", "references", "call_edges", "structural_nodes"}) {
+    loop name in ([String]{"types", "functions", "traits", "constants", "packages", "foreign", "root_calls", "root_types", "scope_types", "definitions", "references", "call_edges", "structural_nodes"}) {
         fields.push(TComptimeField{name: name, value: TComptimeValue.List{values: [TComptimeValue]{}}})
     }
+    fields.push(TComptimeField{name: "complete", value: TComptimeValue.Bool{value: false}})
     TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields}
 }
 

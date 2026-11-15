@@ -11,7 +11,7 @@ build: fn(b: Build) {
     meta: b.compiler(app)
     fields := [CompilerField]{}
     loop definition in b.program.definitions() {
-        if definition.name != "Seed" || definition.kind.kind != "struct" -> next
+        if definition.name != "Seed" || definition.kind.kind != .Struct -> next
         loop field in definition.kind.fields -> fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
     }
     if fields.len() != 2 -> panic("the index has no struct row for `Seed`")

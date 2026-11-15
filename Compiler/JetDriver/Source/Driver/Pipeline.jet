@@ -5663,7 +5663,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         // (jet_driver_query_build_plan) reads them before generation.
         graph_complete: checked_graph.complete
         if kg.enabled -> checked_graph.complete = true
-        info: jet_eval_compiler_services_program_info(resolved_registration, checked_graph, jet_driver_source_text_at(load.source_files, source_positions, request.authorized_sources.entry_path), module_sources)
+        info: jet_eval_compiler_services_program_info(resolved_registration, checked_graph, jet_driver_source_text_at(load.source_files, source_positions, request.authorized_sources.entry_path), module_sources, checked_complete: graph_complete)
         checked_graph.complete = graph_complete
         registration_graph = resolved_registration.move()
         jet_driver_trace_step_end(request.trace_sink, "driver.prelower.build_program", module_sources.len())

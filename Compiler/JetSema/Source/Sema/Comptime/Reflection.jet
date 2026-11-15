@@ -1270,7 +1270,9 @@ sema_comptime_reflection_param_record: fn(name: String, label: String, zone: Str
 // ContributionKind and whether the contribution law selected it. A writer
 // with no source site (a `build: fn` contribution, a `--set`) names no file.
 // Values are PreparedValues of the setting's type. A setting's enum type is
-// the one the package declares by that name.
+// the one the package declares by that name. Its `identity` is the package
+// name and its own, its `scope` the identity of the PackageInfo that lists
+// it.
 sema_comptime_reflection_setting_infos: fn(graph: SemaRegistrationGraph, settings: [SemaBuildSetting]) -> [TComptimeValue] {
     loop setting in settings -> sema_comptime_reflection_struct("SettingInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: setting.name}},
@@ -1283,6 +1285,8 @@ sema_comptime_reflection_setting_infos: fn(graph: SemaRegistrationGraph, setting
             SemaComptimeReflectionField{name: "kind", value: TComptimeValue.Enum{type_name: "ContributionKind", variant: writer.kind, args: [TComptimeEnumArg]{}}},
             SemaComptimeReflectionField{name: "selected", value: TComptimeValue.Bool{value: writer.selected}},
         })}},
+        SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: "{graph.build_facts.package_name}.{setting.name}"}},
+        SemaComptimeReflectionField{name: "scope", value: TComptimeValue.String{value: graph.package_identity}},
     })
 }
 
@@ -2203,6 +2207,11 @@ sema_comptime_reflection_builtin_type_info: fn(graph: SemaRegistrationGraph, nam
     Val(sema_comptime_reflection_located(info, [SemaSourceSegment]{}, "", sema_comptime_reflection_no_source()))
 }
 
+// The TraitInfo of the trait `trait_name` names from module row `caller` as
+// one implementation binds it: the types it binds and the methods it writes.
+// Its `identity` is the declaring module's name and its own, its `scope`
+// that module's name, as ProgramInfo.definitions() spells them; a trait no
+// module declares keeps its written name and no scope.
 sema_comptime_reflection_append_trait_contract: fn(
     registration: SemaRegistrationGraph,
     caller: Int,
@@ -2219,11 +2228,43 @@ sema_comptime_reflection_append_trait_contract: fn(
     }))
     method_values := [TComptimeValue]{}
     sema_comptime_reflection_append_methods(registration, caller, methods, module_path, identity, registry, [SemaInferenceBinding]{}, method_values)
+    declaring: sema_comptime_reflection_module_declared_row(registration, caller, trait_name)
+    scope: if declaring == .Val(row) -> registration.modules[row.module_index].module_name else -> ""
+    sema_comptime_reflection_trait_info(trait_name, associated, method_values, sema_comptime_reflection_qualified_name(registration, caller, trait_name), scope)
+}
+
+sema_comptime_reflection_trait_info: fn(name: String, associated: [TComptimeValue], methods: [TComptimeValue], identity: String, scope: String) -> TComptimeValue Never! {
     sema_comptime_reflection_struct("TraitInfo", [SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: trait_name}},
+        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
         SemaComptimeReflectionField{name: "associated_types", value: TComptimeValue.List{values: associated}},
-        SemaComptimeReflectionField{name: "methods", value: TComptimeValue.List{values: method_values}},
+        SemaComptimeReflectionField{name: "methods", value: TComptimeValue.List{values: methods}},
+        SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: identity}},
+        SemaComptimeReflectionField{name: "scope", value: TComptimeValue.String{value: scope}},
     })
+}
+
+// The traits module row `index` declares, as ProgramInfo.traits() lists
+// them: each one's name, its identity, the module's name as its scope, and a
+// MethodInfo for each method it declares, the header an implementation
+// writes. A declaration binds no associated type, so its
+// `associated_types` is empty; a type's TraitInfo lists the ones its
+// implementation binds. None when the module has no marker registry.
+sema_comptime_reflection_declared_traits: fn(graph: SemaRegistrationGraph, index: Int, catalog: TAppliedRuleCatalog) -> [TComptimeValue]? {
+    registered_module: graph.modules[index]
+    traits := [TComptimeValue]{}
+    registry := SemaScopeMembersMarkerRegistry?{None}
+    loop item in registered_module.program.items {
+        if item == .Trait(definition) {
+            if registry == None -> registry = sema_scope_members_build_marker_registry(graph, registered_module.module_identity, registered_module.program, catalog)
+            known: registry ?? return None
+            identity: "{registered_module.module_name}.{definition.name}"
+            methods: loop signature in definition.methods -> sema_trait_impl_method(signature)
+            method_values := [TComptimeValue]{}
+            sema_comptime_reflection_append_methods(graph, index, methods, registered_module.module_path, identity, known, [SemaInferenceBinding]{}, method_values)
+            traits.push(sema_comptime_reflection_trait_info(definition.name, [TComptimeValue]{}, method_values, identity, sema_comptime_reflection_module_of(registered_module)))
+        }
+    }
+    Val(traits)
 }
 
 sema_comptime_reflection_trait_contracts_from_items: fn(
@@ -2282,16 +2323,50 @@ sema_comptime_reflection_trait_contracts: fn(
 
 // The constants of the traits the type at nominal `row` implements, each with
 // its trait, declared type and value as `print` shows it (absent when the
-// implementation's value was reported instead).
+// implementation's value was reported instead). Its identity is the type's
+// and its name, its scope the type's.
 sema_comptime_reflection_constants: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> [TComptimeValue] {
     owner_module: graph.modules[row.module_index]
-    owner: sema_trait_constant_head(sema_checked_qualify_type(graph, Type.Named{name: owner_module.nominals[row.row].symbol.name.copy()}, owner_module.module_identity)) ?? return [TComptimeValue]{}
-    (loop found in sema_trait_constants_of_type(graph, row, owner) -> sema_comptime_reflection_struct("ConstantInfo", [SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: found.name}},
-        SemaComptimeReflectionField{name: "trait_name", value: TComptimeValue.String{value: found.trait_name}},
-        SemaComptimeReflectionField{name: "type", value: sema_comptime_reflection_type_id(graph, row.module_index, found.ty)},
-        SemaComptimeReflectionField{name: "value", value: sema_comptime_reflection_constant_value(found.value)},
-    }))
+    type_name: owner_module.nominals[row.row].symbol.name
+    owner: sema_trait_constant_head(sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, owner_module.module_identity)) ?? return [TComptimeValue]{}
+    scope: "{owner_module.module_name}.{type_name}"
+    (loop found in sema_trait_constants_of_type(graph, row, owner) -> sema_comptime_reflection_constant_info(
+        found.name,
+        found.trait_name,
+        sema_comptime_reflection_type_id(graph, row.module_index, found.ty),
+        sema_comptime_reflection_constant_value(found.value),
+        "{scope}.{found.name}",
+        scope,
+    ))
+}
+
+sema_comptime_reflection_constant_info: fn(name: String, trait_name: String, ty: TComptimeValue, value: TComptimeValue, identity: String, scope: String) -> TComptimeValue Never! {
+    sema_comptime_reflection_struct("ConstantInfo", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
+        SemaComptimeReflectionField{name: "trait_name", value: TComptimeValue.String{value: trait_name}},
+        SemaComptimeReflectionField{name: "type", value: ty},
+        SemaComptimeReflectionField{name: "value", value: value},
+        SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: identity}},
+        SemaComptimeReflectionField{name: "scope", value: TComptimeValue.String{value: scope}},
+    })
+}
+
+// The constants module row `index` declares at module scope, as
+// ProgramInfo.constants() lists them from its checked `constants`: each
+// one's identity, the module's name as its scope, its type, and its value
+// as `print` shows it. Its `trait_name` is empty. A constant the program
+// computes when it first reads it has no value here, nor has one `print`
+// can't show.
+sema_comptime_reflection_declared_constants: fn(graph: SemaRegistrationGraph, index: Int, constants: [TConstantDef]) -> [TComptimeValue] {
+    registered_module: graph.modules[index]
+    scope: registered_module.module_name
+    values := [TComptimeValue]{}
+    loop constant in constants {
+        if constant.symbol_key == "" || constant.module_identity != registered_module.module_identity -> next
+        value: if constant.item_function == "" -> sema_comptime_reflection_constant_value(Val(constant.value)) else -> sema_comptime_reflection_none(Type.String)
+        values.push(sema_comptime_reflection_constant_info(constant.name, "", sema_comptime_reflection_type_id(graph, index, constant.ty), value, "{scope}.{constant.name}", scope))
+    }
+    values
 }
 
 sema_comptime_reflection_constant_value: fn(value: TComptimeValue?) -> TComptimeValue Never! {

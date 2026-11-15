@@ -559,6 +559,33 @@ PackageInfo lists none.
 [`PackageSettings`](../../../Examples/Metaprogramming/Reflection/PackageSettings/run.jet)
 prints each setting with its writers; under `--release` the profile's value
 is selected.
+A SettingInfo also names itself: its `identity` is the package's name and
+its own (`declaration_facts.unit`), and its `scope` is the `identity` of the
+PackageInfo that lists it.
+
+fn build's `b.program.definitions()` lists every declaration the program
+makes, each a CompilerDefinition with its `kind`, its `path` and its
+`scope`. The `kind` is a CompilerSymbolKind whose own `kind` is a
+DeclarationKind: `Module`, `Function`, `Method` (a function a type or trait
+holds), `Struct`, `Enum`, `Distinct`, `Alias`, `Tag`, `UnitFamily`,
+`ForeignHandle`, `AssociatedType`, `Builtin` (a type no module declares),
+`Trait`, `Impl`, `Constant`, `Field`, `Variant`, `Parameter`, `Local`,
+`Import`, `Foreign` or `Label`. The `path` is the declaration's dotted path
+(`run.Point.norm`), and the `scope` is the path of the declaration that holds
+it, or its module's name at module scope. The `path` of a type, function,
+method, trait or constant is the `identity` of its record. A type's record is
+in `b.program.types()` and a function's in `functions()`. A method's
+MethodInfo is in its type's or trait's `methods`. `traits()` lists a
+TraitInfo for each trait a module declares, and `constants()` a ConstantInfo
+for each constant declared at module scope. Each TraitInfo and ConstantInfo
+carries its `identity` and `scope` as `definitions()` spells them. A trait
+constant a type's `constants` lists has the type's path as its scope, and a
+module constant's `trait_name` is empty. `b.program.complete()` is true when
+every function body checked.
+[`DeclarationFacts`](../../../Examples/Metaprogramming/Reflection/DeclarationFacts/run.jet)
+prints each declaration's kind, path and scope beside the record its path
+finds.
+
 A TypeId names a type: `identity` qualifies each declared type it names by
 its module, as TypeInfo's `identity` does (`shapes.Point` is
 `shapes::Point`), so two TypeIds name one type exactly when their

@@ -161,6 +161,14 @@ vocabulary](vocabulary.md).
   The lexer finds comments, so a `//` inside a string or a marker argument
   is text
   (Examples/Metaprogramming/Reflection/CommentsAndDocs).
+  `b.program.definitions()` lists every declaration with its DeclarationKind,
+  its dotted `path` and the `scope` that holds it. The `path` of a type,
+  function, method, trait or constant is its record's `identity`, and
+  `traits()` and `constants()` list the TraitInfo and ConstantInfo a module
+  declares, each with its `identity` and `scope`. A SettingInfo carries its
+  `identity` and, as its `scope`, its package's identity; `complete()` says
+  whether every body checked
+  (Examples/Metaprogramming/Reflection/DeclarationFacts).
   The template's row is `Meta.Generate`, which `expand` may write as
   `-[Meta.Generate]>`; a read-only lint writes `-[]>` and may reject or warn
   but writes no declaration (E0775). Reading the program needs no effect,
