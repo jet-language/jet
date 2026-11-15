@@ -1099,20 +1099,33 @@ kit_steps_one_of: fn(id: String, directory: String, snapshots: String, actual: S
 }
 
 
-// A failed step carries its command's streams as the row's diff, so a suite report shows why it failed.
+// A failed step carries its command's streams as the row's diff, so a suite
+// report shows why it failed: stderr's last lines, where a failing command
+// reports its error, without the counter lines a `JET_PHASE_COUNTERS` run
+// prints as it goes, then stdout's first lines.
+KIT_STEPS_STREAM_STDERR_LINES: 24
+KIT_STEPS_STREAM_LINES: 32
+KIT_STEPS_PHASE_COUNTER_PREFIX: "JET_PHASE_COUNTERS "
+
 kit_steps_streams_verdict: fn(verdict: &&KitVerdict, context: KitStepCtx, step: KitStep, result: KitRun) -> KitVerdict {
     if (verdict.status != "FAIL" && verdict.status != "ERROR") || verdict.diff != "" || (result.stderr == "" && result.stdout == "") -> return verdict
     out := "--- streams/{context.id}: `{step.argv.join(" ")}` exit {result.code}\n"
-    count := 0
+    errors := [String]{}
+    counters := 0
     loop line in result.stderr.split("\n") {
-        if count >= 24 -> break
-        if line != "" {
-            out = "{out}stderr| {line}\n"
-            count += 1
+        if line == "" -> next
+        if line.starts_with(KIT_STEPS_PHASE_COUNTER_PREFIX) {
+            counters += 1
+            next
         }
+        errors.push(line)
     }
+    first: if errors.len() > KIT_STEPS_STREAM_STDERR_LINES -> errors.len() - KIT_STEPS_STREAM_STDERR_LINES else -> 0
+    if counters > 0 || first > 0 -> out = "{out}stderr| ({first} earlier lines and {counters} phase counter lines not shown)\n"
+    loop at in first..<errors.len() -> out = "{out}stderr| {errors[at]}\n"
+    count := errors.len() - first
     loop line in result.stdout.split("\n") {
-        if count >= 32 -> break
+        if count >= KIT_STEPS_STREAM_LINES -> break
         if line != "" {
             out = "{out}stdout| {line}\n"
             count += 1

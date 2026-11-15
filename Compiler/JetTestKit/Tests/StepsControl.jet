@@ -167,3 +167,17 @@ use {
     }
     files.remove_all(root) ?? panic("remove nonzombie repeat host scratch")
 }
+
+#Test("a failed step's streams show stderr's last lines and leave out phase counter lines") {
+    root: cases_test_root("control-streams")
+    counted: cases_test_advanced(root, "counted", "requires: os:unix\nstep: jet -c 'i=0; while [ $i -lt 30 ]; do echo JET_PHASE_COUNTERS x >&2; i=$((i+1)); done; echo early >&2; echo the cause >&2; exit 1'\n")
+    assert_eq(counted.verdict.status, "FAIL")
+    assert(counted.verdict.diff.contains("stderr| (0 earlier lines and 30 phase counter lines not shown)\nstderr| early\nstderr| the cause\n"))
+    assert(!counted.verdict.diff.contains("stderr| JET_PHASE_COUNTERS"))
+    long: cases_test_advanced(root, "long", "requires: os:unix\nstep: jet -c 'i=0; while [ $i -lt 30 ]; do echo line $i >&2; i=$((i+1)); done; exit 1'\n")
+    assert_eq(long.verdict.status, "FAIL")
+    assert(long.verdict.diff.contains("stderr| (6 earlier lines and 0 phase counter lines not shown)\nstderr| line 6\n"))
+    assert(long.verdict.diff.contains("stderr| line 29\n"))
+    assert(!long.verdict.diff.contains("stderr| line 5\n"))
+    files.remove_all(root) ?? panic("remove streams scratch")
+}
