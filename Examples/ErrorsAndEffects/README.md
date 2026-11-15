@@ -79,3 +79,9 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [TypedErrorFamilies](Errors/TypedErrorFamilies.jet)
 - [UnionErrorContract](Errors/UnionErrorContract.jet) — A whole-union error contract `T (E1 | E2)!` lets one callable fail with any listed error domain.
 - [UnitFailureContract](Errors/UnitFailureContract.jet)
+
+## Failures
+
+- [CatchAllOpenUnion](Failures/CatchAllOpenUnion.jet) — A catch-all `.Err(error)` arm over an open failure union binds `error` as an `Err`.
+- [MintedDisplay](Failures/MintedDisplay.jet) — The error type minted from a function's own `Err(.Case(…))` cases shows with `{error}`.
+- [MintedLeaveRun](Failures/MintedLeaveRun.jet) — Typed and minted failures with text reach the default `Err` without a declared conversion, and the report names the conversion.

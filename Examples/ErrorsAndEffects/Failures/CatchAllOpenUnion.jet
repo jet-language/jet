@@ -1,0 +1,42 @@
+// `parse_level` creates its own cases and also fails with a plain message,
+// so its failures are the open union `Err | ParseLevelError`. A catch-all
+// `.Err(error)` arm over that union binds `error` as an `Err`: a minted case
+// arrives with its text as the message, and the message failure arrives
+// whole.
+parse_level: fn(raw: String) -> Int {
+    if raw == "" -> return Err(.Empty)
+    if raw == "big" -> return Err(.TooBig(raw.len()))
+    if raw == "x" -> return Err("odd input {raw}")
+    raw.len()
+}
+
+// `error` is an `Err`, so it passes where an `Err` is taken.
+explain: fn(error: Err) -> String {
+    "failed: {error.message}"
+}
+
+describe: fn(raw: String) -> String {
+    if parse_level(raw) == {
+        .Ok(level) -> "level {level}"
+        .Err(error) -> explain(error)
+    }
+}
+
+// A named case arm still matches first; the catch-all takes the rest.
+classify: fn(raw: String) -> String {
+    if parse_level(raw) == {
+        .Ok(level) -> "level {level}"
+        .Err(.Empty) -> "empty"
+        .Err(error) -> "other: {error}"
+    }
+}
+
+run: fn() {
+    print(describe("abc"))
+    print(describe(""))
+    print(describe("big"))
+    print(describe("x"))
+    print(classify(""))
+    print(classify("big"))
+    print(classify("x"))
+}

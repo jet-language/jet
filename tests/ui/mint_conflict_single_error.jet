@@ -1,0 +1,21 @@
+// `find` writes no failure contract, so its `Err(.Case(…))` cases make one
+// type, `FindError`, where each case has one payload. Creating `.NotFound`
+// with a String and then an Int is one E0105 at the second case; the case
+// keeps its first payload, so the caller and its arms report nothing more.
+find: fn(key: String) -> Int {
+    if key == "" -> return Err(.NotFound(key))
+    if key == "x" -> return Err(.NotFound(3))
+    key.len()
+}
+
+age: fn(key: String) -> Int {
+    found: find(key)
+    found + 1
+}
+
+run: fn() {
+    if age("x") == {
+        .Ok(value) -> print(value)
+        .Err(.NotFound(who)) -> print("missing {who}")
+    }
+}
