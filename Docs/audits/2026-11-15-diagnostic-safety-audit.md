@@ -589,10 +589,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3012 | StackOverflow | Compiler/JetCli/Source/Cli/Crash.jet:119 | the recursion is bounded |
 | E3015 | UnhandledEntryFailure | Jetpack/Store/Source/Build/Cache.jet:866 | the entry handles the failure |
 | E3016 | OutputCheckNotRun | Compiler/JetCli/Source/Cli/Host.jet:2478 | the fatal trap is fixed |
-| E3105 | UnsafeForbiddenByPolicy | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:847 | the policy owner changes the outer policy |
-| E3106 | InvalidUnsafeObligationMode | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:835 | a permitted obligation mode |
-| E3107 | MissingUnsafeObligation | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:958 | the obligations are stated |
-| E3108 | InvalidUnsafeOption | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:910 | options from the closed vocabulary |
+| E3105 | UnsafeForbiddenByPolicy | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:850 | the policy owner changes the outer policy |
+| E3106 | InvalidUnsafeObligationMode | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:838 | a permitted obligation mode |
+| E3107 | MissingUnsafeObligation | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:961 | the obligations are stated |
+| E3108 | InvalidUnsafeOption | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:913 | options from the closed vocabulary |
 | E3109 | InvalidGatePolicy | Jetpack/PackageModel/Source/Policy/GatePolicy.jet:47 | the policy file is fixed |
 | E3110 | InvalidSwizzleLane | Compiler/JetSema/Source/Sema/Expressions/Places.jet:1386 | name lanes the type has |
 | E3111 | DuplicateSwizzleLane | Compiler/JetSema/Source/Sema/Statements.jet:7756 | each lane is written once |
