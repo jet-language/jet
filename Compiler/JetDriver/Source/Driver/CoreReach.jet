@@ -44,15 +44,17 @@
 // (jet_driver_reach_hold), so load time and memory follow reach, not the
 // size of the library.
 use {
-    jet_foundation.[BUILTIN_METHOD_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameRows, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_intern, name_intern_bytes, name_rows, name_rows_get_text, name_rows_set, name_table, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
+    jet_foundation.[BUILTIN_METHOD_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameRows, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_rows, name_rows_get_text, name_rows_set, name_table, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
     jet_ir.[IR_CORE_INTRINSICS, ir_core_lowered_by_name, ir_precise_source_family_owner]
     jet_lexer.[
         Lexed,
         STRING_PART_INTERPOLATION,
         TOKEN_AT,
+        TOKEN_BANG,
         TOKEN_BLOCK_COMMENT,
         TOKEN_CHAR,
         TOKEN_COLON,
+        TOKEN_COMMA,
         TOKEN_EOF,
         TOKEN_FENCE_CLOSE,
         TOKEN_FENCE_OPEN,
@@ -179,8 +181,8 @@ JetDriverReachDeclaration: struct {
 // its stub keeps), a function no type
 // parameters and no variant head and a `{ … }` body, and a constant a list,
 // number, string, character or negated value (never a module instance's
-// path); and a unit with a fence, an authored `;` or a file rule
-// (`#NoPrelude`, `#HTML`, `#Target`, `#Policy`) holds nothing.
+// path); and a unit with a fence, an authored `;` or a top-level file rule
+// marker (`#NoPrelude`, `#HTML`, `#Target`, `#Policy`) holds nothing.
 
 // What jet_driver_reach_hold left out of a unit's tokens: the held
 // declarations (their positions still -1) and the spans of the dropped
@@ -263,9 +265,15 @@ jet_driver_reach_marker_line: fn(lexed: &Lexed, code: Int, to: Int) -> Bool Neve
 // unit's compiler routes.
 jet_driver_reach_hold: fn(lexed: &Lexed, cutover_module: String, owned_members: [String], part_members: [String], routes: JetDriverCoreRoutes) -> JetDriverReachHeld Never! {
     held := JetDriverReachHeld{declarations: [JetDriverReachDeclaration]{}, dropped: [Span]{}}
-    file_rules: [String]{MARKER_NO_PRELUDE, MARKER_HTML, MARKER_TARGET, MARKER_POLICY}
-    loop rule in file_rules {
-        if name_find(lexed.tables.names, rule) != None -> return held
+    // A unit holds nothing under a file rule, which the parser reads only as
+    // a top-level marker (`#Target`, `#[HTML]`; Entry.jet
+    // parser_chunk_scan); the same name in a body (a `.Policy` variant)
+    // rules nothing, so a parse with the bodies blanked holds as one of the
+    // whole text does.
+    rule_names: [String]{MARKER_NO_PRELUDE, MARKER_HTML, MARKER_TARGET, MARKER_POLICY}
+    file_rules := [Int]{}
+    loop rule in rule_names {
+        if name_find(lexed.tables.names, rule) == .Val(name) -> file_rules.push(name_index(name))
     }
     // Each top-level statement's tokens: from the one after the terminator
     // before it through its own terminator.
@@ -273,11 +281,30 @@ jet_driver_reach_hold: fn(lexed: &Lexed, cutover_module: String, owned_members: 
     ends := [Int]{}
     depth := 0
     start := 0
+    // The previous code token's kind, a top-level `#` whose marker name is
+    // still ahead, and a top-level `#[ … ]` marker list open.
+    previous := -1
+    hash_ahead := false
+    marker_list := false
     loop index in 0..<lexed.tokens.len() {
         kind: lexed.tokens[index].kind
         if kind == TOKEN_FENCE_OPEN || kind == TOKEN_FENCE_CLOSE -> return held
+        if jet_driver_reach_trivia(kind) -> next
+        if kind == TOKEN_IDENT && (hash_ahead || (marker_list && depth == 1 && (previous == TOKEN_LBRACKET || previous == TOKEN_COMMA || previous == TOKEN_BANG))) && file_rules.contains(name_index(lexed.tokens[index].decoded)) {
+            return held
+        }
+        if {
+            hash_ahead -> {
+                if kind == TOKEN_LBRACKET -> marker_list = true
+                if kind != TOKEN_BANG && kind != TOKEN_SEMI -> hash_ahead = false
+            }
+            kind == TOKEN_HASH && depth == 0 -> hash_ahead = true
+        }
         if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
-        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE -> depth -= 1
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE {
+            depth -= 1
+            if depth == 0 -> marker_list = false
+        }
         if depth < 0 -> return held
         if kind == TOKEN_SEMI {
             if lexed.tokens[index].span.start < lexed.tokens[index].span.end -> return held
@@ -287,6 +314,7 @@ jet_driver_reach_hold: fn(lexed: &Lexed, cutover_module: String, owned_members: 
                 start = index + 1
             }
         }
+        previous = kind
         if kind == TOKEN_EOF {
             if index > start {
                 starts.push(start)

@@ -394,6 +394,21 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     }
 }
 
+// A file rule is a top-level marker; a body that spells its name (a
+// `.Policy` variant) rules nothing, so the unit holds as it would without it.
+#Test("a lazy Core unit holds its declarations though a body spells a file rule's name, and holds none under a top-level file rule") {
+    spelled: "plain: fn(x: Int) -> Int Never! {{ x.Policy + x.Target }}\n\nunused: fn() -> Int Never! {{ 9 }}\n"
+    parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: spelled, module_name: "core.math", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
+    assert(!jet_driver_has_errors(parsed.parsed.diagnostics))
+    words: parsed.words ?? panic("a Core unit has words")
+    held := [String]{}
+    loop declaration in words.held -> held.push(declaration.name)
+    assert_eq(held, [String]{"plain", "unused"})
+    ruled: jet_driver_parse_one(JetDriverParseJob.Core{text: "#Target(Web)\n\n{spelled}", module_name: "core.math", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
+    ruled_words: ruled.words ?? panic("a Core unit has words")
+    assert_eq(ruled_words.held.len(), 0)
+}
+
 #Test("a plain `priv` function is held behind a stub as private as it, and parses whole once reached") {
     text: "plain: fn() -> Int Never! {{ helper() }}\n\npriv helper: fn() -> Int Never! {{ 1 }}\n\npriv unused: fn() -> Int Never! {{ 9 }}\n"
     parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: "core.math", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())

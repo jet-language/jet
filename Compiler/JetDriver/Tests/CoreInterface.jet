@@ -136,10 +136,9 @@ interface_test_fragments_read: fn(bytes: [U8], path: String, at: Int, fragments:
         if unit.heads.len() == 0 -> headless.push(unit.path)
     }
     assert(bodies > 5000)
-    // Every unit's heads parse cleanly, but for a unit whose heads parse
-    // holds other declarations than its whole parse does (Core/Http's
-    // client and server today): a load parses it whole, so it keeps none.
-    assert(headless.len() <= 2, "units with no heads: {headless}")
+    // Every unit's heads parse cleanly and hold what its whole parse holds,
+    // so a load parses none of them whole.
+    assert_eq(headless, [String]{})
     interface_test_round_trip(units, texts)
 }
 
