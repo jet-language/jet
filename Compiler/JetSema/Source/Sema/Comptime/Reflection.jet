@@ -1299,10 +1299,18 @@ sema_comptime_reflection_setting_value: fn(graph: SemaRegistrationGraph, ty: Str
 // reflected types are one type exactly when their identities are equal; its
 // `name` is the type as the checker prints it (`Point`, `[Point]`), with no
 // declaring module's internal `module::` qualifier (a Core type a corelib
-// signature names reads `SourceLocation`). `caller` is the row of the module
-// the type is written in, -1 for none.
+// signature names reads `SourceLocation`); its `signature` is a function
+// type's CallableSignature, each type in it a TypeId named the same way
+// (sema_comptime_reflection_type_signature), and None for any other type.
+// `caller` is the row of the module the type is written in, -1 for none.
 sema_comptime_reflection_type_id: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type) -> TComptimeValue {
-    sema_comptime_reflection_type_id_record(type_name(sema_comptime_reflection_qualified_type(graph, caller, ty)), type_name(type_unqualified_nominals(ty)))
+    signature := sema_comptime_reflection_none(Type.Named{name: "CallableSignature"})
+    if ty == .Fn(params, ret, _, _, _, _) {
+        types: loop param in params -> sema_comptime_reflection_type_id(graph, caller, param)
+        returned: if sema_comptime_reflection_success_type(ret) == .Val(success) -> sema_comptime_reflection_some(sema_comptime_reflection_type_id(graph, caller, success)) else -> sema_comptime_reflection_none(Type.Named{name: "TypeId"})
+        signature = sema_comptime_reflection_type_signature(ty, types, returned)
+    }
+    sema_comptime_reflection_type_id_signed(type_name(sema_comptime_reflection_qualified_type(graph, caller, ty)), type_name(type_unqualified_nominals(ty)), signature)
 }
 
 // A type's TypeId when a registration `graph` may be absent: with none, the
@@ -1315,15 +1323,87 @@ sema_comptime_reflection_type_id_in: fn(graph: SemaRegistrationGraph?, caller: I
 // The TypeId of a type no registered module declares: its identity is its
 // name as written, with no module to qualify it.
 sema_comptime_reflection_written_type_id: fn(ty: Type) -> TComptimeValue {
-    sema_comptime_reflection_type_id_record(type_name(ty), type_name(ty))
+    sema_comptime_reflection_type_id_of(ty, ty)
 }
 
-// The TypeId record of an `identity` and the `name` it prints as.
+// The TypeId of one type spelled twice with no registration to qualify it:
+// `identity` names each declared type by its module, `name` is the type as
+// it prints. A function type's `signature` pairs the two spellings' parts
+// the same way; any other type's is None.
+sema_comptime_reflection_type_id_of: fn(identity: Type, name: Type) -> TComptimeValue {
+    signature := sema_comptime_reflection_none(Type.Named{name: "CallableSignature"})
+    if identity == .Fn(identity_params, identity_ret, _, _, _, _) && name == .Fn(name_params, name_ret, _, _, _, _) && identity_params.len() == name_params.len() {
+        types: loop (index, param) in identity_params -> sema_comptime_reflection_type_id_of(param, name_params[index])
+        returned := sema_comptime_reflection_none(Type.Named{name: "TypeId"})
+        if sema_comptime_reflection_success_type(identity_ret) == .Val(identity_success) && sema_comptime_reflection_success_type(name_ret) == .Val(name_success) {
+            returned = sema_comptime_reflection_some(sema_comptime_reflection_type_id_of(identity_success, name_success))
+        }
+        signature = sema_comptime_reflection_type_signature(identity, types, returned)
+    }
+    sema_comptime_reflection_type_id_signed(type_name(identity), type_name(name), signature)
+}
+
+// The TypeId record of an `identity` and the `name` it prints as, for a type
+// that is no function type: its `signature` is None.
 sema_comptime_reflection_type_id_record: fn(identity: String, name: String) -> TComptimeValue {
+    sema_comptime_reflection_type_id_signed(identity, name, sema_comptime_reflection_none(Type.Named{name: "CallableSignature"}))
+}
+
+// The TypeId record of an `identity`, the `name` it prints as and its
+// `signature` value (a `CallableSignature?`).
+sema_comptime_reflection_type_id_signed: fn(identity: String, name: String, signature: TComptimeValue) -> TComptimeValue {
     sema_comptime_reflection_struct("TypeId", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: identity}},
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
+        SemaComptimeReflectionField{name: "signature", value: signature},
     })
+}
+
+// A function type's CallableSignature (a present `CallableSignature?`), the
+// record a FunctionInfo's `signature` is, read from the type itself given
+// the TypeId of each of its parameter types `types`, in order, and its
+// `return_type` value `returned`: a ParamInfo per parameter, with the label
+// and zone the type's `/` or `*` gives it and the access its `&` or `&&`
+// mark gives it (a plain `fn(Int) -> Int` writes none: its parameters are
+// positional, unlabeled and read), plus the name, default and variadic flag
+// the type of a named function keeps; the effect row it bounds as `declared`
+// (a type has no body, so `inferred` is None); the Jet convention and no
+// generic bindings. Any other type has no signature: None.
+sema_comptime_reflection_type_signature: fn(ty: Type, types: [TComptimeValue], returned: TComptimeValue) -> TComptimeValue {
+    if ty == .Fn(_, _, effect_bound, param_contract, call_metadata, _) {
+        params: loop (index, param_type) in types -> sema_comptime_reflection_type_param(index, param_type, param_contract, call_metadata)
+        declared: if effect_bound == .Val(rows) -> Val(loop row in rows -> row.name) else -> None
+        return sema_comptime_reflection_some(sema_comptime_reflection_signature_record(params, returned, declared, None, "Jet"))
+    }
+    sema_comptime_reflection_none(Type.Named{name: "CallableSignature"})
+}
+
+// The ParamInfo of a function type's parameter `index`, whose TypeId is `ty`:
+// its label and zone from the type's call contract (positional and
+// unlabeled with none), its name, access, default and variadic flag from the
+// call metadata of the function it names (unnamed, read, no default and not
+// variadic with none). A parameter with no name reads its label as its name.
+sema_comptime_reflection_type_param: fn(index: Int, ty: TComptimeValue, contract: [CallContractRow]?, metadata: FunctionCallMetadata?) -> TComptimeValue Never! {
+    label := ""
+    zone := "PositionalOnly"
+    if contract == .Val(rows) && index < rows.len() {
+        label = rows[index].label
+        zone = if rows[index].zone == {
+            .PositionalOnly -> "PositionalOnly"
+            .Either -> "Either"
+            .LabelOnly -> "LabelOnly"
+        }
+    }
+    if metadata == .Val(known) {
+        name: if index < known.names.len() && known.names[index] != "" -> known.names[index] else -> label
+        access: if index < known.conventions.len() -> sema_comptime_reflection_access_name(known.conventions[index]) else -> "Read"
+        variadic: index < known.variadic.len() && known.variadic[index]
+        if index < known.defaults.len() && known.defaults[index] == .Val(default) {
+            return sema_comptime_reflection_param_record(name, if label == "" -> name else -> label, zone, ty, access, Val(default.span), default.source_file, variadic: variadic)
+        }
+        return sema_comptime_reflection_param_record(name, if label == "" -> name else -> label, zone, ty, access, None, "", variadic: variadic)
+    }
+    sema_comptime_reflection_param_record(label, label, zone, ty, "Read", None, "")
 }
 
 // `name` qualified by the module that declares it, as TypeInfo.identity

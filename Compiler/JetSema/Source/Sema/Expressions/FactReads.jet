@@ -628,7 +628,13 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             else -> None
         }
     }
-    if type_name == "TypeId" -> return sema_fact_field_when(field == "identity" || field == "name", string)
+    if type_name == "TypeId" {
+        return if {
+            field == "identity" || field == "name" -> Val(string)
+            field == "signature" -> Val(sema_fact_optional("CallableSignature"))
+            else -> None
+        }
+    }
     if type_name == "PreparedCase" {
         return if {
             field == "type" -> Val(sema_fact_named("TypeId"))

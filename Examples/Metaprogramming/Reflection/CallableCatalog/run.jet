@@ -22,6 +22,10 @@
 // method signatures read them in place of `T`, and each signature's
 // `generic_bindings` pairs `T` with its argument. A generic function names
 // its specialization with `types:`: `pick.reflect(types: [String])`.
+// A function type reads the same contract: a TypeId's `signature` is the
+// CallableSignature of a function type (None for any other type), so the
+// type of `apply`'s `step` lists its parameter types, its return type and
+// the effect row it bounds.
 // Every read is a typed fact of the checked signature, so changing a
 // callee's signature changes what the code that reads it sees at its next
 // check.
@@ -46,6 +50,8 @@ Shelf: struct<T> {
 send: fn(text: String) -[Net]> Int { text.len() }
 
 announce: fn(text: String) { print(text) }
+
+apply: fn(value: Int, step: fn(Int) -[]> String) -> String { step(value) }
 
 // The effect rows of `send` and `announce` as the checker solved them.
 build: fn(b: Build) {
@@ -152,4 +158,12 @@ run: fn() {
     print("pick({picks}) -> {picked.signature.return_type?.name ?? "nothing"}, binding {chose}")
     print("pick for String and for Int are distinct instances: {picked.identity != pick.reflect(types: [Int]).identity}")
     print("pick of a and b is {pick("a", "b")}")
+    loop param in apply.reflect().signature.params {
+        if param.type.signature == None -> print("apply {param.name} takes {param.type.name}, no function")
+        callee: param.type.signature ?? next
+        takes: (loop inner in callee.params -> inner.type.name).join(", ")
+        bound: if callee.effects.declared == .Val(row) -> "[{row.join(", ")}]" else -> "no row"
+        print("apply {param.name} takes a function of ({takes}) -> {callee.return_type?.name ?? "nothing"} bounded by {bound}")
+    }
+    print("apply 4 gives {apply(4, fn(n: Int) -> String { "{n}!" })}")
 }

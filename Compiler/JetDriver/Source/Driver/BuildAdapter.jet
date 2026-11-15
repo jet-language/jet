@@ -10,6 +10,7 @@ use {
     jet_eval.[jet_eval_build_failed_value]
     jet_parser.[jfmt_escape_str_lit, parse_source]
     jet_lexer.[TOKEN_HASH, TOKEN_IDENT, lex]
+    jet_sema.[sema_comptime_reflection_type_id_of, sema_comptime_reflection_type_id_record]
     jet_build_session.[
         BuildSession, BuildSessionDiagnostic, BuildSessionReply, BuildSessionValue, build_session_call,
         build_session_diag, build_session_graph, build_session_made_structs, build_session_refuse,
@@ -244,10 +245,7 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         heads := [String]{}
         jet_driver_meta_type_heads(spelled, heads)
         loop head in heads { if identities.get(head) == None -> return jet_driver_meta_type_absent() }
-        return JetEvalBuildReply.Value{value: TComptimeValue.Present{value: TComptimeValue.Struct{type_name: "TypeId", fields: [TComptimeField]{
-            TComptimeField{name: "identity", value: TComptimeValue.String{value: type_name(jet_driver_meta_type_renamed(spelled, identities))}},
-            TComptimeField{name: "name", value: TComptimeValue.String{value: type_name(spelled)}},
-        }}}}
+        return JetEvalBuildReply.Value{value: TComptimeValue.Present{value: sema_comptime_reflection_type_id_of(jet_driver_meta_type_renamed(spelled, identities), spelled)}}
     }
     if member == "Compiler.add_struct" && args.len() == 6 {
         held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
@@ -286,10 +284,7 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         if reply == .Value(_) {
             // The new struct's `TypeId`: declared as `name` in the generated
             // module `module`, which shares the package's namespace.
-            return JetEvalBuildReply.Value{value: TComptimeValue.Struct{type_name: "TypeId", fields: [TComptimeField]{
-                TComptimeField{name: "identity", value: TComptimeValue.String{value: "{home_module}.{name}"}},
-                TComptimeField{name: "name", value: TComptimeValue.String{value: name}},
-            }}}
+            return JetEvalBuildReply.Value{value: sema_comptime_reflection_type_id_record("{home_module}.{name}", name)}
         }
         return jet_driver_compiler_reply(session, reply, span)
     }

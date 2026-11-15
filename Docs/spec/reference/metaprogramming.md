@@ -562,7 +562,18 @@ is selected.
 A TypeId names a type: `identity` qualifies each declared type it names by
 its module, as TypeInfo's `identity` does (`shapes.Point` is
 `shapes::Point`), so two TypeIds name one type exactly when their
-identities are equal; `name` is the type as the checker prints it. A
+identities are equal; `name` is the type as the checker prints it; and
+`signature` is a function type's `CallableSignature`, `None` for any other
+type. A function type's signature reads as a FunctionInfo's does: a
+`ParamInfo` per parameter type, the `return_type`, the effect row the type
+bounds as `effects.declared` (`inferred` is `None`: a type has no body), the
+`Jet` calling convention and no generic bindings. Each `ParamInfo` keeps
+what the type writes: the label and zone a `/` or `*` gives it (positional
+and unlabeled with neither, as in `step: fn(Int) -[]> String`) and the
+access a `&` or `&&` mark gives it (`Read` with none); a written function
+type has no defaults and no variadic parameters, while the type of a named
+function keeps that function's parameter names, defaults and variadic
+flags. A
 PreparedValue is a compile-time value with its type kept, one case per case
 of the compile-time value algebra: `.Int(Int)`, `.Float(Float)`,
 `.Bool(Bool)`, `.Char(Char)`, `.String(String)`, `.Enum(PreparedCase)` (the
