@@ -3586,9 +3586,20 @@ module has no record, so binding or passing one, such as `m: math` after
 `use core.math`, reports **E0629**. A function the module offers is a value:
 `f: text.shout` is the function, as `shout` is after `use text.shout`.
 
-A type is not a value: binding, passing or printing a type, such as
-`t: Rock` or `print(Rock)`, reports **E0636**. Build a value of the type, or
-read a compile-time fact of it such as `Rock.reflect().fields`.
+A type name is a value only where a `Type` is expected. The prelude's `Type`
+is a type as a value: a `Type` parameter, field or result, a `[Type:V]` key, a
+`[Type]` element, or the right of `==` against a `Type` takes a type name, so
+`counts[Position] = 2` keys a map by type and `if t == { Position -> … }`
+switches on one. `Type{Rock}` names one explicitly, and `type_of(p)` is the
+static type of a name or field path, read without evaluating it. Two `Type`
+values are equal exactly when they name one type, generic arguments included:
+`Box<Int>` and `Box<String>` are different keys. A `Type` displays its path,
+each declared type qualified by its module. Only the compiler builds one.
+
+Anywhere else a type is not a value: binding, passing or printing a type, such
+as `t: Rock` or `print(Rock)`, reports **E0636**. Build a value of the type,
+write `Type{Rock}` for the type itself, or read a compile-time fact of it such
+as `Rock.reflect().fields`.
 
 An `impl` head that names a declaration through a module alias binds the alias
 to the segment after it: `impl types.Span { ... }` extends `types.Span`, and

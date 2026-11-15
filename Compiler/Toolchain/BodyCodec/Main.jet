@@ -38,8 +38,10 @@ HAND_PUT: "body_codec_put_"
 // declarations under `shape_dirs`, written into `output`. A named type one of
 // `hand_files` declares a put for is written there. When `package` is not
 // empty the hand files, and the declarations outside `own_dir`, are that
-// package's, and the output imports the names it uses of them. `header` is
-// the comment the output starts with.
+// package's, and the output imports the names it uses of them, and the
+// names in `named` besides: a type the signature of a called hand put spells
+// bare, which the output names as that package does even where its own
+// text does not. `header` is the comment the output starts with.
 CodecTarget: struct {
     output: String
     header: String
@@ -48,19 +50,20 @@ CodecTarget: struct {
     own_dir: String
     hand_files: [String]
     package: String
+    named: [String]
 }
 
 // The generated files, in the order they are written: a later one's hand
 // files may be an earlier one's output.
 codec_targets: fn() -> [CodecTarget] Never! {
     // A checked function body, and a checked standalone expression.
-    body: CodecTarget{output: BODY_CODEC, header: BODY_HEADER, roots: [String]{"FnBody", "BodyExpr"}, shape_dirs: [String]{FOUNDATION_SOURCE}, own_dir: FOUNDATION_SOURCE, hand_files: [String]{BODY_CODEC_ROWS}, package: ""}
+    body: CodecTarget{output: BODY_CODEC, header: BODY_HEADER, roots: [String]{"FnBody", "BodyExpr"}, shape_dirs: [String]{FOUNDATION_SOURCE}, own_dir: FOUNDATION_SOURCE, hand_files: [String]{BODY_CODEC_ROWS}, package: "", named: [String]{}}
     // A parsed program: what a Core unit's declaration heads parse to, which
     // the Core interface holds (JetDriver CoreInterface.jet).
-    syntax: CodecTarget{output: SYNTAX_CODEC, header: SYNTAX_HEADER, roots: [String]{"Program"}, shape_dirs: [String]{FOUNDATION_SOURCE}, own_dir: FOUNDATION_SOURCE, hand_files: [String]{BODY_CODEC_ROWS, BODY_CODEC}, package: ""}
+    syntax: CodecTarget{output: SYNTAX_CODEC, header: SYNTAX_HEADER, roots: [String]{"Program"}, shape_dirs: [String]{FOUNDATION_SOURCE}, own_dir: FOUNDATION_SOURCE, hand_files: [String]{BODY_CODEC_ROWS, BODY_CODEC}, package: "", named: [String]{}}
     // What one function's check leaves for its module pass: its result, and
     // the diagnostics and facts the check gathered.
-    packet: CodecTarget{output: "Compiler/JetSema/Source/Sema/BodyPacketCodec.jet", header: PACKET_HEADER, roots: [String]{"SemaParallelBody"}, shape_dirs: [String]{FOUNDATION_SOURCE, SEMA_SOURCE}, own_dir: SEMA_SOURCE, hand_files: [String]{BODY_CODEC_ROWS, BODY_CODEC, SYNTAX_CODEC}, package: "jet_foundation"}
+    packet: CodecTarget{output: "Compiler/JetSema/Source/Sema/BodyPacketCodec.jet", header: PACKET_HEADER, roots: [String]{"SemaParallelBody"}, shape_dirs: [String]{FOUNDATION_SOURCE, SEMA_SOURCE}, own_dir: SEMA_SOURCE, hand_files: [String]{BODY_CODEC_ROWS, BODY_CODEC, SYNTAX_CODEC}, package: "jet_foundation", named: [String]{"Type"}}
     [CodecTarget]{body, syntax, packet}
 }
 
@@ -617,17 +620,19 @@ render: fn(target: CodecTarget) -[FS]> String BodyCodecError! {
     names: loop name in out.reached -> name
     loop name in names -> write_shape(out, name) ?? return Err(err)
     body: out.blocks.join("\n\n")
-    uses: if importing -> imports_of(out, target.package, body) else -> ""
+    uses: if importing -> imports_of(out, target.package, body, target.named) else -> ""
     // Written as `jet fmt` writes it, so the formatter leaves the file as is.
     formatted: jet_format_source("{target.header}\n{uses}{body}\n", false)
     if !formatted.ok -> return Err(codec_fail("the formatter refused the generated codec {target.output}: {formatted.diagnostics:Debug}"))
     Ok(formatted.text)
 }
 
-// The `use` line of the names `text` uses that `package` declares, sorted,
-// or "" when it uses none. A name after a `.` is a field or variant, not one.
-imports_of: fn(out: CodecOut, package: String, text: String) -> String Never! {
+// The `use` line of the names `text` uses that `package` declares and of
+// `named`, sorted, or "" when there are none. A name after a `.` is a field
+// or variant, not one.
+imports_of: fn(out: CodecOut, package: String, text: String, named: [String]) -> String Never! {
     names := [String:Bool]{}
+    loop name in named -> names[name] = true
     word := ""
     after_dot := false
     previous := ""

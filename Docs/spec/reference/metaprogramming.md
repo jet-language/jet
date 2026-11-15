@@ -510,6 +510,14 @@ build list the same constants and values, `Pair<Int, String>` binds `A` and
 `B` at each rung, and the builtin numbers and a `distinct` one report their
 form.
 
+A type name is also a value of the prelude's `Type` wherever a `Type` is
+expected: `counts[Position] = 2` keys a map by type, `if t == { Position -> … }`
+switches on one, `Type{Rock}` names one explicitly and `type_of(p)` is the
+static type of a name or field path. Two values are equal exactly when they
+name one type, so `Box<Int>` and `Box<String>` are different keys.
+[`TypeValues`](../../../Examples/Metaprogramming/Reflection/TypeValues.jet)
+uses each form.
+
 [`reflect.jet`](../../../Examples/Metaprogramming/Reflection/Reflect.jet) combines typed
 fact reads with `T.reflect()`. [`reflect-value.jet`](../../../Examples/Metaprogramming/Reflection/ReflectValue.jet)
 shows the runtime floor:

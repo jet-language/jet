@@ -350,6 +350,8 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, environment: Sema
         }
         // The benchmark identity sink `keep(value)` calls `core.prelude.keep`.
         "keep" -> sema_call_ambient_source_alias(call, "core.prelude", "keep", expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        // `type_of(p)`: the static type of a name or field path, as a `Type`.
+        "type_of" -> sema_call_check_type_of(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         // The readable prelude's ordered extrema call their `core.prelude`
         // generics (`min(a, b, ...rest)`, `max(...)`, `clamp(x, lo, hi)`).
         "min" | "max" | "clamp" -> {

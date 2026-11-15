@@ -4986,6 +4986,9 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
                     diagnostics.push(sema_module_used_as_value(name, span))
                 }
                 sema_expression_type_symbol(scopes, environment, program, name) != None -> {
+                    // Where a `Type` is expected, a type name is that type's value.
+                    type_value: sema_type_value_name(name, span, expected, environment, program, scopes, context)
+                    if type_value != None -> return type_value
                     diagnostics.push(sema_type_used_as_value(name, span))
                 }
                 else -> {
@@ -6012,6 +6015,11 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
         sema_expr_same_type_operator(op) && sema_expr_wants_expected_form(right) -> {
             rhs_expected = Val(sema_expr_rhs_hint(op, checked_lhs.ty, right))
         }
+        // `t == Position` and a `Position ->` arm of `if t == { … }`
+        // read the type name as a `Type` value.
+        (op == BinOp.Eq || op == BinOp.Ne) && sema_type_value_operand(right) && sema_type_value_resolved(checked_lhs.ty, environment, program) != None -> {
+            rhs_expected = Val(sema_expr_rhs_hint(op, checked_lhs.ty, right))
+        }
         else -> {}
     }
     if op == BinOp.Eq || op == BinOp.Ne {
@@ -7026,6 +7034,8 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
         .Ident(name, span, _) -> if sema_site_root_name(name) -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
         .ComptimeName(name, span, value, _) -> sema_expr_check_comptime_name(name, span, value, expected, environment, program, scopes, state, context, diagnostics)
         .TypeValue(ty, span, _) -> {
+            type_value: sema_type_value_written(ty, span, expected, environment, program, scopes, context)
+            if type_value != None -> return type_value
             diagnostics.push(sema_type_used_as_value(type_name(ty), span))
             None
         }

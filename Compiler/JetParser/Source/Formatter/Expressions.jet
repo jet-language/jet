@@ -1037,6 +1037,15 @@ jfmt_fmt_struct_head_type_args: fn(f: &JetFmt, type_args: [Type], source_span: S
     jfmt_write(f, ">")
 }
 
+// A body of one shorthand field (`Celsius{x}`, `Type{Rock}`) is written as
+// is: when the name is not a field of the head's type, the body is the
+// literal's one value, and `x: x` would make it a field.
+jfmt_one_shorthand_field: fn(fields: [ExprField]) -> Bool Never! {
+    if fields.len() != 1 -> return false
+    if fields[0].value == .Ident(name, value_span, _) -> return name == fields[0].name && value_span.start == fields[0].name_span.start && value_span.end == fields[0].name_span.end
+    false
+}
+
 jfmt_fmt_struct_lit_body: fn(f: &JetFmt, fields: [ExprField], span: Span) {
     jfmt_write(f, "{{")
     multiline: jfmt_source_span_multiline(f, span)
@@ -1054,9 +1063,11 @@ jfmt_fmt_struct_lit_body: fn(f: &JetFmt, fields: [ExprField], span: Span) {
         }
         if multiline -> jfmt_emit_leading(f, field.name_span.start)
         jfmt_write(f, field.name)
-        jfmt_write(f, ": ")
-        if multiline -> jfmt_emit_leading(f, expr_span(field.value).start)
-        jfmt_fmt_expr(f, field.value, JFMT_PREC_OR_FALLBACK)
+        if !jfmt_one_shorthand_field(fields) {
+            jfmt_write(f, ": ")
+            if multiline -> jfmt_emit_leading(f, expr_span(field.value).start)
+            jfmt_fmt_expr(f, field.value, JFMT_PREC_OR_FALLBACK)
+        }
         if multiline {
             jfmt_write(f, ",")
             jfmt_emit_trailing(f, expr_span(field.value).end)
@@ -1169,9 +1180,11 @@ jfmt_fmt_typed_lit: fn(f: &JetFmt, head: Type?, body: TypedLitBody, span: Span) 
                 }
                 if multiline -> jfmt_emit_leading(f, field.name_span.start)
                 jfmt_write(f, field.name)
-                jfmt_write(f, ": ")
-                if multiline -> jfmt_emit_leading(f, expr_span(field.value).start)
-                jfmt_fmt_expr(f, field.value, JFMT_PREC_OR_FALLBACK)
+                if !jfmt_one_shorthand_field(fields) {
+                    jfmt_write(f, ": ")
+                    if multiline -> jfmt_emit_leading(f, expr_span(field.value).start)
+                    jfmt_fmt_expr(f, field.value, JFMT_PREC_OR_FALLBACK)
+                }
                 if multiline {
                     jfmt_write(f, ",")
                     jfmt_emit_trailing(f, expr_span(field.value).end)

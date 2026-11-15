@@ -1,0 +1,59 @@
+// Type values: a type name is a value of type `Type` wherever a `Type` is
+// expected. It keys a map, an `if t == { … }` switches on it, `Type{Rock}`
+// builds one explicitly, and `type_of(p)` is the static type of a name. Two
+// values are equal exactly when they name one type, generic arguments
+// included, so `Box<Int>` and `Box<String>` are different keys.
+
+Position: struct {
+    x: Int
+    y: Int
+}
+
+Rock: struct {
+    weight: Int
+}
+
+Box: struct<T> {
+    item: T
+}
+
+// A switch on a type: each arm names one.
+kind: fn(t: Type) -> String {
+    if t == {
+        Position -> "a place on the map"
+        Rock -> "something to carry"
+        else -> "something else"
+    }
+}
+
+run: fn() {
+    // A map keyed by type: the type names are the keys.
+    counts := [Type:Int]{}
+    counts[Position] = 2
+    counts[Rock] = 1
+    counts[Position] = (counts.get(Position) ?? 0) + 1
+    print("positions: {counts.get(Position) ?? 0}")
+    print("rocks: {counts.get(Rock) ?? 0}")
+    print("kinds counted: {counts.len()}")
+
+    // `Type{Rock}` builds the value explicitly; it is the one `Rock` names.
+    rock: Type{Rock}
+    print("Type{{Rock}} is Rock: {rock == Rock}")
+    print("Type{{Rock}} is Position: {rock == Position}")
+
+    // `type_of` reads a name's static type without evaluating it.
+    p: Position{x: 1, y: 2}
+    print("p is a Position: {type_of(p) == Position}")
+    print("p is {kind(type_of(p))}")
+    print("a rock is {kind(rock)}")
+    print("a Box<Int> is {kind(Type{Box<Int>})}")
+
+    // Generic arguments are part of the type: two boxes, two keys.
+    boxes := [Type:String]{}
+    boxes[Type{Box<Int>}] = "numbers"
+    boxes[Type{Box<String>}] = "words"
+    print("box kinds: {boxes.len()}")
+    print("Box<Int> holds {boxes.get(Type{Box<Int>}) ?? "nothing"}")
+    print("Box<String> holds {boxes.get(Type{Box<String>}) ?? "nothing"}")
+    print("Box<Int> is Box<String>: {Type{Box<Int>} == Type{Box<String>}}")
+}

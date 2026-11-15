@@ -3809,7 +3809,8 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
 // The words besides its name that demand a bare Core type's module: `url`
 // for `URL`, `phase` for `Phase`, `events` for `CompilerEvent` (a
 // `meta.events` handler hears `CompilerEvent` values that the source never
-// names), and for `SourceLocation` `here` (`#here`
+// names), `type_of` for `Type` (its result is one the source need not name),
+// and for `SourceLocation` `here` (`#here`
 // builds one) and the words through which a program holds a declaration
 // record (TypeInfo, FieldInfo, MethodInfo, FunctionInfo, TraitInfo,
 // PackageInfo, CompilerChecked), whose `location` is a `SourceLocation?`
@@ -3819,6 +3820,7 @@ jet_driver_core_bare_aliases: fn(name: String) -> [String] Never! {
     if name == "URL" -> return [String]{"url"}
     if name == "Phase" -> return [String]{"phase"}
     if name == "CompilerEvent" -> return [String]{"events"}
+    if name == "Type" -> return [String]{"type_of"}
     if name != "SourceLocation" -> return [String]{}
     [String]{"here", "reflect", "Build", "ProgramInfo", "CompilerChecked", "TypeInfo", "FieldInfo", "MethodInfo", "FunctionInfo", "TraitInfo", "PackageInfo", "compiler"}
 }

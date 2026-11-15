@@ -2491,6 +2491,8 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             }
         }
     }
+    type_value := sema_type_value_literal(head, body, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if type_value.handled -> return type_value.value
     // A head that names no type is that unknown type (E0119), not a body
     // that fails to match it. A head naming a declared type or a Core record
     // (`IOContext`) is known whatever the written-name table says.

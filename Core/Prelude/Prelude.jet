@@ -101,6 +101,19 @@ SourceLocation: struct {
 
     impl Display { display: fn(self) -> String { "{self.file}:{self.line}:{self.column}" } }
 }
+// A type as a value. Where a `Type` is expected a type name is one
+// (`counts[Position] = 2`, `if t == { Position -> … }`); `Type{Rock}` names
+// one explicitly, and `type_of(p)` is the static type of a name or field
+// path, read without evaluating it. Two values are equal exactly when they
+// name one type, generic arguments included (`Box<Int>` is not
+// `Box<String>`), so a `Type` keys a map. It displays its path, each declared
+// type qualified by its module (`shop.Box<Int>`). Only the compiler builds
+// one: no text becomes a `Type`, and nothing casts through it.
+Type: struct {
+    priv path: String
+
+    impl Display { display: fn(self) -> String { "{self.path}" } }
+}
 // A send the channel refused: its receiving end is gone, or the sending task
 // was cancelled while it waited. `value` is the payload, handed back unsent,
 // so `tx.send(job) ?? retry(err.value)` keeps the job. A program never has to

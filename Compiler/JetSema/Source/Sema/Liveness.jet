@@ -4,7 +4,11 @@
 // so every spelled read counts, including impl heads (`impl Local.types.Named`,
 // ), `#run` bodies and interpolations. C headers stay outside
 // liveness because importing a bridge can have link-time meaning even when no
-// Jet name is read; foreign bindings stay outside for the same reason.
+// Jet name is read; foreign bindings stay outside for the same reason. An
+// import that shadows a bare Core type is never unused: it rebinds that name
+// for the whole module, and a dependency's signatures spell their own types
+// bare (`type_name(ty: Type)`), so the import decides what they mean even
+// where the file never spells the name.
 use jet_foundation.[
     symbol_table_key,
     Diagnostic,
@@ -15,6 +19,8 @@ use jet_foundation.[
     TextEdit,
     StructureFact,
     StructureFactKind,
+    core_bare_source_module,
+    core_module_has_type,
     diagnostic_with_edit,
     name_rows,
     name_rows_get_text,
@@ -118,6 +124,7 @@ sema_liveness_unused_imports: fn(program: Program, foreign_aliases: [String], so
 sema_liveness_note_import: fn(program: Program, foreign_aliases: [String], name: String, source: String, span: Span, edit: TextEdit?, verdicts: &[SemaLivenessVerdict]) Never! {
     if name == "" || name.starts_with("_") || span.start >= span.end -> return
     if program.used_import_names.contains(name) || foreign_aliases.contains(name) -> return
+    if core_bare_source_module(name) == .Val(owner) && core_module_has_type(owner, name) -> return
     diagnostic := sema_lint("L0103", span, "Import `{name}` is never used.", "An unused import adds a name and dependency to the file without contributing to checked code.", "Remove the import, or rename `{name}` to `_{name}` when the import is intentionally kept.")
     if edit == .Val(fix) {
         diagnostic = diagnostic_with_edit(diagnostic, fix)
