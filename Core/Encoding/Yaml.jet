@@ -18,7 +18,7 @@ syntax_error: fn(format: EncodingFormat, offset: Int, line: Int, column: Int, pa
     }
 }
 
-__unsupported_error: fn(reason: String) -> EncodingError Never! {
+priv unsupported_error: fn(reason: String) -> EncodingError Never! {
     error := syntax_error(EncodingFormat.YAML, 0, 1, 1, "", reason)
     error.kind = EncodingErrorKind.Unsupported
     error
@@ -294,7 +294,7 @@ parse_list: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
 parse_scalar: fn(text: String) -> Dyn EncodingError! {
     clean: trim_yaml(strip_inline_comment(text))
     if clean.starts_with("&") || clean.starts_with("*") {
-        return Err(__unsupported_error("YAML anchors and aliases (&name, *name) are not supported"))
+        return Err(unsupported_error("YAML anchors and aliases (&name, *name) are not supported"))
     }
     stamp_text := clean
     if clean.starts_with("!!timestamp") -> stamp_text = unquote(trim_yaml(drop_prefix(clean, 11)))
@@ -324,7 +324,7 @@ parse_scalar: fn(text: String) -> Dyn EncodingError! {
         return Ok(Dyn.DateTime(z))
     }
     if clean.starts_with("[") || clean.starts_with("{{") {
-        return json.parse(clean) ?? return Err(__unsupported_error("YAML flow collections must be JSON"))
+        return json.parse(clean) ?? return Err(unsupported_error("YAML flow collections must be JSON"))
     }
     if clean.starts_with("\"") || clean.starts_with("'") -> return Ok(Dyn.Text(unquote(clean)))
     stamp: Dyn.Text(clean)

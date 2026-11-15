@@ -177,7 +177,7 @@ Remote: struct<S> {
     // the server, and `fail` gives a `CallError` as the method's own error.
     __call: fn<R: [Encode, Decode], E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -[Net, Time.Wait]> R E! {
         if self.service == .Val(service) -> return direct(service)
-        reply: __remote_post(self.address, method, args) ?? return fail(err)
+        reply: remote_post(self.address, method, args) ?? return fail(err)
         tree: live_json.parse(reply) ?? return fail(.Unreachable("the server's reply to `{method}` is not JSON"))
         if live_json.at<E>(tree, "/err") == .Ok(error) -> return Err(error)
         value: live_json.at<R>(tree, "/ok") ?? return fail(.Unreachable("the server's reply to `{method}` has no value"))
@@ -187,7 +187,7 @@ Remote: struct<S> {
     // A call of the endpoint method `method` of `S`, which can't fail.
     __call_value: fn<R: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R Never!) -[Net, Time.Wait]> R CallError! {
         if self.service == .Val(service) -> return Ok(direct(service))
-        reply: __remote_post(self.address, method, args)
+        reply: remote_post(self.address, method, args)
         tree: live_json.parse(reply) ?? return Err(.Unreachable("the server's reply to `{method}` is not JSON"))
         value: live_json.at<R>(tree, "/ok") ?? return Err(.Unreachable("the server's reply to `{method}` has no value"))
         Ok(value)
@@ -246,8 +246,8 @@ remote_at: fn<S>(address: String) -> Remote<S> Never! { Remote<S>{service: None,
 // the reply's body on 200, else the failure its status names. The call
 // carries a W3C `traceparent` that starts its trace, and that trace's id as
 // its `x-request-id`, so the server's span of the call has both.
-__remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wait]> String CallError! {
-    seed: "{rt.clock_mono_ns()}:{__trace_next()}:{address}/{method}"
+priv remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wait]> String CallError! {
+    seed: "{rt.clock_mono_ns()}:{trace_next()}:{address}/{method}"
     trace: __trace_id("trace:{seed}", 16)
     sent: http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{__trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_body("[{args.join(",")}]")
     response: sent.send() ?? return Err(.Unreachable("{address}/{method}: {err}"))
@@ -255,7 +255,7 @@ __remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.W
     if {
         response.status == 200 -> Ok(text)
         response.status == 401 -> Err(.SignedOut)
-        response.status == 422 -> Err(.Invalid(__remote_invalid(text)))
+        response.status == 422 -> Err(.Invalid(remote_invalid(text)))
         response.status == 426 -> Err(.UpdateRequired)
         response.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {response.header("retry-after") ?? "?"} s"))
         else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
@@ -274,7 +274,7 @@ __trace_id: fn(seed: String, n: Int) -> String Never! {
 // The process's count of the trace seeds a Remote makes.
 TRACE_SEEDS: Shared{0}
 
-__trace_next: fn() -> Int Never! {
+priv trace_next: fn() -> Int Never! {
     guard := TRACE_SEEDS.guard_edit()
     guard.value += 1
     guard.value
@@ -282,7 +282,7 @@ __trace_next: fn() -> Int Never! {
 
 // The field errors of a 422 reply, `{"invalid": [{"path": …, "reason":
 // …}, …]}`; a reply that is not that shape is one error with its text.
-__remote_invalid: fn(text: String) -> [FieldError] Never! {
+priv remote_invalid: fn(text: String) -> [FieldError] Never! {
     tree: live_json.parse(text) ?? return [FieldError]{FieldError{path: "", reason: "{text}"}}
     errors := [FieldError]{}
     index := 0

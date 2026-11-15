@@ -614,7 +614,7 @@ paren_step: fn(value: String) -> Int Never! {
 
 bytes_between: fn(source: [U8], start: Int, end: Int) -> [U8] Never! { source[start..<end] }
 
-// Every declaration is public (D-VIS-MODULE1) except inside a `priv module`:
+// Every declaration is public (D-VIS-MODULE1) unless it is `priv` or inside a `priv module`:
 // top-level functions, methods of structs, enums and impls, and the members of
 // a public inline module. Function types (`fn(Int) -> Int`), trait signatures
 // and functions local to a body are not inventoried.
@@ -674,6 +674,8 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
         opener: token(tokens, i + 1)
         if opener != "(" && opener != "<" -> next
         if inside_private(scopes) -> next
+        // A `priv` or `priv(scope)` declaration is no user-callable surface.
+        if token(tokens, i - 3) == "priv" || (token(tokens, i - 3) == ")" && token(tokens, i - 6) == "priv") -> next
         owner := ""
         if scopes.len() > 0 {
             scope: scopes[scopes.len() - 1]
@@ -1729,7 +1731,7 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 }
 
 #Test("every public function, including same-named methods, is inventoried") {
-    found: public_functions("Core/demo/demo.jet", "// fake: fn() {{}}\n    /* nested /* fake2: fn() {{}} */ comment */\n    priv internal: module {{ hidden: fn() {{}} }}\n    A: struct {{ new: fn() -> A Never! {{ {{}} }} }}\n    B: struct<T> {{}}\n    impl B<T> {{ new: fn<T>(f: fn(Int) -> Int) -[FS]> B Never! {{ {{}} }} }}\n    new: fn() -> A Never! {{ A.new() }}\n    generic: fn<T: [Encode, Decode]>(f: fn(T) -> Int) -> B<T> Never! {{ {{}} }}\n    label: \"fake3: fn() {{}}\"\n  ")
+    found: public_functions("Core/demo/demo.jet", "// fake: fn() {{}}\n    /* nested /* fake2: fn() {{}} */ comment */\n    priv internal: module {{ hidden: fn() {{}} }}\n    priv helper: fn() -> Int Never! {{ 1 }}\n    priv(package) shared: fn() -> Int Never! {{ 2 }}\n    A: struct {{ new: fn() -> A Never! {{ {{}} }} }}\n    B: struct<T> {{}}\n    impl B<T> {{ new: fn<T>(f: fn(Int) -> Int) -[FS]> B Never! {{ {{}} }} }}\n    new: fn() -> A Never! {{ A.new() }}\n    generic: fn<T: [Encode, Decode]>(f: fn(T) -> Int) -> B<T> Never! {{ {{}} }}\n    label: \"fake3: fn() {{}}\"\n  ")
     assert_eq(function_ids(found), [String]{"core.demo.A.new", "core.demo.B.new", "core.demo.new", "core.demo.generic"})
     assert_eq(found.map(fn(row) { row.return_type.copy() }), [String]{"core.demo.A", "core.demo.B", "core.demo.A", "B<T>"})
 }
