@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6861,
-    "rev": 103075,
+    "nextNum": 6862,
+    "rev": 103100,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49968,6 +49968,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned: c5 split into #4723 c7, #4723 c8, #4723 c9; c6 restated to the open part (the alias constructor and cycle errors have landed; #6176 allows non-generic aliases)."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Owner deconfliction 2026-11-06: D-DECL-COLON1=A and D-ALIAS-GENERIC1=A (both 2026-11-06) supersede D-ALIAS-BIND2=B's alias keyword, and re-exports are written name: path. c5, c6 and the body now use the ratified spellings; removed pub/priv forms get no teaching diagnostic (owner order)."
@@ -50046,7 +50051,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-07T11:23:08.090Z",
-      "updated": "2026-11-15T02:44:20.866Z",
+      "updated": "2026-11-15T02:44:39.924Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
@@ -52963,39 +52968,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A package declares a custom link step for one executable target whose inputs are the compiler's object files and libraries; jet build runs it on every build and reports its failure as a registered Jet diagnostic with a UI snapshot.",
+          "text": "A package declares a custom link step for one executable target whose inputs are the compiler's object files and libraries; `jet build` runs it on every build and reports its failure as a registered Jet diagnostic. Proof: `jet test Compiler --profile cases --filter custom_link_step` and `jet test Compiler --profile ui --filter custom_link_step_fails`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:54:25.393Z"
+          "at": "2026-11-15T02:45:54.418Z"
         },
         {
           "n": 2,
-          "text": "A post-link step (for example signing or embedding a resource) runs on the written artifact through the same typed action mechanism, with an executable example.",
+          "text": "A post-link step (signing, or embedding an icon or manifest) runs on the written artifact through the same typed action mechanism, with an executable example. Proof: `jet test Compiler --profile cases --filter post_link_step_signs_artifact`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-16T00:50:35.161Z"
+          "at": "2026-11-15T02:45:55.371Z"
         },
         {
           "n": 3,
-          "text": "D-COMPILER-EVENT1=A: one `compiler.Event` enum in core.compiler carries every public moment with its ratified payload; `#On` hooks, `compiler.advanced.Session.stages()`, `jet build --json` and the session wire use its names; the JSON schema is generated from its registry rows and a check fails on a hand-written event name in JetCli/JetDriver.",
+          "text": "One `compiler.Event` enum in core.compiler carries every public compiler moment with its ratified payload, and `#On` hooks, `compiler.advanced.Session.stages()`, `jet build --json` and the session wire all use its names (D-COMPILER-EVENT1=A). Proof: `jet test Compiler --profile cases --filter compiler_event_one_enum`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-17T23:30:27.687Z"
+          "at": "2026-11-15T02:45:56.295Z"
         },
         {
           "n": 4,
-          "text": "`stages()` yields the same compiler.Event sequence with --threads 1 and --threads 16 on one program (test).",
+          "text": "`stages()` yields the same compiler.Event sequence with `--threads 1` and `--threads 16` on one program. Proof: `jet test Compiler --profile cases --filter stages_sequence_thread_independent`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-17T23:30:30.185Z"
+          "at": "2026-11-15T02:45:57.348Z"
         },
         {
           "n": 5,
@@ -53014,6 +53019,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:10:47.537Z"
+        },
+        {
+          "n": 7,
+          "text": "The `jet build --json` event schema is generated from the compiler.Event registry rows, and a check fails on a hand-written event name in JetCli or JetDriver (D-COMPILER-EVENT1=A). Proof: `jet test tests/guards --filter compiler_event_names`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:45:51.304Z"
         }
       ],
       "refs": [
@@ -53032,12 +53046,12 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:38.986Z",
-      "updated": "2026-11-15T02:12:07.285Z",
+      "updated": "2026-11-15T02:45:57.348Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 6
+      "criteriaLastN": 7
     },
     {
       "id": "c0dvyqnu",
@@ -68290,30 +68304,30 @@
         },
         {
           "n": 3,
-          "text": "Swizzles .xyzw and .rgba (read, write, repeated read) work on every [T#N] with N<=4 and every vector/lane type, decided by a type fact rather than hard-coded Core names; invalid lanes are E3110/E3111 with snapshots.",
+          "text": "Swizzles .xyzw and .rgba (read, write, repeated read) work on every `[T#N]` with N <= 4 and every vector or lane type, decided by a type fact instead of the five Core names hard-coded in Sema/Expressions/Places.jet (lines 1199 and 1217 on dev 72a8142651); invalid lanes are E3110 and E3111. Proof: `jet test Compiler --profile golden --filter LowLevel/Swizzle` on o0, o1 and o2, `jet test Compiler --profile ui --filter swizzle_`, and `git grep -n '\"F32x4\"' -- Compiler/JetSema/Source/Sema/Expressions/Places.jet` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-29T13:58:56.482Z"
+          "at": "2026-11-15T02:44:25.201Z"
         },
         {
           "n": 4,
-          "text": "Matrix and quaternion operations the audit marks as Odin built-ins have a Jet equivalent proven by goldens, or a linked card or ballot.",
+          "text": "Each matrix and quaternion operation the audit (c1) marks as an Odin built-in has a Jet equivalent with golden output, or links a card or ballot. Proof: `jet test Compiler --profile golden --filter Math/LinearAlgebra` on o0, o1 and o2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-29T13:58:56.482Z"
+          "at": "2026-11-15T02:44:26.171Z"
         },
         {
           "n": 6,
-          "text": "Integer lane types (`I8`..`I64`, `U8`..`U64` lanes) support element-wise `<<`, `>>` (arithmetic for signed, logical for unsigned), `.bit_and`, `.bit_or`, `.bit_xor` and `.bit_not`, with a lane or a scalar right side. Output matches the scalar fold at O0/O2, and a UI snapshot covers a float-lane shift error. Found by the 2026-11-05 Doom port investigation (ratified, not built; compiler 0ccdff27ea).",
+          "text": "Integer lane types (I8 to I64 and U8 to U64 lanes) support element-wise `<<`, `>>` (arithmetic for signed, logical for unsigned), `.bit_and`, `.bit_or`, `.bit_xor` and `.bit_not` with a lane or scalar right side, matching the scalar fold. Proof: `jet test Compiler --profile golden --filter LowLevel/IntegerLaneBits` on o0 and o2, and `jet test Compiler --profile ui --filter float_lane_shift`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T14:36:18.002Z"
+          "at": "2026-11-15T02:44:27.343Z"
         }
       ],
       "refs": [],
@@ -68324,7 +68338,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T13:58:56.482Z",
-      "updated": "2026-11-15T02:44:23.844Z",
+      "updated": "2026-11-15T02:44:27.343Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 7
     },
@@ -84952,11 +84966,12 @@
         {
           "n": 12,
           "text": "D-NET-HOSTREADS1=A (ratified 2026-11-12) is built for all seven TLS host-ingress leaves (wall clock, OS entropy, CA bundle files and directories, and the rest the review lists), including propagation through TLS and HTTP errors, a denied override that never falls back to another bundle, callbacks and tasks, and dependency-sandbox intersections, with the caller, registry and docs cutover in one change. Proof: the seed-b5 probes (a local HTTPS client denying FS, Rand and Env, a scoped denial of its CA file, and a server denying Rand) are each refused with the registered effect diagnostic (`jet test Compiler --profile cases --filter tls_host_reads`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:09:35.382Z"
+          "evidence": "Moved to #6861 c1: TLS host reads are their own stream (D-NET-HOSTREADS1); split into HOSTR c1-c3",
+          "at": "2026-11-15T02:45:58.345Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
@@ -84978,21 +84993,21 @@
         },
         {
           "n": 16,
-          "text": "(was #2300 c1) Sema source classifies the complete reachable Prelude closure and rejects absent runtime layers through registered diagnostics, proven by snapshot execution tests on every applicable tier. (moved from #4741 c11)",
+          "text": "Sema classifies the reachable Prelude closure into core, alloc and hosted layers (D-FREESTAND-PRELUDE1=A), and a program that reaches a layer its target lacks is refused with a registered error. Proof: `jet test Compiler --profile ui --filter freestanding_missing_layer_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:55.603Z"
+          "at": "2026-11-15T02:45:52.340Z"
         },
         {
           "n": 17,
-          "text": "(was #2300 c3) Applicable execution adapters use target-selected marshalling around canonical Prelude semantics, proven by tier execution tests on every applicable tier. (moved from #4741 c13)",
+          "text": "The five freestanding witnesses (heap_free_core, allocator_firmware, browser_wasm, wasi, hosted_default) run with target-selected marshalling around the one Prelude on their applicable tiers, with no second Prelude. Proof: `jet test Compiler --profile cases --filter freestanding_witness_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:58.886Z"
+          "at": "2026-11-15T02:45:53.381Z"
         },
         {
           "n": 18,
@@ -85018,8 +85033,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:43:21.231Z",
-      "updated": "2026-11-14T13:22:14.454Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:45:58.345Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 18
     },
     {
@@ -87747,7 +87762,7 @@
       "id": "c073cvg9",
       "num": 6637,
       "title": "Compiler code health after the port: retired teaching, stale comments, stutter names and unwired code",
-      "body": "Moved from #4717 on 2026-11-06 because Rust removal is finished: wire or delete the code the slimming audit found nothing calls, and move the 1:1 port to conventional Jet (markers, metaprogramming, error model, ownership marks) with identical behavior.",
+      "body": "Destination: the compiler source reads as conventional Jet after the port from Rust. No retired Jet spelling is recognized or taught, no comment cites deleted Rust code, no name repeats its package, tool packages run their tests, the docs teach only current forms, and no test claims an interpreter tier.\n\nWhy it matters: leftovers from the port mislead every reader and every agent that learns from the source (Pillar 5, Docs/spec/philosophy.md; AGENTS.md Greenfield cutover).\n\nRelated: dotted symbol paths (#6612), the LSP (#4917), formatter rewrites (#6850), D-NO-WARNINGS1 tidy errors (#6858).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
@@ -87991,7 +88006,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:41:10.182Z",
-      "updated": "2026-11-15T02:34:25.191Z",
+      "updated": "2026-11-15T02:44:38.894Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 20
     },
@@ -88853,21 +88868,21 @@
         },
         {
           "n": 3,
-          "text": "A target is an ordinary Jet library that any package can write, using only public compiler-library seams. A third-party test target built outside the repository exports a program as well as a first-party one does.",
+          "text": "A target is an ordinary Jet library any package can write, using only public compiler-library seams: a third-party test target built outside the repository exports a program as well as a first-party one. Proof: `jet test Compiler --profile cases --filter export_third_party_target`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T16:22:10.147Z"
+          "at": "2026-11-15T02:44:28.335Z"
         },
         {
           "n": 4,
-          "text": "Exporting a program to C and building it with a stock C compiler gives the same stdout, stderr and exit code as jet run at O0, O1 and O2 for every executable example, with memory safety, fault reports and error behavior unchanged.",
+          "text": "Exporting a program to C and building it with a stock C compiler gives the same stdout, stderr and exit code as `jet run` at O0, O1 and O2 for every executable example, with memory safety, fault reports and error behavior unchanged. Proof: `jet test Compiler --profile golden --to c`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T16:22:11.035Z"
+          "at": "2026-11-15T02:44:29.316Z"
         },
         {
           "n": 7,
@@ -88880,75 +88895,75 @@
         },
         {
           "n": 8,
-          "text": "The public program view has a version. A target library built against another version gets a registered error naming both versions before the target runs (code, what/why/fix text, ui snapshot). (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "text": "The public program view has a version, and a target library built against another version gets a registered error naming both versions before the target runs (adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md). Proof: `jet test Compiler --profile ui --filter export_target_view_version_mismatch`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T06:31:18.823Z"
+          "at": "2026-11-15T02:44:30.341Z"
         },
         {
           "n": 9,
-          "text": "An idiom hook may not hand copying, string encoding, Float text or map iteration order to the host unless conformance covers the hosted form. `jet test --to <target>` runs each target with its hooks and again with only the defaults, and both match `jet run`. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "text": "An idiom hook may not hand copying, string encoding, Float text or map iteration order to the host unless conformance covers the hosted form: `jet test --to <target>` runs each target with its hooks and again with only the defaults, and both match `jet run` (adversarial review). Proof: `jet test Compiler --profile golden --to c` passes in both modes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T06:31:19.851Z"
+          "at": "2026-11-15T02:44:31.324Z"
         },
         {
           "n": 10,
-          "text": "A target implements a closed host-leaf table that replaces the runtime`s numbered system calls (168 os_syscall_* sites in 30 runtime files on dev 9623399213). The spec names the table; the code holds it. Builds on #6151. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "text": "A target implements a closed host-leaf table that replaces the runtime's numbered system calls (168 os_syscall_* sites in 30 runtime files on dev 9623399213); the spec names the table and the code holds it. Builds on #6151 (adversarial review). Proof: `git grep -c os_syscall_ -- Compiler/JetRuntime` reports 0 outside the table's own module, and `jet test tests/guards --filter core_declarations` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T06:31:20.835Z"
+          "at": "2026-11-15T02:44:32.226Z"
         },
         {
           "n": 11,
-          "text": "The program view exposes value ranges the compiler proved (Int ranges, loop bounds, proven-inline operands), so a hook may spell host arithmetic where no spill is possible; conformance covers it. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "text": "The program view exposes value ranges the compiler proved (Int ranges, loop bounds, proven-inline operands), so a hook may spell host arithmetic where no spill is possible, and conformance covers it (adversarial review). Proof: `jet test Compiler --profile cases --filter export_view_proven_ranges`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T06:31:21.818Z"
+          "at": "2026-11-15T02:44:33.278Z"
         },
         {
           "n": 12,
-          "text": "A transpile target declares Core/Target MachineFacts, and its capability errors are the existing machine denial rows, with no second capability list. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "text": "A transpile target declares Core/Target MachineFacts, and its capability errors are the existing machine denial rows, with no second capability list (adversarial review). Proof: `jet test Compiler --profile ui --filter export_target_machine_denial`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T06:31:22.727Z"
+          "at": "2026-11-15T02:44:34.268Z"
         },
         {
           "n": 13,
-          "text": "The target trait carries Jet source locations: C output writes #line, other targets write source maps where the language has them, and a fault in transpiled code names the Jet file and line. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "text": "Transpiled code carries Jet source locations: C output writes #line, other targets write source maps where the language has them, and a fault in transpiled code names the Jet file and line (adversarial review). Proof: `jet test Compiler --profile cases --filter export_c_fault_names_jet_line`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T06:31:23.637Z"
+          "at": "2026-11-15T02:44:35.284Z"
         },
         {
           "n": 14,
-          "text": "A target library runs in the build sandbox and can write only its output directory (ties to #3520 c22). (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "text": "A target library runs in the build sandbox and can write only its output directory (ties to #3520's sandbox work; adversarial review). Proof: `jet test Compiler --profile ui --filter export_target_writes_outside_output`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T06:31:24.583Z"
+          "at": "2026-11-15T02:44:36.197Z"
         },
         {
           "n": 15,
-          "text": "The interop question the review found (X5) is decided by an owner ballot, D-EXPORT-INTEROP1, drafted at $JET_SCRATCH_ROOT/lanes/G6Meta/c3/ballot-D-EXPORT-INTEROP1.json, after its review pass. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "text": "The interop question the review found (X5) is decided: owner ballot D-EXPORT-INTEROP1, drafted at $JET_SCRATCH_ROOT/lanes/G6Meta/c3/ballot-D-EXPORT-INTEROP1.json, is reviewed, posted and ratified, and its outcome is added here as criteria. Proof: `tower decision show D-EXPORT-INTEROP1` reports ratified.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T06:31:25.494Z"
+          "at": "2026-11-15T02:44:37.116Z"
         }
       ],
       "refs": [
@@ -88964,8 +88979,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T16:22:00.126Z",
-      "updated": "2026-11-14T06:44:54.071Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:44:37.116Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 15
     },
     {
@@ -97934,11 +97949,11 @@
         {
           "n": 3,
           "text": "A log sink set with log.otlp_file on the main thread receives records and spans from every thread, handler and task threads included: one process-wide sink, proved by a case whose handler-thread span and log record appear in the file.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T01:04:39.805Z"
+          "evidence": "dev 88af3fd53b (runtime sink 226e7f5498 + fixture fix 88af3fd53b). p140 batch compiler (built from dev fa5d990a8c): jet test Compiler --profile cases --filter corelib/a_log_file_sink_receives_the_records_of_every_thread -> PASS 1 FAIL 0 (o0 and o2), 2026-11-14 21:50.",
+          "at": "2026-11-15T02:45:18.232Z"
         }
       ],
       "refs": [],
@@ -97949,7 +97964,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:32.765Z",
-      "updated": "2026-11-15T01:04:39.805Z",
+      "updated": "2026-11-15T02:45:18.232Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -100665,6 +100680,86 @@
       "updated": "2026-11-15T02:42:13.760Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 4
+    },
+    {
+      "id": "c06r93ai",
+      "num": 6861,
+      "title": "TLS host reads are effects: clock, entropy and CA bundle reads show in the effect row and obey denials (D-NET-HOSTREADS1)",
+      "body": "Destination: every host read TLS makes (wall clock, OS entropy, CA bundle files and directories, and the other ingress leaves the review lists) is an ordinary inferred effect on the TLS and HTTP calls that reach it. A denial of FS, Rand, Env or one CA file refuses the program with the registered effect diagnostic, and a denied override never falls back to another bundle.\n\nWhy it matters: an effect row that hides host reads is a false promise; a sandboxed HTTPS client must be able to deny entropy or its CA file and know it holds.\n\nDecision: D-NET-HOSTREADS1=A (ratified 2026-11-12), with its adversarial review (sol-reviewer, 2026-11-11). Probes: the seed-b5 probes (a local HTTPS client denying FS, Rand and Env; a scoped denial of its CA file; a server denying Rand).\n\nSource: #6615 c12, c14, c15 (split here 2026-11-15). Related: #3418 (one effect-policy model).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each TLS host-ingress leaf (wall clock, OS entropy, CA bundle files and directories, and the rest the review lists) is an inferred effect on every TLS and HTTP call that reaches it, carried through TLS and HTTP errors, callbacks and tasks, with the caller, registry and docs cutover in one change (D-NET-HOSTREADS1=A). Proof: `jet test Compiler --profile cases --filter tls_host_reads_propagate`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:45:50.027Z"
+        },
+        {
+          "n": 2,
+          "text": "A local HTTPS client denying FS, Rand and Env, a scoped denial of its CA file, and a server denying Rand are each refused with the registered effect diagnostic, and a denied CA override never falls back to another bundle. Proof: `jet test Compiler --profile cases --filter tls_host_reads` (the seed-b5 probes as cases).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:45:50.027Z"
+        },
+        {
+          "n": 3,
+          "text": "A dependency's TLS use under a dependency sandbox that denies one of its host reads is refused at the dependency boundary (sandbox intersection). Proof: `jet test Compiler --profile cases --filter tls_host_reads_dependency_sandbox`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:45:50.027Z"
+        },
+        {
+          "n": 4,
+          "text": "On a target with no clock, no entropy source or no filesystem, a TLS call that needs it is refused at check time with a registered error, and the host-read cases pass on O0, O1, O2 and web where applicable. Proof: `jet test Compiler --profile cases --filter tls_host_reads_missing_source`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:45:50.027Z"
+        },
+        {
+          "n": 5,
+          "text": "An embedded or file-free CA configuration never removes the conservative effects by itself: file-free sandboxed TLS uses separate precise entry paths or a complete provider API with a lifetime design. Proof: `jet test Compiler --profile cases --filter tls_embedded_ca_keeps_effects`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:45:50.027Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "effects",
+        "tls",
+        "security"
+      ],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:45:50.027Z",
+      "updated": "2026-11-15T02:45:50.027Z",
+      "updatedBy": "TowerKeeper-1"
     }
   ],
   "decisions": [
@@ -206083,6 +206178,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:45:58.345Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T02:45:57.348Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0gmf0y4",
+      "note": "#4: add proof; was: `stages()` yields the same compiler.Event sequence with --threads 1 and --threads 16 on one program (test)."
+    },
+    {
+      "at": "2026-11-15T02:45:56.295Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0gmf0y4",
+      "note": "#3: split: the generated schema and its guard moved to a new criterion; was: D-COMPILER-EVENT1=A: one `compiler.Event` enum in core.compiler carries every public moment with its ratified payload; `#On` hooks, `compiler.advanced.Session.stages()`, `jet build --json` and the ses"
+    },
+    {
+      "at": "2026-11-15T02:45:55.371Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0gmf0y4",
+      "note": "#2: add proof; was: A post-link step (for example signing or embedding a resource) runs on the written artifact through the same typed action mechanism, with an executable example."
+    },
+    {
+      "at": "2026-11-15T02:45:54.418Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0gmf0y4",
+      "note": "#1: add proof; was: A package declares a custom link step for one executable target whose inputs are the compiler's object files and libraries; jet build runs it on every build and reports its failure as a registered Jet"
+    },
+    {
+      "at": "2026-11-15T02:45:53.381Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0bbj6h3",
+      "note": "#17: restated from #2300 c3 and c5 (met by source inspection only); the execution proof is what remains; was: (was #2300 c3) Applicable execution adapters use target-selected marshalling around canonical Prelude semantics, proven by tier execution tests on every applicable tier. (moved from #4741 c13)"
+    },
+    {
+      "at": "2026-11-15T02:45:52.340Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0bbj6h3",
+      "note": "#16: restated from #2300 c1 (met by source inspection only); the execution proof is what remains; was: (was #2300 c1) Sema source classifies the complete reachable Prelude closure and rejects absent runtime layers through registered diagnostics, proven by snapshot execution tests on every applicable ti"
+    },
+    {
+      "at": "2026-11-15T02:45:51.304Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0gmf0y4",
+      "note": "#7 The `jet build --json` event schema is generated from the co"
+    },
+    {
+      "at": "2026-11-15T02:45:50.027Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c06r93ai",
+      "note": "TLS host reads are effects: clock, entropy and CA bundle reads show in the effect row and obey denials (D-NET-HOSTREADS1)"
+    },
+    {
+      "at": "2026-11-15T02:45:18.232Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0e5gz4o",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T02:44:39.924Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c06m6abh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:44:38.894Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c073cvg9",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T02:44:37.116Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#15: add proof; owner-gate row recorded; was: The interop question the review found (X5) is decided by an owner ballot, D-EXPORT-INTEROP1, drafted at $JET_SCRATCH_ROOT/lanes/G6Meta/c3/ballot-D-EXPORT-INTEROP1.json, after its review pass. (gap fro"
+    },
+    {
+      "at": "2026-11-15T02:44:36.197Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#14: shorter provenance; add proof; was: A target library runs in the build sandbox and can write only its output directory (ties to #3520 c22). (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-revie"
+    },
+    {
+      "at": "2026-11-15T02:44:35.284Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#13: shorter provenance; add proof; was: The target trait carries Jet source locations: C output writes #line, other targets write source maps where the language has them, and a fault in transpiled code names the Jet file and line. (gap from"
+    },
+    {
+      "at": "2026-11-15T02:44:34.268Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#12: shorter provenance; add proof; was: A transpile target declares Core/Target MachineFacts, and its capability errors are the existing machine denial rows, with no second capability list. (gap from the D-EXPORT-TARGET1 adversarial review,"
+    },
+    {
+      "at": "2026-11-15T02:44:33.278Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#11: shorter provenance; add proof; was: The program view exposes value ranges the compiler proved (Int ranges, loop bounds, proven-inline operands), so a hook may spell host arithmetic where no spill is possible; conformance covers it. (gap"
+    },
+    {
+      "at": "2026-11-15T02:44:32.226Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#10: shorter provenance; add proof; was: A target implements a closed host-leaf table that replaces the runtime`s numbered system calls (168 os_syscall_* sites in 30 runtime files on dev 9623399213). The spec names the table; the code holds "
+    },
+    {
+      "at": "2026-11-15T02:44:31.324Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#9: shorter provenance; add proof; was: An idiom hook may not hand copying, string encoding, Float text or map iteration order to the host unless conformance covers the hosted form. `jet test --to <target>` runs each target with its hooks a"
+    },
+    {
+      "at": "2026-11-15T02:44:30.341Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#8: shorter provenance; add proof; was: The public program view has a version. A target library built against another version gets a registered error naming both versions before the target runs (code, what/why/fix text, ui snapshot). (gap f"
+    },
+    {
+      "at": "2026-11-15T02:44:29.316Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#4: add proof; was: Exporting a program to C and building it with a stock C compiler gives the same stdout, stderr and exit code as jet run at O0, O1 and O2 for every executable example, with memory safety, fault reports"
+    },
+    {
+      "at": "2026-11-15T02:44:28.335Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#3: add proof; was: A target is an ordinary Jet library that any package can write, using only public compiler-library seams. A third-party test target built outside the repository exports a program as well as a first-pa"
+    },
+    {
+      "at": "2026-11-15T02:44:27.343Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05gn07n",
+      "note": "#6: strip provenance; add proof; was: Integer lane types (`I8`..`I64`, `U8`..`U64` lanes) support element-wise `<<`, `>>` (arithmetic for signed, logical for unsigned), `.bit_and`, `.bit_or`, `.bit_xor` and `.bit_not`, with a lane or a sc"
+    },
+    {
+      "at": "2026-11-15T02:44:26.172Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05gn07n",
+      "note": "#4: add proof; was: Matrix and quaternion operations the audit marks as Odin built-ins have a Jet equivalent proven by goldens, or a linked card or ballot."
+    },
+    {
+      "at": "2026-11-15T02:44:25.201Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05gn07n",
+      "note": "#3: add the dev location and proof; was: Swizzles .xyzw and .rgba (read, write, repeated read) work on every [T#N] with N<=4 and every vector/lane type, decided by a type fact rather than hard-coded Core names; invalid lanes are E3110/E3111 "
+    },
     {
       "at": "2026-11-15T02:44:23.844Z",
       "by": "TowerKeeper-1",
