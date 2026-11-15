@@ -166,7 +166,7 @@ TLSStream: struct {
                 buffered: fill_pending(guard.value, operation, end_ns, false) ?? return Err(err)
                 if buffered -> return Ok(NetReady{readable: true, writable: false})
             }
-            raw: __wait(guard.value.tcp, interest, end_ns, "tls ready") ?? return Err(net_to_io(err))
+            raw: ready_wait(guard.value.tcp, interest, end_ns, "tls ready") ?? return Err(net_to_io(err))
             readable := false
             if want_read && raw.readable {
                 readable = fill_pending(guard.value, operation, end_ns, true) ?? return Err(err)
@@ -1037,8 +1037,8 @@ priv pem_certificates: fn(raw: [U8]) -> Int TLSFailure! {
 priv private_key_check: fn(raw: [U8]) TLSFailure! {
     first := 0
     last := raw.len()
-    loop first < last && __space(Int{raw[first]}, true) -> first += 1
-    loop last > first && __space(Int{raw[last - 1]}, true) -> last -= 1
+    loop first < last && pem_space(Int{raw[first]}, true) -> first += 1
+    loop last > first && pem_space(Int{raw[last - 1]}, true) -> last -= 1
     labels: [String]{"PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY"}
     loop label in labels {
         begin: "-----BEGIN {label}-----".bytes()
@@ -1061,7 +1061,7 @@ priv pem_base64: fn(raw: [U8], start: Int, end: Int) -> Int TLSFailure! {
     loop at < end {
         byte: Int{raw[at]}
         at += 1
-        if __space(byte, false) -> next
+        if pem_space(byte, false) -> next
         if padded -> return Err(fail("TLS custom CA PEM has data after base64 padding"))
         if {
             byte == 61 -> { pads += 1 }
@@ -1086,13 +1086,13 @@ priv pem_base64: fn(raw: [U8], start: Int, end: Int) -> Int TLSFailure! {
 }
 
 // ASCII whitespace; `trim` adds the vertical tab str::trim also strips.
-__space: fn(byte: Int, trim: Bool) -> Bool Never! {
+priv pem_space: fn(byte: Int, trim: Bool) -> Bool Never! {
     byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13 || (trim && byte == 11)
 }
 
 priv blank: fn(raw: [U8], start: Int, end: Int) -> Bool Never! {
     loop at in start..<end {
-        if !__space(Int{raw[at]}, true) -> return false
+        if !pem_space(Int{raw[at]}, true) -> return false
     }
     true
 }
@@ -1160,7 +1160,7 @@ priv settle: fn(status: Int, sent: Int) -> Int Never! {
 }
 
 // Sends the records the engine queued, then drops them: 0, or the socket
-// status that failed the send. Writes are sliced like __wait.
+// status that failed the send. Writes are sliced like ready_wait.
 priv flush: fn(tls: &TLSState, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
     if tls.ssl.bio.tx.len() == 0 -> return Ok(0)
     status: send_queued(tls, end_ns, operation) ?? {
@@ -1225,7 +1225,7 @@ priv socket_status: fn(err: NetError, fallback: Int) -> Int Never! {
 // Waits out a WANT_READ or WANT_WRITE status: 0 when the engine can be
 // called again, or the socket status that ended the wait.
 priv await: fn(tls: &TLSState, status: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
-    ready: __wait(tls.tcp, status_interest(status), end_ns, operation) ?? return Err(err)
+    ready: ready_wait(tls.tcp, status_interest(status), end_ns, operation) ?? return Err(err)
     if status == C_WANT_READ && ready.readable -> return Ok(__take(tls, end_ns))
     Ok(0)
 }
@@ -1828,7 +1828,7 @@ priv not_connected: fn(err: NetError) -> Bool Never! {
 // One socket readiness wait bounded by the operation deadline. Long waits are
 // sliced so the runtime never sees an unbounded duration; a timeout that comes
 // before the slice ends (an ambient deadline) is the caller's error as is.
-__wait: fn(tcp: TCPStream, interest: NetReadyInterest, end_ns: Int, operation: String) -[Net, Time.Wait]> NetReady NetError! {
+priv ready_wait: fn(tcp: TCPStream, interest: NetReadyInterest, end_ns: Int, operation: String) -[Net, Time.Wait]> NetReady NetError! {
     started: rt.clock_mono_ns()
     remaining: end_ns - started
     if remaining <= 0 -> return Err(deadline_error(operation))

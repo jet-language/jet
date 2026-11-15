@@ -15,7 +15,7 @@ use {
     sys: core.sys
     random: core.math.random
     core.time.[Clock]
-    core.testing.[__evidence_read, __record_failure, __clear_failure, __temp_facts, __temp_join, __temp_remove, __temp_create, __text_window, __suite_snapshot]
+    builtin: jet_builtins
     crypto: core.crypto
     json: core.encoding.json
     rt: jet.runtime.encoding
@@ -116,23 +116,23 @@ snap: fn(name: String, value: String) -[FS, Env]> Bool Never! {
         if files.write(path, value) == {
             .Ok(_) -> {}
             .Err(_) -> {
-                __record_failure("snapshot cannot be written: {name}", "path: {path}")
+                builtin.record_failure("snapshot cannot be written: {name}", "path: {path}")
                 return false
             }
         }
-        __clear_failure()
+        builtin.clear_failure()
         return true
     }
-    read: __evidence_read(path)
+    read: builtin.evidence_read(path)
     if !read.ok {
-        __record_failure("snapshot cannot be read: {name}", "path: {path}")
+        builtin.record_failure("snapshot cannot be read: {name}", "path: {path}")
         return false
     }
     if read.text == value {
-        __clear_failure()
+        builtin.clear_failure()
         return true
     }
-    __record_failure("snapshot differs: {name}", "path: {path}\n{testing_unified_diff(path, read.text, value)}")
+    builtin.record_failure("snapshot differs: {name}", "path: {path}\n{testing_unified_diff(path, read.text, value)}")
     false
 }
 
@@ -140,9 +140,9 @@ snap: fn(name: String, value: String) -[FS, Env]> Bool Never! {
 /// (JET_UPDATE_SNAPSHOTS=1, the same switch as `snap`) a missing or differing
 /// golden file is written, parent directories included, and the check passes.
 golden: fn(name: String, value: String) -[FS, Env]> Bool Never! {
-    read: __evidence_read(name)
+    read: builtin.evidence_read(name)
     if read.ok && read.text == value {
-        __clear_failure()
+        builtin.clear_failure()
         return true
     }
     if (sys.get("JET_UPDATE_SNAPSHOTS") ?? "") == "1" {
@@ -156,31 +156,31 @@ golden: fn(name: String, value: String) -[FS, Env]> Bool Never! {
         if files.write(name, value) == {
             .Ok(_) -> {}
             .Err(_) -> {
-                __record_failure("golden file cannot be written: {name}", "path: {name}")
+                builtin.record_failure("golden file cannot be written: {name}", "path: {name}")
                 return false
             }
         }
-        __clear_failure()
+        builtin.clear_failure()
         return true
     }
     if !read.ok {
         reason: if read.missing -> "golden file is missing: {name}" else -> "golden file cannot be read: {name}"
-        __record_failure(reason, "path: {name}")
+        builtin.record_failure(reason, "path: {name}")
         return false
     }
     diff: testing_unified_diff(name, read.text, value)
-    __record_failure("golden file differs: {name}", "path: {name}\n{diff}")
+    builtin.record_failure("golden file differs: {name}", "path: {name}\n{diff}")
     false
 }
 
 fixture: fn(name: String) -[FS]> String Never! {
-    read: __evidence_read(name)
+    read: builtin.evidence_read(name)
     if read.ok {
-        __clear_failure()
+        builtin.clear_failure()
         return read.text
     }
     reason: if read.missing -> "fixture is missing: {name}" else -> "fixture cannot be read: {name}"
-    __record_failure(reason, "path: {name}")
+    builtin.record_failure(reason, "path: {name}")
     ""
 }
 
@@ -188,21 +188,21 @@ fixture: fn(name: String) -[FS]> String Never! {
 /// joins the test's output and the test reports skipped, as a first
 /// `.skip { }` member makes it. The test body goes on (return after it).
 /// Outside a running test nothing happens.
-skip: fn(reason: String) Never! { core.testing.__skip("skipped: {reason}") }
+skip: fn(reason: String) Never! { builtin.skip("skipped: {reason}") }
 
 temp_dir: fn(prefix: String) -[FS]> String Never! {
-    facts: __temp_facts()
+    facts: builtin.temp_facts()
     safe: testing_ascii_name(prefix, false)
     thread: testing_ascii_name(facts.thread, true)
-    // __TempPath.path is opaque platform encoding produced by the host.
+    // TempPath.path is opaque platform encoding produced by the host.
     // Never construct, slice, decode, or edit it; only pass it back unchanged.
-    location: __temp_join("jet_test_{safe}_{facts.pid}_{thread}")
+    location: builtin.temp_join("jet_test_{safe}_{facts.pid}_{thread}")
     path: location.text
-    removed: __temp_remove(location.path)
+    removed: builtin.temp_remove(location.path)
     if !removed.ok && !removed.missing {
         panic(testing_temp_error("remove_temp_dir", path, removed.cause))
     }
-    created: __temp_create(location.path)
+    created: builtin.temp_create(location.path)
     if !created.ok -> panic(testing_temp_error("create_temp_dir", path, created.cause))
     path
 }
@@ -393,7 +393,7 @@ fake_city: fn(state: &U64, locale: Int) -> String Never! {
 }
 
 /// The Prelude `Test` carrying the current harness iteration and result.
-test_suite: fn() -> Test Never! { __suite_snapshot() }
+test_suite: fn() -> Test Never! { builtin.suite_snapshot() }
 
 /// A code suite's row sink. `t.suite("perf", perf_rows)` in
 /// `test: fn(t: Test)` hands one to `perf_rows` when a `jet test --profile` run
@@ -1497,7 +1497,7 @@ testing_boundary: fn(text: String, end: Int) -> Int Never! {
 }
 
 testing_window: fn(text: String, start: Int, end: Int) -> String Never! {
-    __text_window(text, U64{start}, U64{end})
+    builtin.text_window(text, U64{start}, U64{end})
 }
 
 testing_owned_text: fn(bytes: &&[U8]) -> String Never! {
@@ -1662,32 +1662,4 @@ testing_temp_error: fn(operation: String, path: String, cause: String) -> String
 #Test("temporary names sanitize each Unicode scalar, not each UTF-8 byte") {
     assert_eq(testing_ascii_name("a/é--中_z", false), "a__--__z")
     assert_eq(testing_ascii_name("ThreadId(42)", true), "ThreadId42")
-}
-
-// Private plain-record physical facts, not raw-codec tuples.
-__EvidenceRead: struct {
-    ok: Bool
-    text: String
-    missing: Bool
-}
-
-__TempFacts: struct {
-    pid: U64
-    thread: String
-}
-
-__TempPath: struct {
-    path: [U8]
-    text: String
-}
-
-__TempRemove: struct {
-    ok: Bool
-    missing: Bool
-    cause: String
-}
-
-__TempCreate: struct {
-    ok: Bool
-    cause: String
 }

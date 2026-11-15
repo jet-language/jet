@@ -211,8 +211,9 @@ algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
 
 Private service delivery/mailbox reader results, CSV bounded-read results,
-crypto physical records (`__JetcRaw` and `__JetcStat`), and testing transport
-records take their checked shapes from canonical Core source declarations.
+the descriptor records `JetcRaw` and `JetcStat` and the testing transport
+records (both declared in `jet_builtins`) take their checked shapes from
+canonical Core source declarations.
 They must not also appear in compiler-owned record inventories. Root-Prelude
 carrier mappings remain ABI spellings, not owners of those checked fields.
 

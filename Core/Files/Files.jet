@@ -16,6 +16,7 @@ use {
     process: core.process
     rt: jet.runtime.files
     host_path: __core_files_path_components
+    builtin: jet_builtins
     core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, __temp_directory]
     access_codes.[access_check, advice_code, map_advice_code]
     raw_names.[raw_held_name]
@@ -314,7 +315,7 @@ priv LockFd: struct {
     fd: Int
 
     impl Close {
-        close: fn(&&self) { _: core.files.__lock_close(self.fd) }
+        close: fn(&&self) { _: builtin.lock_close(self.fd) }
     }
 }
 
@@ -324,32 +325,7 @@ priv LockFd: struct {
 lock_owner: fn(path: &&String, fd: &LockFd) -> FileLock Never! {
     value: fd.fd
     fd.fd = -1
-    core.files.__lock_owner(path, value)
-}
-
-// Private plain records preserve raw host facts without tuple/codec transports.
-__LockCall: struct {
-    value: Int
-    errno: Int
-    platform: Int
-}
-
-__LockIdentity: struct {
-    device: Int
-    low: Int
-    high: Int
-    regular: Bool
-    reparse: Bool
-    errno: Int
-    platform: Int
-}
-
-__LockWait: struct {
-    acquired: Bool
-    timed_out: Bool
-    errno: Int
-    platform: Int
-    deadline_ns: Int
+    builtin.lock_owner(path, value)
 }
 
 /// An exclusive advisory lock on a held directory. Closing this owner releases
@@ -2288,7 +2264,7 @@ lock: fn(path: String | Path, timeout: Duration?{None}) -[FS, Env]> FileLock IOE
     deadline := 0
     loop {
         fd := lock_open(text)
-        waited: core.files.__lock_wait(fd.fd, ns, bounded, deadline)
+        waited: builtin.lock_wait(fd.fd, ns, bounded, deadline)
         deadline = waited.deadline_ns
         if waited.timed_out -> return Err(lock_timeout(text))
         if !waited.acquired -> return Err(lock_errno(text, waited.errno, waited.platform))
@@ -2306,7 +2282,7 @@ try_lock: fn(path: String | Path) -[FS, Env]> FileLock? IOError! {
     lock_path(text)
     loop {
         fd := lock_open(text)
-        result: core.files.__lock_try(fd.fd)
+        result: builtin.lock_try(fd.fd)
         if result.value != 0 {
             if lock_contended(result.errno, result.platform) -> return Ok(None)
             return Err(lock_errno(text, result.errno, result.platform))
@@ -2390,10 +2366,10 @@ lock_errno: fn(path: String, code: Int, platform: Int) -> IOError Never! {
 }
 
 lock_open: fn(path: String) -[FS, Env]> LockFd IOError! {
-    opened: core.files.__lock_open(path)
+    opened: builtin.lock_open(path)
     if opened.value < 0 -> return Err(lock_errno(path, opened.errno, opened.platform))
     fd: LockFd{fd: opened.value}
-    identity: core.files.__lock_fd_identity(fd.fd)
+    identity: builtin.lock_fd_identity(fd.fd)
     if identity.errno != 0 -> return Err(lock_errno(path, identity.errno, identity.platform))
     if !identity.regular || identity.reparse {
         return Err(IOError.InvalidInput(lock_context(path, None, "the lock path must name a regular file, not a directory or link")))
@@ -2402,9 +2378,9 @@ lock_open: fn(path: String) -[FS, Env]> LockFd IOError! {
 }
 
 lock_current: fn(path: String, fd: Int) -[FS, Env]> Bool IOError! {
-    held: core.files.__lock_fd_identity(fd)
+    held: builtin.lock_fd_identity(fd)
     if held.errno != 0 -> return Err(lock_errno(path, held.errno, held.platform))
-    current: core.files.__lock_path_identity(path)
+    current: builtin.lock_path_identity(path)
     // Disappearance and replacement release and reopen. Other lookup failures
     // are real errors, never mistaken for contention or an absent attribute.
     if current.errno != 0 {

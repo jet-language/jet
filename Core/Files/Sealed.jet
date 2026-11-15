@@ -11,7 +11,9 @@ package: {
 
 use {
     core
-    core.crypto.[FileCryptoError, Secret, X25519PublicKey, X25519SecretKey, __JetcRaw, __JetcStat, constant_time_equal_bytes, x25519_public]
+    core.crypto.[FileCryptoError, Secret, X25519PublicKey, X25519SecretKey, constant_time_equal_bytes, x25519_public]
+    builtin: jet_builtins
+    jet_builtins.[JetcRaw, JetcStat]
     random: core.crypto.random
     core.files.[basename, dirname, join]
     rt: jet.runtime.files
@@ -29,8 +31,8 @@ use {
 // `migrate_v1` re-seals a legacy JETC v1 file and, because it takes a raw
 // key, runs only inside an audited `#Unsafe` region.
 
-// The descriptor seal's records (`core.crypto.__JetcRaw`, `__JetcStat`) and
-// its syscall cells stay core.crypto's temporary seed.
+// The descriptor seal reads and writes through jet_builtins' descriptor
+// operations and their records (`JetcRaw`, `JetcStat`).
 JetcFd: struct {
     priv fd: Int
 
@@ -38,7 +40,7 @@ JetcFd: struct {
     // would make a second owner whose scope-end Close re-enters this one.
     impl Close {
         close: fn(&&self) {
-            if self.fd >= 0 -> _: core.crypto.__jetc_close(self.fd)
+            if self.fd >= 0 -> _: builtin.jetc_close(self.fd)
         }
     }
 }
@@ -179,29 +181,29 @@ JetcParent: struct {
     path: String
     destination: String
     name: String
-    metadata: __JetcStat
+    metadata: JetcStat
     linux: Bool
 }
 
 jetc_min: fn(left: Int, right: Int) -> Int Never! { if left < right -> left else -> right }
 
-jetc_fd: fn(raw: __JetcRaw, error: FileCryptoError) -> JetcFd FileCryptoError! {
+jetc_fd: fn(raw: JetcRaw, error: FileCryptoError) -> JetcFd FileCryptoError! {
     if raw.value < 0 -> return Err(error)
     Ok(JetcFd{fd: raw.value})
 }
 
-jetc_stat: fn(file: JetcFd, error: FileCryptoError) -> __JetcStat FileCryptoError! {
-    result: core.crypto.__jetc_stat(file.fd)
+jetc_stat: fn(file: JetcFd, error: FileCryptoError) -> JetcStat FileCryptoError! {
+    result: builtin.jetc_stat(file.fd)
     if result.status < 0 -> return Err(error)
     Ok(result)
 }
 
 jetc_walk_directory: fn(path: String) -> JetcFd FileCryptoError! {
-    current := jetc_fd(core.crypto.__jetc_open_directory(if path.starts_with("/") -> "/" else -> "."), .DestinationIO)
+    current := jetc_fd(builtin.jetc_open_directory(if path.starts_with("/") -> "/" else -> "."), .DestinationIO)
     loop name in path.split("/") {
         if name == "" || name == "." -> next
         if name == ".." -> return Err(.DestinationIO)
-        next: jetc_fd(core.crypto.__jetc_open_child_directory(current.fd, name), .DestinationIO)
+        next: jetc_fd(builtin.jetc_open_child_directory(current.fd, name), .DestinationIO)
         close(current)
         current = next.move()
     }
@@ -216,7 +218,7 @@ jetc_parent: fn(destination: String) -> JetcParent FileCryptoError! {
     if name == "" || name == "." || name == ".." -> return Err(.DestinationIO)
     parent_text: dirname(destination)
     path: if parent_text == "" -> "." else -> parent_text
-    opened: core.crypto.__jetc_open_directory(path)
+    opened: builtin.jetc_open_directory(path)
     linux: opened.linux
     directory := jetc_fd(opened, .DestinationIO)
     if linux {
@@ -239,19 +241,19 @@ jetc_parent: fn(destination: String) -> JetcParent FileCryptoError! {
 }
 
 jetc_source: fn(path: String, error: FileCryptoError) -> JetcFd FileCryptoError! {
-    file: jetc_fd(core.crypto.__jetc_open_source(path), error)
+    file: jetc_fd(builtin.jetc_open_source(path), error)
     if !jetc_stat(file, error).is_file -> return Err(error)
     Ok(file)
 }
 
-jetc_same_source: fn(left: __JetcStat, right: __JetcStat) -> Bool Never! {
+jetc_same_source: fn(left: JetcStat, right: JetcStat) -> Bool Never! {
     identity: if rt.os_family() == "unix" -> left.dev == right.dev && left.ino == right.ino else -> true
     identity && left.len == right.len && left.mtime == right.mtime && left.mtime_ns == right.mtime_ns
 }
 
 jetc_temp: fn(parent: JetcParent, prefix: String) -> JetcTemp FileCryptoError! {
     if parent.linux {
-        file: jetc_fd(core.crypto.__jetc_tmpfile(parent.directory.fd), .DestinationIO)
+        file: jetc_fd(builtin.jetc_tmpfile(parent.directory.fd), .DestinationIO)
         if jetc_stat(file, .DestinationIO).nlink != 0 -> return Err(.DestinationIO)
         return Ok(JetcTemp{file: file.move(), path: None})
     }
@@ -260,7 +262,7 @@ jetc_temp: fn(parent: JetcParent, prefix: String) -> JetcTemp FileCryptoError! {
         sequence: parent.directory.fd * 128 + attempt
         name: ".{prefix}-{pid}-{sequence}"
         path: join(parent.path, name)
-        result: core.crypto.__jetc_create_named(path)
+        result: builtin.jetc_create_named(path)
         if result.value >= 0 -> return Ok(JetcTemp{file: JetcFd{fd: result.value}, path: Val(path)})
         if !jetc_exists_errno(result.errno) -> return Err(.DestinationIO)
     }
@@ -287,7 +289,7 @@ jetc_read: fn(file: JetcFd, count: Int, name: String, error: FileCryptoError) ->
         jetc_io_fault(name, error)
         if rt.fault_should_fail("{name}.eof") -> return Ok(JetcBytes{bytes: [U8]{}})
         requested: if rt.fault_should_fail("{name}.short") -> jetc_min(count, 17) else -> count
-        result: core.crypto.__jetc_read(file.fd, requested)
+        result: builtin.jetc_read(file.fd, requested)
         if result.value < 0 {
             if result.errno == 4 && rt.os_family() == "unix" -> next
             return Err(error)
@@ -319,7 +321,7 @@ jetc_write_span: fn(file: JetcFd, bytes: [U8], start: Int, end: Int, name: Strin
         jetc_io_fault(name, .DestinationIO)
         if rt.fault_should_fail("{name}.zero") -> return Err(.DestinationIO)
         count: if rt.fault_should_fail("{name}.short") -> jetc_min(end - offset, 17) else -> end - offset
-        result: core.crypto.__jetc_write(file.fd, bytes, offset, count)
+        result: builtin.jetc_write(file.fd, bytes, offset, count)
         if result.value < 0 {
             if result.errno == 4 && rt.os_family() == "unix" -> next
             return Err(.DestinationIO)
@@ -331,13 +333,13 @@ jetc_write_span: fn(file: JetcFd, bytes: [U8], start: Int, end: Int, name: Strin
 }
 
 jetc_seek: fn(file: JetcFd, error: FileCryptoError) FileCryptoError! {
-    if core.crypto.__jetc_seek(file.fd, 0).value < 0 -> return Err(error)
+    if builtin.jetc_seek(file.fd, 0).value < 0 -> return Err(error)
     Ok()
 }
 
 jetc_sync: fn(file: JetcFd, name: String) FileCryptoError! {
     jetc_io_fault(name, .DestinationIO)
-    if core.crypto.__jetc_fsync(file.fd).value < 0 -> return Err(.DestinationIO)
+    if builtin.jetc_fsync(file.fd).value < 0 -> return Err(.DestinationIO)
     Ok()
 }
 
@@ -357,7 +359,7 @@ jetc_digest: fn(file: JetcFd, expected_length: Int, name: String) -> [U8] FileCr
 }
 
 jetc_revalidate: fn(parent: JetcParent) FileCryptoError! {
-    current: if parent.linux -> jetc_walk_directory(parent.path) else -> jetc_fd(core.crypto.__jetc_open_directory(parent.path), .DestinationIO)
+    current: if parent.linux -> jetc_walk_directory(parent.path) else -> jetc_fd(builtin.jetc_open_directory(parent.path), .DestinationIO)
     before: if parent.linux -> jetc_stat(parent.directory, .DestinationIO) else -> parent.metadata
     after: jetc_stat(current, .DestinationIO)
     if before.dev != after.dev || before.ino != after.ino -> return Err(.DestinationIO)
@@ -372,15 +374,15 @@ jetc_publish: fn(output: &JetcTemp, parent: JetcParent, operation: String) FileC
     if parent.linux {
         jetc_sync(output.file, "{operation}-output-fsync")
         jetc_revalidate(parent)
-        result: core.crypto.__jetc_link(output.file.fd, parent.directory.fd, parent.name)
+        result: builtin.jetc_link(output.file.fd, parent.directory.fd, parent.name)
         if result.value < 0 {
             if jetc_exists_errno(result.errno) -> return Err(.DestinationExists)
             return Err(.DestinationIO)
         }
         jetc_sync(parent.directory, "{operation}-directory-fsync")
     } else {
-        if core.crypto.__jetc_fsync(output.file.fd).value < 0 -> return Err(.DestinationIO)
-        _: core.crypto.__jetc_close(output.file.fd)
+        if builtin.jetc_fsync(output.file.fd).value < 0 -> return Err(.DestinationIO)
+        _: builtin.jetc_close(output.file.fd)
         output.file.fd = -1
         jetc_revalidate(parent)
         path: output.path ?? return Err(.DestinationIO)
@@ -392,8 +394,8 @@ jetc_publish: fn(output: &JetcTemp, parent: JetcParent, operation: String) FileC
             .Ok(_) -> {}
         }
         core.files.__remove_raw(path) ?? return Err(.DestinationIO)
-        directory: jetc_fd(core.crypto.__jetc_open_directory(parent.path), .DestinationIO)
-        if core.crypto.__jetc_fsync(directory.fd).value < 0 -> return Err(.DestinationIO)
+        directory: jetc_fd(builtin.jetc_open_directory(parent.path), .DestinationIO)
+        if builtin.jetc_fsync(directory.fd).value < 0 -> return Err(.DestinationIO)
         output.path = None
     }
     Ok()
@@ -405,7 +407,7 @@ jetc_seal_stage: fn(
     stage: JetcTemp,
     length: Int,
     expected: [U8],
-    metadata: __JetcStat,
+    metadata: JetcStat,
     verify: Bool,
 ) FileCryptoError! -[FS, Rand]> {
     // Ratified snapshot/cancellation ordering: no RNG1 on observed cancel.

@@ -571,8 +571,9 @@ recorded detail (path, then any diff) as the locals; `panic` keeps its text.
 
 `temp_dir` owns Unicode-scalar prefix sanitation, ASCII-only thread sanitation,
 the `jet_test_` name, remove-before-create ordering, NotFound handling, and
-error wording. Filesystem facts and actions remain raw host leaves returning
-private plain records, never tuples. `__TempPath.path` is opaque platform
+error wording. Filesystem facts and actions remain raw host leaves of
+`jet_builtins`, Core's door to the compiler, returning plain records, never
+tuples. `TempPath.path` is opaque platform
 `OsString::into_encoded_bytes()` output: source must not construct, slice,
 edit, or decode it, and passes it unchanged to remove/create. The displayed
 lossy String is separate, so non-UTF-8 temporary roots retain their original

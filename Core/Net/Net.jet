@@ -13,6 +13,8 @@ use {
     core: core
     sys: core.sys
     rt: jet.runtime.net
+    builtin: jet_builtins
+    jet_builtins.[ResolveError]
 }
 
 // core.net — blocking sockets and name resolution.
@@ -106,15 +108,6 @@ net_error_text: fn(err: NetError) -> String Never! {
     assert(net_error_text(NetError.DNS(NetDNSError.Failure("lookup failed"))) == "lookup failed")
     detail: NetErrorDetail{operation: "read", address: None, name: None, message: "closed", os_code: None}
     assert(net_error_text(NetError.Closed(detail)) == "closed")
-}
-
-// Compiler-private platform result: exact Int fields use the existing record
-// codec rather than a tuple nested inside Result.
-__ResolveError: struct {
-    kind: Int
-    has_os_code: Bool
-    os_code: Int
-    message: String
 }
 
 UDPPacket: struct {
@@ -213,7 +206,7 @@ resolve_socket_addrs: fn(operation: String, host: String, port: Int) -[Net, Time
     text: "{host_text}:{port}"
     if socket_addr_parse(text) == .Ok(address) -> return Ok([SocketAddr]{address})
     port16: U16{port}
-    if core.net.__resolve_ordered(host_text, port16) == {
+    if builtin.resolve_ordered(host_text, port16) == {
         .Ok(addresses) -> resolve_all(text, addresses)
         .Err(error) -> Err(resolve_error(text, error))
     }
@@ -884,13 +877,13 @@ net_err: fn(op: String, addr: String, message: String) -> NetError Never! {
 
 resolve_all: fn(text: String, addresses: [SocketAddr]) -> [SocketAddr] NetError! {
     if addresses.len() > 0 -> return Ok(addresses)
-    Err(resolve_error(text, __ResolveError{kind: 0, has_os_code: false, os_code: 0, message: "no address"}))
+    Err(resolve_error(text, ResolveError{kind: 0, has_os_code: false, os_code: 0, message: "no address"}))
 }
 
 // Raw platform resolver errors carry no address or operation policy.
 // Keep these kinds aligned with jet_net_io_error; the platform preserves
 // every answer's order and Core keeps it.
-resolve_error: fn(text: String, error: __ResolveError) -> NetError Never! {
+resolve_error: fn(text: String, error: ResolveError) -> NetError Never! {
     detail: NetErrorDetail{
         operation: "resolve socket address",
         address: Val(text),
@@ -1035,7 +1028,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 #Test("ordered resolver errors keep caller context and platform codes") {
     expected_address: Val("example.test:443")
     expected_os_code: Val(13)
-    denied: resolve_error("example.test:443", __ResolveError{kind: 2, has_os_code: true, os_code: 13, message: "denied"})
+    denied: resolve_error("example.test:443", ResolveError{kind: 2, has_os_code: true, os_code: 13, message: "denied"})
     if denied == {
         .PermissionDenied(detail) -> {
             assert(detail.operation == "resolve socket address")
@@ -1047,7 +1040,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
             assert(false)
         }
     }
-    empty: resolve_error("[::1]:0", __ResolveError{kind: 0, has_os_code: false, os_code: 0, message: "no address"})
+    empty: resolve_error("[::1]:0", ResolveError{kind: 0, has_os_code: false, os_code: 0, message: "no address"})
     if empty == {
         .Other(detail) -> {
             assert(detail.message == "resolve socket address failed: no address" && detail.os_code == None)
@@ -1078,8 +1071,8 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 
 #Test("resolver error OS code presence is independent of its stored word") {
     expected_os_code: Val(0)
-    absent: resolve_error("example.test:0", __ResolveError{kind: 0, has_os_code: false, os_code: 17, message: "missing"})
-    zero: resolve_error("example.test:0", __ResolveError{kind: 0, has_os_code: true, os_code: 0, message: "present"})
+    absent: resolve_error("example.test:0", ResolveError{kind: 0, has_os_code: false, os_code: 17, message: "missing"})
+    zero: resolve_error("example.test:0", ResolveError{kind: 0, has_os_code: true, os_code: 0, message: "present"})
     assert(error_os_code(absent) == None)
     assert(error_os_code(zero) == expected_os_code)
 }
