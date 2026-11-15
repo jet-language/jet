@@ -89,6 +89,8 @@ fault_action: fn(signal: I64, handler: I64) {
 
 // Map and register this thread's 256 KiB alternate signal stack; its lowest
 // words hold the stack_t that sigaltstack copies. 0 when either call fails.
+// Untracked: the mapping is made where allocating is not allowed, and only
+// the fault handler's frames run on it.
 fault_stack_start: fn() -> I64 {
     stack: alloc_map_try(I64{262144})
     if (stack == I64{0}) -> return I64{0}
@@ -179,7 +181,8 @@ trace_text: fn() -> I64 {
     // alloc_check_start does, this maps the four-byte stub `mov rax, rbp;
     // ret`. os_call_address_i64 is an inline leaf, so the stub returns this
     // function's frame pointer, and that frame's return address is in its
-    // caller.
+    // caller. The stub, path and image pages are untracked: the runtime
+    // alone reads them.
     stub: alloc_map_try(I64{4096})
     if (stub == I64{0}) -> return text
     frame := I64{0}
@@ -203,7 +206,7 @@ trace_text: fn() -> I64 {
             if (fd >= I64{0}) {
                 size: os_syscall_i64(I64{8}, fd, I64{0}, I64{2}, I64{0}, I64{0}, I64{0})
                 if (size > I64{64}) {
-                    mapped: os_syscall_i64(I64{9}, I64{0}, size, I64{1}, I64{2}, fd, I64{0})
+                    mapped: os_map_untracked_i64(I64{0}, size, I64{1}, I64{2}, fd, I64{0})
                     if (mapped > I64{0}) {
                         image = mapped
                         length = size
@@ -224,7 +227,7 @@ trace_text: fn() -> I64 {
 // of the executable.
 trace_unmap: fn(address: I64, bytes: I64) {
     #Unsafe("the trace made this mapping and holds no pointer into it past this call") {
-        _ := os_syscall_i64(I64{11}, address, bytes, I64{0}, I64{0}, I64{0}, I64{0})
+        _ := os_unmap_untracked_i64(address, bytes)
     }
 }
 

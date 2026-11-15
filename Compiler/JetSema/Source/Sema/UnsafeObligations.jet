@@ -138,13 +138,16 @@ SEMA_UNSAFE_RAW_OPERATIONS: [SemaRawOperation]{
     {name: "os_fetch_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
     // A call of a native code address.
     {name: "os_call", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
-    // Mappings: the wrappers, and a raw system call of the memory family
-    // (mmap 9, mprotect 10, munmap 11, mremap 25, madvise 28, memfd_create 319).
+    // Mappings: the wrappers, their untracked forms, and a raw system call of
+    // the memory family (mmap 9, mprotect 10, munmap 11, mremap 25, madvise
+    // 28, memfd_create 319).
     {name: "os_map", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
     {name: "os_map_with", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
     {name: "os_unmap", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_map_untracked_i64", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "os_unmap_untracked_i64", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
     {name: "os_protect", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
-    {name: "os_syscall", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{"9", "10", "11", "25", "28", "319", "OS_SYS_MMAP", "OS_SYS_MPROTECT", "OS_SYS_MUNMAP", "OS_SYS_MREMAP", "OS_SYS_MADVISE", "OS_SYS_MEMFD_CREATE", "OS_SYS_BRK"}},
+    {name: "os_syscall", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{"9", "10", "11", "25", "28", "319", "OS_SYS_MPROTECT", "OS_SYS_MUNMAP", "OS_SYS_MREMAP", "OS_SYS_MADVISE", "OS_SYS_MEMFD_CREATE", "OS_SYS_BRK"}},
 }
 
 // The operation of SEMA_UNSAFE_RAW_OPERATIONS the method call

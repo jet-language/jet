@@ -193,12 +193,21 @@ alloc_align: fn(address: I64, align: I64) -> I64 Never! {
     wrapping(address + mask).bit_and(mask.bit_not())
 }
 
-alloc_map_try: fn(bytes: I64) -> I64 {
+// `bytes` of fresh private read-write pages at `hint` (0: anywhere) with mmap
+// `flags`, MAP_PRIVATE|MAP_ANONYMOUS among them: the address, or mmap's
+// negative errno. The memory sentry is not told (os_map_untracked_i64).
+alloc_map_anonymous: fn(hint: I64, bytes: I64, flags: I64) -> I64 {
     #Unsafe("anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation") {
-        address: os_syscall_i64(I64{9}, I64{0}, bytes, I64{3}, I64{34}, I64{-1}, I64{0})
-        if (address < I64{0}) { return I64{0} }
-        return address
+        return os_map_untracked_i64(hint, bytes, I64{3}, flags, I64{-1}, I64{0})
     }
+}
+
+// `bytes` of fresh private read-write pages, or 0. The sentry is not told:
+// the heap's blocks are registered one by one as they are handed out, and
+// the allocator's own state is read by the runtime alone.
+alloc_map_try: fn(bytes: I64) -> I64 {
+    address: alloc_map_anonymous(I64{0}, bytes, I64{34})
+    if (address < I64{0}) -> I64{0} else -> address
 }
 
 alloc_map: fn(bytes: I64, failed_size: I64) -> I64 {
@@ -208,17 +217,18 @@ alloc_map: fn(bytes: I64, failed_size: I64) -> I64 {
 }
 
 alloc_unmap: fn(address: I64, bytes: I64) {
-    #Unsafe("the caller has removed this mapping from all heap lists and no payload remains live") {
-        _ := os_syscall_i64(I64{11}, address, bytes, I64{0}, I64{0}, I64{0}, I64{0})
+    #Unsafe("the caller owns this mapping and uses no pointer into it again") {
+        _ := os_unmap_untracked_i64(address, bytes)
     }
 }
 
 // A fresh read/write shared mapping of `bytes` of the open `descriptor`, or
 // the kernel's negative errno; the caller unmaps a mapping exactly once with
-// alloc_unmap and this size.
+// alloc_unmap and this size. Untracked: only the runtime's shared-memory
+// calls read and write it, each within the descriptor's size.
 alloc_map_shared: fn(bytes: I64, descriptor: I64) -> I64 {
     #Unsafe("a fresh shared mapping of the descriptor aliases no heap block; a failed syscall maps nothing") {
-        return os_syscall_i64(I64{9}, I64{0}, bytes, I64{3}, I64{1}, descriptor, I64{0})
+        return os_map_untracked_i64(I64{0}, bytes, I64{3}, I64{1}, descriptor, I64{0})
     }
 }
 
@@ -380,23 +390,25 @@ ALLOC_WINDOW_ROWS: I64{632}
 ALLOC_WINDOW_ROW_LIMIT: I64{8}
 
 // The window's base, mapped on the first call; 0 when the system refuses.
+// The sentry is not told: a Region registers its pages at reserve, an arena
+// each block it hands out.
 alloc_window: fn() -> I64 {
     word: wrapping(alloc_root + ALLOC_WINDOW)
     kept: sync_load(word)
     if (kept != I64{0}) -> return kept
     bytes: wrapping(ALLOC_WINDOW_BYTES + ALLOC_PAGE_UNIT)
     #Unsafe("a fresh inaccessible NORESERVE mapping aliases nothing; its link and record units are remapped writable inside it and its span tables mapped before its base is published, and a caller that loses the publication unmaps only its own mapping") {
-        mapping: os_syscall_i64(I64{9}, I64{0}, bytes, I64{0}, I64{16418}, I64{-1}, I64{0})
+        mapping: os_map_untracked_i64(I64{0}, bytes, I64{0}, I64{16418}, I64{-1}, I64{0})
         if (mapping < I64{0}) -> return I64{0}
         base: alloc_align(mapping, ALLOC_PAGE_UNIT)
-        links: os_syscall_i64(I64{9}, base, wrapping(ALLOC_WINDOW_LINK_UNITS * ALLOC_PAGE_UNIT), I64{3}, I64{16434}, I64{-1}, I64{0})
+        links: os_map_untracked_i64(base, wrapping(ALLOC_WINDOW_LINK_UNITS * ALLOC_PAGE_UNIT), I64{3}, I64{16434}, I64{-1}, I64{0})
         lock: wrapping(alloc_root + ALLOC_PAGE_LOCK)
         alloc_lock(lock)
         spans: links == base && alloc_page_spans(base, ALLOC_WINDOW_BYTES)
         alloc_unlock(lock)
         won: if spans -> sync_cas(word, I64{0}, base) else -> I64{-1}
         if (won == I64{0}) -> return base
-        _ := os_syscall_i64(I64{11}, mapping, bytes, I64{0}, I64{0}, I64{0}, I64{0})
+        _ := os_unmap_untracked_i64(mapping, bytes)
         return if (won == I64{-1}) -> I64{0} else -> won
     }
 }
@@ -469,7 +481,7 @@ alloc_window_take: fn(bytes: I64) -> I64 {
     address: wrapping(window + wrapping(unit * ALLOC_PAGE_UNIT))
     // A run the system will not map stays inaccessible and out of the stacks.
     #Unsafe("the fresh run is this caller's alone, inside the window and inaccessible; the fixed mapping replaces only its own units") {
-        if (os_syscall_i64(I64{9}, address, wrapping(size * ALLOC_PAGE_UNIT), I64{3}, I64{50}, I64{-1}, I64{0}) == address) -> return address
+        if (os_map_untracked_i64(address, wrapping(size * ALLOC_PAGE_UNIT), I64{3}, I64{50}, I64{-1}, I64{0}) == address) -> return address
     }
     I64{0}
 }
@@ -558,7 +570,8 @@ alloc_window_rows_flush: fn() {
 
 // `bytes` (whole units) mapped on their own at a unit boundary: the slack
 // mapped for the alignment is unmapped again, `head` bytes before the base
-// and the rest after its units. 0 when the system refuses.
+// and the rest after its units. 0 when the system refuses. Untracked, as the
+// window is.
 alloc_reservation_direct: fn(bytes: I64) -> I64 {
     mapping: alloc_map_try(wrapping(bytes + ALLOC_PAGE_UNIT))
     if (mapping == I64{0}) { return I64{0} }
@@ -2891,7 +2904,8 @@ alloc_check_hex: fn(value: I64) {
 
 // A read-only private mapping of this executable's ELF file for symbol
 // names, or 0: the loader's view of an image run from memory
-// (HOST_AT_IMAGE), else /proc/self/exe mapped here.
+// (HOST_AT_IMAGE), else /proc/self/exe mapped here. It and the path page are
+// untracked: only the heap check's report reads them.
 alloc_check_image: fn() -> I64 {
     loaded: host_getauxval(HOST_AT_IMAGE)
     if (loaded != I64{0}) { return loaded }
@@ -2906,7 +2920,7 @@ alloc_check_image: fn() -> I64 {
         if (fd >= I64{0}) {
             length: os_syscall_i64(I64{8}, fd, I64{0}, I64{2}, I64{0}, I64{0}, I64{0})
             if (length > I64{64}) {
-                mapped: os_syscall_i64(I64{9}, I64{0}, length, I64{1}, I64{2}, fd, I64{0})
+                mapped: os_map_untracked_i64(I64{0}, length, I64{1}, I64{2}, fd, I64{0})
                 if (mapped > I64{0}) { image = mapped }
             }
             _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
@@ -3057,6 +3071,7 @@ alloc_check_fail: fn(kind: I64, pointer: I64, size: I64, align: I64, offset: I64
         alloc_check_hex(pointer)
     }
     alloc_check_say(rt_static_text("\n  at:\n"))
+    // A dying path's scratch: untracked, no checked code reads it.
     scratch: alloc_map_try(I64{4096})
     if (scratch != I64{0}) {
         alloc_check_frames(scratch, I64{24})

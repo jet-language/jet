@@ -515,15 +515,16 @@ THREAD_GUARD_BYTES: I64{4096}
 THREAD_CLONE_FLAGS: I64{3477248}
 
 // Maps a stack of `bytes` (a page multiple) under a guard page: the
-// mapping's address, or -errno.
+// mapping's address, or -errno. Untracked: a frame on the stack registers
+// the storage a raw access reaches itself.
 thread_stack_map: fn(bytes: I64) -> I64 {
     total: bytes + THREAD_GUARD_BYTES
     #Unsafe("a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard") {
-        mapping: os_syscall_i64(I64{9}, I64{0}, total, I64{3}, I64{34}, I64{-1}, I64{0})
+        mapping: os_map_untracked_i64(I64{0}, total, I64{3}, I64{34}, I64{-1}, I64{0})
         if (mapping < I64{0}) -> return mapping
         protect: os_syscall_i64(I64{10}, mapping, THREAD_GUARD_BYTES, I64{0}, I64{0}, I64{0}, I64{0})
         if (protect != I64{0}) {
-            _ := os_syscall_i64(I64{11}, mapping, total, I64{0}, I64{0}, I64{0}, I64{0})
+            _ := os_unmap_untracked_i64(mapping, total)
             return protect
         }
         return mapping

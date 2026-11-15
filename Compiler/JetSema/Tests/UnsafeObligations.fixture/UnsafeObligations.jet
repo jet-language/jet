@@ -79,6 +79,12 @@ run: fn() Never! {
     unsafe_test_require(os_refused.diagnostics[0].diagnostic.what.contains("`os_load_i64`") && os_refused.diagnostics[2].diagnostic.what.contains("`os_syscall_i64`"), "the intrinsic is named")
     os_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: intrinsics.program, policy_path: Val("src/kernel/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     unsafe_test_require(os_kernel.diagnostics.len() == 0, "a kernel file holds raw intrinsics")
+    // The kernel map primitive's untracked forms are raw mapping calls too.
+    untracked: parse_source("run: fn() {{ #Unsafe(\"fresh\") {{ p := os_map_untracked_i64(I64{{0}}, n, I64{{3}}, I64{{34}}, I64{{-1}}, I64{{0}})\n_ := os_unmap_untracked_i64(p, n) }} }}".bytes())
+    untracked_refused: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: untracked.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
+    unsafe_test_require(untracked_refused.diagnostics.len() == 2 && untracked_refused.diagnostics[0].diagnostic.code == "E3113" && untracked_refused.diagnostics[0].diagnostic.what.contains("`os_map_untracked_i64`") && untracked_refused.diagnostics[1].diagnostic.what.contains("`os_unmap_untracked_i64`"), "the untracked map and unmap outside the kernel are refused: {untracked_refused.diagnostics:Debug}")
+    untracked_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: untracked.program, policy_path: Val("src/kernel/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
+    unsafe_test_require(untracked_kernel.diagnostics.len() == 0, "a kernel file maps untracked: {untracked_kernel.diagnostics:Debug}")
     // A composed runtime unit answers per source: its marks name each
     // source, and a refusal names the source's own path and line.
     unit_text: "\n// [unit source: R/Kernel.jet]\nkeep: fn() {{ #Unsafe(\"live\") {{ x := os_load_i64(p) }} }}\n// [unit source: R/Host.jet]\n\nrun: fn() {{ #Unsafe(\"live\") {{ y := os_load_i64(p) }} }}\n"

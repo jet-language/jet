@@ -236,7 +236,7 @@ compiler_mapped_unregister: fn(key: I64) {
 compiler_mapped_mmap: fn(fd: I64, length: I64) -> I64 {
     pointer := I64{0}
     #Unsafe("the descriptor is this map's own; mmap creates exactly length read-only private bytes; the map owner alone unmaps them") {
-        pointer = os_syscall_i64(I64{9}, I64{0}, length, I64{1}, I64{2}, fd, I64{0})
+        pointer = os_map_untracked_i64(I64{0}, length, I64{1}, I64{2}, fd, I64{0})
     }
     if (pointer >= I64{0} || pointer < I64{-4095}) -> jet_rt_sentry_register_allocation(pointer, compiler_mapped_pages(length))
     pointer
@@ -245,7 +245,9 @@ compiler_mapped_mmap: fn(fd: I64, length: I64) -> I64 {
 // storage first.
 compiler_mapped_munmap: fn(pointer: I64, length: I64) {
     jet_rt_sentry_unmap(pointer, compiler_mapped_pages(length))
-    _ := host_call(I64{11}, pointer, length, I64{0})
+    #Unsafe("the map owner unmaps its own mapping once, after its pages left the sentry's live storage") {
+        _ := os_unmap_untracked_i64(pointer, length)
+    }
 }
 // `length` rounded up to whole 4 KiB pages, as the system maps them.
 compiler_mapped_pages: fn(length: I64) -> I64 Never! {
@@ -487,7 +489,7 @@ compiler_mapped_place: fn(fd: I64, to: I64, slot: I64) -> Bool {
     length: sync_load(wrapping(slot + I64{32}))
     if (compiler_mapped_copy(fd, to, length, wrapping(slot + I64{56})) != I64{0}) -> return false
     #Unsafe("MAP_FIXED replaces exactly the held map's own read-only private pages with the same length of its copy; borrowed views keep their addresses") {
-        return os_syscall_i64(I64{9}, pointer, length, I64{1}, I64{18}, to, I64{0}) == pointer
+        return os_map_untracked_i64(pointer, length, I64{1}, I64{18}, to, I64{0}) == pointer
     }
 }
 #Export(c) jet_std_fs_map_len: fn(map: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(map + I64{40}))) }

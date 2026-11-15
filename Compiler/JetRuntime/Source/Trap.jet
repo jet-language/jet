@@ -18,7 +18,7 @@ trap_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 trap_put: fn(address: I64, value: I64) { rt_text_put(address, value) }
 
 trap_syscall: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
-    #Unsafe("audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor") {
+    #Unsafe("audited runtime syscall: write borrows live text, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor") {
         return os_syscall_i64(number, a1, a2, a3, a4, a5, a6)
     }
 }
@@ -28,7 +28,7 @@ trap_syscall: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I
 // address, or mmap's negative errno. A mapping's whole pages are live to the
 // memory sentry until trap_unmap takes them back.
 trap_map: fn(hint: I64, bytes: I64, flags: I64) -> I64 {
-    address: trap_syscall(I64{9}, hint, bytes, I64{3}, flags, I64{-1}, I64{0})
+    address: alloc_map_anonymous(hint, bytes, flags)
     if (address < I64{0}) -> return address
     jet_rt_sentry_register_allocation(address, trap_pages(bytes))
     address
@@ -38,7 +38,7 @@ trap_map: fn(hint: I64, bytes: I64, flags: I64) -> I64 {
 // sentry's live storage first.
 trap_unmap: fn(address: I64, bytes: I64) {
     jet_rt_sentry_unmap(address, trap_pages(bytes))
-    _ := trap_syscall(I64{11}, address, bytes, I64{0}, I64{0}, I64{0}, I64{0})
+    alloc_unmap(address, bytes)
 }
 
 // `bytes` rounded up to whole 4 KiB pages, as the system maps them.

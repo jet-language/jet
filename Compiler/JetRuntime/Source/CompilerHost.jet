@@ -141,7 +141,9 @@ host_getauxval: fn(kind: I64) -> I64 {
     }
 }
 
-// host_getauxval from /proc/self/auxv, read into a fresh page.
+// host_getauxval from /proc/self/auxv, read into a fresh page, untracked:
+// the fault report may read it on the alternate signal stack, where
+// allocating is not allowed, and only this function reads it.
 host_getauxval_kernel: fn(kind: I64) -> I64 {
     page: alloc_map_try(I64{4096})
     if (page == I64{0}) -> return I64{0}

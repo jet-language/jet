@@ -249,8 +249,8 @@ comptime_serve_stop_code := I64{0}
 // 56, r8 + 40) trapped. Inside an admitted `#Impure` block the handler
 // reissues it with the cookie; a file call the filter allows answers in rax
 // (+ 144) and the code resumes after its `syscall`. Any other call is
-// refused: allocation may be mid-flight, so the frame is a fresh mapping,
-// made without trap_map, whose sentry account allocates; no checked code
+// refused: allocation may be mid-flight, so the frame is a fresh mapping
+// made untracked (trap_map's sentry account allocates); no checked code
 // reaches it before the process exits.
 #Export(c) jet_rt_comptime_refused: fn(info: I64, context: I64) {
     number: trap_word(wrapping(info + I64{24})).bit_and(I64{4294967295})
@@ -262,7 +262,7 @@ comptime_serve_stop_code := I64{0}
             return
         }
     }
-    frame: trap_syscall(I64{9}, I64{0}, I64{4096}, I64{3}, I64{34}, I64{-1}, I64{0})
+    frame: alloc_map_try(I64{4096})
     if (frame > I64{0}) -> comptime_serve_reply(frame, I64{4}, number, first, I64{0}, I64{0})
     trap_defect_exit(I64{0})
 }

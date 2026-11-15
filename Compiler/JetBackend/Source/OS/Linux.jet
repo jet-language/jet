@@ -21,7 +21,6 @@ use core.mem
 OS_SYS_READ: 0
 OS_SYS_WRITE: 1
 OS_SYS_CLOSE: 3
-OS_SYS_MMAP: 9
 OS_SYS_MPROTECT: 10
 OS_SYS_MUNMAP: 11
 OS_SYS_BRK: 12
@@ -128,13 +127,13 @@ os_map: fn(size: Int, protection: Int) -> Int {
 // mmap(2) of `size` bytes (rounded up to whole pages) at `address` (0: the
 // kernel picks), with `protection` and `flags` (OS_MAP_*), of `fd` from
 // `offset` (-1 and 0: anonymous memory). Returns the address, or -errno.
-// With os_map and os_unmap, the kernel's one way to map and unmap memory:
-// under the memory sentry the pages it maps are live storage until
-// os_unmap takes them out (mem.mapped), so a checked access into them
-// passes and one after the unmap stops.
+// With os_map and os_unmap, the tracked form of the kernel's one way to map
+// and unmap memory: under the memory sentry the pages it maps are live
+// storage until os_unmap takes them out (mem.mapped), so a checked access
+// into them passes and one after the unmap stops.
 os_map_with: fn(address: Int, size: Int, protection: Int, flags: Int, fd: Int, offset: Int) -> Int {
     #Unsafe("the caller owns `address .. address + size` when it names one, so a fixed mapping replaces only its own pages; the pages mapped are the caller's alone") {
-        mapped: os_syscall(OS_SYS_MMAP, address, os_page_round(size), protection, flags, fd, offset)
+        mapped: Int{os_map_untracked_i64(I64{address}, I64{os_page_round(size)}, I64{protection}, I64{flags}, I64{fd}, I64{offset})}
         if !os_failed(mapped) -> mem.mapped(mapped, size)
         return mapped
     }
@@ -152,7 +151,28 @@ os_protect: fn(address: Int, size: Int, protection: Int) -> Int {
 os_unmap: fn(address: Int, size: Int) -> Int {
     #Unsafe("the caller owns the mapping and nothing uses it any more") {
         mem.unmapping(address, size)
-        return os_syscall(OS_SYS_MUNMAP, address, os_page_round(size), 0, 0, 0, 0)
+        return Int{os_unmap_untracked_i64(I64{address}, I64{os_page_round(size)})}
+    }
+}
+
+// The kernel's one mmap(2) call, as os_map_with makes it but with no account
+// kept: the memory sentry never sees these pages. The runtime maps this way
+// only storage the sentry accounts for otherwise (the heap registers each
+// block, a Region its pages at reserve, a stack each frame; trap_map
+// registers its whole mapping) or that no checked access reaches (a stop's
+// scratch, pages mapped where allocating is not allowed); each caller says
+// which. Returns the address, or -errno.
+os_map_untracked_i64: fn(address: I64, size: I64, protection: I64, flags: I64, fd: I64, offset: I64) -> I64 {
+    #Unsafe("the caller owns `address .. address + size` when it names one, so a fixed mapping replaces only its own pages; the pages mapped are the caller's alone") {
+        return os_syscall_i64(I64{9}, address, size, protection, flags, fd, offset)
+    }
+}
+
+// The kernel's one munmap(2) call: the whole pages in `address .. address +
+// size`, with no account kept (os_unmap is the tracked form). 0, or -errno.
+os_unmap_untracked_i64: fn(address: I64, size: I64) -> I64 {
+    #Unsafe("the caller owns the mapping and nothing uses it any more") {
+        return os_syscall_i64(I64{11}, address, size, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 

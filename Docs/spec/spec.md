@@ -3294,7 +3294,12 @@ without the sentry builds neither call. Both are E3101 outside `#Unsafe`, and
 only the kernel's mapping primitives may call them: `Region.reserve` and
 `close`, and JetBackend's `os_map`, `os_map_with` and `os_unmap`
 (`Source/OS/Linux.jet`). Any other caller, a kernel file or a single program
-included, is E3113. See
+included, is E3113. The runtime's own mappings go through the same layer's
+untracked forms, `os_map_untracked_i64` and `os_unmap_untracked_i64`, which
+hold the one mmap and munmap call and keep no account: the heap registers
+each block it hands out, a Region its pages at reserve and a stack frame its
+own storage, and the rest (fault, trace and receipt scratch, the Secret
+registry) is read by the runtime alone. See
 `tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.case`.
 
 `mem.window(owner, p, len)` gives a `View<T>` over the `len` `T`s at `p`,
