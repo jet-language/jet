@@ -30,7 +30,7 @@
 // So a String whose address `mem.address_of` or a string-data leaf takes
 // lives until its block ends.
 
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, name_rows_value]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_failure_text, compiler_threads_partition, name_rows_value]
 
 // One function's moved Drops: per Drop the slot, the instruction it now goes
 // before and its line; and per instruction whether it goes (a moved Drop at
@@ -42,13 +42,18 @@ IRDropPlan: struct {
     kill: [Bool]
 }
 
+// Planning and moving a function's Drops costs about this much per IR
+// instruction on one thread (timed as x64 selection admission's costs are).
+IR_DROP_EARLY_NS_PER_INSTRUCTION: 30
+
 // Each function's plan and rewrite read only its own body and the module's
 // types and names, so the functions split into consecutive parts
-// (compiler_threads_partition by size), one thread each, as many as
-// `threads` admits for the module's instructions. Every thread reads the
-// module's other rows, which none writes, and owns its part; the parts come
-// back in order, so every body is the same for any thread count. A module
-// whose bodies already dropped early (IRModule.dropped_early) stays as it is.
+// (compiler_threads_partition by size), one thread each, as many as x64
+// selection admission (ir_x64_admit) gives the module's instructions at
+// IR_DROP_EARLY_NS_PER_INSTRUCTION. Every thread reads the module's other
+// rows, which none writes, and owns its part; the parts come back in order,
+// so every body is the same for any thread count. A module whose bodies
+// already dropped early (IRModule.dropped_early) stays as it is.
 ir_drop_early: fn(m: &IRModule, threads: CompilerThreads) Never! {
     if m.dropped_early -> return
     m.dropped_early = true
@@ -62,7 +67,7 @@ ir_drop_early: fn(m: &IRModule, threads: CompilerThreads) Never! {
         weights.push(1 + f.op.len())
         total += 1 + f.op.len()
     }
-    workers: compiler_threads_admit(threads, count, total, IR_X64_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    workers: ir_x64_admit(threads, count, total, IR_DROP_EARLY_NS_PER_INSTRUCTION)
     if workers <= 1 {
         loop id in 0..<count {
             if m.functions[id].asm != None -> next

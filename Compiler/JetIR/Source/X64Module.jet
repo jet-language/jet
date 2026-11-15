@@ -324,18 +324,44 @@ ir_x64_text_header: fn(tables: &IRX64Tables, row: Int) -> Int Never! {
     header
 }
 
-// Selecting threads (compiler_threads_admit): a thread is admitted for at
-// least this many IR instructions, so a small module selects on the calling
-// thread.
-IR_X64_MIN_INSTRUCTIONS_PER_THREAD: 20000
+// x64 selection admission. A pass over a module's functions on k threads
+// takes about total * ns / k of wall, where `total` is the module's IR
+// instructions and `ns` the pass's cost per instruction on one thread, plus
+// IR_X64_THREAD_NS per thread. Going from k - 1 threads to k saves
+// total * ns / (k * (k - 1)), so a pass admits the most threads whose last
+// one saves more than it costs (ir_x64_admit): a module of a few thousand
+// instructions selects on a few threads, a small one on the calling thread.
+//
+// Measured by timing whole selections at forced thread counts on a
+// 16-CPU host already running other work: selection costs 700 to 850 ns per
+// instruction on one thread (modules of 2,000 to 87,000 instructions), and a
+// selecting thread about 0.4 ms of wall in the median (its start and join
+// are a few microseconds; the rest is its cold caches and its share of busy
+// cores), less on an idle host.
+IR_X64_THREAD_NS: 400000
+
+// Selection's cost per IR instruction on one thread.
+IR_X64_SELECT_NS_PER_INSTRUCTION: 800
+
+// The threads `threads` admits for a pass over `count` functions holding
+// `total` IR instructions that costs `ns_per_instruction` each on one
+// thread: the most k with total * ns_per_instruction >= k * (k - 1) *
+// IR_X64_THREAD_NS.
+ir_x64_admit: fn(threads: CompilerThreads, count: Int, total: Int, ns_per_instruction: Int) -> Int Never! {
+    workers := compiler_threads_admit(threads, count, total, 1, 0, 0)
+    work: total * ns_per_instruction
+    loop workers > 1 && workers * (workers - 1) * IR_X64_THREAD_NS > work -> workers -= 1
+    workers
+}
 
 // Compiles every function of `program` (function row = X64CompiledFunction
 // id), collecting every function's selection errors, on as many threads as
-// `threads` admits for its instructions. Threads claim functions heaviest
-// first and each result lands in its function's row, so the rows, errors and
-// bytes are those of the one-thread loop for any thread count. A thread that
-// stops (an internal panic) costs only the function it was selecting: that
-// function gets an error row and fresh threads select the rest.
+// x64 selection admission (ir_x64_admit) gives its instructions. Threads
+// claim functions heaviest first and each result lands in its function's
+// row, so the rows, errors and bytes are those of the one-thread loop for
+// any thread count. A thread that stops (an internal panic) costs only the
+// function it was selecting: that function gets an error row and fresh
+// threads select the rest.
 ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX64Result Never! {
     ir_x64_compile_module_logged(program, threads, [String]{})
 }
@@ -362,7 +388,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
         weights.push(weight)
         total += weight
     }
-    workers: compiler_threads_admit(threads, count, total, IR_X64_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    workers: ir_x64_admit(threads, count, total, IR_X64_SELECT_NS_PER_INSTRUCTION)
     functions := [X64CompiledFunction]{}
     debug := [X64FunctionDebug]{}
     variables := [[X64DebugVariable]]{}
@@ -655,14 +681,17 @@ IRX64Released: struct {
 // (ir_x64_release_fill): on one thread their drop outlasts the object write.
 IR_X64_RELEASE_WAYS: 4
 
-// The runs `program`'s IR functions drop in: the threads `threads` admits
-// for their instructions at IR_X64_MIN_INSTRUCTIONS_PER_THREAD, as selection
-// admits them (ir_x64_compile_module_logged), up to IR_X64_RELEASE_WAYS. One
+// Dropping an IR function's instructions costs about this much per
+// instruction (measured as above).
+IR_X64_RELEASE_NS_PER_INSTRUCTION: 15
+
+// The runs `program`'s IR functions drop in: the threads x64 selection
+// admission (ir_x64_admit) gives their drop, up to IR_X64_RELEASE_WAYS. One
 // run means the compile is too small for a thread to pay off.
 ir_x64_release_ways: fn(program: IRModule, threads: CompilerThreads) -> Int Never! {
     total := 0
     loop f in program.functions -> total += 1 + f.op.len()
-    admitted: compiler_threads_admit(threads, program.functions.len(), total, IR_X64_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    admitted: ir_x64_admit(threads, program.functions.len(), total, IR_X64_RELEASE_NS_PER_INSTRUCTION)
     if admitted > IR_X64_RELEASE_WAYS -> IR_X64_RELEASE_WAYS else -> admitted
 }
 

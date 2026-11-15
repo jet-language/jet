@@ -33,7 +33,7 @@
 // so a call after which one is dropped stays a call (ir_tail_memory_only).
 // A panic unwinding a variant does not drop its owned parameters.
 
-use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, name_rows, name_rows_set, name_rows_value]
+use jet_foundation.[CompilerThreads, compiler_threads_failure_text, compiler_threads_partition, name_rows, name_rows_set, name_rows_value]
 
 // Return.b of the Return after a tail Call: the Call is the jump.
 IR_TAIL_JUMP: 1
@@ -61,12 +61,18 @@ IRTailSite: struct {
     drops: [Int]
 }
 
+// Finding a function's ownable parameters and tail calls costs about this
+// much per IR instruction on one thread (timed as x64 selection admission's
+// costs are).
+IR_TAIL_CALLS_NS_PER_INSTRUCTION: 10
+
 // Each function's ownable parameters and tail calls as built read only its
 // own body and its callees' signatures, so for those the functions split
 // into consecutive parts (compiler_threads_partition by size), one thread
-// each, as many as `threads` admits. The variants are then numbered in
-// function order and call order, as the one-thread walk does, so every
-// body and variant is the same for any thread count.
+// each, as many as x64 selection admission (ir_x64_admit) gives the module's
+// instructions at IR_TAIL_CALLS_NS_PER_INSTRUCTION. The variants are then
+// numbered in function order and call order, as the one-thread walk does, so
+// every body and variant is the same for any thread count.
 ir_tail_calls: fn(m: &IRModule, threads: CompilerThreads) Never! {
     count: m.functions.len()
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
@@ -79,7 +85,7 @@ ir_tail_calls: fn(m: &IRModule, threads: CompilerThreads) Never! {
     }
     ownable := [Int]{}
     plans := [IRTailPlan]{}
-    workers: compiler_threads_admit(threads, count, total, IR_X64_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    workers: ir_x64_admit(threads, count, total, IR_TAIL_CALLS_NS_PER_INSTRUCTION)
     if {
         workers <= 1 -> {
             loop f in m.functions -> ownable.push(ir_tail_ownable(m, f))
