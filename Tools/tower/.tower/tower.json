@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6953,
-    "rev": 105150,
+    "rev": 105170,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27343,11 +27343,11 @@
         {
           "n": 10,
           "text": "An explicitly numbered payload-free enum gets a generated `from_int` (D-ENUM-INGRESS1=A): sparse and negative case numbers work, a number that is not a case returns the registered refusal (\"7 is not a case number of `Mode`\"), a payload enum is refused with a UI snapshot, and the hand-written number-to-case parsers in Core, Compiler and Examples call it instead. Proof: `jet test Compiler --profile golden --filter Types/EnumFromInt`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:51.575Z"
+          "evidence": "dev 834e4b14fa (GoalsA-1-3-enum-from-int: Core number-to-case parsers call the generated from_int). batch compiler p148 (built from dev 1b65b28007), 2026-11-15 00:03: jet test Compiler --profile golden --filter Types/EnumFromInt PASS 3 (O0/O1/O2); --profile ui --filter enum_from_int_payload PASS 1; jet test Core/Image/Image.jet 17, Core/Ui/Dbus.jet 7, Core/Net/Tls.jet 6, Core/Files/Files.jet 27 passed.",
+          "at": "2026-11-15T05:03:52.463Z"
         },
         {
           "n": 11,
@@ -27419,7 +27419,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:35.846Z",
-      "updated": "2026-11-15T04:53:51.164Z",
+      "updated": "2026-11-15T05:03:52.463Z",
       "updatedBy": "Main",
       "workOrder": 128,
       "goals": [
@@ -33266,111 +33266,112 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every owned default project-generated output uses the location ratified in D-GENERATED-STORAGE2. Under B, one top-level .jet root includes build products and generated source, with no default build/, .jet-build/, or per-input-file .jet debris.",
+          "text": "Every owned default project-generated output, build products and generated source included, goes under the one top-level `.jet` root (D-GENERATED-STORAGE2=B), with no default build/, .jet-build/ or per-input-file .jet debris. Proof: `jet test tests/guards --filter generated_storage_root`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T18:38:02.545Z"
+          "at": "2026-11-15T05:03:40.856Z"
         },
         {
           "n": 2,
-          "text": "Project/target identities separate standalone files, workspaces, symlinks, toolchains/profiles, and concurrent users without collisions or escape.",
+          "text": "Project and target identities separate standalone files, workspaces, symlinks, toolchains and profiles, targets and concurrent users, so final artifacts never collide or escape (today `bin_path` keys on the file stem only). Proof: `jet test Compiler --profile cases --filter project_root/artifact_identity_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-23T07:35:03.982Z"
+          "at": "2026-11-15T05:03:41.753Z"
         },
         {
           "n": 3,
-          "text": "Saved portable data, mandatory audit/sensitive roots, and their references remain protected and accessible after migration.",
+          "text": "Saved portable data, mandatory audit and sensitive roots and their references stay protected and readable after the migration. Proof: `jet test Compiler --profile cases --filter project_root/migration_keeps_saved_data`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T18:38:02.951Z"
+          "at": "2026-11-15T05:03:42.664Z"
         },
         {
           "n": 4,
-          "text": "Every affected reader/writer/cleanup path is migrated; no compatibility reader, duplicate disposable layout, or blanket deletion remains.",
+          "text": "Every affected reader, writer and cleanup path uses the new root, with no compatibility reader, duplicate disposable layout or blanket deletion. Proof: `jet test tests/guards --filter project_state_dir_single` (also c10's guard).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-23T07:35:18.078Z"
+          "at": "2026-11-15T05:03:43.591Z"
         },
         {
           "n": 5,
-          "text": "Read-only sources, unwritable required and optional destinations, explicit outputs, concurrency, moved checkouts, and selective cleanup have focused real-command proof under the selected location contract.",
+          "text": "Read-only sources, unwritable required and optional destinations, explicit outputs, concurrency, moved checkouts and selective cleanup each have a real-command case. Proof: `jet test Compiler --profile cases --filter project_root/`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-15T00:45:54.757Z"
+          "at": "2026-11-15T05:03:44.547Z"
         },
         {
           "n": 7,
-          "text": "[#3878] Route every remaining per-package or cwd-relative `.jet/` writer to the one workspace root (shared cache under ~/.cache): build/deps, lock (keep any ratified package-scoped lock), cache/api, cache/schema, codemods, game-*, jobs, state/jobs.db.",
+          "text": "Every remaining per-package or cwd-relative `.jet/` writer (build/deps, lock unless a ratified package-scoped lock, cache/api, cache/schema, codemods, game-*, jobs, state/jobs.db) writes to the one workspace root, and shared cache goes under ~/.cache. Proof: `jet test tests/guards --filter project_state_dir_single`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:58:59.069Z"
+          "at": "2026-11-15T05:03:45.460Z"
         },
         {
           "n": 8,
           "text": "[#3422] Suitable small examples, scaffolds, dogfood and benchmarks use one authored source with inline package metadata and explicit authority, with no duplicated metadata. Real multi-file apps stay intact, with a classification reason. Scaffold, run, goldens and automation prove the default.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:58:59.723Z"
+          "evidence": "Moved to #4275 c151: single-source examples depend on the inline package header on #4275; unrelated to the generated-files root",
+          "at": "2026-11-15T05:03:53.316Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
-          "text": "Guard test: build, test and run inside each member of a three-member workspace; afterwards `find . -name .jet -type d | wc -l` prints 1 and that directory is at the workspace root.",
+          "text": "After build, test and run inside each member of a three-member workspace, exactly one `.jet` directory exists, at the workspace root. Proof: `jet test Compiler --profile cases --filter project_root/workspace_has_one_state_dir` (counts with `find . -name .jet -type d`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:02:42.390Z"
+          "at": "2026-11-15T05:03:46.370Z"
         },
         {
           "n": 10,
-          "text": "One function returns the project state directory (workspace root, else package root); no other code joins a `.jet` path by hand (a source guard over Compiler/, Core/ and Jetpack/ enforces it).",
+          "text": "One function returns the project state directory (the workspace root, else the package root), and no other code joins a `.jet` path by hand. Proof: `jet test tests/guards --filter project_state_dir_single` over Compiler/, Core/ and Jetpack/.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:02:43.342Z"
+          "at": "2026-11-15T05:03:47.259Z"
         },
         {
           "n": 11,
-          "text": "`jet doc` writes to `<project>/.jet/doc/` and prints that path; it never writes `docs/` in the source tree.",
+          "text": "`jet doc` writes to `<project>/.jet/doc/` and prints that path, and never writes docs/ in the source tree. Proof: `jet test Compiler --profile cases --filter jet_doc/writes_under_state_dir`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:02:44.448Z"
+          "at": "2026-11-15T05:03:48.164Z"
         },
         {
           "n": 12,
-          "text": "`jet doc --out <dir>` never overwrites a file that lacks the generated-file header: `mkdir docs && echo guide > docs/index.md && jet doc --out docs` exits non-zero with a registered diagnostic naming docs/index.md, and the file is unchanged.",
+          "text": "`jet doc --out <dir>` never overwrites a file that lacks the generated-file header: with a hand-written docs/index.md, `jet doc --out docs` exits non-zero with a registered error naming docs/index.md and leaves the file unchanged. Proof: `jet test Compiler --profile cases --filter jet_doc/out_refuses_hand_written_file`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:02:45.478Z"
+          "at": "2026-11-15T05:03:49.871Z"
         },
         {
           "n": 14,
-          "text": "(was #3555 c2) Tracked fixture inputs formerly under nested .jet are either migrated with their consumers and focused witnesses, or each unresolved consumer is recorded as an explicit blocking follow-up; no canonical source silently disappears [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Tracked fixture inputs that lived under nested `.jet` directories are migrated with their consumers, so no tracked file sits under a nested `.jet` and no canonical source silently disappears. Proof: `git ls-files '*/.jet/*'` lists only files under the workspace root `.jet`, and the consumers' cases pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:49:17.924Z"
+          "at": "2026-11-15T05:03:51.580Z"
         }
       ],
       "refs": [
@@ -33400,8 +33401,8 @@
       "parentId": "c0dp5efn",
       "needsAcceptance": false,
       "created": "2026-09-15T00:28:02.894Z",
-      "updated": "2026-11-13T01:57:14.567Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:03:53.316Z",
+      "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-13T01:49:43.959Z",
       "goals": [
         "G7"
@@ -41202,15 +41203,15 @@
     {
       "id": "c077ihdp",
       "num": 3693,
-      "title": "Project jobs: core.process, job graph, and job parameters broken on the default tier",
-      "body": "Three owner-reported defects (2026-09-28) plus three found while fixing them. Fixed in the working tree by pip; not yet committed.\n\n1. `use core.process` failed to compile (10 errors in `Core/process/process.jet`). Private helpers called from `which` (`?String`) and `getstatusoutput` (`!IOError`) had implicit `!Err` contracts. Fix: mark the infallible helpers `!Never`, matching Core convention; regenerated only the `core.process` row of `crates/jet-foundation/src/CoreModuleExports.rs`.\n2. `after:` was ignored on `jet jobs` / `jet run -- <job>` (default and `--interpret`). The host swapped the entry point and never ran the Prelude job graph (I9 divergence from AOT). Fix: `Source/Interpreter.rs` `run_job_graph` checks every job in the root's closure, then hands the Prelude `jet_job_dispatch_specs` one spec row per MIR job with a host invoke/validate trampoline. The Prelude owns order, skip, cache, cwd, cancellation, and events. Root argv is validated before any predecessor runs (`jet_jit::validate_entry_argv`).\n3. Jobs with plain parameters (`fn migrate(to: String{\"latest\"})`) were listed but failed with E1321 at invocation. Fix: `Driver::swap_entry_point` gives such a job a compiler-generated `#[CLI, Decode]` record with the same field names, types, and defaults as the checked job schema.\n4. Found: bare `#Job` (no marker args) produced no MIR job row, so it could not be a graph predecessor. Fix: `artifact_plan::lower_job` uses default metadata.\n5. Found: job argument rows had empty help and a re-spelled `Type::Named(\"String\")` type, so any `#Job(...)` with parameters hit a MIR legality ICE on every tier. Fix: rows take the lowered parameter type and `#CLI`-field shape rules; a single `#CLI` record parameter uses the record's field inputs like a record entry.\n6. Found: AOT job wrappers never used the record decode path. Fix: `MIRRust::emit_jobs` passes `record_inputs` for a single `#CLI` record parameter. UNVERIFIED: every AOT build currently ICEs (`::jet_jit::SourceSharedInterop`), owned by another stream.\n\nAlso noticed, not fixed: the embedded copies of `core.reactive` and `core.web.table` in `CoreModuleExports.rs` are stale against committed Core sources, and `crates/jet-foundation/build.rs` only hashes `Core.jet`, so this staleness is not caught.",
+      "title": "Project jobs run the same on every tier: `jet <job>` and `jet jobs` dispatch, typed arguments, `after:` order, validation, freshness and inspection",
+      "body": "Destination: a #Job declared once runs by name (`jet <job>`, `jet jobs <job>`, `jet run -- <job>`) with typed scalar parameters from argv, its `after:` predecessors in order, validation before any effect, declared input/output freshness, and one process and job identity model for inspection and lifecycle events, with byte-identical output from a built binary and from `jet jobs`.\n\nWhy: project commands are how users drive their work; a job that behaves differently on another tier breaks trust.\n\nHistory: the 2026-09-28 owner-reported defects (core.process compile, ignored `after:`, E1321 on parameter jobs) were fixed in the retired Rust compiler and met as c1-c3. Today the Jet driver does not make parameter jobs argv-selectable (Pipeline.jet:2685-2688) and the top-level `jet <job>` lookup is unbuilt (Front.jet:1688-1717 against Docs/spec cli.md). Source generation through #Job is #6952.",
       "kind": "bug",
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "## Goal\nLand the working-tree fixes for project jobs (`use core.process`, the `after:` job graph, scalar job parameters, bare `#Job`, job argument rows, and AOT record decode). Then prove `jetpack_tasks` and AOT job-dispatch parity.\n\n## Current state\n- The fixes are uncommitted in the working tree, touching `Core/process/process.jet`, `Source/Interpreter.rs`, `crates/jet-codegen/src/Codegen/mod.rs`, `crates/jet-foundation/src/CoreModuleExports.rs` and `tests/jetpack_tasks.rs`.\n- `Source/Interpreter.rs:749` `run_job_graph` hands the Prelude `jet_job_dispatch_specs` one row per MIR job.\n- `crates/jet-codegen/src/Codegen/mod.rs:1953, 3582` `strip_source_shared_interop_jit` removes the AOT `::jet_jit::SourceSharedInterop` ICE region.\n- `tests/jetpack_tasks.rs:201` `jet_jobs_after_runs_predecessors_and_scalar_args` exists. Criteria 1-3 are met.\n- Rust job lowering: `crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1136` `lower_job`, `TIR/mir.rs:2452` `lower_job_argument`, and `MIRRust.rs:10746` `emit_jobs`.\n- The Jet compiler still has fix 5's bug. `Compiler/JetCodegen/Source/Codegen/JobTestArtifacts.jet:31-48` `jet_codegen_lower_job_argument` re-spells the type as `Type.Named(argument.ty)` and emits empty `help`. `:102` `jet_codegen_lower_job_fact` needs checking for the bare `#Job` default-metadata case (fix 4).\n- Also noticed and not owned here: the stale embedded `core.reactive` and `core.web.table` rows in `CoreModuleExports.rs`, and `crates/jet-foundation/build.rs` hashing only `Core.jet`.\n\n## Changes\n1. Integrate the working-tree fix as one commit, owned only by this card's paths.\n2. Jet compiler mirror, in `JobTestArtifacts.jet`: argument rows take the lowered parameter type and `#CLI` field shape/help. A single `#CLI` record parameter uses the record's field inputs. A bare `#Job` produces a job row with default metadata.\n3. AOT: `MIRRust::emit_jobs` passes `record_inputs` for a single `#CLI` record parameter, as already in the tree.\n4. `tests/jetpack_tasks.rs`: add `jet_build_job_dispatch_matches_default_and_interpreter`. Build the `after:` + scalar-parameter fixture with `jet build`, then dispatch `seed` through the binary's emitted job entry. Its output must match `jet jobs seed` and `jet run --interpret -- seed`. It covers three cases: predecessor order, stop on a failing predecessor, and E1331 with exit 2 for a bad root argument before any predecessor runs.\n\n## Proof\n- `jet test Compiler --profile cases jetpack_tasks/` passes all tests (criterion 4).\n- `jet test Compiler --profile cases jetpack_tasks/jet_build_job_dispatch_matches_default_and_interpreter` passes (criterion 5).\n\n## Batch\n`batch-host-runtime`: host job dispatch plus AOT/run/interpreter parity.\n\n## Dependencies\nNone open.\n",
+      "plan": "Build argv selection for parameter jobs and the top-level `jet <job>` lookup in the Jet driver, then turn the jetpack_tasks rows green. Each criterion names its case.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
@@ -41355,29 +41356,32 @@
         {
           "n": 8,
           "text": "[#3103] A clean prepared environment runs the script with recorded dependency and source hashes. Missing or changed material errors, with no registry fallback. Lifting to a package keeps dependency identity.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:26:32.430Z"
+          "evidence": "Moved to #5966 c7: script lock reproducibility belongs on the lockfile card #5966",
+          "at": "2026-11-15T05:02:29.768Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
           "text": "[#3705] D-SCRIPT-CONFIRM1: a manifest-less script shows one default-yes confirmation naming each authority and call site, before any effect, on the Jet-hosted path. CLI tests cover accept, refuse and non-TTY. There is no prompt when authority is fully declared. EOF or unknown input never grants.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:26:33.185Z"
+          "evidence": "Moved to #6010 c6: script authority prompts belong on #6010",
+          "at": "2026-11-15T05:02:30.659Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
           "text": "[#3119] A tool installs with no accidental project capture. Version, PATH, update and offline behavior are explicit (D-CHANNEL-AUTO1). The jetpack_tool install/ephemeral receipts pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:26:33.887Z"
+          "evidence": "Moved to #6941 c16: tool installs belong on #6941",
+          "at": "2026-11-15T05:02:31.567Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
@@ -41489,7 +41493,7 @@
       "parentId": "c0a59ow3",
       "needsAcceptance": false,
       "created": "2026-09-28T15:53:06.743Z",
-      "updated": "2026-11-15T05:02:28.666Z",
+      "updated": "2026-11-15T05:02:33.107Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
@@ -45758,6 +45762,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T04:52:46.756Z"
+        },
+        {
+          "n": 151,
+          "text": "Suitable small examples, scaffolds, dogfood and benchmarks use one authored source with an inline `package {}` header and explicit authority, with no duplicated metadata, while real multi-file apps stay multi-file with a recorded reason. Proof: `jet test tests/guards --filter examples_single_source` and the scaffold case `jet test Compiler --profile cases --filter new/single_file_default`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:03:39.899Z"
         }
       ],
       "refs": [],
@@ -45771,12 +45784,12 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:54.174Z",
-      "updated": "2026-11-15T04:52:46.756Z",
+      "updated": "2026-11-15T05:03:39.899Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 150
+      "criteriaLastN": 151
     },
     {
       "id": "c0699zei",
@@ -75175,11 +75188,11 @@
         {
           "n": 23,
           "text": "A small program compiles on the calling thread: `jet run` starts compile worker threads only when the work justifies them (by a measured threshold), with identical output either way; strace -c of `jet run hello.jet` shows no thread-pool futex traffic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T11:17:58.284Z"
+          "evidence": "dev 5fb82a0d69 (calling-thread batches) + 8882451d5b (a wake with one thread makes no futex call). jet links its seed's runtime, so the fix shows one batch later. batch compiler p148 (built from dev 1b65b28007), 2026-11-15 00:03: strace -f -c -e trace=clone,clone3,futex jet run hello.jet prints hello and reports no clone, clone3 or futex calls (p144: 0 clones/146 futex; p147: 0/150, all sync_futex_wake from Shared release, Once exits and scheduler shutdown, per Speed-3 strace -k). Speed-3's A/B: a program built by p146 makes 6 futex calls, built by p147 0.",
+          "at": "2026-11-15T05:03:50.726Z"
         },
         {
           "n": 24,
@@ -75325,7 +75338,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T04:19:57.101Z",
+      "updated": "2026-11-15T05:03:50.726Z",
       "updatedBy": "Main",
       "criteriaLastN": 38
     },
@@ -96123,11 +96136,11 @@
         {
           "n": 13,
           "text": "`jet check Core` reports 0 E1012 UpwardCoreLayerReference. Today there are 6: core.encoding`s Stream.jet and CborStream.jet parts, plus core.encoding.json, .jsonl, .cbor and .xml (data layer), hold core.files FileReader and FileWriter (system layer). Fix: split the FileReader and FileWriter stream structs (JSONPull, JSONPush, JSONLines*, CBORPull, CBORPush) out of Stream.jet and CborStream.jet into parts owned by core.encoding.json and core.encoding.cbor; move json, jsonl, cbor and xml, plus their data-layer users Eetf, Toml and Yaml, to the system layer (CoreSourceParts.tsv, Core.rows). Found by the E1102 census; analysis by G3Core-2. Proof: `jet check Core` with no E1012.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T03:24:01.656Z"
+          "evidence": "dev 837fd95caa, 6536f638e1, 62560256fd (PrecompiledCore-4 c13a-r2, c13b-r2, c13c: writer_flush row, Writer trait rows, generic codecs). batch compiler p148 (built from dev 1b65b28007), 2026-11-15 00:03: jet check Core -> ok, Core has no problems (0 E1012). Census of c13c on p147 had selfcheck-core rc=0, 0 rows (was 6 E1012). Writer and codec cases on p148 PASS: core_byte_sources_meet_the_prelude_reader_and_writer, cbor/csv/xml/json/jsonl reader and writer cases, child_pipes_carry_binary_bytes_both_ways, reader_read_into_buffer_must_be_written (ui).",
+          "at": "2026-11-15T05:03:49.052Z"
         },
         {
           "n": 14,
@@ -96147,7 +96160,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-15T02:03:13.710Z",
+      "updated": "2026-11-15T05:03:49.052Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -215931,6 +215944,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:03:53.316Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c04l6p7a",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T05:03:52.463Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xb6zik",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T05:03:51.580Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04l6p7a",
+      "note": "#14: strip debris; proof; was: (was #3555 c2) Tracked fixture inputs formerly under nested .jet are either migrated with their consumers and focused witnesses, or each unresolved consumer is recorded as an explicit blocking follow-"
+    },
+    {
+      "at": "2026-11-15T05:03:50.726Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-15T05:03:49.871Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04l6p7a",
+      "note": "#12: proof; was: `jet doc --out <dir>` never overwrites a file that lacks the generated-file header: `mkdir docs && echo guide > docs/index.md && jet doc --out docs` exits non-zero with a registered diagnostic naming "
+    },
+    {
+      "at": "2026-11-15T05:03:49.052Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ssy5wy",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T05:03:48.164Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04l6p7a",
+      "note": "#11: proof; was: `jet doc` writes to `<project>/.jet/doc/` and prints that path; it never writes `docs/` in the source tree."
+    },
+    {
+      "at": "2026-11-15T05:03:47.259Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04l6p7a",
+      "note": "#10: proof; was: One function returns the project state directory (workspace root, else package root); no other code joins a `.jet` path by hand (a source guard over Compiler/, Core/ and Jetpack/ enforces it)."
+    },
+    {
+      "at": "2026-11-15T05:03:46.370Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04l6p7a",
+      "note": "#9: proof; was: Guard test: build, test and run inside each member of a three-member workspace; afterwards `find . -name .jet -type d | wc -l` prints 1 and that directory is at the workspace root."
+    },
+    {
+      "at": "2026-11-15T05:03:45.460Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04l6p7a",
+      "note": "#7: strip debris; proof; was: [#3878] Route every remaining per-package or cwd-relative `.jet/` writer to the one workspace root (shared cache under ~/.cache): build/deps, lock (keep any ratified package-scoped lock), cache/api, c"
+    },
+    {
+      "at": "2026-11-15T05:03:44.547Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04l6p7a",
+      "note": "#5: proof; was: Read-only sources, unwritable required and optional destinations, explicit outputs, concurrency, moved checkouts, and selective cleanup have focused real-command proof under the selected location cont"
+    },
+    {
+      "at": "2026-11-15T05:03:43.591Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04l6p7a",
+      "note": "#4: proof; was: Every affected reader/writer/cleanup path is migrated; no compatibility reader, duplicate disposable layout, or blanket deletion remains."
+    },
+    {
+      "at": "2026-11-15T05:03:42.664Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04l6p7a",
+      "note": "#3: proof; was: Saved portable data, mandatory audit/sensitive roots, and their references remain protected and accessible after migration."
+    },
+    {
+      "at": "2026-11-15T05:03:41.753Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04l6p7a",
+      "note": "#2: proof; was: Project/target identities separate standalone files, workspaces, symlinks, toolchains/profiles, and concurrent users without collisions or escape."
+    },
+    {
+      "at": "2026-11-15T05:03:40.856Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c04l6p7a",
+      "note": "#1: proof; was: Every owned default project-generated output uses the location ratified in D-GENERATED-STORAGE2. Under B, one top-level .jet root includes build products and generated source, with no default build/, "
+    },
+    {
+      "at": "2026-11-15T05:03:39.899Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#151 Suitable small examples, scaffolds, dogfood and benchmarks u"
+    },
+    {
+      "at": "2026-11-15T05:02:33.107Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c077ihdp",
+      "note": "title,body,plan"
+    },
+    {
+      "at": "2026-11-15T05:02:31.567Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c077ihdp",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T05:02:30.659Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c077ihdp",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T05:02:29.768Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c077ihdp",
+      "note": "#8"
+    },
     {
       "at": "2026-11-15T05:02:28.666Z",
       "by": "TowerKeeper-1",
