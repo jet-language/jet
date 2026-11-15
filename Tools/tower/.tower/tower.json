@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 106598,
+    "rev": 106599,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -218994,6 +218994,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T23:44:17.606Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0w2cubn",
+      "note": "Deadline 06:00 check-in, cycle p194b landed: 41.1% (+5.2)"
+    },
+    {
       "at": "2026-11-15T23:18:15.606Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -223715,6 +223722,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0w2cubn",
+      "title": "Deadline 06:00 check-in, cycle p194b landed: 41.1% (+5.2)",
+      "body": "**Deadline 06:00 (precompiled Core + speed plan steps 1-5): 41.1% (+5.2 since the p193c check-in at 35.9%)**\n\nBetween cycles: #5479 c1 (throughput cell recorded every wave) and c2 (phase budget table, every phase over budget naming its root) are MET on Tower (+1.6). The p193c receipts: check 71.5K lines/s, O0 28.8K, release 22.7K; the compiler build runs at 4.31x parallelism. A strace of a cold `jet run hello.jet` makes 0 of 498 path syscalls into Core or Prelude (#6328 c22 0.6 to 0.7).\n\np194 was held: its census found GoalsA-1-4's S4.2/S4.3 missing a Jetpack bootstrap slice entry. Those two went back and were fixed within 20 minutes. p194b landed the other 10 SUBs (tip f93e33c48e):\n- MemKernel-6: O1/O2 builds take Core bodies from the shipped record (#6328 c22 item 2); the p192b failures are fixed (CryptoErrorRun o0/o1/o2, unit_family, comptime_diff, E1015). #6328 c22 0.7 to 0.8.\n- Speed-3-2: Core-ready parses on threads, effects read in place, plan load aside, text sha256 on Core. rcc load is 82-85 ms (was 160-198), load plus finalize 356-388 ms against the 300 ms target (#6759 c2 0.6 to 0.75).\n- PrecompiledCore-4: stable closure symbols (the hot-text list no longer rots between compilers) and run binds before the pack (#6759 c9 0.8 to 0.85).\n- GoalsB-5-2: the link copy (#6759 c15 0.1 to 0.2). GoalsA-1-4: the Math O2 snapshots.\n\nSuite against p193c: 11 fixed, 3 new. Two TLS dudect timing rows and an HTTP keepalive row look like load noise and are rechecked in p195. The process-session 64 MiB limit row went to PrecompiledCore-4.\n\nRunning now: receipts on p194b, then p195 with 9 SUBs. These include the 16 MiB large-free cache bound (sc run 205 to 167 MB, optimization twin 350 to 306 MB, hello 63-68 MB against node's 70 MB; wall-checked on an allocation-churn program), a threaded E2815 caller scan (about -2.7 s on the check critical path), the flat AST steps S4.2-S4.4, and the c1 comptime-child step.\n\nBoard: 432 open cards (0), 2,505 open criteria (-3).\n",
+      "by": "Main",
+      "created": "2026-11-15T23:44:17.606Z",
+      "sections": []
+    },
     {
       "id": "briefing0lnla85",
       "title": "Deadline 06:00 check-in, cycle p193c landed: 35.9% (+2.7)",
