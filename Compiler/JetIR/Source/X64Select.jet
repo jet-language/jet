@@ -5156,6 +5156,11 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     assert(ir_x64_test_sha_line("sha256msg2 xmm4, xmm3") == [U8]{0x0f, 0x38, 0xcd, 0xe3})
     assert(ir_x64_test_sha_line("pxor xmm0, xmm2") == [U8]{0x66, 0x0f, 0xef, 0xc2})
     assert(ir_x64_test_sha_line("por xmm5, xmm3") == [U8]{0x66, 0x0f, 0xeb, 0xeb})
+    assert(ir_x64_test_sha_line("pand xmm0, xmm2") == [U8]{0x66, 0x0f, 0xdb, 0xc2})
+    assert(ir_x64_test_sha_line("pcmpeqb xmm2, xmm3") == [U8]{0x66, 0x0f, 0x74, 0xd3})
+    assert(ir_x64_test_sha_line("pcmpeqb xmm8, xmm1") == [U8]{0x66, 0x44, 0x0f, 0x74, 0xc1})
+    assert(ir_x64_test_sha_line("pmovmskb rcx, xmm3") == [U8]{0x66, 0x0f, 0xd7, 0xcb})
+    assert(ir_x64_test_sha_line("pmovmskb r9, xmm1") == [U8]{0x66, 0x44, 0x0f, 0xd7, 0xc9})
     assert(ir_x64_test_sha_line("aesenc xmm0, xmm4") == [U8]{0x66, 0x0f, 0x38, 0xdc, 0xc4})
     assert(ir_x64_test_sha_line("aesenclast xmm9, xmm4") == [U8]{0x66, 0x44, 0x0f, 0x38, 0xdd, 0xcc})
     assert(ir_x64_test_sha_line("aesdec xmm1, xmm12") == [U8]{0x66, 0x41, 0x0f, 0x38, 0xde, 0xcc})
@@ -5171,6 +5176,9 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     assert(x64_assemble_template("psllq xmm2", names, false, false).error != None)
     assert(x64_assemble_template("psllq xmm2, 256", names, false, false).error != None)
     assert(x64_assemble_template("psllq rax, 1", names, false, false).error != None)
+    assert(x64_assemble_template("pmovmskb xmm1, xmm2", names, false, false).error != None)
+    assert(x64_assemble_template("pmovmskb rax, rcx", names, false, false).error != None)
+    assert(x64_assemble_template("pmovmskb rax, xmm0 ; -> return", names, true, false).error == None)
     assert(x64_assemble_template("pshufd xmm1, xmm1, 177 ; -> return", names, true, false).error != None)
 }
 

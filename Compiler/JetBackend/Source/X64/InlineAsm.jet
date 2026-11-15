@@ -159,6 +159,8 @@ x64_asm_sse: fn(mnemonic: String) -> X64AsmSse? Never! {
         "sha256msg2" -> Val(X64AsmSse{prefix: 0, escape: 0x38, opcode: 0xcd, immediate: false})
         "pxor" -> Val(X64AsmSse{prefix: 0x66, escape: 0, opcode: 0xef, immediate: false})
         "por" -> Val(X64AsmSse{prefix: 0x66, escape: 0, opcode: 0xeb, immediate: false})
+        "pand" -> Val(X64AsmSse{prefix: 0x66, escape: 0, opcode: 0xdb, immediate: false})
+        "pcmpeqb" -> Val(X64AsmSse{prefix: 0x66, escape: 0, opcode: 0x74, immediate: false})
         // AES-NI rounds and PCLMULQDQ (Intel SDM vol. 2A).
         "aesenc" -> Val(X64AsmSse{prefix: 0x66, escape: 0x38, opcode: 0xdc, immediate: false})
         "aesenclast" -> Val(X64AsmSse{prefix: 0x66, escape: 0x38, opcode: 0xdd, immediate: false})
@@ -432,6 +434,15 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
             if src < 0 -> return Val("expected an xmm register source")
             x64_vector_store(s.code, mem.base, mem.disp, src)
         }
+    } else if mnemonic == "pmovmskb" {
+        // 66 0F D7 /r: the top bit of each byte of an xmm register into the
+        // low 16 bits of a general one, the rest cleared.
+        if operands.len() != 2 -> return Val("expected two operands")
+        dst: x64_asm_reg(s, first, false)
+        src: x64_asm_xmm(operands[1].trim())
+        if dst < 0 || src < 0 -> return Val("expected a general register and an xmm register")
+        x64_sse(s.code, 0x66, false, 0xd7, dst, src)
+        written = dst
     } else if x64_asm_sse(mnemonic) == .Val(form) {
         // xmm register operands only; sha256rnds2 also reads xmm0.
         expected: if form.immediate -> 3 else -> 2

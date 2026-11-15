@@ -3373,84 +3373,84 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 207,
+      "line": 210,
       "column": 5,
-      "reason": "C's caller owns count readable bytes at left and at right"
+      "reason": "the caller (C, or the List equality's lowering) holds count readable bytes at left and at right"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 225,
+      "line": 228,
       "column": 5,
       "reason": "checked native value-returning callback; its raw argument stays valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 231,
+      "line": 234,
       "column": 5,
       "reason": "checked native value-returning callback; both raw arguments stay valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 237,
+      "line": 240,
       "column": 5,
       "reason": "checked unary closure adapter with borrowed environment, input and output slots"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 243,
+      "line": 246,
       "column": 5,
       "reason": "checked binary closure adapter with live environment, inputs and output slots"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 249,
+      "line": 252,
       "column": 5,
       "reason": "checked native Unit callback; its raw argument stays valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 255,
+      "line": 258,
       "column": 5,
       "reason": "checked Unit clone callback; source remains live and target lends writable output storage"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 261,
+      "line": 264,
       "column": 5,
       "reason": "checked native entry or runtime export whose System V signature takes five words, all live for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 267,
+      "line": 270,
       "column": 5,
       "reason": "checked executable System V void(void) address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 273,
+      "line": 276,
       "column": 5,
       "reason": "checked native Unit callback; its three raw arguments stay valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 281,
+      "line": 284,
       "column": 5,
       "reason": "checked code(box) address; the box stays live for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RawWords.jet",
-      "line": 287,
+      "line": 290,
       "column": 5,
       "reason": "checked code(box, argument) address; the box and argument stay live for the synchronous call"
     },
@@ -10613,18 +10613,18 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 45:5 | "native lowering owns both live ranges of count bytes; each leaf loads all its bytes before it stores any, and the steps run in the order the overlap requires" |
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 98:5 | "native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes" |
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 148:5 | "native lowering owns count writable bytes at target; each leaf stores only inside its class's count" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 207:5 | "C's caller owns count readable bytes at left and at right" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 225:5 | "checked native value-returning callback; its raw argument stays valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 231:5 | "checked native value-returning callback; both raw arguments stay valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 237:5 | "checked unary closure adapter with borrowed environment, input and output slots" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 243:5 | "checked binary closure adapter with live environment, inputs and output slots" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 249:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 255:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 261:5 | "checked native entry or runtime export whose System V signature takes five words, all live for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 267:5 | "checked executable System V void(void) address" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 273:5 | "checked native Unit callback; its three raw arguments stay valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 281:5 | "checked code(box) address; the box stays live for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 287:5 | "checked code(box, argument) address; the box and argument stay live for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 210:5 | "the caller (C, or the List equality's lowering) holds count readable bytes at left and at right" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 228:5 | "checked native value-returning callback; its raw argument stays valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 234:5 | "checked native value-returning callback; both raw arguments stay valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 240:5 | "checked unary closure adapter with borrowed environment, input and output slots" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 246:5 | "checked binary closure adapter with live environment, inputs and output slots" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 252:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 258:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 264:5 | "checked native entry or runtime export whose System V signature takes five words, all live for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 270:5 | "checked executable System V void(void) address" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 276:5 | "checked native Unit callback; its three raw arguments stay valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 284:5 | "checked code(box) address; the box stays live for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RawWords.jet | 290:5 | "checked code(box, argument) address; the box and argument stay live for the synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 34:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 74:5 | "the observer id is a label nothing reads back; a racing creator can only repeat a label" |
 | Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 235:5 | "the terminated path and the 128-byte stat fact row are live for the syscall" |
