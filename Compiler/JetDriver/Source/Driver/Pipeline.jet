@@ -1030,22 +1030,37 @@ jet_driver_comptime_run_index: fn(checked_functions: [SemaComptimeFunctionResult
 }
 
 // The owner maps of `graph`, which never changes during a run, filled in
-// ascending key order (JetDriverModuleKeyRow); a key's first registration
-// owns it and a later one from another module marks it ambiguous. One module
-// lists an impl method both on its nominal and on its impl block, which is
-// the same owner.
+// registration order (module, then its free functions, nominal methods and
+// impl methods): a key's first registration owns it and a later one from
+// another module marks it ambiguous. One module lists an impl method both on
+// its nominal and on its impl block, which is the same owner. A String-keyed
+// Map is hashed, so a key inserted in any order is a constant-time append.
 jet_driver_comptime_owners_build: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex) Never! {
     index.owners_built = true
-    rows := jet_driver_registration_function_rows(graph)
-    rows = loop fresh_item in rows -> fresh_item
-    rows.sort_by(fn(left: JetDriverModuleKeyRow, right: JetDriverModuleKeyRow) { (left.key <=> right.key).then(left.row <=> right.row) })
-    loop at in 0..<rows.len() {
-        if at > 0 && rows[at - 1].key == rows[at].key {
-            if index.owners.get(rows[at].key) != .Val(rows[at].module_identity) {
-                index.ambiguous_owners[rows[at].key] = true
+    loop source_module in graph.modules {
+        loop function in source_module.functions {
+            jet_driver_comptime_owner_add(index, source_module.module_identity, symbol_table_key(graph.symbols, function.symbol.id))
+        }
+        loop nominal in source_module.nominals {
+            loop function in nominal.methods {
+                jet_driver_comptime_owner_add(index, source_module.module_identity, symbol_table_key(graph.symbols, function.symbol.id))
             }
-        } else { index.owners[rows[at].key] = rows[at].module_identity }
+        }
+        loop implementation in source_module.impls {
+            loop function in implementation.methods {
+                jet_driver_comptime_owner_add(index, source_module.module_identity, symbol_table_key(graph.symbols, function.symbol.id))
+            }
+        }
     }
+}
+
+// Records that `module_identity` registers `key` (jet_driver_comptime_owners_build).
+jet_driver_comptime_owner_add: fn(index: &JetDriverComptimeRunIndex, module_identity: ModuleID, key: String) Never! {
+    if index.owners.get(key) == .Val(owner) {
+        if owner != module_identity -> index.ambiguous_owners[key] = true
+        return
+    }
+    index.owners[key] = module_identity
 }
 
 // The one module that registers `function_key`, or None when no module or
@@ -4734,51 +4749,11 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, kg: &JetDriverKe
     result
 }
 
-// A Map is a sorted entry list (Lower/Maps.jet): inserting a key below the
-// largest one shifts every later entry, so a whole-program map filled in
-// source order costs O(N^2) moves. The comptime owner index is filled from
-// rows sorted once (a merge sort), so each insert appends.
-JetDriverModuleKeyRow: struct {
-    module_identity: ModuleID
-    key: String
-    // The row's position in registration order (module, then free
-    // functions, nominal methods, impl methods).
-    row: Int
-}
-
 // The function keys each registration module declares: `modules` binds a
 // module id to its row of `keys`. Hashed sets, only looked up.
 JetDriverRegisteredKeys: struct {
     modules: [U32:Int]
     keys: [NameRows]
-}
-
-// Every function key a registration module declares (free functions, nominal
-// and impl methods), in registration order.
-jet_driver_registration_function_rows: fn(graph: SemaRegistrationGraph) -> [JetDriverModuleKeyRow] Never! {
-    rows := [JetDriverModuleKeyRow]{}
-    loop source_module in graph.modules {
-        loop function in source_module.functions {
-            jet_driver_push_module_key(rows, source_module.module_identity, symbol_table_key(graph.symbols, function.symbol.id))
-        }
-        loop nominal in source_module.nominals {
-            loop function in nominal.methods {
-                jet_driver_push_module_key(rows, source_module.module_identity, symbol_table_key(graph.symbols, function.symbol.id))
-            }
-        }
-        loop implementation in source_module.impls {
-            loop function in implementation.methods {
-                jet_driver_push_module_key(rows, source_module.module_identity, symbol_table_key(graph.symbols, function.symbol.id))
-            }
-        }
-    }
-    rows
-}
-
-jet_driver_push_module_key: fn(rows: &[JetDriverModuleKeyRow], module_identity: ModuleID, key: String) Never! {
-    row: rows.len()
-    // copy: the rows are sorted on their own; the graph keeps its declarations.
-    rows.push(JetDriverModuleKeyRow{module_identity: module_identity.copy(), key: key.copy(), row: row})
 }
 
 // The function keys each registration module declares, by module identity.
