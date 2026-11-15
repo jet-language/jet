@@ -1,0 +1,25 @@
+# A built program loads every Core function check it needs from the Core
+# library's check at every level, as a run does. That includes the functions
+# a build checks for comptime first, those that name a compiler-owned
+# nominal (`Ordering`, `Encode`, `Decode`), whose module is the program's
+# entry rather than the library check's, and the Core functions the library
+# check itself checked for comptime. None of them is checked from text.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_PHASE_COUNTERS=1
+write: main.jet = "use core.crypto\nuse core.encoding.json\n\nrun: fn() {\n    v: json.parse(\"[1, 2]\") ?? return\n    print(json.to_string(v) ?? \"\")\n    print(crypto.sha256(\"ab\".bytes()).hex())\n}\n"
+step: jet build -O0 --trace=o0.json main.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"core\",\"bodies_from_text\":0}" # no Core function is checked from text
+step: jet build -O1 --trace=o1.json main.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"core\",\"bodies_from_text\":0}" # at O1 too
+step: jet build -O2 --trace=o2.json main.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"core\",\"bodies_from_text\":0}" # and at O2
+step: {work}/.jet/build/main
+exit: 0
+stdout: = "[1,2]\nfb8e20fc2e4c3f248c60c39bd652f3c1347298bb977b8b4d5903b85055620603\n"

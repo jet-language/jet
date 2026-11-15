@@ -2561,9 +2561,14 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     mark: sema_scope_mark(probe.slots[probe.current].table)
     probe.slots[probe.current].table.comptime_execution_depth = 1
     // The demand this check records rides the result, for a body pass that
-    // takes it to record again (SemaDemandCapture).
+    // takes it to record again (SemaDemandCapture). A Core function's check
+    // loads from the Core library's bodies file as the body pass's does
+    // (CoreBodies.jet sema_core_body_loaded), and that check is the one the
+    // body pass then reuses.
     sema_demand_capture_open(graph)
-    checked := sema_function_check(memory_func, sema_program_symbol_key(program, source.symbol.id), function_kind, source.raw_protocol_return, environment, program, probe.slots[probe.current].table, probe.host_hooks, diagnostics, call_facts, calls, name_references)
+    module_index: sema_registration_module_index(graph, module_identity) ?? -1
+    loaded: if module_index >= 0 -> sema_core_body_loaded(program, probe.host_hooks, module_index, source.symbol.id, diagnostics, call_facts, calls, name_references) else -> None
+    checked := loaded ?? sema_function_check(memory_func, sema_program_symbol_key(program, source.symbol.id), function_kind, source.raw_protocol_return, environment, program, probe.slots[probe.current].table, probe.host_hooks, diagnostics, call_facts, calls, name_references)
     // A propagation site that reaches `Err` from a Core error family member
     // converts through its module's Prelude routine, which a module check
     // injects after its bodies. A compile-time closure runs before that, so
@@ -3944,7 +3949,10 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
     job: SemaBodyJob.TopLevel{item_index: item_index}
     function_name: sema_check_registered_top_level_name(module_index, item_index, environment, program)
     owner_id: sema_check_registered_function_id(job, module_index, environment, program)
-    cached := sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, sema_program_symbol_key(program, owner_id))
+    // The Core library's check captures every Core function check it makes
+    // (CoreBodies.jet), so it checks a Core function its comptime already
+    // checked again here rather than reuse that check, which no capture saw.
+    cached := if sema_core_body_capturing(program, module_index) -> SemaComptimeFunctionResult?{None} else -> sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, sema_program_symbol_key(program, owner_id))
     if cached == {
         .Val(checked_function) -> {
             if checked_function.function == .Val(function) {
@@ -4061,7 +4069,8 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     label: sema_check_registered_method_label(job, module_index, environment, program)
     owner_id: sema_check_registered_function_id(job, module_index, environment, program)
     raw_protocol_return: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
-    cached := sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, sema_program_symbol_key(program, owner_id))
+    // As a top-level function's (sema_check_registration_top_level).
+    cached := if sema_core_body_capturing(program, module_index) -> SemaComptimeFunctionResult?{None} else -> sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, sema_program_symbol_key(program, owner_id))
     if cached == {
         .Val(checked_function) -> {
             exact_int_reachable = exact_int_reachable || checked_function.exact_int_reachable
@@ -8333,9 +8342,12 @@ sema_comptime_walk_take: fn(walk: SemaComptimeWalk) -> [SemaComptimeWalkDone] {
 // Queues `jobs` on the walk and wakes its threads. The run's environment
 // enters each module the walk holds no scope of yet, preparing the module's
 // scope for the threads (sema_comptime_function_precheck_slot); a job of a
-// module that cannot be entered is not queued (the closure checks it). The
-// threads claim the modules with the heaviest job first, and each module's
-// jobs heaviest first, so a thread mostly stays in one module's scope.
+// module that cannot be entered is not queued (the closure checks it). Nor
+// is a job whose check this compile loads from the Core library's check
+// (sema_comptime_function_loads): a load reads the host hooks, which a walk
+// thread is withheld, so the closure loads it. The threads claim the modules
+// with the heaviest job first, and each module's jobs heaviest first, so a
+// thread mostly stays in one module's scope.
 sema_comptime_walk_push: fn(walk: &SemaComptimeWalk, environment: &SemaScopeEnvironment, program: SemaProgramTables, version: Int, jobs: [SemaComptimeFunctionJob]) {
     // Module k of this push has scope row `slots[k]`, its jobs at
     // `members[k]` and its heaviest job's weight at `heaviest[k]`.
@@ -8345,6 +8357,7 @@ sema_comptime_walk_push: fn(walk: &SemaComptimeWalk, environment: &SemaScopeEnvi
     heaviest := [Int]{}
     loop job_row in 0..<jobs.len() {
         job: jobs[job_row]
+        if sema_comptime_function_loads(program, job.module_identity) -> next
         at: module_index(job.module_identity)
         loop walk.module_slots.len() <= at -> walk.module_slots.push(-1)
         if walk.module_slots[at] == -1 {
@@ -8388,6 +8401,17 @@ sema_comptime_walk_push: fn(walk: &SemaComptimeWalk, environment: &SemaScopeEnvi
         }
     }
     walk.changed.notify_all()
+}
+
+// Whether a function check of module `module_identity` loads from the Core
+// library's check (CoreBodies.jet sema_core_bodies_held).
+sema_comptime_function_loads: fn(program: SemaProgramTables, module_identity: ModuleID) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        if sema_registration_module_index(graph, module_identity) == .Val(at) {
+            return sema_core_bodies_held(graph, graph.modules[at])
+        }
+    }
+    false
 }
 
 // Drops the prepared scopes no queued job needs, oldest first, until a new

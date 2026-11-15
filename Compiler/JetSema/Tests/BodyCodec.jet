@@ -160,10 +160,12 @@ body_codec_source: fn() -> String {
 // (SemaRegistrationGraph.core_seal), so its function checks are captured
 // (CoreBodies.jet); with one, as a compile bound to the built-in Core is,
 // which loads them. `extra` is source text added after body_codec_source().
-body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaRegistrationHostHooks>, core: Bool{false}, extra: String{""}) -> SemaGraphResult? Err! {
+// With `own_entry`, the compile's entry is a module of its own, not `main`,
+// so the compiler-owned nominals registration puts in the entry live there.
+body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaRegistrationHostHooks>, core: Bool{false}, extra: String{""}, own_entry: Bool{false}) -> SemaGraphResult? Err! {
     threads: compiler_threads_single()
     loading: hooks.guard_read().value.core_bodies != None
-    stage := body_codec_declared(failures, package, core, loading, extra) ?? return None
+    stage := body_codec_declared(failures, package, core, loading, extra, own_entry) ?? return None
     declared := stage.graph.move()
     stage.graph = None
     graph := declared.move() ?? {
@@ -180,7 +182,7 @@ body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaReg
 
 // The declaration stage of body_codec_check, its graph in it: `loading` as
 // when the host hooks hold a bodies file.
-body_codec_declared: fn(failures: &[String], package: String, core: Bool, loading: Bool, extra: String) -> SemaComptimeDeclarationStage? Err! {
+body_codec_declared: fn(failures: &[String], package: String, core: Bool, loading: Bool, extra: String, own_entry: Bool{false}) -> SemaComptimeDeclarationStage? Err! {
     source: "{body_codec_source()}{extra}"
     threads: compiler_threads_single()
     parsed := parse_source(source.bytes())
@@ -198,7 +200,16 @@ body_codec_declared: fn(failures: &[String], package: String, core: Bool, loadin
     facts: SemaBuildFacts{package_name: "body-codec", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     input: SemaRegistrationModuleInput{package_identity: package, module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, package, main_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, threads) ?? {
+    inputs := [SemaRegistrationModuleInput]{input, canonical}
+    entry_id := main_id
+    if own_entry {
+        entry_source: "start: fn() {{}}\n"
+        entry_parsed := parse_source(entry_source.bytes())
+        entry_id = module_intern(table, "body-codec::entry")
+        entry_segment: SemaSourceSegment{generated: Span{start: 0, end: entry_source.len()}, source_file: "entry.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+        inputs.push(SemaRegistrationModuleInput{package_identity: package, module_identity: entry_id, module_name: "entry", core_source_alias: "", module_path: "entry.jet", source_file: "entry.jet", source_segments: [SemaSourceSegment]{entry_segment}, source_origin: SemaSourceOrigin.Snapshot, program: entry_parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: entry_source})
+    }
+    graph := sema_registration_prepare_graph(inputs, [SemaRegistrationImportEdge]{}, package, entry_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, threads) ?? {
         failures.push("registration failed: {err}")
         return None
     }
@@ -556,6 +567,22 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
 
 #Test("a Core function check whose record the host reads from its file is the check from text") {
     body_codec_load("core", true, through_file: true)
+}
+
+// Registration puts the compiler-owned nominals (`Ordering`) in the entry
+// module, and the Core library's check has an entry of its own; a Core
+// function that names one loads in a compile whose entry is another module.
+#Test("a Core function check that names a compiler-owned nominal loads in a compile with another entry") {
+    ranked: "\nrank: fn(order: Ordering) -> Int {{\n    if order == {{\n        .Less -> 0\n        .Equal -> 1\n        .Greater -> 2\n    }}\n}}\n"
+    failures := [String]{}
+    captured := body_codec_check(failures, "core", body_codec_hooks(), true, ranked) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
+    bodies := sema_core_bodies_read(captured.core_bodies.move()) ?? panic("BodyCodec: the bodies file does not read back")
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, core_bodies: Val(bodies)}}
+    _ := body_codec_check(failures, "core", hooks, true, ranked, own_entry: true) ?? panic("BodyCodec could not load module `main`:\n{failures.join("\n")}")
+    permit: hooks.guard_read()
+    if !sema_core_body_was_loaded(permit.value.core_bodies, permit.value.core_bodies_loaded, "function:<corelib>/body-codec::rank") {
+        panic("BodyCodec: `rank`, which names `Ordering`, was checked from text in a compile with another entry")
+    }
 }
 
 // The records of a bodies file read from bytes of their own, as a host
