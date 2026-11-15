@@ -683,9 +683,13 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         return sema_expression_terminal_fact(member, member_span, expected, environment, program, diagnostics)
     }
     // Rust `infer_field` (`fold_enum_variant_path`, `is_known_enum`):
-    // `Enum.Variant`, `Enum.Group.Leaf` or `types.Enum.Variant` builds the variant.
+    // `Enum.Variant`, `Enum.Group.Leaf` or `types.Enum.Variant` builds the
+    // variant; a payload case read without a call is its constructor value.
     if sema_expression_enum_variant_path(base, member, environment, program, scopes) == .Val(path) {
-        return sema_expression_enum_literal(path.enum_name, sema_expression_path_type_args(base), path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        type_args: sema_expression_path_type_args(base)
+        constructor: sema_expression_enum_constructor_value(path, type_args, member_span, Span{start: expr_span(base).start, end: span.end}, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        if constructor.handled -> return constructor.value
+        return sema_expression_enum_literal(path.enum_name, type_args, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     // Rust `infer_field` (imports arm): `alias.NAME` where `alias` is a
     // whole-module import reads that module's constant `NAME`, and

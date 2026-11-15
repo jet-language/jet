@@ -1430,6 +1430,21 @@ function becomes a value only when every parameter can be called with that read
 access; parameters requiring `&` or `&&` keep the function direct-call-only
 (**E0227**; S47, D-MEM-PARAM1).
 
+A qualified enum payload case written without a call is that case's
+constructor as an ordinary capture-free function value (D-ENUM-CONSTRUCTORCALL1):
+`Message.Text` is `fn(String) -[]> Message`, so `names.map(Message.Text)`
+builds one case per name. A named payload keeps its labels label-only, so
+`Message.Pair` is `fn(*, left: Int, right: Int) -[]> Message` and fills the
+slots such a declared function fills. A payload that the copy law can't copy
+out of a read parameter is taken, so its constructor value fits only a
+function type that marks the take (`fn(&&FileWriter) -> Sink`); anywhere else
+it reports **E0227**. The enum's type arguments are written on the case
+(`Holder<Int>.Full`) or come from the result of the expected function type. A
+unit case stays a value (`Message.Quit` is a `Message`), a leading-dot case
+never becomes a constructor from an expected function type, and a payload case
+whose expected type is not a function keeps the literal's missing-payload
+diagnostics.
+
 The same structural callable-value comparison applies inside collection and
 aggregate slots: a named function's declaration call metadata does not make
 `[String:fn(String) -> String]` a different value type. Required public labels,

@@ -613,6 +613,20 @@ environments are lent under one invocation lock, while read-only environments
 need no lock. A checked consuming capture is held in an owned optional slot
 and transferred once, rather than moving directly out of a Rust `Fn` closure.
 
+**D-ENUM-CONSTRUCTORCALL1=A — payload constructors are function values**
+*(ratified 2026-09-12)*: a qualified payload case written without a call
+(`Message.Text`) is its constructor as an ordinary capture-free function
+value, typed from the checked payload and the enum through the same function
+type, binder, S30 labels and effects as a lambda making the call. A single
+payload stays positional; a named payload's labels stay label-only
+(`fn(*, left: Int, right: Int) -> Message`). A payload the copy law can't copy
+out of a read parameter is taken (`fn(&&T)`), so that value fits only a
+function type marking the take (E0227); no label or take is erased to fit.
+Type arguments are written on the case or come from the expected function
+type's result. A unit case stays a value, leading-dot shorthand never infers a
+constructor from an expected function type, and direct construction is
+unchanged. There is no constructor type, protocol or registry.
+
 **D-CALLVALUE1=B — function values use `.call(...)`** *(ratified
 2026-08-05; superseded by D-CALLVALUE2=A)*: a call result that was itself a
 function was invoked with `callee.call(...)`, and the adjacent `)(` spelling

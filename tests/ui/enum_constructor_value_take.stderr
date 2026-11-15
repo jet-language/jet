@@ -1,0 +1,8 @@
+Error [jet.MarkedFunctionValue]: `Sink.Out` can't be used as a function value here because it takes its payload (`&&FileWriter`)
+  --> tests/ui/enum_constructor_value_take.jet:15:16
+    |
+ 15 |     print(wrap(Sink.Out))
+    |                ^^^^^^^^
+ Why: `FileWriter` can't be copied out of a read parameter into the variant, so the constructor takes it, and a function type gives each parameter plain read access unless it marks a take (`fn(&&T)`)
+ Fix: Mark the parameter in the function type (`fn(&&FileWriter)`), or build the case directly with `Sink.Out(…)`
+More: jet-lang.dev/e/E0227

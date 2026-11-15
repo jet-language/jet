@@ -7,9 +7,18 @@ use {
         ByteTextPart,
         Call,
         CallArg,
+        CallContractRow,
+        CallablePolicy,
+        CallablePolicyChain,
         Diagnostic,
         EnumLitArg,
         Expr,
+        FunctionCallMetadata,
+        FunctionDefaultRef,
+        Lambda,
+        LambdaBody,
+        LambdaParam,
+        NamedSpan,
         NodeKind,
         OrFallback,
         ExprField,
@@ -32,6 +41,7 @@ use {
         TypedLitBody,
         Variant,
         ast_empty_call_arg_flags,
+        ast_empty_lambda_meta,
         core_enum_payload_variants,
         core_enum_variant_labels,
         core_enum_variant_payload,
@@ -1076,6 +1086,159 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
     payload_rows: body_flat_enum_payload(payload, context.arena)
     value: sema_node(context, enum_ty, NodeKind.EnumCtor{owner: owner.id, variant: variant_id, payload: payload_rows}, span)
     sema_expr_expected(value, expected, environment, program, diagnostics)
+}
+
+// The parameters and result of a payload case's constructor value: one
+// parameter per payload slot, labeled for a named payload ("" for a
+// positional one), and the enum the call builds.
+SemaEnumConstructorSignature: struct {
+    labels: [String]
+    params: [Type]
+    result: Type
+}
+
+// A qualified payload case read without a call (`Message.Text`) is its
+// constructor as an ordinary capture-free function value, checked as the
+// lambda that makes the call: `fn(String) -> Message`, or
+// `fn(*, left: Int, right: Int) -> Message` for a named payload, whose labels
+// stay label-only as a declared function's would. A payload the copy law
+// can't copy out of a read parameter is taken (`fn(&&File) -> Message`), so
+// the value fits only a slot that marks the take, as a named function with a
+// `&&` parameter does (E0227). Unhandled, so the literal's own diagnostics
+// apply, for a unit case, a case of no known enum, unknown type arguments,
+// or an expected type that is no function.
+sema_expression_enum_constructor_value: fn(path: SemaExpressionEnumPath, type_args: [Type], variant_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unhandled: SemaMethodSpecialCheck{handled: false, value: None}
+    if expected == .Val(required) {
+        callable: if sema_expr_unwrap_tag(required) == .Fn(_, _, _, _, _, _) -> true else -> false
+        if !callable -> return unhandled
+    }
+    signature: sema_expression_enum_constructor_signature(path, type_args, expected, environment, program, scopes) ?? return unhandled
+    conventions: loop ty in signature.params -> if sema_expression_enum_payload_taken(ty, environment, program, context) -> AccessConvention.Move else -> AccessConvention.Read
+    display: "{path.enum_name}.{path.variant}"
+    if sema_expression_enum_constructor_unmarked(conventions, expected) == .Val(index) {
+        diagnostics.push(sema_expression_enum_constructor_taken(display, signature.labels[index], signature.params[index], span))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    params: loop (index, convention) in conventions -> LambdaParam{name: "__payload_{index}", name_span: variant_span, ty: None, ty_span: None, convention: convention}
+    args: loop (index, label) in signature.labels -> if label == "" -> EnumLitArg.Positional{value: Expr.Ident{name: "__payload_{index}", span: variant_span, id: AST_NODE_GENERATED}} else -> EnumLitArg.Named{label: label, expr: Expr.Ident{name: "__payload_{index}", span: variant_span, id: AST_NODE_GENERATED}}
+    body: Expr.EnumLit{type_name: path.enum_name, variant: path.variant, variant_span: Val(variant_span), args: args, leading_dot: false, span: span, id: AST_NODE_GENERATED}
+    lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: body}, span: span, meta: ast_empty_lambda_meta()}
+    labeled: loop label in signature.labels {
+        if label != "" {
+            break true
+        }
+    } ?? false
+    contract := [CallContractRow]?{None}
+    if labeled -> contract = Val(loop label in signature.labels -> CallContractRow{label: label, zone: ParamZone.LabelOnly})
+    taken: loop convention in conventions {
+        if convention == AccessConvention.Move {
+            break true
+        }
+    } ?? false
+    // As in a written function type, only a taken parameter needs call
+    // metadata, whose names repeat the contract's labels.
+    metadata := FunctionCallMetadata?{None}
+    if taken {
+        metadata = Val(FunctionCallMetadata{
+            names: signature.labels,
+            defaults: loop _ in conventions -> FunctionDefaultRef?{None},
+            variadic: loop _ in conventions -> false,
+            conventions: conventions,
+            policies: CallablePolicyChain{policies: [CallablePolicy]{}},
+        })
+    }
+    constructor_ty: Type.Fn{params: signature.params, ret: Val(signature.result), effect_bound: None, param_contract: contract, call_metadata: metadata, return_view_provenance: None}
+    value: sema_check_expression(Expr.Lambda{lambda: lambda, id: AST_NODE_GENERATED}, Val(constructor_ty), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// The constructor signature of payload case `path`, with the enum's type
+// arguments written on the path or read from the expected function type's
+// result. None for a unit case, a case of no known enum, or type arguments
+// neither gives.
+sema_expression_enum_constructor_signature: fn(path: SemaExpressionEnumPath, type_args: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> SemaEnumConstructorSignature? {
+    if sema_data_is_json_name(path.enum_name) -> return None
+    owner: sema_expression_type_symbol(scopes, environment, program, path.enum_name) ?? return sema_expression_core_constructor_signature(path.enum_name, path.variant)
+    if sema_expression_core_export_variants(environment, program, owner) != None -> return sema_expression_core_constructor_signature(owner.name, path.variant)
+    enum_def: sema_scope_declaration_enum(environment, program, owner.id) ?? return None
+    selected := Variant?{None}
+    loop candidate in enum_def.variants {
+        if candidate.name == path.variant {
+            selected = Val(candidate)
+            break
+        }
+    }
+    variant: selected ?? return None
+    generic_names: loop parameter in enum_def.type_params -> parameter.name
+    generic_args := type_args
+    if generic_args.len() == 0 && expected == .Val(required) {
+        normalized: sema_expr_unwrap_tag(required)
+        if normalized == .Fn(_, ret, _, _, _, _) {
+            // A function-typed parameter takes the failing form of its
+            // result, whose success row is the enum.
+            returned := sema_expr_unwrap_tag(ret ?? Type.Named{name: "Unit"})
+            if returned == .Result(ok, _) -> returned = sema_expr_unwrap_tag(ok)
+            if returned == .Apply(name, rows) {
+                if sema_expression_same_nominal_head(name, path.enum_name, environment, program) -> generic_args = rows
+            }
+        }
+    }
+    if generic_args.len() != generic_names.len() -> return None
+    labels := [String]{}
+    params := [Type]{}
+    if variant.payload == {
+        .Unit -> return None
+        .Single(ty, _) -> {
+            labels.push("")
+            params.push(sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_identity, ty, generic_names), generic_names, generic_args))
+        }
+        .Named(fields) -> loop field in fields {
+            labels.push(field.name)
+            params.push(sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_identity, field.ty, generic_names), generic_names, generic_args))
+        }
+    }
+    declared: if generic_args.len() > 0 -> Type.Apply{name: owner.name, args: generic_args} else -> Type.Named{name: owner.name}
+    Val(SemaEnumConstructorSignature{labels: labels, params: params, result: sema_expression_field_owner_type(environment, program, owner.module_identity, declared, generic_names)})
+}
+
+// The constructor signature of a payload case of a Core enum with no source
+// declaration, from the generated Core enum rows.
+sema_expression_core_constructor_signature: fn(enum_name: String, variant: String) -> SemaEnumConstructorSignature? {
+    params: core_enum_variant_payload(enum_name, variant) ?? return None
+    if params.len() == 0 -> return None
+    written: core_enum_variant_labels(enum_name, variant)
+    labels: if written == .Val(rows) -> rows else -> loop _ in params -> ""
+    Val(SemaEnumConstructorSignature{labels: labels, params: params, result: Type.Named{name: enum_name}})
+}
+
+// A payload slot the constructor takes: a complete type whose clone the copy
+// law refuses can't be copied out of a read parameter into the variant.
+sema_expression_enum_payload_taken: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> Bool {
+    if sema_ownership_type_is_copy(ty) || sema_copy_site_is_type_parameter(ty, context) -> return false
+    facts: sema_copy_classify(ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    facts.complete && !facts.accepted
+}
+
+// The first taken payload slot when `expected` doesn't mark every slot the
+// way the constructor does: a call through it would read the value the
+// variant has to own. None when the constructor takes nothing.
+sema_expression_enum_constructor_unmarked: fn(conventions: [AccessConvention], expected: Type?) -> Int? Never! {
+    taken: loop (index, convention) in conventions {
+        if convention == AccessConvention.Move {
+            break index
+        }
+    } ?? return None
+    if expected == .Val(required) {
+        if sema_expr_unwrap_tag(required) == .Fn(_, _, _, _, metadata, _) && metadata == .Val(slot) && slot.conventions == conventions -> return None
+    }
+    Val(taken)
+}
+
+sema_expression_enum_constructor_taken: fn(display: String, label: String, ty: Type, span: Span) -> Diagnostic {
+    slot: if label == "" -> "payload" else -> "payload field `{label}`"
+    direct: if label == "" -> "{display}(…)" else -> "{display}{{…}}"
+    sema_error("E0227", span, "`{display}` can't be used as a function value here because it takes its {slot} (`&&{type_name(ty)}`)", "`{type_name(ty)}` can't be copied out of a read parameter into the variant, so the constructor takes it, and a function type gives each parameter plain read access unless it marks a take (`fn(&&T)`)", "mark the parameter in the function type (`fn(&&{type_name(ty)})`), or build the case directly with `{direct}`")
 }
 
 // A variant of a Core enum without a source declaration: unit variants take no
