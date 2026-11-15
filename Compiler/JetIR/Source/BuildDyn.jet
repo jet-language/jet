@@ -663,12 +663,31 @@ ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> (name: String, type_ar
 }
 
 // The checked key of the Core decode helper `name`, or None when the program
-// does not hold it (CoreReach.jet ir_codec_decode_source).
+// does not hold it (IRProgram.decode_helpers).
 ir_codec_decode_key: fn(p: IRProgram, name: String) -> String? Never! {
-    loop (index, function) in p.functions {
-        if function.name == name && ir_codec_decode_source(module_is_core(function.module_identity), function.source_file, function.kind, function.name) && ir_function_row(p, function.key) == (Val(index)) -> return Val(function.key.copy())
+    loop (at, helper) in ir_codec_decode_helpers() {
+        if helper != name -> next
+        row: p.decode_helpers[at]
+        if row < 0 -> return None
+        return Val(p.functions[row].key.copy())
     }
     None
+}
+
+// By ir_codec_decode_helpers index, the row of the first function of that
+// name the helpers' source holds (CoreReach.jet ir_codec_decode_source) that
+// is its key's first row; -1 for a helper the program lacks. Found once by
+// ir_program_bind, after it binds the functions and their rows.
+ir_codec_decode_rows: fn(p: IRProgram) -> [Int] Never! {
+    names: ir_codec_decode_helpers()
+    found := (loop _ in 0..<names.len() -> -1)
+    loop (index, function) in p.functions {
+        if !ir_codec_decode_source(module_is_core(function.module_identity), function.source_file, function.kind, function.name) -> next
+        loop (at, helper) in names {
+            if helper == function.name && found[at] < 0 && ir_function_row(p, function.key) == (Val(index)) -> found[at] = index
+        }
+    }
+    found
 }
 
 // The runtime scalar Decode adapter's suffix for `target`, or None for a

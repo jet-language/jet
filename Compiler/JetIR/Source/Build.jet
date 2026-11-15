@@ -559,6 +559,10 @@ IRProgram: struct {
     // source order, by "{source file}:{span start}" (ir_spawn_sites): the
     // "spawn site N" of task reports.
     spawn_sites: [String:Int]{[String:Int]{}}
+    // By ir_codec_decode_helpers index, that Core decode helper's function
+    // row (-1: the program does not hold it), found once by ir_program_bind
+    // (BuildDyn.jet ir_codec_decode_key).
+    decode_helpers: [Int]{[Int]{}}
     // Whether this program's code computes compile-time values (comptime
     // items, not a build invocation): outside an `#Impure` block, a Core
     // call that reads ambient host or process state with no system call the
@@ -930,6 +934,7 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     p.spawn_sites = ir_spawn_sites(owned)
     p.functions = owned.move()
     p.rows = rows
+    p.decode_helpers = ir_codec_decode_rows(p)
     ir_program_bind_decls(p, decls)
     p.render_impls = render_impls
     p.close_methods = close_methods
