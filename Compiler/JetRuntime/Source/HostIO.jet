@@ -18,27 +18,27 @@
     if (value == I64{0}) {
         return
     }
-    #Unsafe("value transfers one 56-byte error header and its nullable owned E4 text children") {
-        resource: os_load_i64(wrapping(value + I64{16}))
-        cause: os_load_i64(wrapping(value + I64{40}))
-        if (resource != I64{0}) { jet_rt_string_drop(resource) }
-        if (cause != I64{0}) { jet_rt_string_drop(cause) }
-    }
+    // `value` transfers one 56-byte error header and its nullable owned E4 text
+    // children.
+    resource: rt_text_word(wrapping(value + I64{16}))
+    cause: rt_text_word(wrapping(value + I64{40}))
+    if (resource != I64{0}) { jet_rt_string_drop(resource) }
+    if (cause != I64{0}) { jet_rt_string_drop(cause) }
     jet_rt_free(value, I64{56}, I64{8})
 }
 
 #Export(c) jet_rt_handle_clone_io_error: fn(value: I64) -> I64 {
     result: jet_rt_alloc(I64{56}, I64{8})
-    #Unsafe("value borrows the complete error header; result exclusively owns 56 fresh bytes") {
-        offset := I64{0}
-        loop offset < (I64{56}) {
-            word := os_load_i64(wrapping(value + offset))
-            if (offset == I64{16} || offset == I64{40}) && word != (I64{0}) {
-                word = jet_rt_string_clone(word)
-            }
-            os_store_i64(wrapping(result + offset), word)
-            offset = wrapping(offset + I64{8})
+    // `value` borrows the complete error header; `result` exclusively owns 56
+    // fresh bytes.
+    offset := I64{0}
+    loop offset < (I64{56}) {
+        word := rt_text_word(wrapping(value + offset))
+        if (offset == I64{16} || offset == I64{40}) && word != (I64{0}) {
+            word = jet_rt_string_clone(word)
         }
+        rt_text_store(wrapping(result + offset), word)
+        offset = wrapping(offset + I64{8})
     }
     result
 }
@@ -65,16 +65,16 @@ host_stdio_cause: fn(failure: I64) -> I64 {
 // Keep the canonical IOError carrier in one place, not in each OS leaf.
 host_io_other_take: fn(operation: I64, resource: I64, cause: I64, error: I64) -> I64 {
     value: jet_rt_alloc(I64{56}, I64{8})
-    #Unsafe("value exclusively owns a new initialized IOError with two owned text children; error lends the caller's pointer slot") {
-        os_store_i64(value, HOST_IO_KIND_OTHER)
-        os_store_i64(wrapping(value + I64{8}), operation)
-        os_store_i64(wrapping(value + I64{16}), resource)
-        os_store_i64(wrapping(value + I64{24}), I64{0})
-        os_store_i64(wrapping(value + I64{32}), I64{0})
-        os_store_i64(wrapping(value + I64{40}), cause)
-        os_store_i64(wrapping(value + I64{48}), I64{0})
-        os_store_i64(error, value)
-    }
+    // `value` exclusively owns a new initialized IOError with two owned text
+    // children; `error` lends the caller's pointer slot.
+    rt_text_store(value, HOST_IO_KIND_OTHER)
+    rt_text_store(wrapping(value + I64{8}), operation)
+    rt_text_store(wrapping(value + I64{16}), resource)
+    rt_text_store(wrapping(value + I64{24}), I64{0})
+    rt_text_store(wrapping(value + I64{32}), I64{0})
+    rt_text_store(wrapping(value + I64{40}), cause)
+    rt_text_store(wrapping(value + I64{48}), I64{0})
+    rt_text_store(error, value)
     I64{0}
 }
 
@@ -82,14 +82,14 @@ host_io_other_take: fn(operation: I64, resource: I64, cause: I64, error: I64) ->
 // owned when projected. OS code is i64 internally, exact Int at its C seam.
 host_context_copy: fn(value: I64) -> I64 {
     result: jet_rt_alloc(I64{40}, I64{8})
-    #Unsafe("value lends five initialized context words; result exclusively owns its header and cloned nullable E4 children") {
-        offset := I64{0}
-        loop offset < (I64{40}) {
-            word := os_load_i64(wrapping(value + offset))
-            if ((offset == I64{8} || offset == I64{32}) && word != I64{0}) -> word = jet_rt_string_clone(word)
-            os_store_i64(wrapping(result + offset), word)
-            offset = wrapping(offset + I64{8})
-        }
+    // `value` lends five initialized context words; `result` exclusively owns
+    // its header and cloned nullable E4 children.
+    offset := I64{0}
+    loop offset < (I64{40}) {
+        word := rt_text_word(wrapping(value + offset))
+        if ((offset == I64{8} || offset == I64{32}) && word != I64{0}) -> word = jet_rt_string_clone(word)
+        rt_text_store(wrapping(result + offset), word)
+        offset = wrapping(offset + I64{8})
     }
     result
 }
@@ -98,12 +98,12 @@ host_context_copy: fn(value: I64) -> I64 {
 
 #Export(c) jet_rt_handle_drop_io_context: fn(value: I64) {
     if (value == I64{0}) -> return
-    #Unsafe("value transfers its 40-byte header and two independently owned nullable text children") {
-        resource: os_load_i64(wrapping(value + I64{8}))
-        cause: os_load_i64(wrapping(value + I64{32}))
-        if (resource != I64{0}) -> jet_rt_string_drop(resource)
-        if (cause != I64{0}) -> jet_rt_string_drop(cause)
-    }
+    // `value` transfers its 40-byte header and two independently owned
+    // nullable text children.
+    resource: rt_text_word(wrapping(value + I64{8}))
+    cause: rt_text_word(wrapping(value + I64{32}))
+    if (resource != I64{0}) -> jet_rt_string_drop(resource)
+    if (cause != I64{0}) -> jet_rt_string_drop(cause)
     jet_rt_free(value, I64{40}, I64{8})
 }
 
@@ -114,32 +114,32 @@ host_context_copy: fn(value: I64) -> I64 {
     }
     raw_code := I64{0}
     if (os_code != I64{0}) {
-        #Unsafe("the optional code box borrows one initialized exact-Int word") {
-            raw_code = jet_int_owned_to_i64(os_load_i64(os_code))
-        }
+        // The optional code box borrows one initialized exact-Int word.
+        raw_code = jet_int_owned_to_i64(rt_text_word(os_code))
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
     value: jet_rt_alloc(I64{40}, I64{8})
-    #Unsafe("nullable option boxes lend one initialized payload word; value owns cloned texts and the complete new context") {
-        os_store_i64(value, operation)
-        os_store_i64(wrapping(value + I64{8}), if (resource == I64{0}) -> I64{0} else -> jet_rt_string_clone(os_load_i64(resource)))
-        os_store_i64(wrapping(value + I64{16}), if (os_code == I64{0}) -> I64{0} else -> I64{1})
-        os_store_i64(wrapping(value + I64{24}), raw_code)
-        os_store_i64(wrapping(value + I64{32}), if (cause == I64{0}) -> I64{0} else -> jet_rt_string_clone(os_load_i64(cause)))
-    }
+    // Nullable option boxes lend one initialized payload word; `value` owns
+    // cloned texts and the complete new context.
+    rt_text_store(value, operation)
+    rt_text_store(wrapping(value + I64{8}), if (resource == I64{0}) -> I64{0} else -> jet_rt_string_clone(rt_text_word(resource)))
+    rt_text_store(wrapping(value + I64{16}), if (os_code == I64{0}) -> I64{0} else -> I64{1})
+    rt_text_store(wrapping(value + I64{24}), raw_code)
+    rt_text_store(wrapping(value + I64{32}), if (cause == I64{0}) -> I64{0} else -> jet_rt_string_clone(rt_text_word(cause)))
     value
 }
 
 #Export(c) jet_rt_record_get_io_context_operation: fn(value: I64) -> I64 {
-    #Unsafe("value borrows an initialized context header") { return os_load_i64(value) }
+    // `value` borrows an initialized context header.
+    rt_text_word(value)
 }
 
 host_context_text: fn(value: I64, offset: I64, some: I64) -> I64 {
-    #Unsafe("value borrows a context; some lends the writable pointer output for a present field") {
-        text: os_load_i64(wrapping(value + offset))
-        if (text == I64{0}) -> return I64{0}
-        os_store_i64(some, jet_rt_string_clone(text))
-    }
+    // `value` borrows a context; `some` lends the writable pointer output for
+    // a present field.
+    text: rt_text_word(wrapping(value + offset))
+    if (text == I64{0}) -> return I64{0}
+    rt_text_store(some, jet_rt_string_clone(text))
     I64{1}
 }
 
@@ -147,50 +147,50 @@ host_context_text: fn(value: I64, offset: I64, some: I64) -> I64 {
 #Export(c) jet_rt_record_get_io_context_cause: fn(value: I64, some: I64) -> I64 { host_context_text(value, I64{32}, some) }
 
 #Export(c) jet_rt_record_get_io_context_os_code: fn(value: I64, some: I64) -> I64 {
-    #Unsafe("value borrows a context; some lends the writable exact-Int word output for a present field") {
-        if (os_load_i64(wrapping(value + I64{16})) == I64{0}) -> return I64{0}
-        os_store_i64(some, jet_int_owned_from_i64(os_load_i64(wrapping(value + I64{24}))))
-    }
+    // `value` borrows a context; `some` lends the writable exact-Int word
+    // output for a present field.
+    if (rt_text_word(wrapping(value + I64{16})) == I64{0}) -> return I64{0}
+    rt_text_store(some, jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{24}))))
     I64{1}
 }
 
 #Export(c) jet_rt_record_tag_io_error: fn(value: I64) -> I64 {
-    #Unsafe("value borrows an initialized error header") { return os_load_i64(value) }
+    // `value` borrows an initialized error header.
+    rt_text_word(value)
 }
 
 host_error_context: fn(value: I64, kind: I64) -> I64 {
-    #Unsafe("value borrows a complete error header; the selected payload must match its canonical tag") {
-        if (os_load_i64(value) != kind) {
-            host_record_index_refused()
-            return I64{0}
-        }
+    // `value` borrows a complete error header; the selected payload must match
+    // its canonical tag.
+    if (rt_text_word(value) != kind) {
+        host_record_index_refused()
+        return I64{0}
     }
     host_context_copy(wrapping(value + I64{8}))
 }
 
 host_error_with_context: fn(context: I64, kind: I64) -> I64 {
     value: jet_rt_alloc(I64{56}, I64{8})
-    #Unsafe("context transfers its initialized five words and text owners into the fresh error; only the context header is then freed") {
-        os_store_i64(value, kind)
-        offset := I64{0}
-        loop offset < (I64{40}) {
-            os_store_i64(wrapping(value + I64{8} + offset), os_load_i64(wrapping(context + offset)))
-            offset = wrapping(offset + I64{8})
-        }
-        os_store_i64(wrapping(value + I64{48}), I64{0})
+    // `context` transfers its initialized five words and text owners into the
+    // fresh error; only the context header is then freed.
+    rt_text_store(value, kind)
+    offset := I64{0}
+    loop offset < (I64{40}) {
+        rt_text_store(wrapping(value + I64{8} + offset), rt_text_word(wrapping(context + offset)))
+        offset = wrapping(offset + I64{8})
     }
+    rt_text_store(wrapping(value + I64{48}), I64{0})
     jet_rt_free(context, I64{40}, I64{8})
     value
 }
 
 #Export(c) jet_rt_record_get_io_error_resource_limit: fn(value: I64) -> I64 {
-    #Unsafe("value borrows an initialized ResourceLimit error") {
-        if (os_load_i64(value) != HOST_IO_KIND_RESOURCE_LIMIT) {
-            host_record_index_refused()
-            return I64{0}
-        }
-        return os_load_i64(wrapping(value + I64{48}))
+    // `value` borrows an initialized ResourceLimit error.
+    if (rt_text_word(value) != HOST_IO_KIND_RESOURCE_LIMIT) {
+        host_record_index_refused()
+        return I64{0}
     }
+    rt_text_word(wrapping(value + I64{48}))
 }
 
 #Export(c) jet_rt_record_new_io_error_resource_limit: fn(limit: I64) -> I64 {
@@ -199,15 +199,15 @@ host_error_with_context: fn(context: I64, kind: I64) -> I64 {
         return I64{0}
     }
     value: jet_rt_alloc(I64{56}, I64{8})
-    #Unsafe("value exclusively owns seven initialized words; ResourceLimit has no text children") {
-        os_store_i64(value, HOST_IO_KIND_RESOURCE_LIMIT)
-        offset := I64{8}
-        loop offset < (I64{56}) {
-            os_store_i64(wrapping(value + offset), I64{0})
-            offset = wrapping(offset + I64{8})
-        }
-        os_store_i64(wrapping(value + I64{48}), limit)
+    // `value` exclusively owns seven initialized words; ResourceLimit has no
+    // text children.
+    rt_text_store(value, HOST_IO_KIND_RESOURCE_LIMIT)
+    offset := I64{8}
+    loop offset < (I64{56}) {
+        rt_text_store(wrapping(value + offset), I64{0})
+        offset = wrapping(offset + I64{8})
     }
+    rt_text_store(wrapping(value + I64{48}), limit)
     value
 }
 

@@ -4,17 +4,11 @@
 // ErrorOut32: domain U32@0, stage U32@4, code I64@8, kind U32@16,
 // pad U32@20, owned E4 message@24. Linux emits POSIX domain1 or success0;
 // kind/message stay zero. WriteZero is a separate Bool, never an OS code.
-fd_word: fn(state: I64, offset: I64) -> I64 {
-    #Unsafe("the caller borrows a live FD72 or runtime scratch word") {
-        return os_load_i64(wrapping(state + offset))
-    }
-}
+// `fd_word` borrows a live FD72 or runtime scratch word; `fd_put` needs the
+// FD72 lock or the exclusive runtime scratch word.
+fd_word: fn(state: I64, offset: I64) -> I64 { rt_text_word(wrapping(state + offset)) }
 
-fd_put: fn(state: I64, offset: I64, value: I64) {
-    #Unsafe("the caller owns the FD72 lock or exclusive runtime scratch word") {
-        os_store_i64(wrapping(state + offset), value)
-    }
-}
+fd_put: fn(state: I64, offset: I64, value: I64) { rt_text_store(wrapping(state + offset), value) }
 
 fd_lock: fn(state: I64) { sync_mutex_lock(state) }
 
@@ -51,9 +45,8 @@ fd_c_path: fn(path: I64) -> I64 {
     length: rt_text_len(path)
     data: jet_rt_alloc(wrapping(length + I64{1}), I64{1})
     rt_text_bytes_copy(data, rt_text_data(path), length)
-    #Unsafe("the fresh path allocation includes its terminator byte") {
-        os_store_u8(wrapping(data + length), I64{0})
-    }
+    // The fresh path allocation includes its terminator byte.
+    rt_text_put(wrapping(data + length), I64{0})
     data
 }
 
@@ -427,9 +420,8 @@ fd_operation: fn(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 }
 
 fd_zero: fn(result: I64, zero: I64) {
-    #Unsafe("the caller lends one writable Bool byte") {
-        os_store_u8(zero, if (result == HOST_WRITE_ZERO) -> I64{1} else -> I64{0})
-    }
+    // The caller lends one writable Bool byte.
+    rt_text_put(zero, if (result == HOST_WRITE_ZERO) -> I64{1} else -> I64{0})
 }
 
 #Export(c) jet_fd_open_at_raw: fn(directory: I64, path: I64, flags: I64, mode: I64, errno: I64) -> I64 {

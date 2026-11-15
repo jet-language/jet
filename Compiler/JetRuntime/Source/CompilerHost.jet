@@ -125,19 +125,19 @@ compiler_process_status_text: fn(status: I64) -> I64 {
 host_getauxval: fn(kind: I64) -> I64 {
     envp: host_envp
     if (envp == I64{0}) -> return host_getauxval_kernel(kind)
-    #Unsafe("startup lends the start stack: the null-terminated envp array, then the auxiliary vector's [type, value] pairs up to AT_NULL") {
-        at := envp
-        loop {
-            if (os_load_i64(at) == I64{0}) -> break
-            at = wrapping(at + I64{8})
-        }
+    // Startup lends the start stack: the null-terminated envp array, then the
+    // auxiliary vector's [type, value] pairs up to AT_NULL.
+    at := envp
+    loop {
+        if (rt_text_word(at) == I64{0}) -> break
         at = wrapping(at + I64{8})
-        loop {
-            entry: os_load_i64(at)
-            if (entry == I64{0}) -> return I64{0}
-            if (entry == kind) -> return os_load_i64(wrapping(at + I64{8}))
-            at = wrapping(at + I64{16})
-        }
+    }
+    at = wrapping(at + I64{8})
+    loop {
+        entry: rt_text_word(at)
+        if (entry == I64{0}) -> return I64{0}
+        if (entry == kind) -> return rt_text_word(wrapping(at + I64{8}))
+        at = wrapping(at + I64{16})
     }
 }
 
@@ -146,10 +146,10 @@ host_getauxval_kernel: fn(kind: I64) -> I64 {
     page: alloc_map_try(I64{4096})
     if (page == I64{0}) -> return I64{0}
     found := I64{0}
+    // "/proc/self/auxv\0", little-endian, at the start of the fresh private page.
+    rt_text_store(page, I64{7310238724270485551})
+    rt_text_store(wrapping(page + I64{8}), I64{33346492788860524})
     #Unsafe("page is a fresh private page: the path, then the [type, value] pairs read into it") {
-        // "/proc/self/auxv\0", little-endian.
-        os_store_i64(page, I64{7310238724270485551})
-        os_store_i64(wrapping(page + I64{8}), I64{33346492788860524})
         fd: os_syscall_i64(I64{257}, I64{-100}, page, I64{524288}, I64{0}, I64{0}, I64{0})
         if (fd >= I64{0}) {
             length: os_syscall_i64(I64{0}, fd, wrapping(page + I64{16}), I64{4080}, I64{0}, I64{0}, I64{0})
@@ -157,10 +157,10 @@ host_getauxval_kernel: fn(kind: I64) -> I64 {
             at := I64{16}
             // The pair at `at` (from 16) is whole when at + 16 <= 16 + length.
             loop at <= length {
-                entry: os_load_i64(wrapping(page + at))
+                entry: rt_text_word(wrapping(page + at))
                 if (entry == I64{0}) -> break
                 if (entry == kind) {
-                    found = os_load_i64(wrapping(page + wrapping(at + I64{8})))
+                    found = rt_text_word(wrapping(page + wrapping(at + I64{8})))
                     break
                 }
                 at = wrapping(at + I64{16})
@@ -235,35 +235,36 @@ host_image_part: fn(name: I64) -> I64 {
     if (table == I64{0} || length == I64{0}) -> return I64{0}
     mask: I64{4294967295}
     index := I64{0}
-    #Unsafe("AT_PHDR lends the program header table the kernel mapped, AT_PHNUM rows of 56 bytes; a PT_NOTE row's p_vaddr and p_filesz bound its mapped read-only notes, and a note is read only inside that bound") {
-        loop index < count {
-            row: wrapping(table + index * I64{56})
-            index = wrapping(index + I64{1})
-            if (os_load_i64(row).bit_and(mask) != I64{4}) -> next
-            note: os_load_i64(wrapping(row + I64{16}))
-            size: os_load_i64(wrapping(row + I64{32}))
-            if (size < wrapping(I64{16} + label)) -> next
-            head: os_load_i64(note)
-            kind: os_load_i64(wrapping(note + I64{8}))
-            descriptor: (head >> I64{32}).bit_and(mask)
-            if (head.bit_and(mask) != I64{4} || kind.bit_and(mask) != HOST_NOTE_JET_PART || (kind >> I64{32}).bit_and(mask) != HOST_NOTE_JET_OWNER) -> next
-            if (descriptor < label || wrapping(I64{16} + descriptor) > size) -> next
-            if (os_load_u8(wrapping(note + wrapping(I64{16} + length))) != I64{0}) -> next
-            at := I64{0}
-            loop at < length && os_load_u8(wrapping(note + wrapping(I64{16} + at))) == os_load_u8(wrapping(data + at)) {
-                at = wrapping(at + I64{1})
-            }
-            if (at == length) -> return note
+    // AT_PHDR lends the program header table the kernel mapped, AT_PHNUM rows
+    // of 56 bytes; a PT_NOTE row's p_vaddr and p_filesz bound its mapped
+    // read-only notes, and a note is read only inside that bound.
+    loop index < count {
+        row: wrapping(table + index * I64{56})
+        index = wrapping(index + I64{1})
+        if (rt_text_word(row).bit_and(mask) != I64{4}) -> next
+        note: rt_text_word(wrapping(row + I64{16}))
+        size: rt_text_word(wrapping(row + I64{32}))
+        if (size < wrapping(I64{16} + label)) -> next
+        head: rt_text_word(note)
+        kind: rt_text_word(wrapping(note + I64{8}))
+        descriptor: (head >> I64{32}).bit_and(mask)
+        if (head.bit_and(mask) != I64{4} || kind.bit_and(mask) != HOST_NOTE_JET_PART || (kind >> I64{32}).bit_and(mask) != HOST_NOTE_JET_OWNER) -> next
+        if (descriptor < label || wrapping(I64{16} + descriptor) > size) -> next
+        if (rt_text_byte(wrapping(note + wrapping(I64{16} + length))) != I64{0}) -> next
+        at := I64{0}
+        loop at < length && rt_text_byte(wrapping(note + wrapping(I64{16} + at))) == rt_text_byte(wrapping(data + at)) {
+            at = wrapping(at + I64{1})
         }
+        if (at == length) -> return note
     }
     I64{0}
 }
 
 // The byte length of the part of `note` (host_image_part), named `name`.
 host_image_part_length: fn(note: I64, name: I64) -> I64 {
-    #Unsafe("note is a mapped part note host_image_part found; its first word holds the descriptor size") {
-        return wrapping((os_load_i64(note) >> I64{32}).bit_and(I64{4294967295}) - host_image_part_label(name))
-    }
+    // `note` is a mapped part note host_image_part found; its first word holds
+    // the descriptor size.
+    wrapping((rt_text_word(note) >> I64{32}).bit_and(I64{4294967295}) - host_image_part_label(name))
 }
 
 // jet_sys_image_part_size_raw: the byte length of the part `name` the build

@@ -331,7 +331,8 @@ receipt_section_directory_at: fn(name: I64, length: I64, facts: I64) -> Bool {
         empty: at != I64{0} && rt_text_byte(wrapping(name + at - I64{1})) == I64{47}
         if (!empty && end <= length) {
             saved: rt_text_byte(wrapping(name + end))
-            #Unsafe("the path copy owns its terminator byte and every byte before it") { os_store_u8(wrapping(name + end), I64{0}) }
+            // The path copy owns its terminator byte and every byte before it.
+            rt_text_put(wrapping(name + end), I64{0})
             loop {
                 result: receipt_section_lstat(name, facts)
                 if (result == I64{0}) {
@@ -350,7 +351,7 @@ receipt_section_directory_at: fn(name: I64, length: I64, facts: I64) -> Bool {
                     break
                 }
             }
-            #Unsafe("the path copy owns every byte before its terminator") { os_store_u8(wrapping(name + end), saved) }
+            rt_text_put(wrapping(name + end), saved)
         }
         at += I64{1}
     }

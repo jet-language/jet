@@ -1,12 +1,10 @@
 // R5-reviewed native addresses, independent of Rust enum/struct layouts.
 // IP24: family0 (4/6), network-order octets8..23, unused IPv4 octets zero.
 // Socket56: inline IP0..23, raw unsigned port24, flow32, scope40, reserved48.
-net_word: fn(value: I64, offset: I64) -> I64 {
-    #Unsafe("value lends a complete initialized network header") { return os_load_i64(wrapping(value + offset)) }
-}
-net_put: fn(value: I64, offset: I64, word: I64) {
-    #Unsafe("value exclusively owns the network header or its mutex") { os_store_i64(wrapping(value + offset), word) }
-}
+// `net_word` borrows a word of a complete initialized network header;
+// `net_put` owns the header or holds its mutex. RawWords.jet performs the access.
+net_word: fn(value: I64, offset: I64) -> I64 { rt_text_word(wrapping(value + offset)) }
+net_put: fn(value: I64, offset: I64, word: I64) { rt_text_store(wrapping(value + offset), word) }
 net_copy: fn(value: I64, size: I64) -> I64 {
     result: jet_rt_alloc(size, I64{8})
     rt_text_bytes_copy(result, value, size)
@@ -35,11 +33,10 @@ net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
     net_put(value, I64{8}, I64{0})
     net_put(value, I64{16}, I64{0})
     at := I64{0}
-    #Unsafe("value owns sixteen octets; bytes lends length initialized U8 elements") {
-        loop at < length {
-            os_store_u8(wrapping(value + I64{8} + at), host_u8_get(bytes, at))
-            at = wrapping(at + I64{1})
-        }
+    // `value` owns sixteen octets; `bytes` lends `length` initialized U8 elements.
+    loop at < length {
+        rt_text_put(wrapping(value + I64{8} + at), host_u8_get(bytes, at))
+        at = wrapping(at + I64{1})
     }
     value
 }
@@ -47,13 +44,13 @@ net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
     length: if (net_word(value, I64{0}) == I64{4}) -> I64{4} else -> I64{16}
     data: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
     at := I64{0}
-    #Unsafe("value lends IP24; data owns length initialized native U8 elements; output receives ownership") {
-        loop at < length {
-            host_u8_put(data, at, os_load_u8(wrapping(value + I64{8} + at)))
-            at = wrapping(at + I64{1})
-        }
-        os_store_i64(data_out, data)
+    // `value` lends IP24; `data` owns `length` native U8 elements; the output
+    // receives ownership.
+    loop at < length {
+        host_u8_put(data, at, rt_text_byte(wrapping(value + I64{8} + at)))
+        at = wrapping(at + I64{1})
     }
+    rt_text_store(data_out, data)
     length
 }
 #Export(c) jet_net_raw_ip_is_v4: fn(value: I64) -> Bool { net_word(value, I64{0}) == I64{4} }
@@ -80,21 +77,19 @@ net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
 net_load_uint: fn(bytes: I64, width: I64) -> I64 {
     result := I64{0}
     at := I64{0}
-    #Unsafe("bytes lends width initialized little-endian bytes (width<=8)") {
-        loop at < width {
-            result = result.bit_or((os_load_u8(wrapping(bytes + at)) << (at * I64{8})))
-            at = wrapping(at + I64{1})
-        }
+    // `bytes` lends `width` initialized little-endian bytes (width <= 8).
+    loop at < width {
+        result = result.bit_or((rt_text_byte(wrapping(bytes + at)) << (at * I64{8})))
+        at = wrapping(at + I64{1})
     }
     result
 }
 net_store_uint: fn(bytes: I64, width: I64, value: I64) {
     at := I64{0}
-    #Unsafe("bytes owns width writable little-endian bytes (width<=8)") {
-        loop at < width {
-            os_store_u8(wrapping(bytes + at), (value >> (at * I64{8})).bit_and(I64{255}))
-            at = wrapping(at + I64{1})
-        }
+    // `bytes` owns `width` writable little-endian bytes (width <= 8).
+    loop at < width {
+        rt_text_put(wrapping(bytes + at), (value >> (at * I64{8})).bit_and(I64{255}))
+        at = wrapping(at + I64{1})
     }
 }
 net_swap16: fn(value: I64) -> I64 { ((value.bit_and(I64{255})) << I64{8}).bit_or(((value >> I64{8}).bit_and(I64{255}))) }

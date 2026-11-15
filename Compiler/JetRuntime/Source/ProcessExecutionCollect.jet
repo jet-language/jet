@@ -349,7 +349,8 @@ process_execution_park_return: fn(child: I64, slot: I64, park: I64) {
 }
 #Export(c) jet_process_child_exited: fn(child: I64, ok: I64, err: I64) -> I64 {
     if (sync_load(wrapping(child + I64{120})).bit_and(I64{2}) != I64{0}) {
-        #Unsafe("ok is the canonical writable Bool output slot") { os_store_u8(ok, I64{1}) }
+        // `ok` is the canonical writable Bool output slot.
+        rt_text_put(ok, I64{1})
         return I64{1}
     }
     scratch: jet_rt_alloc(I64{40}, I64{8})
@@ -357,7 +358,8 @@ process_execution_park_return: fn(child: I64, slot: I64, park: I64) {
     code: fd_word(scratch, I64{16})
     jet_rt_free(scratch, I64{40}, I64{8})
     if (result < I64{0}) -> return process_execution_error(fd_word(child, I64{24}), HOST_IO_OP_CLOSE, host_errno_cause(code), err)
-    #Unsafe("ok lends exactly the C ABI Bool byte") { os_store_u8(ok, if (result > I64{0}) -> I64{1} else -> I64{0}) }
+    // `ok` lends exactly the C ABI Bool byte.
+    rt_text_put(ok, if (result > I64{0}) -> I64{1} else -> I64{0})
     I64{1}
 }
 process_execution_signal: fn(child: I64, signal: I64, err: I64) -> I64 {
@@ -465,10 +467,8 @@ process_execution_stream_bytes: fn(child: I64, stream: I64, maximum: I64, line: 
         end := at
         found := false
         loop end < filled && end - at < maximum {
-            byte := I64{0}
-            #Unsafe("the child mutex holds the capture builder's initialized bytes") {
-                byte = os_load_u8(wrapping(data + end))
-            }
+            // The child mutex holds the capture builder's initialized bytes.
+            byte: rt_text_byte(wrapping(data + end))
             end = wrapping(end + I64{1})
             if (line && byte == I64{10}) {
                 found = true

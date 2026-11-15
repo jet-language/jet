@@ -57,8 +57,8 @@ host_write_all: fn(fd: I64, bytes: I64, length: I64) -> I64 {
 // Caller holds the lock. Preserve unwritten bytes after a failed/short flush,
 // so a subsequent explicit flush has the same pending suffix, not duplicates.
 host_stdout_flush_locked: fn() -> I64 {
-    #Unsafe("the output lock exclusively owns the initialized buffer and length") {
-        length: os_load_i64(wrapping(host_root + I64{8}))
+    #Unsafe("the output lock exclusively owns the initialized buffer and length; write borrows its pending bytes") {
+        length: rt_text_word(wrapping(host_root + I64{8}))
         bytes: wrapping(host_root + I64{128})
         at := I64{0}
         failure := I64{0}
@@ -75,11 +75,11 @@ host_stdout_flush_locked: fn() -> I64 {
         if (at != I64{0}) {
             index := I64{0}
             loop index < remaining {
-                os_store_u8(wrapping(bytes + index), os_load_u8(wrapping(wrapping(bytes + at) + index)))
+                rt_text_put(wrapping(bytes + index), rt_text_byte(wrapping(wrapping(bytes + at) + index)))
                 index = wrapping(index + I64{1})
             }
         }
-        os_store_i64(wrapping(host_root + I64{8}), remaining)
+        rt_text_store(wrapping(host_root + I64{8}), remaining)
         return failure
     }
 }
@@ -92,51 +92,51 @@ host_stdout_flush_locked: fn() -> I64 {
 host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
     sole: sync_sole_enter(host_root)
     failure := I64{0}
-    #Unsafe("the caller lends length bytes; the output lock owns the destination buffer") {
-        index := I64{0}
-        pending := os_load_i64(wrapping(host_root + I64{8}))
-        tty: os_load_i64(wrapping(host_root + I64{16})) != I64{0}
-        loop index < length {
-            room: wrapping(I64{8192} - pending)
-            left: wrapping(length - index)
-            run := if (left < room) -> left else -> room
-            ends_line := false
-            if (tty && run > I64{0}) {
-                lf: rt_line_run(wrapping(bytes + index), run)
-                ends_line = rt_text_byte(wrapping(bytes + index + lf - I64{1})) == I64{10}
-                run = lf
-            }
-            rt_text_bytes_copy(wrapping(host_root + I64{128} + pending), wrapping(bytes + index), run)
-            pending = wrapping(pending + run)
-            index = wrapping(index + run)
-            if (pending == I64{8192} || ends_line) {
-                os_store_i64(wrapping(host_root + I64{8}), pending)
-                failure = host_stdout_flush_locked()
-                if (failure != I64{0}) { break }
-                pending = os_load_i64(wrapping(host_root + I64{8}))
-            }
+    // The caller lends `length` bytes; the output lock owns the destination
+    // buffer.
+    index := I64{0}
+    pending := rt_text_word(wrapping(host_root + I64{8}))
+    tty: rt_text_word(wrapping(host_root + I64{16})) != I64{0}
+    loop index < length {
+        room: wrapping(I64{8192} - pending)
+        left: wrapping(length - index)
+        run := if (left < room) -> left else -> room
+        ends_line := false
+        if (tty && run > I64{0}) {
+            lf: rt_line_run(wrapping(bytes + index), run)
+            ends_line = rt_text_byte(wrapping(bytes + index + lf - I64{1})) == I64{10}
+            run = lf
         }
-        // print's LF joins the same pass: a full buffer is written out
-        // first, and the LF flushes on a terminal or when it fills the buffer.
-        if (failure == I64{0} && line) {
-            if (pending == I64{8192}) {
-                os_store_i64(wrapping(host_root + I64{8}), pending)
-                failure = host_stdout_flush_locked()
-                pending = os_load_i64(wrapping(host_root + I64{8}))
-            }
-            if (failure == I64{0}) {
-                os_store_u8(wrapping(host_root + I64{128} + pending), I64{10})
-                pending = wrapping(pending + I64{1})
-                if (pending == I64{8192} || tty) {
-                    os_store_i64(wrapping(host_root + I64{8}), pending)
-                    failure = host_stdout_flush_locked()
-                    pending = os_load_i64(wrapping(host_root + I64{8}))
-                }
-            }
+        rt_text_bytes_copy(wrapping(host_root + I64{128} + pending), wrapping(bytes + index), run)
+        pending = wrapping(pending + run)
+        index = wrapping(index + run)
+        if (pending == I64{8192} || ends_line) {
+            rt_text_store(wrapping(host_root + I64{8}), pending)
+            failure = host_stdout_flush_locked()
+            if (failure != I64{0}) { break }
+            pending = rt_text_word(wrapping(host_root + I64{8}))
         }
-        if (failure == I64{0}) { os_store_i64(wrapping(host_root + I64{8}), pending) }
-        if (failure == I64{0} && flush) { failure = host_stdout_flush_locked() }
     }
+    // print's LF joins the same pass: a full buffer is written out
+    // first, and the LF flushes on a terminal or when it fills the buffer.
+    if (failure == I64{0} && line) {
+        if (pending == I64{8192}) {
+            rt_text_store(wrapping(host_root + I64{8}), pending)
+            failure = host_stdout_flush_locked()
+            pending = rt_text_word(wrapping(host_root + I64{8}))
+        }
+        if (failure == I64{0}) {
+            rt_text_put(wrapping(host_root + I64{128} + pending), I64{10})
+            pending = wrapping(pending + I64{1})
+            if (pending == I64{8192} || tty) {
+                rt_text_store(wrapping(host_root + I64{8}), pending)
+                failure = host_stdout_flush_locked()
+                pending = rt_text_word(wrapping(host_root + I64{8}))
+            }
+        }
+    }
+    if (failure == I64{0}) { rt_text_store(wrapping(host_root + I64{8}), pending) }
+    if (failure == I64{0} && flush) { failure = host_stdout_flush_locked() }
     sync_sole_exit(host_root, sole)
     failure
 }
@@ -240,9 +240,9 @@ host_print_capture_install: fn(code: I64) {
 #Export(c) jet_term_write_stdout_line: fn(value: I64, flush: U8) {
     capture: host_print_capture_code
     if (capture != I64{0} && coll_call1(capture, value) != I64{0}) -> return
-    #Unsafe("value is a borrowed E4 JetCText header; stdout copies its bytes before returning") {
-        _ := host_stdout_write(os_load_i64(value), os_load_i64(wrapping(value + I64{8})), true, flush != U8{0})
-    }
+    // `value` is a borrowed E4 JetCText header; stdout copies its bytes before
+    // returning.
+    _ := host_stdout_write(rt_text_word(value), rt_text_word(wrapping(value + I64{8})), true, flush != U8{0})
 }
 
 // print in a program that owns its main (JetIR EntryOwned.jet): such a
@@ -252,9 +252,10 @@ host_print_capture_install: fn(code: I64) {
 // jet_term_write_stdout_line's buffered writes. A failed write is dropped,
 // as there.
 #Export(c) jet_term_write_stdout_line_direct: fn(value: I64, flush: U8) {
-    #Unsafe("value is a borrowed E4 JetCText header; writev borrows its bytes and its own LF until return") {
-        bytes: os_load_i64(value)
-        length: os_load_i64(wrapping(value + I64{8}))
+    // `value` is a borrowed E4 JetCText header.
+    bytes: rt_text_word(value)
+    length: rt_text_word(wrapping(value + I64{8}))
+    #Unsafe("writev borrows the header's bytes and its own LF until return") {
         at := I64{0}
         loop at <= length {
             count: os_write_line_i64(I64{1}, wrapping(bytes + at), wrapping(length - at))

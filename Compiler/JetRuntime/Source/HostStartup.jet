@@ -49,15 +49,14 @@ rt_host_env_capture_address: fn() -> I64 {
 // search '=' AFTER byte zero, permit names starting '=', skip malformed rows.
 // https://github.com/rust-lang/rust/blob/1.90.0/library/std/src/sys/env/unix.rs
 host_environment_split: fn(bytes: I64) -> I64 {
-    #Unsafe("bytes borrows one live NUL-terminated startup string") {
-        if (os_load_u8(bytes) == I64{0}) { return I64{-1} }
-        index := I64{1}
-        loop {
-            byte: os_load_u8(wrapping(bytes + index))
-            if (byte == I64{0}) { return I64{-1} }
-            if (byte == I64{61}) { return index }
-            index = wrapping(index + I64{1})
-        }
+    // `bytes` borrows one live NUL-terminated startup string.
+    if (rt_text_byte(bytes) == I64{0}) { return I64{-1} }
+    index := I64{1}
+    loop {
+        byte: rt_text_byte(wrapping(bytes + index))
+        if (byte == I64{0}) { return I64{-1} }
+        if (byte == I64{61}) { return index }
+        index = wrapping(index + I64{1})
     }
 }
 
@@ -124,13 +123,13 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart
     envp: startup.bit_and(I64{-2})
     logical_environment_startup()
     raw_count := I64{0}
-    #Unsafe("startup lends the immutable, null-terminated envp pointer array and its NUL-terminated entries") {
-        if (envp != I64{0}) {
-            loop {
-                entry: os_load_i64(wrapping(envp + raw_count * I64{8}))
-                if (entry == I64{0}) { break }
-                raw_count = wrapping(raw_count + I64{1})
-            }
+    // `startup` lends the immutable, null-terminated envp pointer array and its
+    // NUL-terminated entries.
+    if (envp != I64{0}) {
+        loop {
+            entry: rt_text_word(wrapping(envp + raw_count * I64{8}))
+            if (entry == I64{0}) { break }
+            raw_count = wrapping(raw_count + I64{1})
         }
     }
     if (startup.bit_and(I64{1}) == I64{0} || raw_count == I64{0}) {
@@ -138,10 +137,11 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart
         return I64{0}
     }
     pending: jet_rt_alloc(wrapping(raw_count + I64{2}) * I64{8}, I64{8})
-    #Unsafe("pending exclusively owns raw_count + 2 words; registration is single-threaded and precedes user code") {
-        os_store_i64(pending, I64{0})
-        os_store_i64(wrapping(pending + I64{8}), raw_count)
-        rt_text_bytes_copy(wrapping(pending + I64{16}), envp, raw_count * I64{8})
+    // `pending` exclusively owns raw_count + 2 words.
+    rt_text_store(pending, I64{0})
+    rt_text_store(wrapping(pending + I64{8}), raw_count)
+    rt_text_bytes_copy(wrapping(pending + I64{16}), envp, raw_count * I64{8})
+    #Unsafe("registration is single-threaded and precedes user code") {
         host_env_pending = pending
     }
     I64{0}
@@ -156,38 +156,39 @@ host_environment_index: fn(envp: I64, raw_count: I64) {
     valid := I64{0}
     index := I64{0}
     total_bytes := I64{0}
-    #Unsafe("rows exclusively owns raw_count index records; startup lends every pointed-to NUL string") {
-        loop index < raw_count {
-            entry: os_load_i64(wrapping(envp + index * I64{8}))
-            split: host_environment_split(entry)
-            if (split >= I64{0}) {
-                if (rows == I64{0}) -> rows = jet_rt_alloc(raw_count * I64{24}, I64{8})
-                length: host_startup_byte_length(entry)
-                total_bytes = total_bytes + length + I64{1}
-                row: wrapping(rows + valid * I64{24})
-                os_store_i64(row, entry)
-                os_store_i64(wrapping(row + I64{8}), split)
-                // Temporarily retain length while the private index is built.
-                os_store_i64(wrapping(row + I64{16}), length)
-                valid = wrapping(valid + I64{1})
-            }
-            index = wrapping(index + I64{1})
+    // `rows` exclusively owns raw_count index records; startup lends every
+    // pointed-to NUL string.
+    loop index < raw_count {
+        entry: rt_text_word(wrapping(envp + index * I64{8}))
+        split: host_environment_split(entry)
+        if (split >= I64{0}) {
+            if (rows == I64{0}) -> rows = jet_rt_alloc(raw_count * I64{24}, I64{8})
+            length: host_startup_byte_length(entry)
+            total_bytes = total_bytes + length + I64{1}
+            row: wrapping(rows + valid * I64{24})
+            rt_text_store(row, entry)
+            rt_text_store(wrapping(row + I64{8}), split)
+            // Temporarily retain length while the private index is built.
+            rt_text_store(wrapping(row + I64{16}), length)
+            valid = wrapping(valid + I64{1})
         }
+        index = wrapping(index + I64{1})
     }
     storage: if (total_bytes == I64{0}) -> I64{0} else -> jet_rt_alloc(total_bytes, I64{1})
     cursor := storage
     index = I64{0}
-    #Unsafe("storage exclusively owns total_bytes; each source row lends its NUL string for this capture call, and published rows point only into the owned block") {
-        loop index < valid {
-            row: wrapping(rows + index * I64{24})
-            length: os_load_i64(wrapping(row + I64{16}))
-            span: wrapping(length + I64{1})
-            rt_text_bytes_copy(cursor, os_load_i64(row), span)
-            os_store_i64(row, cursor)
-            os_store_i64(wrapping(row + I64{16}), wrapping(os_load_i64(wrapping(row + I64{8})) + I64{1}))
-            cursor = wrapping(cursor + span)
-            index = wrapping(index + I64{1})
-        }
+    // `storage` exclusively owns total_bytes; each source row lends its NUL
+    // string for this capture call, and published rows point only into the
+    // owned block.
+    loop index < valid {
+        row: wrapping(rows + index * I64{24})
+        length: rt_text_word(wrapping(row + I64{16}))
+        span: wrapping(length + I64{1})
+        rt_text_bytes_copy(cursor, rt_text_word(row), span)
+        rt_text_store(row, cursor)
+        rt_text_store(wrapping(row + I64{16}), wrapping(rt_text_word(wrapping(row + I64{8})) + I64{1}))
+        cursor = wrapping(cursor + span)
+        index = wrapping(index + I64{1})
     }
     #Unsafe("the index is published once: by single-threaded registration, or inside host_environment_require's once before it completes") {
         host_env_rows = rows
@@ -219,9 +220,8 @@ host_environment_row: fn(index: I64) -> I64 {
 
 host_startup_byte_length: fn(bytes: I64) -> I64 {
     count := I64{0}
-    #Unsafe("bytes lends one live NUL-terminated startup string") {
-        loop os_load_u8(wrapping(bytes + count)) != (I64{0}) -> count = wrapping(count + I64{1})
-    }
+    // `bytes` lends one live NUL-terminated startup string.
+    loop rt_text_byte(wrapping(bytes + count)) != (I64{0}) -> count = wrapping(count + I64{1})
     count
 }
 
@@ -233,24 +233,24 @@ host_startup_bytes: fn(bytes: I64, length: I64) -> I64 {
     source := bytes
     destination := data
     remaining := length
-    #Unsafe("startup lends length bytes; data exclusively owns length initialized packed bytes") {
-        loop remaining > (I64{0}) {
-            os_store_u8(destination, os_load_u8(source))
-            source = wrapping(source + I64{1})
-            destination = wrapping(destination + I64{1})
-            remaining = wrapping(remaining - I64{1})
-        }
+    // Startup lends `length` bytes; `data` exclusively owns `length`
+    // initialized packed bytes.
+    loop remaining > (I64{0}) {
+        rt_text_put(destination, rt_text_byte(source))
+        source = wrapping(source + I64{1})
+        destination = wrapping(destination + I64{1})
+        remaining = wrapping(remaining - I64{1})
     }
     data
 }
 
 host_startup_list: fn(bytes: I64, length: I64, output: I64) {
     data: host_startup_bytes(bytes, length)
-    #Unsafe("output lends a 24-byte native [U8] header and receives ownership of data") {
-        os_store_i64(output, length)
-        os_store_i64(wrapping(output + I64{8}), length)
-        os_store_i64(wrapping(output + I64{16}), data)
-    }
+    // `output` lends a 24-byte native [U8] header and receives ownership of
+    // `data`.
+    rt_text_store(output, length)
+    rt_text_store(wrapping(output + I64{8}), length)
+    rt_text_store(wrapping(output + I64{16}), data)
 }
 
 #Export(c) jet_rt_env_count: fn() -> I64 {
@@ -260,13 +260,12 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
 
 #Export(c) jet_rt_env_entry: fn(index: I64, key_out: I64, value_out: I64) {
     row: host_environment_row(index)
-    #Unsafe("row borrows a complete immutable startup index record") {
-        bytes: os_load_i64(row)
-        key_length: os_load_i64(wrapping(row + I64{8}))
-        value: wrapping(bytes + os_load_i64(wrapping(row + I64{16})))
-        host_startup_list(bytes, key_length, key_out)
-        host_startup_list(value, host_startup_byte_length(value), value_out)
-    }
+    // `row` borrows a complete immutable startup index record.
+    bytes: rt_text_word(row)
+    key_length: rt_text_word(wrapping(row + I64{8}))
+    value: wrapping(bytes + rt_text_word(wrapping(row + I64{16})))
+    host_startup_list(bytes, key_length, key_out)
+    host_startup_list(value, host_startup_byte_length(value), value_out)
 }
 
 // Private Core primitive adapters use the generated list-out ABI, not a
@@ -275,21 +274,21 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
 
 #Export(c) jet_sys_startup_env_name_raw: fn(index: I64, data_out: I64) -> I64 {
     row: host_environment_row(index)
-    #Unsafe("row borrows its immutable record; data_out lends one writable pointer word") {
-        length: os_load_i64(wrapping(row + I64{8}))
-        os_store_i64(data_out, host_startup_bytes(os_load_i64(row), length))
-        return length
-    }
+    // `row` borrows its immutable record; `data_out` lends one writable
+    // pointer word.
+    length: rt_text_word(wrapping(row + I64{8}))
+    rt_text_store(data_out, host_startup_bytes(rt_text_word(row), length))
+    length
 }
 
 #Export(c) jet_sys_startup_env_value_raw: fn(index: I64, data_out: I64) -> I64 {
     row: host_environment_row(index)
-    #Unsafe("row borrows its immutable record; data_out lends one writable pointer word") {
-        bytes: wrapping(os_load_i64(row) + os_load_i64(wrapping(row + I64{16})))
-        length: host_startup_byte_length(bytes)
-        os_store_i64(data_out, host_startup_bytes(bytes, length))
-        return length
-    }
+    // `row` borrows its immutable record; `data_out` lends one writable
+    // pointer word.
+    bytes: wrapping(rt_text_word(row) + rt_text_word(wrapping(row + I64{16})))
+    length: host_startup_byte_length(bytes)
+    rt_text_store(data_out, host_startup_bytes(bytes, length))
+    length
 }
 
 #Export(c) jet_rt_arg_count: fn() -> I64 {
@@ -300,10 +299,10 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
 #Export(c) jet_rt_arg_entry: fn(index: I64, output: I64) {
     host_arguments_require()
     if (index < I64{0} || index >= host_argc) { host_argument_index_refused() }
-    #Unsafe("startup lends argc initialized argv pointers and their immutable NUL strings") {
-        bytes: os_load_i64(wrapping(host_argv + index * I64{8}))
-        host_startup_list(bytes, host_startup_byte_length(bytes), output)
-    }
+    // Startup lends argc initialized argv pointers and their immutable NUL
+    // strings.
+    bytes: rt_text_word(wrapping(host_argv + index * I64{8}))
+    host_startup_list(bytes, host_startup_byte_length(bytes), output)
 }
 
 // 1 when the program's first word (argv[1]) is the
@@ -314,12 +313,12 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
     if (host_argc < I64{2}) { return I64{0} }
     bytes: host_argument_bytes(I64{1})
     if (host_startup_byte_length(bytes) != length) { return I64{0} }
-    #Unsafe("argv[1] is an immutable startup string of `length` bytes; data lends the job name's static bytes") {
-        at := I64{0}
-        loop at < length {
-            if (os_load_u8(wrapping(bytes + at)) != os_load_u8(wrapping(data + at))) { return I64{0} }
-            at = wrapping(at + I64{1})
-        }
+    // argv[1] is an immutable startup string of `length` bytes; `data` lends
+    // the job name's static bytes.
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(wrapping(bytes + at)) != rt_text_byte(wrapping(data + at))) { return I64{0} }
+        at = wrapping(at + I64{1})
     }
     I64{1}
 }
@@ -336,9 +335,8 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
     length: host_startup_byte_length(bytes)
     first := I64{0}
     if (length > I64{0}) {
-        #Unsafe("argv[1] is an immutable startup string of `length` bytes") {
-            first = os_load_u8(bytes)
-        }
+        // argv[1] is an immutable startup string of `length` bytes.
+        first = rt_text_byte(bytes)
     }
     if (first == I64{45}) { return }
     text: rt_text_copy(prefix, prefix_length)
@@ -382,9 +380,9 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
 }
 
 host_argument_bytes: fn(index: I64) -> I64 {
-    #Unsafe("startup lends argc initialized argv pointers and their immutable NUL strings") {
-        return os_load_i64(wrapping(host_argv + index * I64{8}))
-    }
+    // Startup lends argc initialized argv pointers and their immutable NUL
+    // strings.
+    rt_text_word(wrapping(host_argv + index * I64{8}))
 }
 
 // Read-only runtime configuration exception: scheduler/deadline bootstrap
@@ -400,24 +398,23 @@ host_environment_value: fn(key: I64) -> I64 {
 host_environment_value_bytes: fn(key_data: I64, key_length: I64) -> I64 {
     host_environment_require()
     index := I64{0}
-    #Unsafe("the startup index and key bytes are immutable borrowed data") {
-        loop index < host_env_length {
-            row: wrapping(host_env_rows + index * I64{24})
-            if (os_load_i64(wrapping(row + I64{8})) == key_length) {
-                bytes: os_load_i64(row)
-                matched := true
-                at := I64{0}
-                loop at < key_length {
-                    if (os_load_u8(wrapping(bytes + at)) != os_load_u8(wrapping(key_data + at))) {
-                        matched = false
-                        break
-                    }
-                    at = wrapping(at + I64{1})
+    // The startup index and key bytes are immutable borrowed data.
+    loop index < host_env_length {
+        row: wrapping(host_env_rows + index * I64{24})
+        if (rt_text_word(wrapping(row + I64{8})) == key_length) {
+            bytes: rt_text_word(row)
+            matched := true
+            at := I64{0}
+            loop at < key_length {
+                if (rt_text_byte(wrapping(bytes + at)) != rt_text_byte(wrapping(key_data + at))) {
+                    matched = false
+                    break
                 }
-                if matched -> return wrapping(bytes + os_load_i64(wrapping(row + I64{16})))
+                at = wrapping(at + I64{1})
             }
-            index = wrapping(index + I64{1})
+            if matched -> return wrapping(bytes + rt_text_word(wrapping(row + I64{16})))
         }
+        index = wrapping(index + I64{1})
     }
     I64{0}
 }
@@ -455,17 +452,16 @@ host_envp_value: fn(envp: I64, key_data: I64, key_length: I64) -> I64 {
     }
     first: rt_text_byte(key_data)
     cursor := envp
-    #Unsafe("envp is a live null-terminated pointer array of NUL-terminated rows") {
-        loop {
-            entry: os_load_i64(cursor)
-            if (entry == I64{0}) -> return I64{0}
-            if (os_load_u8(entry) == first) {
-                at = I64{1}
-                loop at < key_length && os_load_u8(wrapping(entry + at)) == rt_text_byte(wrapping(key_data + at)) -> at = wrapping(at + I64{1})
-                if (at == key_length && os_load_u8(wrapping(entry + key_length)) == I64{61}) -> return wrapping(entry + key_length + I64{1})
-            }
-            cursor = wrapping(cursor + I64{8})
+    // `envp` is a live null-terminated pointer array of NUL-terminated rows.
+    loop {
+        entry: rt_text_word(cursor)
+        if (entry == I64{0}) -> return I64{0}
+        if (rt_text_byte(entry) == first) {
+            at = I64{1}
+            loop at < key_length && rt_text_byte(wrapping(entry + at)) == rt_text_byte(wrapping(key_data + at)) -> at = wrapping(at + I64{1})
+            if (at == key_length && rt_text_byte(wrapping(entry + key_length)) == I64{61}) -> return wrapping(entry + key_length + I64{1})
         }
+        cursor = wrapping(cursor + I64{8})
     }
 }
 

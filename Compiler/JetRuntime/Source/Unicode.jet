@@ -244,9 +244,9 @@ unicode_index: fn(value: I64, needle: I64, some: I64, last: Bool) -> I64 {
     byte: rt_text_find(value, needle, I64{0}, last)
     if (byte < I64{0}) { return I64{0} }
     index: unicode_scalar_offset(value, byte)
-    #Unsafe("some is the caller's writable aligned Option<Int> payload slot, written only on success") {
-        os_store_i64(some, index)
-    }
+    // `some` is the caller's writable aligned Option<Int> payload slot, written
+    // only on success.
+    rt_text_store(some, index)
     I64{1}
 }
 

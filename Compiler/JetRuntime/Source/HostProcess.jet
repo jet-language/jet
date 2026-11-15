@@ -94,11 +94,10 @@ host_sample_out: fn(result: I64, available: I64, value: I64, errno: I64) {
 }
 
 host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errno: I64) {
-    #Unsafe("the caller lends the C-ABI tuple's Bool byte and two writable Int words") {
-        os_store_u8(available, I64{1})
-        os_store_i64(value, result)
-        os_store_i64(errno, error)
-    }
+    // The caller lends the C-ABI tuple's Bool byte and two writable Int words.
+    rt_text_put(available, I64{1})
+    rt_text_store(value, result)
+    rt_text_store(errno, error)
 }
 
 #Export(c) jet_sys_getpgid_raw: fn(pid: I64, available: I64, value: I64, errno: I64) {
@@ -188,13 +187,16 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     buffer: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(buffer, I64{16})
-    #Unsafe("buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words") {
-        result: os_syscall_i64(I64{302}, I64{0}, native, I64{0}, buffer, I64{0}, I64{0})
-        os_store_u8(available, I64{1})
-        os_store_i64(soft, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> os_load_i64(buffer)))
-        os_store_i64(hard, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> os_load_i64(wrapping(buffer + I64{8}))))
-        os_store_i64(errno, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0})
+    // `buffer` owns the sixteen-byte struct rlimit64 the kernel writes; the
+    // caller lends the tuple's Bool byte and three Int words.
+    result := I64{0}
+    #Unsafe("buffer owns the sixteen-byte struct rlimit64 the kernel writes") {
+        result = os_syscall_i64(I64{302}, I64{0}, native, I64{0}, buffer, I64{0}, I64{0})
     }
+    rt_text_put(available, I64{1})
+    rt_text_store(soft, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> rt_text_word(buffer)))
+    rt_text_store(hard, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> rt_text_word(wrapping(buffer + I64{8}))))
+    rt_text_store(errno, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0})
     jet_rt_free(buffer, I64{16}, I64{8})
 }
 
@@ -208,9 +210,9 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     high: host_native_int(hard)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     buffer: jet_rt_alloc(I64{16}, I64{8})
+    rt_text_store(buffer, low)
+    rt_text_store(wrapping(buffer + I64{8}), high)
     #Unsafe("buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain") {
-        os_store_i64(buffer, low)
-        os_store_i64(wrapping(buffer + I64{8}), high)
         host_sample_out(os_syscall_i64(I64{302}, I64{0}, native, buffer, I64{0}, I64{0}, I64{0}), available, value, errno)
     }
     jet_rt_free(buffer, I64{16}, I64{8})
@@ -224,13 +226,13 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     buffer: jet_rt_alloc(I64{144}, I64{8})
     thread_zero(buffer, I64{144})
     result: host_call(I64{98}, native, buffer, I64{0})
-    #Unsafe("buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words") {
-        os_store_u8(available, I64{1})
-        os_store_i64(user, jet_int_owned_from_i64(os_load_i64(buffer) * I64{1000000} + os_load_i64(wrapping(buffer + I64{8}))))
-        os_store_i64(system, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{16})) * I64{1000000} + os_load_i64(wrapping(buffer + I64{24}))))
-        os_store_i64(peak, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{32})) * I64{1024}))
-        os_store_i64(errno, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0})
-    }
+    // `buffer` owns the 144-byte struct rusage the kernel wrote; the caller
+    // lends the tuple's Bool byte and four Int words.
+    rt_text_put(available, I64{1})
+    rt_text_store(user, jet_int_owned_from_i64(rt_text_word(buffer) * I64{1000000} + rt_text_word(wrapping(buffer + I64{8}))))
+    rt_text_store(system, jet_int_owned_from_i64(rt_text_word(wrapping(buffer + I64{16})) * I64{1000000} + rt_text_word(wrapping(buffer + I64{24}))))
+    rt_text_store(peak, jet_int_owned_from_i64(rt_text_word(wrapping(buffer + I64{32})) * I64{1024}))
+    rt_text_store(errno, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0})
     jet_rt_free(buffer, I64{144}, I64{8})
 }
 
@@ -238,7 +240,8 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     native: host_native_int(mask)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     result: host_call(I64{95}, native.bit_and(I64{4294967295}), I64{0}, I64{0})
-    #Unsafe("some lends a writable C-ABI Option success word") { os_store_i64(some, result) }
+    // `some` lends a writable C-ABI Option success word.
+    rt_text_store(some, result)
     I64{1}
 }
 
@@ -248,8 +251,8 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     native_options: host_i32(options)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     jet_rt_stdout_flush()
+    rt_text_store(status, I64{0})
     #Unsafe("status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer") {
-        os_store_i64(status, I64{0})
         result: os_syscall_i64(I64{61}, native_pid, status, native_options, I64{0}, I64{0}, I64{0})
         host_sample_out(result, available, value, errno)
     }
@@ -260,12 +263,12 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
 }
 
 #Export(c) jet_sys_pipe_raw: fn(available: I64, value: I64, errno: I64, read_fd: I64, write_fd: I64) {
-    #Unsafe("read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots") {
-        os_store_i64(read_fd, I64{0})
-        result: host_call(I64{22}, read_fd, I64{0}, I64{0})
-        packed: os_load_i64(read_fd)
-        os_store_i64(read_fd, packed.bit_and(I64{4294967295}))
-        os_store_i64(write_fd, (packed >> I64{32}).bit_and(I64{4294967295}))
-        host_sample_out(result, available, value, errno)
-    }
+    // `read_fd` lends eight writable bytes to pipe's two u32 results; both
+    // facts split into the caller's separate word slots.
+    rt_text_store(read_fd, I64{0})
+    result: host_call(I64{22}, read_fd, I64{0}, I64{0})
+    packed: rt_text_word(read_fd)
+    rt_text_store(read_fd, packed.bit_and(I64{4294967295}))
+    rt_text_store(write_fd, (packed >> I64{32}).bit_and(I64{4294967295}))
+    host_sample_out(result, available, value, errno)
 }

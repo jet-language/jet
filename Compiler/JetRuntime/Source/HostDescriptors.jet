@@ -531,11 +531,11 @@ host_shared_span: fn(token: I64, offset: I64, count: I64) -> I64 {
     loop row < y + height {
         start: row * row_bytes + x * I64{4}
         index := I64{0}
-        #Unsafe("host_shared_span proved end bytes from base lie inside the live mapping and end <= length bounds data's packed bytes; start + span <= end") {
-            loop wrapping(index + I64{8}) <= span {
-                os_store_i64(wrapping(base + start + index), host_pixels_padded(os_load_i64(wrapping(data + start + index)), layout))
-                index += I64{8}
-            }
+        // host_shared_span proved `end` bytes from `base` lie inside the live
+        // mapping and end <= length bounds data's packed bytes; start + span <= end.
+        loop wrapping(index + I64{8}) <= span {
+            rt_text_store(wrapping(base + start + index), host_pixels_padded(rt_text_word(wrapping(data + start + index)), layout))
+            index += I64{8}
         }
         if (index < span) -> net_store_uint(wrapping(base + start + index), I64{4}, host_pixels_padded(net_load_uint(wrapping(data + start + index), I64{4}), layout).bit_and(I64{4294967295}))
         row += I64{1}
@@ -586,11 +586,11 @@ host_pixels_padded: fn(pair: I64, layout: I64) -> I64 {
     if (base == I64{0}) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
     pair: pixel.bit_or(pixel << I64{32})
     index := I64{0}
-    #Unsafe("host_shared_span proved count * 4 bytes from base lie inside the live mapping") {
-        loop wrapping(index + I64{2}) <= total {
-            os_store_i64(wrapping(base + index * I64{4}), pair)
-            index += I64{2}
-        }
+    // host_shared_span proved count * 4 bytes from `base` lie inside the live
+    // mapping.
+    loop wrapping(index + I64{2}) <= total {
+        rt_text_store(wrapping(base + index * I64{4}), pair)
+        index += I64{2}
     }
     if (index < total) -> net_store_uint(wrapping(base + index * I64{4}), I64{4}, pixel)
     I64{1}

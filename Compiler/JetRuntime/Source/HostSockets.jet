@@ -133,11 +133,11 @@ net_socket_address_call: fn(state: I64, address: I64, number: I64) -> I64 {
 
 net_copy_packed: fn(data: I64, length: I64, output: I64) {
     at := I64{0}
-    #Unsafe("data lends length native U8 elements; output owns length compact bytes") {
-        loop at < length {
-            os_store_u8(wrapping(output + at), host_u8_get(data, at))
-            at = at + I64{1}
-        }
+    // `data` lends `length` native U8 elements; `output` owns `length` compact
+    // bytes.
+    loop at < length {
+        rt_text_put(wrapping(output + at), host_u8_get(data, at))
+        at = at + I64{1}
     }
 }
 net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error: I64) -> I64 {
@@ -152,11 +152,11 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
         }
         if (temporary && reading && result > I64{0}) {
             at := I64{0}
-            #Unsafe("recvfrom initialized result compact bytes; data owns the corresponding mutable native U8 slots") {
-                loop at < result {
-                    host_u8_put(data, at, os_load_u8(wrapping(packed + at)))
-                    at = at + I64{1}
-                }
+            // recvfrom initialized `result` compact bytes; `data` owns the
+            // corresponding mutable native U8 slots.
+            loop at < result {
+                host_u8_put(data, at, rt_text_byte(wrapping(packed + at)))
+                at = at + I64{1}
             }
         }
         if temporary -> jet_rt_free(packed, length, I64{8})
@@ -209,11 +209,11 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
             } else if (RT_HOST_U8_STRIDE != I64{1}) {
                 used: if (result < length) -> result else -> length
                 at := I64{0}
-                #Unsafe("recvfrom initialized used compact bytes; the caller owns used mutable native U8 elements") {
-                    loop at < used {
-                        host_u8_put(data, at, os_load_u8(wrapping(packed + at)))
-                        at = at + I64{1}
-                    }
+                // recvfrom initialized `used` compact bytes; the caller owns
+                // `used` mutable native U8 elements.
+                loop at < used {
+                    host_u8_put(data, at, rt_text_byte(wrapping(packed + at)))
+                    at = at + I64{1}
                 }
             }
         }
@@ -233,11 +233,11 @@ net_unix_path_status: fn(path: I64) -> I64 {
     length: rt_text_len(path)
     source: rt_text_data(path)
     at := I64{0}
-    #Unsafe("path lends its immutable E4 bytes for std-compatible sockaddr_un validation") {
-        loop at < length {
-            if (os_load_u8(wrapping(source + at)) == I64{0}) -> return HOST_UNIX_PATH_NUL
-            at = at + I64{1}
-        }
+    // `path` lends its immutable E4 bytes for std-compatible sockaddr_un
+    // validation.
+    loop at < length {
+        if (rt_text_byte(wrapping(source + at)) == I64{0}) -> return HOST_UNIX_PATH_NUL
+        at = at + I64{1}
     }
     if (length >= I64{108}) -> HOST_UNIX_PATH_TOO_LONG else -> I64{0}
 }

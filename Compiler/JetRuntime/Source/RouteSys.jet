@@ -4,7 +4,8 @@
 // every thread (Thread.jet thread_setxid), as musl's does.
 
 sys_some: fn(some: I64, value: I64) -> I64 {
-    #Unsafe("some lends a writable C-ABI Option success word") { os_store_i64(some, jet_int_owned_from_i64(value)) }
+    // `some` lends a writable C-ABI Option success word.
+    rt_text_store(some, jet_int_owned_from_i64(value))
     I64{1}
 }
 
@@ -406,12 +407,12 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     kind: host_call(I64{145}, native, I64{0}, I64{0})
     result := kind
     if (result >= I64{0}) -> result = host_call(I64{143}, native, param, I64{0})
-    #Unsafe("param owns an initialized struct sched_param; the caller lends the tuple's Bool byte and three Int words") {
-        os_store_u8(available, I64{1})
-        os_store_i64(policy, jet_int_owned_from_i64(if (kind < I64{0}) -> I64{-1} else -> kind.bit_and(I64{1073741823})))
-        os_store_i64(priority, jet_int_owned_from_i64(net_i32(net_load_uint(param, I64{4}))))
-        os_store_i64(errno, jet_int_owned_from_i64(if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}))
-    }
+    // `param` owns an initialized struct sched_param; the caller lends the
+    // tuple's Bool byte and three Int words.
+    rt_text_put(available, I64{1})
+    rt_text_store(policy, jet_int_owned_from_i64(if (kind < I64{0}) -> I64{-1} else -> kind.bit_and(I64{1073741823})))
+    rt_text_store(priority, jet_int_owned_from_i64(net_i32(net_load_uint(param, I64{4}))))
+    rt_text_store(errno, jet_int_owned_from_i64(if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}))
     jet_rt_free(param, I64{8}, I64{8})
 }
 
@@ -491,13 +492,12 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     effective_id: net_load_uint(wrapping(ids + I64{4}), I64{4})
     saved_id: net_load_uint(wrapping(ids + I64{8}), I64{4})
     jet_rt_free(ids, I64{16}, I64{8})
-    #Unsafe("the caller lends the tuple's Bool byte and four Int words") {
-        os_store_u8(available, I64{1})
-        os_store_i64(real, jet_int_owned_from_i64(real_id))
-        os_store_i64(effective, jet_int_owned_from_i64(effective_id))
-        os_store_i64(saved, jet_int_owned_from_i64(saved_id))
-        os_store_i64(errno, jet_int_owned_from_i64(if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}))
-    }
+    // The caller lends the tuple's Bool byte and four Int words.
+    rt_text_put(available, I64{1})
+    rt_text_store(real, jet_int_owned_from_i64(real_id))
+    rt_text_store(effective, jet_int_owned_from_i64(effective_id))
+    rt_text_store(saved, jet_int_owned_from_i64(saved_id))
+    rt_text_store(errno, jet_int_owned_from_i64(if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}))
 }
 
 // setresuid (117), or setresgid (119) when `group` is 1, on every thread
@@ -526,13 +526,13 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     info: jet_rt_alloc(I64{112}, I64{8})
     thread_zero(info, I64{112})
     result: host_call(I64{99}, info, I64{0}, I64{0})
-    #Unsafe("info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words") {
-        os_store_u8(available, I64{1})
-        os_store_i64(count, jet_int_owned_from_i64(if (result < I64{0}) -> I64{-1} else -> I64{3}))
-        os_store_i64(first, sys_load_bits(info, result, I64{8}))
-        os_store_i64(second, sys_load_bits(info, result, I64{16}))
-        os_store_i64(third, sys_load_bits(info, result, I64{24}))
-    }
+    // `info` owns the initialized struct sysinfo; the caller lends the tuple's
+    // Bool byte, Int word and three Float words.
+    rt_text_put(available, I64{1})
+    rt_text_store(count, jet_int_owned_from_i64(if (result < I64{0}) -> I64{-1} else -> I64{3}))
+    rt_text_store(first, sys_load_bits(info, result, I64{8}))
+    rt_text_store(second, sys_load_bits(info, result, I64{16}))
+    rt_text_store(third, sys_load_bits(info, result, I64{24}))
     jet_rt_free(info, I64{112}, I64{8})
 }
 
@@ -573,15 +573,15 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
     buffer: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(buffer, I64{32})
     now: host_call(I64{100}, buffer, I64{0}, I64{0})
-    #Unsafe("buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words") {
-        os_store_u8(available, I64{1})
-        os_store_i64(user, jet_int_owned_from_i64(os_load_i64(buffer)))
-        os_store_i64(system, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{8}))))
-        os_store_i64(child_user, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{16}))))
-        os_store_i64(child_system, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{24}))))
-        os_store_i64(elapsed, jet_int_owned_from_i64(now))
-        os_store_i64(ticks, jet_int_owned_from_i64(I64{100}))
-    }
+    // `buffer` owns an initialized struct tms; the caller lends the tuple's
+    // Bool byte and six Int words.
+    rt_text_put(available, I64{1})
+    rt_text_store(user, jet_int_owned_from_i64(rt_text_word(buffer)))
+    rt_text_store(system, jet_int_owned_from_i64(rt_text_word(wrapping(buffer + I64{8}))))
+    rt_text_store(child_user, jet_int_owned_from_i64(rt_text_word(wrapping(buffer + I64{16}))))
+    rt_text_store(child_system, jet_int_owned_from_i64(rt_text_word(wrapping(buffer + I64{24}))))
+    rt_text_store(elapsed, jet_int_owned_from_i64(now))
+    rt_text_store(ticks, jet_int_owned_from_i64(I64{100}))
     jet_rt_free(buffer, I64{32}, I64{8})
 }
 

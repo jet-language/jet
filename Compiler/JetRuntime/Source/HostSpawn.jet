@@ -247,10 +247,10 @@ spawn_pty: fn(terminal: I64, scratch: I64, minimum: I64, child: I64) -> I64 {
                 control_local: fd_word(scratch, I64{8})
                 fd_put(scratch, I64{0}, (input_output.bit_and(I64{4294965780})).bit_or((((input_output >> I64{32}).bit_and(I64{4294967294})) << I64{32})))
                 fd_put(scratch, I64{8}, ((control_local.bit_and(I64{4294966991})).bit_or(I64{48})).bit_or((((control_local >> I64{32}).bit_and(I64{4294934452})) << I64{32})))
-                #Unsafe("Linux TCGETS initialized the 36-byte termios buffer; cfmakeraw sets VMIN=1, VTIME=0 in its control-character array") {
-                    os_store_u8(wrapping(scratch + I64{23}), I64{1})
-                    os_store_u8(wrapping(scratch + I64{22}), I64{0})
-                }
+                // Linux TCGETS initialized the 36-byte termios buffer; cfmakeraw
+                // sets VMIN=1, VTIME=0 in its control-character array.
+                rt_text_put(wrapping(scratch + I64{23}), I64{1})
+                rt_text_put(wrapping(scratch + I64{22}), I64{0})
             }
             fd_put(scratch, I64{64}, I64{14})
             result = host_call(I64{16}, slave, I64{21506}, scratch)
@@ -1076,9 +1076,9 @@ process_move_up: fn(target: I64, source: I64, count: I64) {
         return I64{0}
     }
     count := I64{0}
-    #Unsafe("successful realpath NUL-terminates its result within the PATH_MAX byte buffer") {
-        loop os_load_u8(wrapping(buffer + count)) != (I64{0}) -> count = wrapping(count + I64{1})
-    }
+    // A successful realpath NUL-terminates its result within the PATH_MAX byte
+    // buffer.
+    loop rt_text_byte(wrapping(buffer + count)) != (I64{0}) -> count = wrapping(count + I64{1})
     fd_put(length, I64{0}, count)
     fd_put(capacity, I64{0}, I64{4096})
     host_error_out(I64{0}, I64{0}, error)

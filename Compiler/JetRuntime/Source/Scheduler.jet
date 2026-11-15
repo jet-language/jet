@@ -1321,11 +1321,12 @@ scheduler_work_waits: fn(root: I64) -> Bool {
 // Not sync_clock_read, which stops on a failed read.
 scheduler_thread_cpu_ns: fn(tid: I64) -> I64 {
     clock: (wrapping(I64{-1} - tid) << I64{3}).bit_or(I64{6})
+    scratch := I64{0}
     #Unsafe("clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes") {
-        scratch: wrapping(os_tls_base_i64() + I64{232})
+        scratch = wrapping(os_tls_base_i64() + I64{232})
         if (os_syscall_i64(I64{228}, clock, scratch, I64{0}, I64{0}, I64{0}, I64{0}) != I64{0}) -> return I64{-1}
-        return wrapping(os_load_i64(scratch) * I64{1000000000} + os_load_i64(wrapping(scratch + I64{8})))
     }
+    wrapping(rt_text_word(scratch) * I64{1000000000} + rt_text_word(wrapping(scratch + I64{8})))
 }
 
 // Reads /proc/self/task/<tid>/<name> (`name` a static text) into `buffer`,
@@ -1586,9 +1587,11 @@ scheduler_carrier_idle: fn(root: I64) {
 #Export(c) jet_rt_scheduler_worker: fn(record: I64) -> I64 {
     root: sync_load(record)
     sync_store(wrapping(record + I64{24}), thread_base())
+    tid := I64{0}
     #Unsafe("gettid takes no arguments and retains nothing") {
-        sync_store(wrapping(record + I64{32}), os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}))
+        tid = os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
+    sync_store(wrapping(record + I64{32}), tid)
     yielded := I64{0}
     loop {
         fiber_timers_fire(root)

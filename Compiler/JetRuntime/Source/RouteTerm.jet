@@ -55,18 +55,18 @@ term_read_line: fn(value: I64) -> I64 {
             failure = jet_rt_string_clone(rt_static_text("stream did not contain valid UTF-8"))
         }
     }
-    #Unsafe("the caller lends the tuple's Bool byte, Text word and Option<Text> tag/payload words") {
-        if (failure != I64{0}) {
-            jet_rt_string_drop(value)
-            os_store_u8(eof, I64{0})
-            os_store_i64(line, jet_rt_string_builder_new())
-            os_store_i64(error_tag, I64{1})
-            os_store_i64(error, failure)
-        } else {
-            os_store_u8(eof, if (count == I64{0}) -> I64{1} else -> I64{0})
-            os_store_i64(line, value)
-            os_store_i64(error_tag, I64{0})
-        }
+    // The caller lends the tuple's Bool byte, Text word and Option<Text>
+    // tag/payload words.
+    if (failure != I64{0}) {
+        jet_rt_string_drop(value)
+        rt_text_put(eof, I64{0})
+        rt_text_store(line, jet_rt_string_builder_new())
+        rt_text_store(error_tag, I64{1})
+        rt_text_store(error, failure)
+    } else {
+        rt_text_put(eof, if (count == I64{0}) -> I64{1} else -> I64{0})
+        rt_text_store(line, value)
+        rt_text_store(error_tag, I64{0})
     }
 }
 
@@ -226,16 +226,15 @@ stdin_utf8_error: fn(error: I64) -> I64 {
     }
     sync_mutex_unlock(terminal_input_root)
     if (failure == I64{0}) -> failure = text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
-    #Unsafe("the caller lends the tuple's Text word and Option<Text> tag/payload words") {
-        if (failure != I64{0}) {
-            jet_rt_string_drop(value)
-            os_store_i64(output, jet_rt_string_builder_new())
-            os_store_i64(error_tag, I64{1})
-            os_store_i64(error, failure)
-        } else {
-            os_store_i64(output, value)
-            os_store_i64(error_tag, I64{0})
-        }
+    // The caller lends the tuple's Text word and Option<Text> tag/payload words.
+    if (failure != I64{0}) {
+        jet_rt_string_drop(value)
+        rt_text_store(output, jet_rt_string_builder_new())
+        rt_text_store(error_tag, I64{1})
+        rt_text_store(error, failure)
+    } else {
+        rt_text_store(output, value)
+        rt_text_store(error_tag, I64{0})
     }
 }
 

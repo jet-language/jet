@@ -122,9 +122,8 @@ process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
     if (refusal != I64{0} && encoding_word(wrapping(result + PROCESS_SPEC_KEEP_REFUSAL)) == I64{0}) -> encoding_store(wrapping(result + PROCESS_SPEC_KEEP_REFUSAL), refusal)
     encoding_store(spec_out, result)
     // bool is exactly one C byte; do not overwrite adjacent caller storage.
-    #Unsafe("supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC") {
-        os_store_u8(supported_out, I64{1})
-    }
+    // Linux implements F_DUPFD_CLOEXEC.
+    rt_text_put(supported_out, I64{1})
     encoding_store(assigned_out, assigned)
     encoding_store(errno_out, error)
 }
