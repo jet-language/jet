@@ -889,6 +889,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
     }
     value: sema_call_with_binder_pins(pins, contracted, span)
     checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return None
+    sema_call_trait_dispatch_failure(resolved_candidate.method, result_type, program, context)
     facts := sema_call_facts(resolved_candidate.signature, resolved_candidate.type_args, resolved_binding) ?? return None
     // The host access replaces the declared call, so its row is the host
     // operation's own, never the absent callee's.
@@ -898,6 +899,34 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
         .None -> sema_call_return_view_facts(resolved_candidate.signature, Val(receiver), checked_args, resolved_binding, scopes, state, span, diagnostics)
     }
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
+}
+
+// A call through a trait whose method writes a plain return is typed by that
+// value, while the implementation it reaches hands back the trait's failure
+// carrier and the call passes the failure up (IR's trait propagation). The
+// call is a failure source of the caller's, so its failure solve keeps the
+// trait's route and never takes one implementation's infallibility. Nothing
+// is recorded when the call's type is the carrier itself or the trait's
+// route cannot fail.
+sema_call_trait_dispatch_failure: fn(method: TMethodRef, result: Type, program: SemaProgramTables, context: &SemaCheckContext) Never! {
+    owner: method.trait_owner ?? return
+    if sema_expr_unwrap_tag(result) == .Result(_, _) -> return
+    if program.registration_graph == .Val(graph) {
+        trait_row: sema_type_graph_nominal_row(graph, owner) ?? return
+        loop trait_method in graph.modules[trait_row.module_index].nominals[trait_row.row].trait_methods {
+            if trait_method.symbol.id != method.symbol -> next
+            if trait_method.signature == .Fn(_, ret, _, _, _, _) {
+                if ret == .Val(returned) {
+                    if sema_expr_unwrap_tag(returned) == .Result(_, error) {
+                        if sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) -> return
+                        sema_failure_record_edge(None, context)
+                        sema_failure_union_record_propagation(None, error, context)
+                    }
+                }
+            }
+            return
+        }
+    }
 }
 
 // A method's inferred return-view summary is published in the module scope

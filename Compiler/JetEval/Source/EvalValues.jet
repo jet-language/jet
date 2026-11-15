@@ -31,7 +31,7 @@ JetEvalError: struct {
 // machine runs (IR/Host.jet). The ordinary comptime evaluation deliberately
 // cannot acquire network or wait rights.
 JetEvalBuildHostAdapter: trait {
-    clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter
+    clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter Never!
     // Build host method `member` (`Build.add_executable`, `BuildPlan.graph`,
     // `Dev.watch`) on `args`, the receiver first; `fallible` when the checked
     // call returns a Result, `impure` when it sits in an `#Impure` block.
@@ -60,7 +60,7 @@ JetEvalComptimeInputError: struct {
 }
 
 JetEvalComptimeInputAdapter: trait {
-    clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter
+    clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter Never!
     comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError!
     comptime_fetch: fn(self, url: String, sha256: String, span: Span) -[FS.Read, Net, Time.Wait]> TComptimeValue JetEvalComptimeInputError!
 }
@@ -75,7 +75,7 @@ JetEvalComptimeInputAdapter: trait {
 // through the compiler service (Exec, Time.Wait); a check's trace spans read
 // the task CPU clock (Time).
 JetEvalCompilerQueryHost: trait {
-    clone_compiler_host: fn(self) -[]> JetEvalCompilerQueryHost
+    clone_compiler_host: fn(self) -[]> JetEvalCompilerQueryHost Never!
     // Query `query` on `args`: its typed Result (Present, or a told Failed
     // CompilerError). None: no query of this host.
     compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply?

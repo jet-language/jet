@@ -1,0 +1,36 @@
+Shape: trait {
+    area: fn(self) -> Int
+}
+
+Square: struct {
+    side: Int
+
+    impl Shape {
+        area: fn(self) -> Int {
+            if self.side < 0 -> return Err("negative side")
+            self.side * self.side
+        }
+    }
+}
+
+Circle: struct {
+    radius: Int
+
+    impl Shape {
+        area: fn(self) -> Int { 3 * self.radius * self.radius }
+    }
+}
+
+through_value: fn(shape: Shape) -> Int { shape.area() + 1 }
+
+through_bound: fn<T: Shape>(shape: T) -> Int { shape.area() + 2 }
+
+run: fn() {
+    print(through_value(Circle{radius: 1}))
+    print(through_value(Square{side: 2}))
+    print(through_value(Square{side: -1}) ?? -1)
+    print(through_bound(Circle{radius: 1}))
+    print(through_bound(Square{side: -1}) ?? -2)
+    print(through_value(Square{side: -3}))
+    print("unreached")
+}

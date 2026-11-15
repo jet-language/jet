@@ -17,7 +17,7 @@ use {
 
 JetCLILSPChecker: struct {
     impl LSPChecker {
-        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked {
+        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
             producer: jet_cli_lsp_producer(entry)
             alone: jet_cli_lsp_unsaved_loose(entry)
             entry_path: jet_cli_overlay_path(entry)
@@ -35,7 +35,12 @@ JetCLILSPChecker: struct {
                 .Prepared(request, snapshot) -> {
                     demanded := request.move()
                     demanded.doc_core_on_demand = true
-                    result: jet_driver_compile_keep_going(demanded, JetDriverKeepGoing{skip: [String]{}})
+                    // A compile that fails outright publishes nothing, as a
+                    // refusal does; the client's log shows why.
+                    result: jet_driver_compile_keep_going(demanded, JetDriverKeepGoing{skip: [String]{}}) ?? {
+                        lsp_write_log("internal compiler error checking `{entry}`: {err}").drop("standard error is the log; a failed log write has nowhere to go")
+                        return LSPChecked{diagnostics: [Diagnostic]{}, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer}
+                    }
                     if result.internal_problem == .Val(problem) -> lsp_write_log("internal compiler error checking `{entry}`: {problem}").drop("standard error is the log; a failed log write has nowhere to go")
                     diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
                     if result.doc_modules.len() == 0 -> return LSPChecked{diagnostics: diagnostics, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer}

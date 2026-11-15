@@ -65,7 +65,7 @@ JetDriverComptimeInputs: struct {
     toolchain: Shared<JetDriverToolchainTree>?
 
     impl JetEvalComptimeInputAdapter {
-        clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter {
+        clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter Never! {
             // copy: the evaluator forks the adapter for each machine; the forks share the input
             // transports, the one input log and the one toolchain tree.
             JetDriverComptimeInputs{inputs: self.inputs.copy(), http_inputs: self.http_inputs.copy(), base_dir: self.base_dir.copy(), log: self.log.copy(), file: self.file.copy(), toolchain: self.toolchain.copy()}
@@ -97,7 +97,7 @@ JetDriverCoreComptimeInputs: struct {
     base_dir: String
 
     impl JetEvalComptimeInputAdapter {
-        clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter {
+        clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter Never! {
             // copy: the forks share the Core row's text cell and so its reader.
             JetDriverCoreComptimeInputs{text: self.text.copy(), base_dir: self.base_dir.copy()}
         }
