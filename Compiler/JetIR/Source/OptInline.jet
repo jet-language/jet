@@ -248,15 +248,34 @@ ir_opt_inline_quiet: fn(m: IRModule, f: IRFunction) -> Bool Never! {
 
 // Whether selection reports a stop of instruction `at` at the function's
 // own source file and line (X64Select: stop_if, located routes, shift stops).
+// A division by a constant other than 0 and -1 (ir_opt_divisor) reports
+// none: it can neither divide by zero nor overflow.
 ir_opt_located: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     op: f.op[at]
     if op != .Add && op != .Sub && op != .Mul && op != .Div && op != .Rem && op != .FloorDiv && op != .Mod && op != .Shl && op != .Shr && op != .Neg -> return false
+    division: op == .Div || op == .Rem || op == .FloorDiv || op == .Mod
+    if division && ir_opt_divisor(f, at) == .Val(divisor) && divisor != 0 && divisor != -1 -> return false
     kind: ir_x64_type(m, f, f.a[at]).kind
     if kind == {
-        .Int -> op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || op == .Shl || op == .Shr
-        .Word -> op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || f.c[at] != IR_OVERFLOW_WRAP
+        .Int -> division || op == .Shl || op == .Shr
+        .Word -> division || f.c[at] != IR_OVERFLOW_WRAP
         .Unit | .Bool | .Float | .Float32 | .Char | .String | .Pointer | .Aggregate -> false
     }
+}
+
+// The divisor of the division at `at` when selection knows it as a
+// constant: a temporary whose one write is a Const (X64Alloc.jet
+// ir_x64_allocate's `consts`).
+ir_opt_divisor: fn(f: IRFunction, at: Int) -> Int? Never! {
+    slot: f.b[at]
+    if slot < f.param_count || slot >= f.slot_kind.len() || f.slot_kind[slot] != .Temp -> return None
+    found := Int?{None}
+    loop k in 0..<f.op.len() {
+        if ir_x64_write(f, k) != slot -> next
+        if found != None || f.op[k] != .Const -> return None
+        found = Val(f.a[k])
+    }
+    found
 }
 
 // The callee's body in place of the Call at `at` of `caller`, appended to `f`.
@@ -431,4 +450,31 @@ ir_opt_inline_test_calls_left: fn(op: IROp) -> Int Never! {
     assert_eq(ir_opt_inline_test_calls_left(IROp.Add), 0)
     // An Int shift can stop, and the poll after the body delivers it.
     assert_eq(ir_opt_inline_test_calls_left(IROp.Shl), 1)
+}
+
+// Whether the FloorDiv of an Int parameter by `divisor` (a constant, or the
+// parameter itself when None) is located.
+ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
+    m := ir_module_new()
+    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    g := ir_function_new("g", "test:kernel.jet::g", "", "kernel.jet", 1)
+    n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
+    g.result = int
+    by := n
+    if divisor == .Val(value) {
+        by = ir_slot(g, int, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Const, by, value, -1, -1, 2)
+    }
+    v: ir_slot(g, int, IRSlotKind.Temp, -1, 0)
+    at: ir_emit(g, IROp.FloorDiv, v, n, by, -1, 2)
+    _ := ir_emit(g, IROp.Return, -1, v, -1, -1, 2)
+    ir_opt_located(m, g, at)
+}
+
+#Test("A division by a constant other than 0 and -1 reports no stop of its own") {
+    assert_eq(ir_opt_inline_test_located(Val(8)), false)
+    assert_eq(ir_opt_inline_test_located(Val(7)), false)
+    assert_eq(ir_opt_inline_test_located(Val(0)), true)
+    assert_eq(ir_opt_inline_test_located(Val(-1)), true)
+    assert_eq(ir_opt_inline_test_located(None), true)
 }

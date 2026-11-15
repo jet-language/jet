@@ -5673,7 +5673,8 @@ per-caller budget (`small` does not limit it), under `auto` and
 also picks unmarked callees by size, within the level's limits.
 `always_marked` takes only the marked functions. The inliner
 cannot splice a recursive callee, a callee that writes a parameter, an
-`#FFI(asm)` leaf, or a callee from another file whose arithmetic can stop.
+`#FFI(asm)` leaf, or a callee from another file whose arithmetic can stop
+(a division by a constant other than 0 and -1 cannot).
 `off` inlines nothing, marked functions included. `build: fn` writes
 `b.inline(.AlwaysMarked)`, and the
 flag writes `--inline=always_marked`. Example:
