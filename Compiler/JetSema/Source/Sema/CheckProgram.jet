@@ -2448,7 +2448,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         }
         .None -> { memory_complete = false }
     }
-    sema_comptime_probe_prepare(probe, environment, program, available.counted_values)
+    sema_comptime_probe_prepare(probe, environment, program, sema_comptime_available_version(available))
     if !probe.slots[probe.current].applied {
         loop diagnostic in probe.slots[probe.current].diagnostics {
             diagnostics.push(diagnostic.copy())
@@ -7271,10 +7271,11 @@ SEMA_COMPTIME_PROBE_SLOTS: 8
 // Readies `probe` as the declaration scope of the environment's current
 // module (set by sema_scope_environment_enter_probe_module): a scope the probe
 // kept for that module is reused, with any constant a staged value typed
-// since copied in, and anything else is rebuilt. `version` is the number of
-// staged values applied to the run's graph (SemaComptimeAvailableConstants
-// counted_values): only those type waiting constants, so a scope compared at
-// the same version has nothing to copy in, and is reused as it is. The caller
+// since copied in, and anything else is rebuilt. `version` counts the staged
+// values and the types ahead of values applied to the run's graph
+// (sema_comptime_available_version): only those type waiting constants, so
+// a scope compared at the same version has nothing to copy in, and is reused
+// as it is. The caller
 // checks inside a mark on the current slot's table and rolls back, so the
 // next probe finds the same scope. A rebuilt scope takes its module's old
 // slot, else an unapplied one, else a new one up to SEMA_COMPTIME_PROBE_SLOTS,
@@ -7443,7 +7444,7 @@ sema_comptime_precheck_items: fn(environments: &[SemaScopeEnvironment], programs
     start := 0
     loop start < module_positions.len() {
         end: sema_comptime_precheck_wave_end(shared_state, module_identities, start)
-        sema_comptime_precheck_wave(shared_state, module_identities, module_positions, start, end, sources, available.counted_values, threads, seed, checks, memory_plan)
+        sema_comptime_precheck_wave(shared_state, module_identities, module_positions, start, end, sources, sema_comptime_available_version(available), threads, seed, checks, memory_plan)
         start = end
     }
     permit: shared_state.guard_edit()
@@ -8258,6 +8259,12 @@ SemaComptimeAvailableConstants: struct {
     keys: [String:Bool]
     // How many of the run's append-only values `keys` already covers.
     counted_values: Int
+    // How many constants took their type ahead of their value, joining a
+    // batch that computes them for the items after them in one program
+    // (the driver's jet_driver_comptime_type_land): each types the graph's
+    // rows as a landing does, so the item checks' scopes count it too
+    // (sema_comptime_available_version).
+    typed: Int{0}
     // Canonical first Constant position, with module/key kept separate:
     // `constant_modules` holds each module's slot at its ModuleID row
     // (sema_comptime_index_module_slot). The same append-only frontier
@@ -8309,6 +8316,13 @@ sema_comptime_available_constants_add: fn(available: &SemaComptimeAvailableConst
         }
     }
     if values.len() > available.counted_values -> available.counted_values = values.len()
+}
+
+// The version of the run's graph types an item check's scope is built at
+// (sema_comptime_probe_prepare): the values landed and the types landed
+// ahead of their values, both of which only grow.
+sema_comptime_available_version: fn(available: SemaComptimeAvailableConstants) -> Int Never! {
+    available.counted_values + available.typed
 }
 
 sema_comptime_waiting_dependencies: fn(available: SemaComptimeAvailableConstants, dependencies: [String]) -> [String] Never! {
@@ -9803,7 +9817,7 @@ sema_comptime_declare_prepared_locals: fn(source: SemaComptimeItemSource, module
 // `available` lacks.
 sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource) -> SemaComptimeItemCheck {
     if program.registration_graph == .Val(resolved_graph) {
-        sema_comptime_probe_prepare(probe, environment, program, available.counted_values)
+        sema_comptime_probe_prepare(probe, environment, program, sema_comptime_available_version(available))
         at: probe.current
         diagnostics := probe.slots[at].diagnostics.copy()
         if !probe.slots[at].applied {
@@ -9861,7 +9875,12 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
             if !already -> dependencies.push(dependency.copy())
         }
         waiting := sema_comptime_waiting_dependencies(available, dependencies)
-        if waiting.len() > 0 {
+        // A check that waits returns its request too: a batch that computes
+        // the constants it waits on, whose types landed ahead of their values,
+        // evaluates it in the same program (the driver's
+        // jet_driver_comptime_computed_waits); otherwise it is checked again
+        // once they land.
+        if waiting.len() > 0 && (checked == None || sema_has_error_since(diagnostics, 0)) {
             return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
         }
         if checked == None {

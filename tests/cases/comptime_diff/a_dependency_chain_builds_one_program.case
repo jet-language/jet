@@ -1,0 +1,19 @@
+# A constant's type lands as it joins the comptime batch, ahead of its
+# value, and the batch computes it for the entries after it, which read it
+# by calling its item function (JetDriver Pipeline.jet
+# jet_driver_comptime_type_land). A check that waits only on such constants
+# joins the same batch, so the chain TWO -> SIX -> TWENTY and the pair FOUR
+# -> EIGHT build one program, not one per dependency level.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "double: fn(n: Int) -> Int {\n    n * 2\n}\n\nTWO: double(1)\nSIX: double(TWO) + 2\nFOUR: double(2)\nEIGHT: double(FOUR)\nTWENTY: double(SIX) + EIGHT\n\nrun: fn() {\n    print(\"{TWO} {SIX} {FOUR} {EIGHT} {TWENTY}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "2 6 4 8 20\n"
+stderr: ~ "# comptime.programs_built = 1\n" # one build for the whole chain
+stderr: ~ "comptime.build TWO, SIX, FOUR, EIGHT, TWENTY (main.jet)" # the build span names every level
+stderr: count "> comptime.check SIX (main.jet)" = 1 # SIX does not wait for TWO to land
+stderr: count "> comptime.check TWENTY (main.jet)" = 1
+step: jet run --release main.jet
+exit: 0
+stdout: = "2 6 4 8 20\n"

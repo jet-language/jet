@@ -65,6 +65,7 @@ use {
         sema_comptime_append_checked_function_to_module,
         sema_comptime_available_constants,
         sema_comptime_available_constants_add,
+        sema_comptime_available_version,
         sema_comptime_body_work_flush,
         sema_comptime_checked_text_source,
         sema_comptime_dependency_cycle_diagnostic,
@@ -1693,7 +1694,7 @@ jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs
     kept := 0
     task.group jet_driver_comptime_prefetch_threads {
         walkers: task sema_comptime_walk_run(walk)
-        jet_driver_comptime_walk(environments[0], programs[0], available.counted_values, index, values.len(), walk, seeds, seen, kept, follows: true)
+        jet_driver_comptime_walk(environments[0], programs[0], sema_comptime_available_version(available), index, values.len(), walk, seeds, seen, kept, follows: true)
         _ := walkers.join() ?? panic(compiler_threads_failure_text(err))
     }
     kept
@@ -1760,7 +1761,7 @@ jet_driver_comptime_closure_prefetch: fn(environment: &SemaScopeEnvironment, pro
     kept := 0
     task.group jet_driver_comptime_closure_prefetch_threads {
         walkers: task sema_comptime_walk_run(walk)
-        jet_driver_comptime_walk(environment, program, available.counted_values, index, values.len(), walk, jobs, seen, kept, follows: false)
+        jet_driver_comptime_walk(environment, program, sema_comptime_available_version(available), index, values.len(), walk, jobs, seen, kept, follows: false)
         _ := walkers.join() ?? panic(compiler_threads_failure_text(err))
     }
 }
@@ -1878,6 +1879,10 @@ JetDriverComptimeEntry: struct {
     source: SemaComptimeItemSource
     request: SemaComptimeItemRequest
     function_keys: [String]
+    // Whether the build computes its constant for the entries after it,
+    // which read it by calling its item function (TConstantDef.item_function):
+    // its type landed as it joined (jet_driver_comptime_type_land).
+    computed: Bool{false}
 }
 
 // Checked items evaluated together on one IR build, in order.
@@ -1889,7 +1894,8 @@ JetDriverComptimeBatch: struct {
     functions: [FnBody]
     function_rows: [String:Int]
     // The source key of every entry: an item check that waits on one of
-    // them reads a value the batch still holds back.
+    // them reads a value the batch still holds back. True for a computed
+    // entry (JetDriverComptimeEntry.computed), which a later entry may read.
     keys: [String:Bool]
     // Whether no evaluated entry reaches a declaration or has a closure
     // (jet_driver_comptime_entry_bare), so the batch builds with no
@@ -2080,16 +2086,24 @@ jet_driver_comptime_lost_graph: fn(values: [SemaComptimeItemValue], functions: [
 }
 
 // The check sema_comptime_precheck_items made of an item ahead of its pass,
-// while `values` held `from` values, if it is the check the run would make
-// now: no value has landed since whose key is one of its dependencies (a
-// check reads only the constants it references, and each referenced constant
-// without a value then is a dependency). Taken once: the caller moves its
-// precheck in and leaves it None, so a retried item checks again.
-jet_driver_comptime_prechecked: fn(precheck: &&SemaComptimeItemCheck?, values: [SemaComptimeItemValue], from: Int) -> SemaComptimeItemCheck? {
+// while `values` held `from` values and `typed_from` constants had their
+// types ahead of their values, if it is the check the run would make now: no
+// value has landed since whose key is one of its dependencies (a check reads
+// only the constants it references, and each referenced constant without a
+// value then is a dependency), and no dependency's type has landed since,
+// which leaves it one the batch computes (jet_driver_comptime_type_land).
+// Taken once: the caller moves its precheck in and leaves it None, so a
+// retried item checks again.
+jet_driver_comptime_prechecked: fn(precheck: &&SemaComptimeItemCheck?, values: [SemaComptimeItemValue], from: Int, batch: JetDriverComptimeBatch, typed_from: Int, typed: Int) -> SemaComptimeItemCheck? {
     check := precheck.move() ?? return None
     loop index in from..<values.len() {
         loop dependency in check.dependencies {
             if values[index].key == dependency -> return None
+        }
+    }
+    if typed > typed_from {
+        loop dependency in check.dependencies {
+            if batch.keys.get(dependency) ?? false -> return None
         }
     }
     Val(check.move())
@@ -2127,6 +2141,49 @@ jet_driver_comptime_apply_landed: fn(environment: &SemaScopeEnvironment, program
     sema_comptime_environment_publish_body_values(environment, values, from, body_values_changed)
     jet_driver_trace_step_end(trace_sink, "comptime.apply", values.len() - from)
     true
+}
+
+// Whether checked item `source` joining a batch is computed there for the
+// entries after it (JetDriverComptimeEntry.computed): a constant, not a
+// module value, local value or checked text, whose evaluation lands its
+// value or reports and ends the run.
+jet_driver_comptime_computes: fn(source: SemaComptimeItemSource) -> Bool Never! {
+    source.kind == SemaComptimeItemKind.Constant && !source.module_value && !source.local_value && source.checked_text == None
+}
+
+// Lands the type of constant `source` (its checked `expression`'s) on the
+// run's program graph ahead of its value, as it joins a batch that computes
+// it: an item checked after it then types its reads of the constant and,
+// waiting only on such constants, joins the same batch
+// (jet_driver_comptime_computed_waits), so a dependency chain builds one
+// program, not one per level. False when the tables lost their graph.
+jet_driver_comptime_type_land: fn(program: &SemaProgramTables, available: &SemaComptimeAvailableConstants, sites: SemaComptimeValueSites, source: SemaComptimeItemSource, expression: BodyExpr, trail: &SemaGraphTrail) -> Bool {
+    typed: [SemaComptimeItemValue]{jet_driver_comptime_item_value(source, TComptimeValue.Unit, expression)}
+    if &program.registration_graph == {
+        None -> return false
+        .Val(resolved_graph) -> sema_comptime_graph_apply_sites(resolved_graph, sites, typed, trail)
+    }
+    available.typed += 1
+    true
+}
+
+// Whether item check `checked` waits only on constants `batch` computes
+// (jet_driver_comptime_type_land) and is otherwise complete: its request
+// reads them by calling their item functions in the batch's program
+// (TConstantDef.item_function), so it joins the batch instead of waiting
+// for them to land.
+jet_driver_comptime_computed_waits: fn(batch: JetDriverComptimeBatch, checked: SemaComptimeItemCheck) -> Bool Never! {
+    if checked.waiting_dependencies.len() == 0 || checked.request == None || !checked.complete || jet_driver_has_errors(checked.diagnostics) -> return false
+    jet_driver_comptime_batch_computes(batch, checked.waiting_dependencies)
+}
+
+// Whether `batch` computes every constant of `keys`
+// (JetDriverComptimeEntry.computed).
+jet_driver_comptime_batch_computes: fn(batch: JetDriverComptimeBatch, keys: [String]) -> Bool Never! {
+    loop key in keys {
+        if !(batch.keys.get(key) ?? false) -> return false
+    }
+    keys.len() > 0
 }
 
 // The value sites of the run's program graph, read in place. The run's
@@ -2411,7 +2468,9 @@ jet_driver_comptime_batch_new: fn() -> JetDriverComptimeBatch Never! {
 // Appends an item to `batch`, moving the functions of its checked closure
 // that the batch does not hold yet out of `functions` (left empty), and
 // adding the foreign functions it reaches that the batch does not hold yet.
-jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: &[FnBody], foreign: [SemaCheckedForeignFunction]) Never! {
+// `computed`: the build computes the item's constant for the entries after
+// it (JetDriverComptimeEntry.computed).
+jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: &[FnBody], foreign: [SemaCheckedForeignFunction], computed: Bool) Never! {
     loop row in foreign {
         held: loop previous in batch.foreign {
             if previous.symbol_id == row.symbol_id {
@@ -2439,8 +2498,8 @@ jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaCo
         batch.functions.push(function)
     }
     if !jet_driver_comptime_entry_bare(request, function_keys) -> batch.bare = false
-    batch.keys[source.key] = true
-    batch.entries.push(JetDriverComptimeEntry{source: source, request: request, function_keys: function_keys})
+    batch.keys[source.key] = computed
+    batch.entries.push(JetDriverComptimeEntry{source: source, request: request, function_keys: function_keys, computed: computed})
 }
 
 // The batch holding only entry `index` of `batch`, with that entry's own
@@ -3027,13 +3086,17 @@ jet_driver_comptime_run: fn(
     // Items whose check and closure settled (jet_driver_comptime_settled)
     // with no waits are checked and, when jet_driver_comptime_batchable
     // admits them, wait in `batch` to be evaluated together on one IR
-    // build. One that waits on a batch key waits like any item that names
-    // an unvalued constant: the pass's last flush lands the batch, and the
-    // next pass checks it again. A batch that no waiting item names, in a
-    // pass that landed other values, is not flushed at the pass's end: it
-    // waits into the next pass (jet_driver_comptime_batch_awaited). So one
-    // IR build and one load serve every item of a dependency level, and the
-    // levels a fold unblocks, not one stretch of the declaration order.
+    // build. A constant's type lands as it joins (jet_driver_comptime_type_land)
+    // and the build computes it for the entries after it, so a check that
+    // waits only on such constants joins the same batch
+    // (jet_driver_comptime_computed_waits). One that waits on any other batch
+    // key waits like any item that names an unvalued constant: the pass's
+    // last flush lands the batch, and the next pass checks it again. A batch
+    // that no waiting item names, in a pass that landed other values, is not
+    // flushed at the pass's end: it waits into the next pass
+    // (jet_driver_comptime_batch_awaited). So one IR build and one load serve
+    // every item of a dependency chain of constants, and the levels a fold
+    // unblocks, not one stretch of the declaration order.
     // An item whose check is unsettled lands the batch first and is checked
     // again; one whose closure is unsettled withdraws the closure's reports
     // and function checks, lands the batch and starts over (`retry`). Either
@@ -3081,6 +3144,7 @@ jet_driver_comptime_run: fn(
         jet_driver_trace_step_end(request.trace_sink, "comptime.prefetch", prefetched)
         prechecks.reverse()
         prechecked_values: values.len()
+        prechecked_typed: available.typed
         loop source in pending {
             precheck := prechecks.pop() ?? SemaComptimeItemCheck?{None}
             retry := true
@@ -3094,8 +3158,10 @@ jet_driver_comptime_run: fn(
                     resolved_count = values.len()
                 }
                 source_key: "{source.module_identity.id}\n{source.key}"
+                // Its waits stand until one of them lands, unless the batch
+                // computes them all, which it may read in the batch's program.
                 if settled_waits.get(source_key) == .Val(previous_waits) {
-                    if !jet_driver_comptime_any_available(available, previous_waits) {
+                    if !jet_driver_comptime_any_available(available, previous_waits) && !jet_driver_comptime_batch_computes(batch, previous_waits) {
                         wait_rows.push(
                             JetDriverComptimeWaitRow{
                                 key: source.key,
@@ -3112,10 +3178,14 @@ jet_driver_comptime_run: fn(
                 if request.trace_sink == .Val(sink) {
                     sink.begin_item("comptime.check", source.source_file, source.name)
                 }
-                checked_item := jet_driver_comptime_prechecked(precheck, values, prechecked_values) ?? sema_check_comptime_item(environments[0], programs[0], probe, available, source)
+                checked_item := jet_driver_comptime_prechecked(precheck, values, prechecked_values, batch, prechecked_typed, available.typed) ?? sema_check_comptime_item(environments[0], programs[0], probe, available, source)
                 jet_driver_trace_step_end(request.trace_sink, "comptime.check", 1)
                 precheck = None
                 counters.items_checked += 1
+                // A check that waits only on constants the batch computes
+                // reads them in the batch's program, and goes on as one that
+                // waits on nothing.
+                if jet_driver_comptime_computed_waits(batch, checked_item) -> checked_item.waiting_dependencies = [String]{}
                 // A settled check that waits on a batch key waits below.
                 if batch.entries.len() > 0 && !jet_driver_comptime_settled(source.local_value, jet_driver_has_errors(checked_item.diagnostics), checked_item.complete, checked_item.waiting_dependencies) {
                     flushed := jet_driver_comptime_staged_flush(request, batch, values, checked_functions, trace, programs, staging, counters, diagnostics)
@@ -3406,7 +3476,12 @@ jet_driver_comptime_run: fn(
                     closure.functions.extend(checked_functions[row].conversions)
                 }
                 if jet_driver_comptime_batchable(source) {
-                    jet_driver_comptime_batch_add(batch, source, comptime_request, closure.functions, closure.foreign)
+                    computed: jet_driver_comptime_computes(source)
+                    if computed && !jet_driver_comptime_type_land(programs[0], available, staging.sites, source, comptime_request.expression, trail) {
+                        sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+                        return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+                    }
+                    jet_driver_comptime_batch_add(batch, source, comptime_request, closure.functions, closure.foreign, computed)
                     next
                 }
                 if batch.entries.len() > 0 {
@@ -3423,7 +3498,7 @@ jet_driver_comptime_run: fn(
                     }
                 }
                 alone := jet_driver_comptime_batch_new()
-                jet_driver_comptime_batch_add(alone, source, comptime_request, closure.functions, closure.foreign)
+                jet_driver_comptime_batch_add(alone, source, comptime_request, closure.functions, closure.foreign, false)
                 flushed := jet_driver_comptime_staged_flush(request, alone, values, checked_functions, trace, programs, staging, counters, diagnostics)
                 if flushed.progressed -> made_progress = true
                 if flushed.stop == .Val(stopped) {

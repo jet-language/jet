@@ -1160,9 +1160,12 @@ ir_spawn_sites: fn(functions: [FnBody]) -> [String:Int] Never! {
 // `definition` takes over `p`'s constant rows of its key and its symbol key
 // (a compile-time value landed after the program was declared), each not
 // taken over yet (`taken`, which it joins): a key's first landed row stands.
-// Both keys name the one definition it appends.
+// Both keys name the one definition it appends. A computed row
+// (TConstantDef.item_function) stands only for its build and joins no
+// `taken`: its constant's value takes over once it lands.
 ir_program_put_constant: fn(p: &IRProgram, definition: &&TConstantDef, taken: &[String:Bool]) Never! {
     owned := definition.move()
+    computed: owned.item_function != ""
     by_name: owned.symbol_key != "" && taken.get(owned.symbol_key) == None
     by_key: taken.get(owned.key) == None
     if !by_name && !by_key {
@@ -1170,11 +1173,11 @@ ir_program_put_constant: fn(p: &IRProgram, definition: &&TConstantDef, taken: &[
     }
     row: p.constant_defs.len()
     if by_name {
-        taken[owned.symbol_key.copy()] = true
+        if !computed -> taken[owned.symbol_key.copy()] = true
         p.constants[owned.symbol_key.copy()] = row
     }
     if by_key {
-        taken[owned.key.copy()] = true
+        if !computed -> taken[owned.key.copy()] = true
         p.constants[owned.key.copy()] = row
     }
     p.constant_defs.push(owned)
