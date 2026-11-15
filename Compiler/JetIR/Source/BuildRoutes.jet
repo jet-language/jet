@@ -5827,11 +5827,13 @@ ir_reader_read_inline: fn(m: &IRModule, b: &IRBuilder, read: IRReaderRead, handl
         ir_emit(b.f, IROp.Load, value, base, 0, -1, b.line)
     } else {
         // Byte by byte into a word, first byte highest; the bits then fit
-        // the field's row.
+        // the field's row. A signed field loads its first byte signed, so
+        // its sign extends through the word as the row's carrier needs.
         byte_row: ir_type_row(m, Type.IntN{signed: false, bits: 8}) ?? 0
+        sign_row: if m.types[row].signed -> ir_type_row(m, Type.IntN{signed: true, bits: 8}) ?? byte_row else -> byte_row
         gathered := ir_word_const(m, b, 0)
         loop k in 0..<read.bytes {
-            byte: ir_load_at(m, b, base, k, byte_row)
+            byte: ir_load_at(m, b, base, k, if k == 0 -> sign_row else -> byte_row)
             widened: ir_copy_word(m, b, byte, word)
             shift: ir_word_const(m, b, 8 * (read.bytes - 1 - k))
             placed: ir_word_op(m, b, IROp.Shl, widened, shift)
