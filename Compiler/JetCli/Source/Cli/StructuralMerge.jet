@@ -21,6 +21,7 @@ JetCLIStructDocument: struct {
     suffix: String
     source_hash: String
     operations: [JetCLISemOp]
+    failures: [JetCLIFailureFunction]
 }
 
 JetCLIStructLoaded: enum {
@@ -103,7 +104,7 @@ jet_cli_struct_load: fn(path: String) -> JetCLIStructLoaded {
                 cursor = units[row].fact.span.end
             }
             hash: sha256_hex(source)
-            return JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: semindex_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash)}}
+            return JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: semindex_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash), failures: jet_cli_failure_functions(result.doc_modules, jet_cli_sem_normalize(path))}}
         }
     }
 }
@@ -472,6 +473,7 @@ jet_cli_structural: fn(argv: [String], command: String, json: Bool) -> JetDriver
     }
     if command == "diff" {
         changes: jet_cli_struct_diff(documents[0], documents[1])
+        failures: jet_cli_failure_changes(documents[0].failures, documents[1].failures)
         stdout := ""
         if json {
             rows := [JetCLIStatusValue]{}
@@ -479,12 +481,13 @@ jet_cli_structural: fn(argv: [String], command: String, json: Bool) -> JetDriver
                 operation: if change.operation == .Val(op) -> jet_cli_sem_op_value(op) else -> JetCLIStatusValue.Null
                 rows.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(change.kind)), jet_cli_status_field("stable_id", jet_cli_status_text(change.stable_id)), jet_cli_status_field("before", jet_cli_status_optional_text(change.before)), jet_cli_status_field("after", jet_cli_status_optional_text(change.after)), jet_cli_status_field("semantic_op", operation)}))
             }
-            stdout = "{jet_cli_status_render("diff.structural", true, [JetCLIStatusField]{jet_cli_status_field("structural_diff", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("changes", jet_cli_status_array(rows))}))})}\n"
+            stdout = "{jet_cli_status_render("diff.structural", true, [JetCLIStatusField]{jet_cli_status_field("structural_diff", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("changes", jet_cli_status_array(rows)), jet_cli_status_field("failures", jet_cli_failure_value(failures))}))})}\n"
         } else {
             if changes.len() == 0 -> stdout = "no structural changes\n"
             loop change in changes {
                 stdout = "{stdout}{change.kind}: {change.after ?? (change.before ?? "definition")} [{change.stable_id}]\n"
             }
+            loop line in jet_cli_failure_lines(failures, "") -> stdout = "{stdout}{line}\n"
         }
         return JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }

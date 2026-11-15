@@ -467,16 +467,25 @@ The optional `:line` suffix filters the report, not the checked program.
 Structural `diff` and `merge` align checked definitions rather than source
 lines. A rename is recorded intent only when a semantic-operation receipt
 names the compared file and its before/after byte checkpoints. Hand edits
-do not inherit stale rename intent. A merge conflict leaves the output
+do not inherit stale rename intent. `diff --structural` also lists the
+failure changes `review` reports (below). A merge conflict leaves the output
 unwritten; a clean candidate must parse and pass semantic checking before
 publication.
 
 `review <base.jet> <head.jet>` compares two error-free checked sides. Meaning
 aligns the checked definitions of the one semantic index by stable id,
 compiler identity, then signature and module; a recorded rename or move
-receipt for the compared files aligns what the facts alone cannot. Authority
-compares each side's gate ledger, including the package and lock writers, and
-its checked effect rows; a widened or changed authority blocks `reviewable`.
+receipt for the compared files aligns what the facts alone cannot. Failures
+list each function that fails differently: one that newly can fail
+(`newly_fallible`), one that no longer can, an added or removed one that can
+fail, and one whose failure points changed. Whether a function can fail is
+its carrier after failure inference. A failure point is a call that passes a
+failure up, by `?`, `?(text)` or by itself, named by the function it calls;
+each point is `new`, `kept` or `gone`. A call handled in place (`??`, a match)
+is no failure point, and neither is a call of a function inference proved
+infallible. Authority compares each side's gate ledger, including the package
+and lock writers, and its checked effect rows; a widened or changed authority
+blocks `reviewable`.
 `--base-receipt` and `--receipt` compare proof receipts, and equal sampled
 traces never count as universal agreement. `review --diagnostics` instead
 compares checker diagnostics by occurrence identity; a side whose checker

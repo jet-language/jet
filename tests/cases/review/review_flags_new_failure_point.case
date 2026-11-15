@@ -1,0 +1,22 @@
+# `report` newly calls the fallible `parse`, so it newly can fail: `jet review`
+# flags it and lists the new failure point, and `run`, whose call of `report`
+# now passes a failure up, lists its own. `jet diff --structural` reports the
+# same failure changes. A `??` fallback handles its failure, so `run`'s call of
+# `parse` is no failure point on either side.
+fixture: review_flags_new_failure_point.fixture
+step: jet review {work}/base/run.jet {work}/head/run.jet --json
+exit: 0
+stdout: ~ "\"function\":\"report\",\"status\":\"newly_fallible\",\"before_can_fail\":false,\"after_can_fail\":true"
+stdout: ~ "{\"status\":\"new\",\"callee\":\"parse\",\"site\":\""
+stdout: ~ "\"function\":\"run\",\"status\":\"points_changed\""
+stdout: ~ "{\"status\":\"new\",\"callee\":\"report\",\"site\":\""
+stdout: !~ "{\"status\":\"kept\""
+stdout: !~ "\"function\":\"parse\""
+step: jet review {work}/base/run.jet {work}/head/run.jet
+exit: 0
+stdout: ~ "failures   2 function(s) fail differently · 1 newly can fail"
+stdout: ~ "  newly can fail: report\n    new failure point: parse at "
+stdout: ~ "  failure points changed: run\n    new failure point: report at "
+step: jet diff --structural {work}/base/run.jet {work}/head/run.jet
+exit: 0
+stdout: ~ "newly can fail: report\n  new failure point: parse at "
