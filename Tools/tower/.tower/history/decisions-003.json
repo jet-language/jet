@@ -19448,6 +19448,1484 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-09",
       "retiredAt": "2026-11-14T22:25:24.323Z"
+    },
+    {
+      "id": "D-EFFTYPE-MODEL1",
+      "cardId": "c09kjhit",
+      "group": "effects",
+      "title": "`#FX` above a type bounds everything done in that type's name",
+      "situation": "A library author often wants to promise that a whole type is safe, for example that a parser never touches the network or the disk. Today the promise must be written on every method's row. The vote decides whether `#FX` above a type makes that promise once. It would cover the type's methods, its trait impls in any package, and the closures they create. We recommend it.",
+      "gist": "Should `#FX` above a type bound everything its methods, trait impls and closures may do?",
+      "lesson": "An effect is a kind of power, such as network access. A function promises what it does with its row, like `-[!Net]>`. `#FX` above a block is a ceiling for the code inside it. This vote asks whether a type takes the same ceiling for all code that acts in its name.",
+      "explainer": "",
+      "story": "Mia publishes `mia_parse`. Her users want to know the parser never reaches the network or the disk before they run it on untrusted notes. She writes `#FX(!Net, !FS)` once, above `Parser`. Months later a contributor adds a `Stylesheet` impl that fetches CSS. The build fails at that line, naming Mia's cap.",
+      "inWild": "-- Haskell: ST's type confines its effects; runST proves none escape.\nsumST :: [Int] -> Int\nsumST xs = runST $ do\n  ref <- newSTRef 0\n  mapM_ (\\x -> modifySTRef ref (+ x)) xs\n  readSTRef ref",
+      "detail": "Provenance. Card c09kjhit. The owner rejected v1, which kept types without a cap of their own. In the owner's words, it threw away the original ask. That ask, after Simon Peyton Jones's work in Haskell, is that a type can limit the effects it may use. v2 makes it the recommendation. It also removes the two costs v1 listed: a third place for promises and a tail rule for generic types.\n\nThe one reading. D-DECL-TYPES1 rule 4 says `#FX` above any type means the most that work done in that type's name may do. For an effect type, that work is every function whose row names it. For an ordinary type, option A says the work is its methods, its trait impls in any package, and every closure written inside them.\n\nGeneric types need no tail. What a type parameter does belongs to whoever picks it, just as a callback's effects belong to its caller under D-EFF2. So `#FX(IO)` above `Traced<T>` bounds Traced's own code to IO. `Traced<Parser>` does IO plus whatever Parser does, and Parser's part is checked against the caps where `Traced<Parser>` is written. Haskell's monad transformers read the same way: `LoggingT m` adds logging to whatever `m` does.\n\nWhy it is sound. Only a type parameter or a function parameter passes effects through, because the caller chose it and sees it. Everything else counts against the cap. A concrete type the methods build and call counts, so no type can launder an effect through another. A trait value in a field counts with its trait's declared row. A function field with a fixed row must fit the cap.\n\nTrait impls in any package. The cap is part of the type's public signature, like a method row. An impl of any trait for the type is checked against it where the impl is written, in whatever package. An inherited default method is checked there too. A `Close` impl is covered, so cleanup cannot reach the network either. Widening a published cap is a semver change, as a row change is under D-EFFECT-OMIT1.\n\nOne ladder, not a third place. `#FX` is already the ceiling for a block (spec.md:1825) and, under D-EFFECT-RUNGS1 A, for a module. A type becomes one more rung of the same ladder: block, function, type, module, package. Caps meet, so code obeys every cap above it. A method row may only tighten. `jet explain effects` lists the chain, nearest first.\n\nCost. The check reads rows the compiler already infers (D-EFFECT-OMIT1). Caps erase before IR, as block caps do today, so generated code is the same with or without them. A generic instance needs no extra check, because each type argument's own work was checked against its own cap. Nothing runs at run time.\n\nReads with the related ballots. Under D-EFFECT-RUNGS1 A, a type in a capped module obeys both caps. Under RUNGS1 C, the type cap is the only shared ceiling below the package. D-EFFTYPE-USES1 A and D-DECL-TYPES1 rule 4 give `#FX` above an effect type the same reading. D-EFFTYPE-TARGET1 caps whole artifacts and is independent.\n\nResearch. Haskell's `ST` type confines mutation, and `runST`'s rank-2 type proves none escapes, at no run-time cost (Launchbury and Peyton Jones, 1994). Monad transformers stack effects so each layer adds its own. Koka and Frank put rows on functions and stay polymorphic in the rest of the row; option A's pass-through reads the same way. Rust has no effect bound on types, only inferred auto traits.\n\nProbes, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx2. model.jet is the shown program in today's syntax, without the other package's impl. `jet check model.jet` is ok, because `#FX` above a struct parses and is ignored today. `jet run -A model.jet` is an internal compiler error in `Parser.display` (card to file), so the snippets are checked, not run. `Parser.Stylesheet`, `http.get` and the `T: #FX(...)` bound are illustrative.",
+      "options": [
+        {
+          "key": "A",
+          "name": "`#FX` above a type bounds its work",
+          "detail": "`#FX(...)` above a struct, enum or trait is the ceiling for everything done in the type's name. That is its methods, its trait impls in any package, and every closure written inside them. A method row may only tighten it.\n\nWhat a type parameter or a function parameter does belongs to the caller, as with `via`. So a generic type needs no tail rule, and `Traced<Parser>` does Traced's work plus Parser's. Above a trait, the cap bounds every impl in any package.",
+          "technical": "The Prelude `marker FX` sites grow from [.Block] to struct, enum and trait. Its D-MARK-SCOPE1 matrix mode is tighten. The check runs on inferred rows (D-EFFECT-OMIT1). Each method, impl method, inherited default method and lambda body must fit the cap, with E0712 naming it. Calls through a type parameter or a function parameter are excluded (D-EFF2 pass-through). Calls on concrete types are counted.\n\nTrait values count with their trait's declared row (D-EFF3). Function-typed fields with a fixed row must fit. An impl is checked where it is written, in any package. The cap joins the public API snapshot. Caps erase before IR.",
+          "code": "// mia_parse/parse.jet\n#FX(!Net, !FS)                  // new meaning: bounds all work in Parser's name\nstruct Parser {\n    text: String\n}\n\nimpl Parser {\n    fn words(self) -> [String] { self.text.split(\" \").to_list() }\n    fn count(self) -> Int { self.words().len() }\n\n    // `visit` is the caller's function, so what it does is the caller's\n    fn each(self, visit: fn(String)) {\n        loop word in self.words() -> visit(word)\n    }\n}\n\nimpl Parser.Display {\n    fn display(self) -> String { \"Parser of {self.count()} words\" }\n}\n\n// Traced's own code may only print; what `T` does is the caller's choice\n#FX(IO)\nstruct Traced<T: Printable> {\n    inner: T\n}\n\nimpl Traced.Display {\n    fn display(self) -> String {\n        print(\"trace: display\")\n        \"{self.inner}\"\n    }\n}\n\n// another package: held to Parser's cap where it is written\nimpl Parser.Stylesheet {\n    fn css(self) -> String { http.get(\"https://cdn.example/p.css\") }\n    // error[E0712]: Net is outside Parser's #FX(!Net, !FS)\n}\n\n// app: the beginner path, the same under every option\nuse core.files as files\nuse mia_parse.parse.Parser\n\nfn run() {\n    parser :: Parser{text: files.read(\"notes.md\") ?? \"\"}\n    print(parser.count())\n    parser.each((word: String) -> print(word))\n}"
+        },
+        {
+          "key": "B",
+          "name": "Module caps and rows only",
+          "detail": "A type gets no cap of its own. Its author moves it into its own module and caps the module, which covers the type, its methods and its helpers. A trait keeps its per-method rows, which already bind every impl.\n\nAn impl written in another package sits outside the module, so the cap does not check it. Closures follow their module. Generic types use today's open row tails and `via`.",
+          "technical": "Uses D-EFFECT-RUNGS1=A (module `#FX` cap) and D-EFF3 (trait method rows bind impls). No new placement or grammar. A type with its own promise needs its own module line (`#FX(...) module parse`). Generic methods use `-[via f]>` (D-EFF2) and open tails (D-SHAPE8=A). An impl of the type in another package is checked only against that package's own caps and rows.",
+          "code": "// mia_parse/run.jet: each promise is a module cap\n#FX(!Net, !FS)\nmodule parse\n\n#FX(IO)\nmodule trace\n\n// mia_parse/parse.jet\nstruct Parser {\n    text: String\n}\n\nimpl Parser {\n    fn words(self) -> [String] { self.text.split(\" \").to_list() }\n    fn count(self) -> Int { self.words().len() }\n\n    // `visit` is the caller's function, so what it does is the caller's\n    fn each(self, visit: fn(String)) {\n        loop word in self.words() -> visit(word)\n    }\n}\n\nimpl Parser.Display {\n    fn display(self) -> String { \"Parser of {self.count()} words\" }\n}\n\n// mia_parse/trace.jet\nstruct Traced<T: Printable> {\n    inner: T\n}\n\nimpl Traced.Display {\n    fn display(self) -> String {\n        print(\"trace: display\")\n        \"{self.inner}\"\n    }\n}\n\n// another package: outside both module caps, so not checked\nimpl Parser.Stylesheet {\n    fn css(self) -> String { http.get(\"https://cdn.example/p.css\") }\n}\n\n// app: the beginner path, the same under every option\nuse core.files as files\nuse mia_parse.parse.Parser\n\nfn run() {\n    parser :: Parser{text: files.read(\"notes.md\") ?? \"\"}\n    print(parser.count())\n    parser.each((word: String) -> print(word))\n}"
+        },
+        {
+          "key": "C",
+          "name": "Bounds where the type is used",
+          "detail": "Types carry no promise. A function that needs one asks for it in a generic bound, and the compiler checks the inferred rows of the type's methods. Rust checks its inferred `Send` and `Sync` the same way.\n\nAuthors write nothing, and nothing is promised that no one uses. Each caller who needs the promise repeats the bound. A library change can break those callers, because the library never wrote the promise down.",
+          "technical": "New bound form `T: #FX(...)` on generic parameters, checked against the inferred rows of the type's methods and impls (D-EFFECT-OMIT1). Model: Rust auto traits. No marker sites change.",
+          "code": "// mia_parse: no marks\nstruct Parser {\n    text: String\n}\n\nimpl Parser {\n    fn words(self) -> [String] { self.text.split(\" \").to_list() }\n    fn count(self) -> Int { self.words().len() }\n\n    // `visit` is the caller's function, so what it does is the caller's\n    fn each(self, visit: fn(String)) {\n        loop word in self.words() -> visit(word)\n    }\n}\n\nimpl Parser.Display {\n    fn display(self) -> String { \"Parser of {self.count()} words\" }\n}\n\nstruct Traced<T: Printable> {\n    inner: T\n}\n\nimpl Traced.Display {\n    fn display(self) -> String {\n        print(\"trace: display\")\n        \"{self.inner}\"\n    }\n}\n\n// a caller who needs the promise asks for it (new bound form)\nfn index<T: #FX(!Net, !FS)>(doc: T) -> Int { … }\n\n// app: the beginner path, the same under every option\nuse core.files as files\nuse mia_parse.parse.Parser\n\nfn run() {\n    parser :: Parser{text: files.read(\"notes.md\") ?? \"\"}\n    print(parser.count())\n    parser.each((word: String) -> print(word))\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Haskell",
+          "note": "`ST s` confines mutation to one type, and runST's rank-2 type proves no reference escapes, with no run-time cost. Source: https://hackage.haskell.org/package/base/docs/Control-Monad-ST.html and Launchbury and Peyton Jones, Lazy Functional State Threads (PLDI 1994).",
+          "code": "runST :: (forall s. ST s a) -> a"
+        },
+        {
+          "lang": "Haskell (mtl)",
+          "note": "A monad transformer adds its own effect to whatever the inner monad does, the reading option A gives a generic type. Source: https://hackage.haskell.org/package/monad-logger",
+          "code": "newtype LoggingT m a = LoggingT { runLoggingT :: (Loc -> LogSource -> LogLevel -> LogStr -> IO ()) -> m a }"
+        },
+        {
+          "lang": "Koka",
+          "note": "Rows sit on function types and stay open over the rest of the row, so a higher-order function passes its argument's effects through. Source: https://koka-lang.github.io/koka/doc/book.html",
+          "code": "fun map(xs : list<a>, f : a -> e b) : e list<b>"
+        },
+        {
+          "lang": "Rust",
+          "note": "No effect bounds on types; inferred auto traits such as Send are asked for in bounds (option C). Source: https://doc.rust-lang.org/reference/special-types-and-traits.html#auto-traits",
+          "code": "fn spawn<F: Send + 'static>(f: F)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A is the original ask, made safe. One line above a type bounds its methods, its impls anywhere and its closures. It reads like `#FX` on blocks, modules and effect types. Generic types reuse `via`.",
+        "gains": [
+          "A type's promise is written once, on the type, and binds every package.",
+          "Generic types need no tail: a parameter's work is the caller's, as with `via`.",
+          "One reading of `#FX` from block to package, effect types included."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B leaves other packages' impls and a split-out module's helpers outside the promise, and makes authors split modules to state one."
+          },
+          {
+            "key": "C",
+            "reason": "C puts nothing in the library, so every caller repeats the bound and an upgrade can break them silently."
+          }
+        ],
+        "tradeoff": "A published cap is a promise to users: narrowing it is free, widening it is a breaking change, like a row."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotDesign (fresh pass). It tried laundering an effect through a concrete type, a trait-value field and an inherited default method, and v2 now counts all three against the cap. It asked whether `Traced<Http>` breaks Traced's `!Net`; v2 checks Http's part where `Traced<Http>` is written."
+      },
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree. In $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx2, `jet check model.jet` is ok: `#FX` above a struct parses today and is ignored.\n\nIn $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx, `jet run model_today.jet` prints 3 with the rows repeated on each method. `jet run model_a/run.jet` prints 3 with option B's module cap.",
+      "surface": {
+        "gist": "Should `#FX` above a type bound everything its methods, trait impls and closures may do?",
+        "lesson": "An effect is a kind of power, such as network access. A function promises what it does with its row, like `-[!Net]>`. `#FX` above a block is a ceiling for the code inside it. This vote asks whether a type takes the same ceiling for all code that acts in its name.",
+        "trio": {
+          "current": {
+            "note": "Today the promise is repeated on each method's row, and an impl in another package is not held to it.",
+            "code": "impl Parser {\n    fn words(self) -[!Net, !FS]> [String] { … }\n    fn count(self) -[!Net, !FS]> Int { … }\n    // … ten more methods, each with the same row\n}"
+          },
+          "wild": {
+            "lang": "Haskell",
+            "note": "A type can confine the effects of all code run in it: `ST` code can mutate only its own references. Source: Control.Monad.ST.",
+            "code": "runST :: (forall s. ST s a) -> a"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`#FX` above a type bounds its work",
+            "gist": "`#FX(...)` above a type bounds its methods, its impls in any package and its closures.",
+            "gains": [
+              "One line promises the whole type, wherever its impls live.",
+              "Generic types need no new rule: a type parameter's work is the caller's.",
+              "The same `#FX` reading as blocks, modules and effect types."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "#FX(!Net, !FS)\nstruct Parser {\n    text: String\n}\n\n// Traced may only print; what T does is the caller's\n#FX(IO)\nstruct Traced<T: Printable> {\n    inner: T\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Module caps and rows only",
+            "gist": "A type is promised through its module's cap; a trait through its methods' rows.",
+            "gains": [
+              "Nothing new beyond the module cap.",
+              "One cap covers the type and its helpers."
+            ],
+            "losses": [
+              "An impl of the type in another package is not checked.",
+              "A type that needs its own promise must move to its own module."
+            ],
+            "proposed": {
+              "code": "#FX(!Net, !FS)\nmodule parse\n\n// parse.jet: every function inside is covered\nstruct Parser {\n    text: String\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Bounds where the type is used",
+            "gist": "Types stay unmarked; code that needs a promise asks for it in a bound.",
+            "gains": [
+              "Authors write nothing.",
+              "The promise is checked exactly where it matters."
+            ],
+            "losses": [
+              "A new kind of bound for generics.",
+              "Each caller repeats the bound, and the library promises nothing."
+            ],
+            "proposed": {
+              "code": "// mia_parse: no marks\nstruct Parser {\n    text: String\n}\n\n// a caller asks (new bound form)\nfn index<T: #FX(!Net, !FS)>(doc: T) -> Int { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A is the original ask, made safe. One line above a type bounds its methods, its impls anywhere and its closures. It reads like `#FX` on blocks, modules and effect types. Generic types reuse `via`.",
+          "gains": [
+            "A type's promise is written once, on the type, and binds every package.",
+            "Generic types need no tail: a parameter's work is the caller's, as with `via`.",
+            "One reading of `#FX` from block to package, effect types included."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B leaves other packages' impls and a split-out module's helpers outside the promise, and makes authors split modules to state one."
+            },
+            {
+              "key": "C",
+              "reason": "C puts nothing in the library, so every caller repeats the bound and an upgrade can break them silently."
+            }
+          ],
+          "tradeoff": "A published cap is a promise to users: narrowing it is free, widening it is a breaking change, like a row."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T00:18:19.942Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-15T02:00:02.614Z"
+    },
+    {
+      "id": "D-EFFTYPE-USES1",
+      "cardId": "c09kjhit",
+      "group": "effects",
+      "title": "A library effect says what it may do with the same `#FX` marker",
+      "situation": "A library can name its own effect, such as a graph package's queries, so callers can allow or forbid exactly that. Today such a name can only be a leaf under one built-in effect, like `Net.Query`. Worse, its functions cannot actually use the network: the compiler rejects the very calls the name stands for. One rule matters here: a denial such as `!Net` checks what code really reaches, not what its rows claim. The vote decides how a library effect states what it may do. We recommend the same `#FX` marker used on blocks and modules.",
+      "gist": "How should a library's own effect say which basic powers it may use?",
+      "lesson": "An effect is a kind of power, such as network access. A library may name its own effect, like `graph.Query`, so a caller can allow or forbid just that. The name must say what it may really do. A denial such as `!Net` checks what code really reaches, not what rows claim, so a hidden network call is still caught.",
+      "explainer": "",
+      "story": "Ana's reports call the `graph` package. Her lead wants one report that may never run a graph query, while another report may. She wants to write `!graph.Query` on that one function and have the compiler hold it.",
+      "inWild": "// Koka: a user effect names its own operations; handlers decide what they do.\neffect query\n  fun run-query(text : string) : list<person>",
+      "detail": "Provenance. Folded into the D-EFFECT-LIMITS1 package ballot (card c09kjhit), which the owner rejected. Already ratified: the effect tree with roots and leaves (D-EFFTREE1), leaf declarations (D-EFFECT-DECL1=A), denials hold through calls (D-PROP1), and a new user root is E0119.\n\nProbe findings, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx. leaf_wrap2.jet: a function under `-[Net.Query]>` calling `net.tcp_listen` is E0740 \"uses the effect `Net`, which its signature doesn't allow\". deny_leaf_real.jet: the same for `FS.Notes` over `fs.read` (E0740 on `FS.Read`). So a library leaf is a name with nothing behind it today.\n\nuses_a.jet: `#FX(Net)` above `effect Query` gives E0119 \"`Query` isn't a known effect\", as expected for new syntax. leaf.jet and deny_net.jet: a denial checks real reach, not the declared row. `-[!Net]>` calling a `-[Net]>` function with an empty body checks clean. db_net.jet: `-[!Net]>` calling a `-[DB]>` function checks clean, since DB is its own root.\n\nSide note for existing cards: in leaf_wrap.jet, `print(port()?)` with a bare `?` checked clean. In leaf_wrap2.jet a bare `?` after a binding is E-ERR-PROPAGATE \"A bare `?` has no meaning\". The cause is not confirmed.\n\nReads with the related ballots. D-EFFECT-RUNGS1=A puts `#FX` on module lines with the same \"at most\" meaning, so blocks, modules and effects share one marker. D-EFFTYPE-KERNEL1 option A needs A here: Core declares `DB` and `Log` as library effects over machine powers. D-EFFTYPE-MODEL1 and D-EFFTYPE-TARGET1 are independent of this vote.",
+      "options": [
+        {
+          "key": "A",
+          "name": "`#FX` above the effect",
+          "detail": "A package declares `effect Query` with `#FX(...)` above it, the same marker that caps a block or a module. Inside the package, a function whose row says `Query` may do what `Query` stands for, here network calls. Callers write `graph.Query`, like any other package item.\n\nA leaf such as `effect Net.Query` keeps working, with the same rule: a leaf may do at most what its root does. So today's leaves become usable rather than changing shape.",
+          "technical": "Marker site: `#FX` on an `effect` declaration (D-MARK-SCOPE1 matrix, mode tighten). A positive list only; `!` entries are errors there. Package effects resolve as package items (`graph.Query`); unqualified inside the package. A leaf `Root.Leaf` gets the implicit cap `#FX(Root)`, which fixes E0740 on leaf bodies (probe/fx/leaf_wrap2.jet). Denials keep checking real reach (D-PROP1).\n\nToday `$` marks facts and `#` marks rules: Compiler/Prelude/Effects.jet writes `effect Net $irreversible`. The cap is a rule checked on bodies, so it is spelled with today's rule sigil.",
+          "code": "// graph/graph.jet: the package names its own effect\n#FX(Net)                                     // new: Query may do at most what Net does\neffect Query\n\nfn adults(db: Conn, age: Int) -[Query]> [Person] Error! {\n    db.send(Cypher{\"MATCH (p:Person) WHERE p.age > {age} RETURN p\"})\n}\n\n// app/run.jet: the beginner path, the same under every option\nfn run() {\n    db :: graph.connect(\"bolt://localhost:7687\")\n    print(graph.adults(db, 18).len())\n}\n\n// app, expert path: forbid graph queries in one function\nfn summary(db: graph.Conn) -[!graph.Query]> Int { … }      // new: qualified effect"
+        },
+        {
+          "key": "B",
+          "name": "Leaves only, made usable",
+          "detail": "A library effect is a leaf under one built-in effect, as today. The one change: a leaf may use its root, so a `Net.Query` function may make network calls.\n\nA library that needs both the network and files cannot say so with one name. Leaves live under shared roots, so two packages can pick the same leaf name.",
+          "technical": "Semantics only: a body under `-[Root.Leaf]>` may use `Root`. No grammar change. D-EFFECT-DECL1 leaf declarations unchanged. Excludes D-EFFTYPE-KERNEL1 option A, which needs multi-power library effects.",
+          "code": "// graph/graph.jet\neffect Net.Query\n\nfn adults(db: Conn, age: Int) -[Net.Query]> [Person] Error! {\n    db.send(Cypher{\"MATCH (p:Person) WHERE p.age > {age} RETURN p\"})\n}\n\n// app/run.jet: the beginner path, the same under every option\nfn run() {\n    db :: graph.connect(\"bolt://localhost:7687\")\n    print(graph.adults(db, 18).len())\n}\n\n// app, expert path\nfn summary(db: graph.Conn) -[!Net.Query]> Int { … }"
+        },
+        {
+          "key": "C",
+          "name": "A `uses` clause",
+          "detail": "The declaration lists its powers after a new `uses` keyword. The meaning matches option A; only the spelling differs.\n\nA reader meets one more keyword, and the same \"at most\" idea is spelled `#FX(...)` on blocks and modules but `uses` here.",
+          "technical": "New contextual keyword `uses` in `effect` declarations. Same semantics as option A.",
+          "code": "// graph/graph.jet\neffect Query uses Net                        // new\n\nfn adults(db: Conn, age: Int) -[Query]> [Person] Error! {\n    db.send(Cypher{\"MATCH (p:Person) WHERE p.age > {age} RETURN p\"})\n}\n\n// app/run.jet: the beginner path, the same under every option\nfn run() {\n    db :: graph.connect(\"bolt://localhost:7687\")\n    print(graph.adults(db, 18).len())\n}\n\n// app, expert path\nfn summary(db: graph.Conn) -[!graph.Query]> Int { … }      // new: qualified effect"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Koka",
+          "note": "User effects are first-class names; what they do is decided by handlers. Source: https://koka-lang.github.io/koka/doc/book.html",
+          "code": "effect query\n  fun run-query(text : string) : list<person>"
+        },
+        {
+          "lang": "Unison",
+          "note": "Abilities are declared by libraries and named in function types. Source: https://www.unison-lang.org/docs/fundamentals/abilities/",
+          "code": "ability Query where\n  run : Text -> [Person]"
+        },
+        {
+          "lang": "Scala 3",
+          "note": "Capabilities are ordinary values; a library capability wraps the ones it uses. Source: https://docs.scala-lang.org/scala3/reference/experimental/cc.html",
+          "code": "class Query(using net: Net^)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A reuses the one \"at most\" marker Jet already has, lets a package own its effect's name, and makes today's leaves usable too. It adds a placement, not a concept.",
+        "gains": [
+          "One rule for blocks, modules and effects.",
+          "Unblocks Core's own effects in D-EFFTYPE-KERNEL1."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B cannot name an effect that needs two powers, and leaf names collide across packages."
+          },
+          {
+            "key": "C",
+            "reason": "C spells the same \"at most\" idea with a second keyword."
+          }
+        ],
+        "tradeoff": "Effects gain a marker line above them; a leaf needs none."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main. A reuses the at-most marker, so a reader learns no new form; the only risk is reading #FX(Net) as granting Net rather than capping it."
+      },
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx. `jet check leaf_wrap2.jet` shows E0740 on the leaf body. `jet check uses_a.jet` shows E0119 for the new form.\n\n`jet check deny_net.jet` and `jet check db_net.jet` both pass, showing that denials follow real reach and that DB sits outside Net.",
+      "surface": {
+        "gist": "How should a library's own effect say which basic powers it may use?",
+        "lesson": "An effect is a kind of power, such as network access. A library may name its own effect, like `graph.Query`, so a caller can allow or forbid just that. The name must say what it may really do. A denial such as `!Net` checks what code really reaches, not what rows claim, so a hidden network call is still caught.",
+        "trio": {
+          "current": {
+            "note": "Today a library effect is a leaf under one root, and its functions cannot use that root.",
+            "code": "use core.net as net\n\neffect Net.Query\n\nfn listen() -[Net.Query]> Int NetError! {\n    listener :: net.tcp_listen(\"127.0.0.1:0\")\n    // E0740: `listen` uses the effect `Net`, which its signature doesn't allow\n    1\n}"
+          },
+          "wild": {
+            "lang": "Koka",
+            "note": "User effects are declared like types and named in function types; the handler decides what they really do. Source: https://koka-lang.github.io/koka/doc/book.html",
+            "code": "effect query\n  fun run-query(text : string) : list<person>\n\nfun report() : query int"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`#FX` above the effect",
+            "gist": "`#FX(Net)` above `effect Query` says Query may do at most what Net does.",
+            "gains": [
+              "Same marker and meaning as on blocks and modules.",
+              "One effect may span several powers.",
+              "The package owns the name: `graph.Query`."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "// package graph\n#FX(Net)                      // new\neffect Query\n\n// app\nfn report(db: graph.Conn) -[!graph.Query]> Int { … }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Leaves only, made usable",
+            "gist": "A library effect stays a leaf under one root, and may use that root.",
+            "gains": [
+              "No new marker site.",
+              "Today's leaves keep their spelling."
+            ],
+            "losses": [
+              "One effect cannot span two powers.",
+              "Two packages may both declare `Net.Query`.",
+              "Core's `DB` and `Log` cannot become library effects."
+            ],
+            "proposed": {
+              "code": "// package graph\neffect Net.Query\n\n// app\nfn report(db: graph.Conn) -[!Net.Query]> Int { … }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "A `uses` clause",
+            "gist": "`effect Query uses Net` lists the powers on the declaration line.",
+            "gains": [
+              "Reads as a sentence.",
+              "One effect may span several powers."
+            ],
+            "losses": [
+              "A new keyword for one place.",
+              "Says what `#FX` already says elsewhere."
+            ],
+            "proposed": {
+              "code": "// package graph\neffect Query uses Net          // new\n\n// app\nfn report(db: graph.Conn) -[!graph.Query]> Int { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A reuses the one \"at most\" marker Jet already has, lets a package own its effect's name, and makes today's leaves usable too. It adds a placement, not a concept.",
+          "gains": [
+            "One rule for blocks, modules and effects.",
+            "Unblocks Core's own effects in D-EFFTYPE-KERNEL1."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B cannot name an effect that needs two powers, and leaf names collide across packages."
+            },
+            {
+              "key": "C",
+              "reason": "C spells the same \"at most\" idea with a second keyword."
+            }
+          ],
+          "tradeoff": "Effects gain a marker line above them; a leaf needs none."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T00:21:06.452Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-15T02:00:02.614Z"
+    },
+    {
+      "id": "D-EFFTYPE-KERNEL1",
+      "cardId": "c09kjhit",
+      "group": "effects",
+      "title": "The compiler builds in machine powers; Core declares the rest like a library",
+      "situation": "Jet has thirteen built-in effects. Some are things the machine does, such as network, files and the clock. Others are services built on those, such as databases and logging. Because a database is its own built-in effect, forbidding the network does not stop a database call that goes over the network. Packages also cannot define effects the way Core does. The vote decides which effects the compiler builds in. We recommend building in only the machine powers and declaring the rest in Core, the way any package would.",
+      "gist": "Which effects should the compiler build in, and which should Core declare like a library?",
+      "lesson": "An effect is a kind of power, such as network access. Some powers come from the machine: network, files, clock, randomness. Others are services built on them, like a database. If a service is declared over the machine powers it uses, forbidding the network also stops a database that talks over the network.",
+      "explainer": "",
+      "story": "Ana's offline report reads from the shop database. She writes `!Net` on it so it never waits on the network. Then the team moves the database to a server, and the report still compiles, because a database call is not a network call to the compiler.",
+      "inWild": "// Unison: the runtime builds in IO and Exception; libraries declare\n// their own abilities on top, and Remote is one of them.\nability Remote where\n  at : Location -> '{Remote} a -> a",
+      "detail": "Provenance. Folded into the D-EFFECT-LIMITS1 package ballot (card c09kjhit), which the owner rejected. Already ratified: the thirteen roots (D-EFF4/5, D-AUTHORITY-ROOTS1), the effect tree (D-EFFTREE1) and leaf declarations (D-EFFECT-DECL1=A). Also settled: the vocabulary is Jet source in Compiler/Prelude/Effects.jet (D-META-ONE1=A), and denials hold through calls (D-PROP1).\n\nProbe, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx. kernel_today.jet is today's program: `offline_count` under `-[!Net]>` calls a `-[DB]>` function and checks clean. db_net.jet shows the same with a stub body.\n\nReads with the related ballots. A needs D-EFFTYPE-USES1=A, which lets an effect declare what it may do. It matches D-EXTEND-ARCH1=A: Core uses the same forms packages use. D-EFFTYPE-TARGET1 takes the machine powers as the facts a target profile lists. D-EFFTYPE-GRANT1 grants these names unchanged.\n\nOpen detail inside A, not a vote: the exact caps for `Log` and `Secret` follow their Core drivers. A file logger reaches only FS; a collector also reaches Net.\n\nSide note for existing cards: a `DBConnection` has no query method. Even a first program must build a row policy and call `with_policy` to get a `DBScope` (kernel_today.jet; Core/Db/Db.jet:707-715). That is heavy for the beginner path.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Machine powers built in, services in Core",
+          "detail": "The compiler builds in what the machine does: network, files, terminal, clock, randomness, environment, processes, foreign code, graphics card and browser host. Core then declares databases, logging and secrets over those, with the same `#FX` line a package uses.\n\nUsers keep writing `-[DB]>` and `!DB`. What changes is that `!Net` now catches a database that talks to a server, while a local database file still passes.",
+          "technical": "Needs D-EFFTYPE-USES1=A. Compiler/Prelude/Effects.jet keeps the machine roots (Net, FS, IO, Time, Rand, Env, Exec, FFI, GPU, Browser; deny-only Mem, Panic). Core declares `#FX(Net, FS) effect DB`, `#FX(IO, FS, Net) effect Log` and `#FX(Env, FS, Net) effect Secret`, exported through the Prelude so rows keep bare names. Leaves (DB.Read, DB.Write) move with their parent.\n\nDenials keep checking real reach (D-PROP1), so each driver's real calls decide. A server driver written over `core.net` reaches Net. Core's SQLite driver calls C inside vouched `#Unsafe` gates (Core/Db/Db.jet:1374); those stay invisible to callers, as today. A driver over vouched C names its machine reach on its binding.",
+          "code": "// Core, written like any package (new)\n#FX(Net, FS)\neffect DB\n\n#FX(IO, FS, Net)\neffect Log\n\n// app: the beginner path, the same under every option\nuse core.db as db\n\nfn count(scope: DBScope) -[DB]> Int {\n    row :: scope.query_one(SQL{\"SELECT COUNT(*) AS n FROM sqlite_master\"}) ?? return -1\n    db.row_int(row, \"n\") ?? -1\n}\n\nfn run() {\n    conn :: db.open_memory()\n    everyone :: db.policy(\"person\", \"true\") ?? panic(\"policy\")\n    print(count(conn.with_policy(everyone, \"ana\")))\n}\n\n// app, expert path: this report must work offline\nfn offline_count(scope: DBScope) -[!Net]> Int {\n    count(scope)\n}        // new meaning: a server database is caught"
+        },
+        {
+          "key": "B",
+          "name": "Keep thirteen built-in roots",
+          "detail": "All thirteen effects stay built in, each its own switch. Forbidding one never forbids another.\n\nA team that wants an offline report must forbid both `Net` and `DB`, even when the database is a local file. A package that builds a service like Core's database cannot give it an effect of the same kind.",
+          "technical": "Status quo: D-EFF4/5 roots in Compiler/Prelude/Effects.jet. probe/fx/kernel_today.jet shows `-[!Net]>` calling `-[DB]>` checks clean.",
+          "code": "// Compiler/Prelude/Effects.jet, as today\neffect Net\neffect FS\neffect DB\neffect Log\n\n// app: the beginner path, the same under every option\nuse core.db as db\n\nfn count(scope: DBScope) -[DB]> Int {\n    row :: scope.query_one(SQL{\"SELECT COUNT(*) AS n FROM sqlite_master\"}) ?? return -1\n    db.row_int(row, \"n\") ?? -1\n}\n\nfn run() {\n    conn :: db.open_memory()\n    everyone :: db.policy(\"person\", \"true\") ?? panic(\"policy\")\n    print(count(conn.with_policy(everyone, \"ana\")))\n}\n\n// app, expert path: this report must work offline\nfn offline_count(scope: DBScope) -[!Net]> Int {\n    count(scope)\n}        // checks clean, even for a server"
+        },
+        {
+          "key": "C",
+          "name": "Everything in Core over foreign calls",
+          "detail": "The compiler builds in only foreign calls and memory. Core declares network, files and every other effect over foreign calls to the system.\n\nThis is the smallest list, but every input and output path now sits under foreign calls. Forbidding foreign code forbids everything, and the switches people use most, like network and files, become library choices rather than facts about the machine.",
+          "technical": "Compiler roots: FFI and deny-only Mem, Panic. Core declares the rest with `#FX(FFI)` or stacks. Package `authority:` and `--deny` lists stay valid but every root becomes a declared effect.",
+          "code": "// Core (new)\n#FX(FFI)\neffect Net\n\n#FX(FFI)\neffect FS\n\n#FX(Net, FS)\neffect DB\n\n// app: the beginner path, the same under every option\nuse core.db as db\n\nfn count(scope: DBScope) -[DB]> Int {\n    row :: scope.query_one(SQL{\"SELECT COUNT(*) AS n FROM sqlite_master\"}) ?? return -1\n    db.row_int(row, \"n\") ?? -1\n}\n\nfn run() {\n    conn :: db.open_memory()\n    everyone :: db.policy(\"person\", \"true\") ?? panic(\"policy\")\n    print(count(conn.with_policy(everyone, \"ana\")))\n}\n\n// app, expert path: this report must work offline\nfn offline_count(scope: DBScope) -[!Net]> Int {\n    count(scope)\n}        // new meaning: a server database is caught"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Unison",
+          "note": "A small built-in IO underneath; libraries declare abilities on top. Source: https://www.unison-lang.org/docs/fundamentals/abilities/",
+          "code": "ability Store where\n  get : Text -> Optional Text"
+        },
+        {
+          "lang": "Koka",
+          "note": "Built-in effects such as io, fsys, net, ndet; libraries add their own. Source: https://koka-lang.github.io/koka/doc/book.html",
+          "code": "fun fetch() : <net,exn> string"
+        },
+        {
+          "lang": "Deno",
+          "note": "Run permissions name machine powers only: net, read, write, env, run, ffi, sys. Source: https://docs.deno.com/runtime/fundamentals/security/",
+          "code": "deno run --allow-read --deny-net app.ts"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps every row users write today and makes `!Net` mean what people expect. Core's services become ordinary declarations, the same form packages use.",
+        "gains": [
+          "Denials follow the machine, not names.",
+          "One effect form for Core and packages."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B leaves `!Net` blind to database servers and keeps Core's effects out of packages' reach."
+          },
+          {
+            "key": "C",
+            "reason": "C hides every machine power under foreign calls and loses the simple switches."
+          }
+        ],
+        "tradeoff": "Core gains three short declarations; the compiler's list shrinks to machine powers."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main. A keeps machine powers in the compiler and declares DB, Log and Secret in Core, so a !Net denial catches a remote database; C-backed drivers must state their reach."
+      },
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx. `jet check kernel_today.jet` passes, which shows `!Net` does not cover `DB` today. Read Compiler/Prelude/Effects.jet in the dev worktree for today's root list.",
+      "surface": {
+        "gist": "Which effects should the compiler build in, and which should Core declare like a library?",
+        "lesson": "An effect is a kind of power, such as network access. Some powers come from the machine: network, files, clock, randomness. Others are services built on them, like a database. If a service is declared over the machine powers it uses, forbidding the network also stops a database that talks over the network.",
+        "trio": {
+          "current": {
+            "note": "Today `DB` is its own root, so `!Net` does not cover it.",
+            "code": "fn count(scope: DBScope) -[DB]> Int { … }\n\nfn offline_count(scope: DBScope) -[!Net]> Int {\n    count(scope)    // checks clean, even for a database server\n}"
+          },
+          "wild": {
+            "lang": "Unison",
+            "note": "Built-in IO and Exception sit underneath; libraries define abilities such as Remote and Storage on top. Source: https://www.unison-lang.org/docs/fundamentals/abilities/",
+            "code": "ability Store where\n  get : Text -> Optional Text\n  put : Text -> Text -> ()"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Machine powers built in, services in Core",
+            "gist": "The compiler knows the machine's powers; Core declares `DB`, `Log` and `Secret` over them.",
+            "gains": [
+              "`!Net` also stops a networked database.",
+              "Core's effects use the form packages use.",
+              "Rows keep today's names."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "// Core, written like any package (new)\n#FX(Net, FS)\neffect DB\n\n#FX(IO, FS, Net)\neffect Log"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep thirteen built-in roots",
+            "gist": "Every effect stays built into the compiler, as today.",
+            "gains": [
+              "No change for anyone.",
+              "Each root is a separate, simple switch."
+            ],
+            "losses": [
+              "`!Net` misses a database server.",
+              "Core has a kind of effect packages cannot make."
+            ],
+            "proposed": {
+              "code": "// Compiler/Prelude/Effects.jet, as today\neffect Net\neffect FS\neffect DB\neffect Log"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Everything in Core over foreign calls",
+            "gist": "The compiler knows only foreign calls and memory; Core declares every other effect.",
+            "gains": [
+              "The smallest compiler list.",
+              "Every effect uses the library form."
+            ],
+            "losses": [
+              "`!FFI` would forbid all input and output.",
+              "Runs and packages lose simple machine-level switches."
+            ],
+            "proposed": {
+              "code": "// Core (new)\n#FX(FFI)\neffect Net\n\n#FX(Net, FS)\neffect DB"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps every row users write today and makes `!Net` mean what people expect. Core's services become ordinary declarations, the same form packages use.",
+          "gains": [
+            "Denials follow the machine, not names.",
+            "One effect form for Core and packages."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B leaves `!Net` blind to database servers and keeps Core's effects out of packages' reach."
+            },
+            {
+              "key": "C",
+              "reason": "C hides every machine power under foreign calls and loses the simple switches."
+            }
+          ],
+          "tradeoff": "Core gains three short declarations; the compiler's list shrinks to machine powers."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T00:24:11.688Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-15T02:00:02.614Z"
+    },
+    {
+      "id": "D-EFFTYPE-TARGET1",
+      "cardId": "c09kjhit",
+      "group": "effects",
+      "title": "Each build's effect limit is read from its target profile; nothing new to write",
+      "situation": "Some builds run where the machine lacks things: a web page with no operating system has no files, and a small board may have no memory allocator. Jet already describes each such machine as a target profile with typed facts. Today those facts do not limit what code may do, so a list allocated under a profile with no allocator checks and builds clean. The vote decides where a build's effect limit comes from. We recommend reading it from the profile's facts, with nothing new to write.",
+      "gist": "Where should the effect limit for a no-OS web, GPU or board build come from?",
+      "lesson": "An effect is a kind of power, such as file access or allocating memory. A target profile lists what a machine has. If the profile says there is no allocator, code built for it must not allocate. Reading the limit from those facts means a machine is described once, and the compiler checks code against it.",
+      "explainer": "",
+      "story": "Ana's team ships a small price widget built for a web page with no operating system. Its profile says there is no allocator. A helper that builds a list of labels slipped in, the build passed, and the widget failed at load time.",
+      "inWild": "// Zig: target facts are values code can read, but nothing checks\n// that code avoids what the target lacks.\nconst builtin = @import(\"builtin\");\nif (builtin.os.tag == .freestanding) { … }",
+      "detail": "Provenance. Folded into the D-EFFECT-LIMITS1 package ballot (card c09kjhit), which the owner rejected. Reuses the earlier draft at ballots/out/new/D-EFFTYPE-TARGET1.json, with its fact-to-denial table. Already ratified: typed profile modules selected by `targets:` (D-TARGET-SURFACE1=A), facts as the source of truth (D-FREESTAND-FACTS1=A), and required allocator and panic facts (D-TARGET-ALLOC1=A).\n\nD-FREESTAND-FACTS1 rejected effects as the source of what a machine has. Here effects are only derived from facts, never written, so that decision holds.\n\nProbes, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx. target_today uses Examples/embedded/heap_free_core/package.jet (profile `web.no_os`, `runtime: \"core\"`). `use core.files` there is E1006 \"`core.files` needs `runtime: hosted`\". A list allocation checks clean, and `jet build run.jet` exits 0 with a host ELF binary. target_a/run.jet is option A's program and checks clean today.\n\nSide note for existing cards: `jet build --target=web.no_os run.jet` is E2104 \"`jet build --target=web.no_os` is not built yet\". Plain `jet build` in a `web.no_os` package produced a host ELF binary rather than refusing.\n\nReads with the related ballots. D-EFFTYPE-KERNEL1=A keeps the machine powers as compiler roots, which are exactly what profile facts map to. D-EFFECT-RUNGS1 and D-EFFTYPE-MODEL1 cap code by where it lives; this ballot caps it by where it runs. The two combine by intersection.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Read from the profile's facts",
+          "detail": "The package already selects its profile. Each fact the profile marks absent becomes a denial for that build: no allocator denies allocation, no sockets denies the network, no file system denies files.\n\nA breach is reported at the line, with the call path from the entry and the missing fact. Hover on the profile line, or `jet explain`, lists every derived denial with its fact.",
+          "technical": "Keeps D-TARGET-SURFACE1=A (typed profile modules selected by `targets:`) and D-FREESTAND-FACTS1=A (facts are the source of truth). Mapping: allocator absent gives `!Mem.Alloc`; sockets `!Net`; file system `!FS`; entropy `!Rand`; browser DOM `!Browser`; GPU `!GPU`; FFI `!FFI`.\n\nAlso: no byte sink gives `!IO`; no clocks `!Time`; no sleep `!Time.Wait`. Facts with no effect (startup, linker, regions, MMIO) map to nothing. Each artifact gets its own limit. Shared code that differs per build branches with `comptime if` on profile facts.",
+          "code": "// price_widget/package.jet: today's form\nname: \"price_widget\"\ntargets: { machine: { profile: \"web.no_os\" } }\nruntime: \"core\"\n\n// price_widget/run.jet: the expert path\nfn total(a: Int, b: Int) -> Int {\n    a + b\n}\n\nfn labels() -> [String] {\n    \"small large\".split(\" \").to_list()      // error (new): allocates; `web.no_os` has no allocator\n}\n\n// shop/run.jet: the beginner path, the same under every option.\n// A hosted program never names a profile.\nfn run() {\n    text :: read_file(\"prices.md\")\n    print(pricing.total(text))\n}"
+        },
+        {
+          "key": "B",
+          "name": "Written by the package",
+          "detail": "Each target entry in the package file gets a `deny:` list, written by the team. The profile's facts stay separate.\n\nThe limit is visible in one line. But the team repeats what the profile already says, and a denial left out is never checked.",
+          "technical": "New `deny:` field on `targets:` entries, checked like `authority.deny` but per artifact. Profile facts are not consulted.",
+          "code": "// price_widget/package.jet\nname: \"price_widget\"\ntargets: { machine: { profile: \"web.no_os\", deny: [Mem.Alloc, FS, Net] } }    // new field\nruntime: \"core\"\n\n// price_widget/run.jet: the expert path\nfn total(a: Int, b: Int) -> Int {\n    a + b\n}\n\nfn labels() -> [String] {\n    \"small large\".split(\" \").to_list()      // error only if `Mem.Alloc` was listed\n}\n\n// shop/run.jet: the beginner path, the same under every option.\n// A hosted program never names a profile.\nfn run() {\n    text :: read_file(\"prices.md\")\n    print(pricing.total(text))\n}"
+        },
+        {
+          "key": "C",
+          "name": "No effect limit",
+          "detail": "Keep what exists: `runtime:` refuses imports of whole libraries the machine cannot support. Anything finer, like one allocation, is not checked until link or load.\n\nNothing new to learn, but the widget story above keeps happening.",
+          "technical": "Status quo. probe/fx/target_today: `use core.files` under `runtime: \"core\"` is E1006; a list allocation under `web.no_os` checks and builds clean.",
+          "code": "// price_widget/package.jet: today's form\nname: \"price_widget\"\ntargets: { machine: { profile: \"web.no_os\" } }\nruntime: \"core\"\n\n// price_widget/run.jet: the expert path\nfn total(a: Int, b: Int) -> Int {\n    a + b\n}\n\nfn labels() -> [String] {\n    \"small large\".split(\" \").to_list()      // checks and builds clean today\n}\n\n// shop/run.jet: the beginner path, the same under every option.\n// A hosted program never names a profile.\nfn run() {\n    text :: read_file(\"prices.md\")\n    print(pricing.total(text))\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Platform facts are `cfg` values; `no_std` crates fail at link time when they reach for an allocator. Source: https://doc.rust-lang.org/reference/conditional-compilation.html",
+          "code": "#![no_std]\n#[cfg(target_os = \"none\")]\nfn init() { … }"
+        },
+        {
+          "lang": "Zig",
+          "note": "Target facts are compile-time values; using a missing feature fails when it is reached. Source: https://ziglang.org/documentation/master/#Targets",
+          "code": "if (builtin.os.tag == .freestanding) { … }"
+        },
+        {
+          "lang": "CUDA",
+          "note": "Device-code rules are hard-coded one by one in the compiler. Source: https://docs.nvidia.com/cuda/cuda-c-programming-guide/",
+          "code": "__device__ void f() { malloc(8); }   // restricted"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A turns facts the team already writes into checks, with no new syntax. Each machine is described once, and errors point at the line and the missing fact.",
+        "gains": [
+          "Machine limits are checked at compile time.",
+          "No second list to keep in step."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes teams repeat the profile by hand, and a forgotten line is never checked."
+          },
+          {
+            "key": "C",
+            "reason": "C leaves allocation and similar breaches to fail at load time."
+          }
+        ],
+        "tradeoff": "The derived limit is not one written line; hover and `jet explain` list it."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx/target_today. `jet check run.jet` passes despite allocating under `web.no_os`; `jet build run.jet` exits 0.\n\n`jet build --target=web.no_os run.jet` gives E2104. In target_a, `jet check run.jet` passes.",
+      "surface": {
+        "gist": "Where should the effect limit for a no-OS web, GPU or board build come from?",
+        "lesson": "An effect is a kind of power, such as file access or allocating memory. A target profile lists what a machine has. If the profile says there is no allocator, code built for it must not allocate. Reading the limit from those facts means a machine is described once, and the compiler checks code against it.",
+        "trio": {
+          "current": {
+            "note": "Today the no-allocator profile does not stop allocation.",
+            "code": "// price_widget/package.jet: today's form\nname: \"price_widget\"\ntargets: { machine: { profile: \"web.no_os\" } }\nruntime: \"core\"\n\n// run.jet\nfn labels() -> [String] {\n    \"small large\".split(\" \").to_list()    // checks and builds clean\n}"
+          },
+          "wild": {
+            "lang": "CUDA",
+            "note": "Device code may not use host-only features; the compiler hard-codes each rule. Source: https://docs.nvidia.com/cuda/cuda-c-programming-guide/",
+            "code": "__global__ void kernel() {\n    std::vector<int> v;   // error: host function in device code\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Read from the profile's facts",
+            "gist": "Each fact the profile lacks becomes a denial for that build.",
+            "gains": [
+              "Nothing new to write.",
+              "One description of each machine.",
+              "Errors name the missing fact."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "// price_widget/package.jet: today's form\nname: \"price_widget\"\ntargets: { machine: { profile: \"web.no_os\" } }\nruntime: \"core\"\n\n// error (new): `labels` allocates, and profile `web.no_os` has no allocator\n//   path: run -> labels"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Written by the package",
+            "gist": "Each target entry lists its own denials by hand.",
+            "gains": [
+              "The limit is one visible line.",
+              "A package may deny more than the profile."
+            ],
+            "losses": [
+              "The same fact is written twice.",
+              "A forgotten denial passes silently."
+            ],
+            "proposed": {
+              "code": "// package.jet (new field)\ntargets: { machine: { profile: \"web.no_os\", deny: [Mem.Alloc, FS, Net] } }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No effect limit",
+            "gist": "Keep today's import gate; missing machine features fail at link or load.",
+            "gains": [
+              "No new checks.",
+              "Import errors already catch whole libraries."
+            ],
+            "losses": [
+              "A list on a board with no allocator builds clean.",
+              "Failures surface at load time, far from the line."
+            ],
+            "proposed": {
+              "code": "// price_widget/package.jet: today's form\nname: \"price_widget\"\ntargets: { machine: { profile: \"web.no_os\" } }\nruntime: \"core\"\n\n// `use core.files` is refused (E1006);\n// allocation is not checked"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A turns facts the team already writes into checks, with no new syntax. Each machine is described once, and errors point at the line and the missing fact.",
+          "gains": [
+            "Machine limits are checked at compile time.",
+            "No second list to keep in step."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B makes teams repeat the profile by hand, and a forgotten line is never checked."
+            },
+            {
+              "key": "C",
+              "reason": "C leaves allocation and similar breaches to fail at load time."
+            }
+          ],
+          "tradeoff": "The derived limit is not one written line; hover and `jet explain` list it."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T00:26:59.386Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-15T02:00:02.614Z"
+    },
+    {
+      "id": "D-EFFTYPE-GRANT1",
+      "cardId": "c09kjhit",
+      "group": "effects",
+      "title": "`jet add` writes each dependency's grant line; an upgrade that needs more stops with the call path",
+      "situation": "Attacks often arrive in an upgrade: a trusted library's new version quietly starts using the network. Jet already has a place in package.jet for what each dependency may do, but nothing writes it, and the compiler refuses any filled-in line today. So a project that allows the network for its own code lets every dependency use it too. The vote decides who writes each dependency's line. We recommend that `jet add` writes it, asking only when the project would gain a power.",
+      "gist": "Should `jet add` write what each dependency may do into package.jet, ask first, or leave it?",
+      "lesson": "An effect is a kind of power, such as network access. A grant line in package.jet says which powers one dependency may use. If the tool writes that line when you add the dependency, a later version that wants more power stops the build. It names the call that needs the power and offers one command to allow it.",
+      "explainer": "",
+      "story": "Ana adds a JSON library to her shop. Months later, `jet update` pulls a new version that sends data to a server. Her shop uses the network itself, so nothing in today's package file notices the library's new reach.",
+      "inWild": "// LavaMoat (npm): writes a per-package policy from observed use, then enforces it.\n$ npx lavamoat app.js --autopolicy\n// lavamoat/node/policy.json\n{ \"resources\": { \"json-lib\": { \"globals\": {} } } }",
+      "detail": "Provenance. Folded into the D-EFFECT-LIMITS1 package ballot (card c09kjhit), which the owner rejected. Reuses the earlier draft at ballots/out/new/D-EFFTYPE-GRANT1.json. Already ratified: per-dependency provenance in the lock and opt-in enforcement (D-EFFBUDGET1=D), the `grants:` field (D-EFFBUDGET1), and the confirmation prompt shape (D-SCRIPT-CONFIRM1=A).\n\nProbe, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx/grant_today. A package.jet with `grants: { json: [] }` gives E1221 \"`authority.grants` is not supported by the current compiler package-policy boundary\". Today's Examples/features/packages/effect_budget writes only an empty `grants: {}`.\n\nMeaning of a grant line. D-EFFBUDGET1 calls a grant a per-dependency escape from `allow`. Under A, the line is that dependency's whole limit, which covers the escape case and also pins a dependency below `allow`. No project has a non-empty line today, so nothing changes meaning.\n\nWhy this matters. Upgrade attacks: event-stream (2018) added a payload through a new dependency; ua-parser-js (2021) and xz-utils (2024) shipped malicious releases of trusted packages.\n\nReads with the related ballots. D-EFFTYPE-KERNEL1 fixes the names a grant line lists. D-SCRIPT-DESIGNATE1, in the project group, covers what a script grants itself. D-FFI-UNSAFE1 uses the same grant line for a binder's build-time tool.",
+      "options": [
+        {
+          "key": "A",
+          "name": "`jet add` writes the line",
+          "detail": "`jet add json` works out what the library uses and writes `json: []` under `grants:`. If that fits what the project already allows, nothing is asked. If it needs a new power, a terminal asks once; without a terminal, the command stops and prints the exact flag to pass.\n\nEach later build and `jet update` checks every granted dependency. A version that reaches further stops with the call path and a one-command fix.",
+          "technical": "Under `authority.grants`, a listed dependency's limit is its line, replacing `allow` for that dependency. Today non-empty grants are refused (Compiler/JetDriver/Source/Driver/Loader.jet:387-388), so no project changes meaning. Writing grants alone does not turn on `allow` enforcement for the project's own code (D-EFFBUDGET1=D keeps enforcement opt-in).\n\nPrompt shape follows D-SCRIPT-CONFIRM1=A. `--allow` reuses the run flag spelling (`jet run --allow=FS.Read`). Hand-added dependencies without a line keep today's behavior: provenance in the lock. Lines are one per dependency, sorted.",
+          "code": "// beginner path, the same under every option\n$ jet add json\nadded json 1.4.2: no effects\n\n// shop/package.jet\nname: \"shop\"\nauthority: {\n    allow: [FS, IO],\n    grants: {\n        json: [],\n        sql: [Net],\n    },\n}\n\n// expert path: an upgrade that reaches further\n$ jet update json\nerror: json 1.5.0 uses Net, which shop does not grant it\n  path: json.parse -> json.fetch_schema -> net.dial\n  fix: keep 1.4.2, or `jet add json@1.5.0 --allow Net`"
+        },
+        {
+          "key": "B",
+          "name": "Ask on every add",
+          "detail": "Like A, but `jet add` always asks before writing, even when the library needs nothing new.\n\nThe question carries no information when the answer is always yes, so people learn to press Enter. Non-interactive use needs a flag on every add.",
+          "technical": "Same grant semantics as A. Adds a confirmation on every `jet add`; `--yes` for scripts.",
+          "code": "// beginner path, the same under every option\n$ jet add json\njson 1.4.2 uses no effects. Record this grant? [Y/n] y\n\n// shop/package.jet\nname: \"shop\"\nauthority: {\n    allow: [FS, IO],\n    grants: {\n        json: [],\n        sql: [Net],\n    },\n}\n\n// expert path\n$ jet update json\nerror: json 1.5.0 uses Net, which shop does not grant it"
+        },
+        {
+          "key": "C",
+          "name": "Never write",
+          "detail": "Keep today's rule: the lock records what each dependency uses, and grant lines are written by hand.\n\nThe lock shows the change after the fact, if someone reads the diff. Nothing stops the build.",
+          "technical": "Status quo for D-EFFBUDGET1=D provenance; non-empty grants become writable by hand only.",
+          "code": "// beginner path, the same under every option\n$ jet add json\nadded json 1.4.2\n\n// shop/package.jet: no grant lines unless written by hand\nname: \"shop\"\nauthority: {\n    allow: [FS, IO, Net],\n}\n\n// expert path\n$ jet update json        // 1.5.0 now uses the network: passes"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "LavaMoat",
+          "note": "Per-package policy written from observed use, then enforced. Source: https://github.com/LavaMoat/LavaMoat",
+          "code": "$ npx lavamoat app.js --autopolicy"
+        },
+        {
+          "lang": "Deno",
+          "note": "Asks at run time for each new permission, for the whole program rather than per package. Source: https://docs.deno.com/runtime/fundamentals/security/",
+          "code": "┌ Deno requests net access to \"example.com\".\n└ Allow? [y/n/A]"
+        },
+        {
+          "lang": "Go Capslock",
+          "note": "Reports the capabilities each package reaches, for review in CI; it does not block. Source: https://github.com/google/capslock",
+          "code": "$ capslock -packages ./..."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A writes the line nobody would write by hand, asks only when a question means something, and turns every upgrade into a check. It uses the `grants:` field the package file already has.",
+        "gains": [
+          "Upgrade attacks stop at the build.",
+          "Beginners are asked nothing for ordinary libraries."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B asks a question whose answer is almost always yes, so it trains people to skip it."
+          },
+          {
+            "key": "C",
+            "reason": "C leaves the line unwritten in practice, so upgrades pass unchecked."
+          }
+        ],
+        "tradeoff": "package.jet gains one short, sorted line per dependency."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree. In $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx/grant_today, `jet check run.jet` gives E1221 for the non-empty grant line. Read Compiler/JetDriver/Source/Driver/Loader.jet lines 380-390 for the refusal.",
+      "surface": {
+        "gist": "Should `jet add` write what each dependency may do into package.jet, ask first, or leave it?",
+        "lesson": "An effect is a kind of power, such as network access. A grant line in package.jet says which powers one dependency may use. If the tool writes that line when you add the dependency, a later version that wants more power stops the build. It names the call that needs the power and offers one command to allow it.",
+        "trio": {
+          "current": {
+            "note": "Today a filled-in grant line is refused, so dependencies share the project's powers.",
+            "code": "// package.jet\nauthority: {\n    allow: [FS, IO, Mem.Alloc],\n    grants: { json: [] },\n}\n// E1221: `authority.grants` is not supported by the\n//        current compiler package-policy boundary"
+          },
+          "wild": {
+            "lang": "LavaMoat",
+            "note": "Generates a per-package policy from what each package uses, then enforces it on later runs. Source: https://github.com/LavaMoat/LavaMoat",
+            "code": "$ npx lavamoat app.js --autopolicy\n$ npx lavamoat app.js   # enforces policy.json"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`jet add` writes the line",
+            "gist": "Adding a dependency writes its grant; a question comes only for new power.",
+            "gains": [
+              "Beginners see one printed line.",
+              "Every later upgrade is checked.",
+              "Grants are visible in review."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "$ jet add json\nadded json 1.4.2: no effects\n\n$ jet update json\nerror: json 1.5.0 uses Net, which shop does not grant it\n  path: json.parse -> json.fetch_schema -> net.dial\n  fix: keep 1.4.2, or `jet add json@1.5.0 --allow Net`"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Ask on every add",
+            "gist": "Show the effects and ask before writing each line.",
+            "gains": [
+              "Every grant is a conscious choice.",
+              "Same upgrade check as A."
+            ],
+            "losses": [
+              "Beginners answer a question for every library.",
+              "Scripts and CI need a flag every time."
+            ],
+            "proposed": {
+              "code": "$ jet add json\njson 1.4.2 uses no effects. Record this grant? [Y/n]"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Never write",
+            "gist": "Record effects in the lock file; grant lines stay hand-written.",
+            "gains": [
+              "package.jet changes only by hand.",
+              "No new tool behavior."
+            ],
+            "losses": [
+              "Upgrades that reach further pass silently.",
+              "Few teams will write the lines by hand."
+            ],
+            "proposed": {
+              "code": "$ jet add json\nadded json 1.4.2\n$ jet update json        # 1.5.0 now uses the network: passes"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A writes the line nobody would write by hand, asks only when a question means something, and turns every upgrade into a check. It uses the `grants:` field the package file already has.",
+          "gains": [
+            "Upgrade attacks stop at the build.",
+            "Beginners are asked nothing for ordinary libraries."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B asks a question whose answer is almost always yes, so it trains people to skip it."
+            },
+            {
+              "key": "C",
+              "reason": "C leaves the line unwritten in practice, so upgrades pass unchecked."
+            }
+          ],
+          "tradeoff": "package.jet gains one short, sorted line per dependency."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T00:28:26.899Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-15T02:00:02.614Z"
+    },
+    {
+      "id": "D-EFFTYPE-MODVALUE1",
+      "cardId": "c09kjhit",
+      "group": "other",
+      "title": "Where does a module's and a package's metadata live, and how do you set it?",
+      "situation": "A package and a module each have a body: metadata fields first, then bindings. package.jet and module.jet are bodies with implicit braces; in any other file you write name :: package { ... } or name :: module { ... } and the metadata goes inside the braces. Every example uses the planned binding form, where every named thing is a constant bound with ::. The options differ only in how you read the fields.",
+      "gist": "Should a module's metadata fields be read directly, as pricing.category, or only through #module(pricing)?",
+      "lesson": "A module groups functions under one name, such as pricing. A package is a project with a package.jet file. Both have metadata: a name, a file, docs, a version and a license. This vote decides how you set and read it.",
+      "explainer": "",
+      "story": "Mia's shop has a pricing module and an old discount module she wants to retire. Her About screen shows her version, authors and the version of the json package she uses. She marks discount as deprecated so its callers get a warning.",
+      "inWild": "Python: a module keeps its metadata in reserved double-underscore names, such as __name__, __doc__ and __file__.\nRust: Cargo exposes package fields such as CARGO_PKG_VERSION as text, one macro read per field.\nJai: a module is a constant, Basic :: #import \"Basic\", and module settings are written where it is imported.",
+      "detail": "YOUR RULE\n\nA package in package.jet and a module in module.jet are implicitly wrapped in braces: the whole file is the body. A package or module written in any other file wraps its body in braces, as name :: package { ... } or name :: module { ... }. The metadata and optional fields go in the body, first, followed by the bindings. Both options follow this rule exactly; they differ only in how you read the fields.\n\nTHE FORM EVERY EXAMPLE USES\n\nD-DECL-BINDING1=B is ratified: every named thing is a constant bound with ::. A function is total :: fn(text: String) -> Int { ... }, a type is Module :: struct { ... }, and a module bound in a file is discount :: module { ... }. The file-module line, module pricing, stays as that ruling kept it, and finds pricing.jet or pricing/module.jet as today. Lambdas are fn(n) { n + 1 } (D-LAMBDA-SHAPE1=C). None of the proposed forms is built yet, so every proposed example is marked not built.\n\nTHE BODY\n\nA package body or module body holds field lines first, then bindings. A field line is name: value, the line form package.jet already uses. A binding is name :: value or name := value.\n\n- package.jet: the file is the package body. Its field lines are today's package.jet lines.\n\n- pricing/module.jet: the file is the module body. category: \"billing\" at its top sets a field.\n\n- Any other file: discount :: module { category: \"billing\" ... total :: fn ... } and tool :: package { name: \"tool\" ... }. The fields go inside the braces, first.\n\nA module's fields are those of the built-in type Module: name, file, doc, package, maturity, category and deprecated. name, file, doc and package are filled by the compiler. maturity, category and deprecated have defaults, so you opt in only to the ones you want. A package's fields are the Package fields package.jet has today, plus authors.\n\nWHAT A MEANS\n\nThe fields are the module's own. You read pricing.category, and describe(pricing) passes the module to a function that takes a Module. You read your own package as #package.version and a dependency's as json.package.version.\n\nWHY NOT B, READ THROUGH #module\n\nB writes the bodies and field lines exactly as A, but reads a module's fields only as #module(pricing).category. A module member may then use any name, so nothing is renamed. The cost is a second, longer read form, and a module no longer passes as a Module itself.\n\nTHE CLASH RULE IN A, EXACTLY\n\nIn every module body, the seven names name, file, doc, package, maturity, category and deprecated are fields. A binding in a module body with one of those names is the generic duplicate-name error, E0105, which lists the module's fields.\n\nNothing else is touched: locals, parameters, struct fields, methods, types and struct members may use all seven names. Package fields never clash, because they are read through package or #package. The list is closed; your own metadata is an ordinary constant, such as OWNER :: \"billing team\".\n\nToday 9 module-level items use name or file, out of 59,105, including Core/Files/Path.jet:102 and Core/Sys/Sys.jet:286; jet fix renames them and their callers once.\n\nFIELD LINES\n\nField lines come first in the body: at the top of package.jet or module.jet, after the /// comment, or right after the opening brace. Each field is written at most once, and the value must have the field's type, so category: 3 is a type error.\n\nWriting a compiler-filled field, such as name: \"x\", is the generic error for a read-only field. Any other name, such as limit: 5, is the generic error that lists the legal forms: name :: value, name := value, or a field line.\n\nEDGE CASES\n\n- deprecated makes every use from another module warn, as #Deprecated warns today. It never fails the build.\n\n- A module's doc is the /// comment at the top of module.jet, or the one above name :: module { ... }.\n\n- A function that takes Module sees only the seven fields, as a trait value sees only its trait's members.\n\n- A dependency's Package is read-only. json.package.authority shows json's rules; only json's own build applies them.\n\n- Old package.jet files keep working, because every new field has a default.\n\n- Module and Package live in core.meta, not the Prelude. Reading their fields needs no import; naming the type does, as run.jet's use line shows.\n\n- Every field is known while building. Metadata ships in the program only where code reads it.\n\nBEGINNER AND EXPERT\n\nA beginner writes no field lines in a module, because every field has a default, and prints #package.version on an About screen. An expert opts in to category, maturity or deprecated and passes modules to tools that take a Module.\n\nWHAT RUNS TODAY\n\nProbes are in $JET_SCRATCH_ROOT/lanes/Research/ballots-2026-11-05/modvalue and modvalue3, run with the pinned compiler (jet@0.0.1#006bccd5).\n\n- f01 and f05: a category: \"billing\" line is an error today, at file top and inside a module. The line form is free.\n\n- f02 and f03: square :: fn(...) and pricing :: module { ... } are not built yet; both are parse errors today.\n\n- f07: a repeated module-level name is E0105, \"defined twice\".\n\n- m01_today prints 3, standard rules, m01_today and 0.0.0. Only $package.name and $package.version are readable; $package.license is E0107.\n\n- Today module pricing finds pricing.jet, then pricing/module.jet (Compiler/JetDriver Loader.jet:2276-2287).\n\nRATIFIED DECISIONS IT TOUCHES\n\nAll code is in D-DECL-BINDING1=B and D-LAMBDA-SHAPE1=C form. Both options use D-ECO-FILEROOT1 for the Package value. B adds #module(m) beside the ratified #package (D-META-HASH1=A). D-MARK-META1=B's law that behavior-free metadata is a #Meta field still holds for functions and types; for packages and modules the metadata is a field of the body. Choice point C2 of Docs/proposals/effect-types-2026-10-29.md is answered: modules are first-class values.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A module's fields are read directly",
+          "detail": "A package or module body holds its metadata fields first: implicit braces in package.jet and module.jet, explicit braces in any other file. You read pricing.category, and a module passes as a Module. The seven field names are taken in module bodies, so 9 items are renamed once.",
+          "technical": "Sema gives each module the fields of core.meta.Module, filled from the file or binding, owning package, /// comment and the body's field lines. A field line is name: value at the top of a body, before any binding, checked against the field type. A binding in a module body named like a field is E0105. Package is PackageFacts' fields plus authors. #package is that value. All values are known while building.",
+          "code": "// proposed (A), not built. Every named thing is a constant bound with ::, as D-DECL-BINDING1=B ratified.\n// The body of a package or module holds its metadata fields first, then its bindings.\n// package.jet and module.jet are bodies with implicit braces; any other file wraps the body in braces.\n// Three files plus the built-in types; run.jet prints the lines in its comments.\n\n// ===== core.meta: the two built-in metadata types =====\nModule :: struct {\n    name: String                      // set by the compiler: the module's name\n    file: String                      // set by the compiler: its file, from the package root\n    doc: String                       // set by the compiler: the /// comment above it, or \"\"\n    package: Package                  // set by the compiler: the package that owns it\n    maturity: Maturity{.Tested}       // yours to set: .Experimental, .Tested or .Hardened\n    category: String{\"\"}              // yours to set: a group name for docs and tools\n    deprecated: Deprecated{none}      // yours to set: uses from other modules warn\n}\n\nPackage :: struct {                   // every package.jet field, with today's defaults\n    name: String\n    version: String{\"0.0.0\"}\n    description: String{none}\n    license: String{none}\n    authors: [String]{[String]{}}     // new: the one field package.jet lacks today\n    deps: [String: DepSpec]{[String: DepSpec]{}}\n    // edition, jet, repository, runtime, allocator, outputs, defaults, configs,\n    // authority and policy keep today's types and defaults.\n}\n\n// ===== package.jet: the whole file is the package's body, so its braces are implicit =====\nname: \"shop\"\nversion: \"0.3.0\"\nlicense: \"MIT\"\nauthors: [\"Mia Chen\"]\ndeps: {\n    json: \"1.4.2\",\n}\n\n// ===== pricing/module.jet: the whole file is the module's body, so its braces are implicit =====\n/// Price rules for the shop.\ncategory: \"billing\"                   // opt in: every field not written keeps its default\n\ntotal :: fn(text: String) -> Int { text.len() }\n\n// ===== run.jet: any other file wraps a module's body in braces =====\nuse json\nuse core.meta.[Module]                // describe names the type, so it imports it\nmodule pricing                        // loads pricing/module.jet\n\n/// Old discount rules, kept for one release.\ndiscount :: module {\n    category: \"billing\"               // metadata fields come first, inside the braces\n    maturity: .Experimental\n    deprecated: Deprecated{since: \"0.3.0\", use: \"pricing\"}\n\n    total :: fn(text: String) -> Int { text.len() - 1 }\n}\n\ndescribe :: fn(m: Module) -> String { \"{m.name} ({m.category}, {m.maturity})\" }\n\nrun :: fn() {\n    print(pricing.total(\"abc\"))           // 3\n    print(pricing.category)               // billing\n    print(pricing.doc)                    // Price rules for the shop.\n    print(pricing.file)                   // pricing/module.jet\n    print(discount.file)                  // run.jet\n    print(describe(pricing))              // pricing (billing, Tested): a module is a Module value\n    print(describe(discount))             // discount (billing, Experimental)\n    print(discount.total(\"abc\"))          // 2, and the build warns: discount is deprecated since 0.3.0; use pricing\n    print(#package.version)               // 0.3.0: the package this line is in\n    print(#package.authors)               // [Mia Chen]\n    print(json.package.version)           // 1.4.2: a dependency's version\n}\n\n// ===== another program: tool.jet, a one-file package with no package.jet =====\ntool :: package {\n    name: \"tool\"                      // the package's fields go inside its braces\n    version: \"0.1.0\"\n\n    run :: fn() { print(#package.version) }   // 0.1.0\n}\n"
+        },
+        {
+          "key": "B",
+          "name": "Same bodies, fields read only through #module",
+          "detail": "Bodies and field lines are exactly as in A, but a module's fields are read as #module(pricing).category. A module member may use any name, so nothing is renamed. Every outside read is longer, and a module does not pass as a Module itself.",
+          "technical": "As A for bodies, field lines and types. The fields are not members of the module type. #module(m) is a new form that returns m's Module value; bare #module is the module where it is written. Nothing is reserved.",
+          "code": "// proposed (B), not built. Every named thing is a constant bound with ::, as D-DECL-BINDING1=B ratified.\n// Bodies and field lines are exactly as in A; the fields are read only through #module.\n// Three files plus the built-in types; run.jet prints the lines in its comments.\n\n// ===== core.meta: the two built-in metadata types =====\nModule :: struct {\n    name: String                      // set by the compiler: the module's name\n    file: String                      // set by the compiler: its file, from the package root\n    doc: String                       // set by the compiler: the /// comment above it, or \"\"\n    package: Package                  // set by the compiler: the package that owns it\n    maturity: Maturity{.Tested}       // yours to set: .Experimental, .Tested or .Hardened\n    category: String{\"\"}              // yours to set: a group name for docs and tools\n    deprecated: Deprecated{none}      // yours to set: uses from other modules warn\n}\n\nPackage :: struct {                   // every package.jet field, with today's defaults\n    name: String\n    version: String{\"0.0.0\"}\n    description: String{none}\n    license: String{none}\n    authors: [String]{[String]{}}     // new: the one field package.jet lacks today\n    deps: [String: DepSpec]{[String: DepSpec]{}}\n    // edition, jet, repository, runtime, allocator, outputs, defaults, configs,\n    // authority and policy keep today's types and defaults.\n}\n\n// ===== package.jet: the whole file is the package's body, so its braces are implicit =====\nname: \"shop\"\nversion: \"0.3.0\"\nlicense: \"MIT\"\nauthors: [\"Mia Chen\"]\ndeps: {\n    json: \"1.4.2\",\n}\n\n// ===== pricing/module.jet: the whole file is the module's body, so its braces are implicit =====\n/// Price rules for the shop.\ncategory: \"billing\"                   // opt in: every field not written keeps its default\n\nname :: fn() -> String { \"standard rules\" }   // yours: no clash with the name field\ntotal :: fn(text: String) -> Int { text.len() }\n\n// ===== run.jet: any other file wraps a module's body in braces =====\nuse json\nuse core.meta.[Module]\nmodule pricing                        // loads pricing/module.jet\n\n/// Old discount rules, kept for one release.\ndiscount :: module {\n    category: \"billing\"               // metadata fields come first, inside the braces\n    maturity: .Experimental\n    deprecated: Deprecated{since: \"0.3.0\", use: \"pricing\"}\n\n    total :: fn(text: String) -> Int { text.len() - 1 }\n}\n\ndescribe :: fn(m: Module) -> String { \"{m.name} ({m.category}, {m.maturity})\" }\n\nrun :: fn() {\n    print(pricing.total(\"abc\"))               // 3\n    print(pricing.name())                     // standard rules\n    print(#module(pricing).category)          // billing\n    print(#module(pricing).doc)               // Price rules for the shop.\n    print(describe(#module(pricing)))         // pricing (billing, Tested)\n    print(describe(#module(discount)))        // discount (billing, Experimental)\n    print(discount.total(\"abc\"))              // 2, and the build warns: discount is deprecated since 0.3.0; use pricing\n    print(#package.version)                   // 0.3.0\n    print(json.package.version)               // 1.4.2\n}\n"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Python reserves double-underscore names for module metadata, a naming rule like A's taken names. This file prints the three lines shown.",
+          "code": "\"\"\"Price rules for the shop.\"\"\"\n\n\ndef total(text):\n    return len(text)\n\n\nprint(total(\"abc\"))   # 3\nprint(__name__)       # __main__\nprint(__doc__)        # Price rules for the shop."
+        },
+        {
+          "lang": "Rust",
+          "note": "Cargo exposes package fields as text, one macro per field. Code cannot read a module's docs.",
+          "code": "// Cargo.toml has name = \"shop\" and version = \"0.3.0\".\nfn main() {\n    println!(\"{} {}\", env!(\"CARGO_PKG_NAME\"), env!(\"CARGO_PKG_VERSION\")); // shop 0.3.0\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "One mechanism: the metadata are the body's own typed fields with defaults, written first in the body and read as plain fields. A module then passes as a Module value.",
+        "gains": [
+          "Package and module metadata are typed fields with defaults, written first in the body.",
+          "One body rule: implicit braces in package.jet and module.jet, explicit braces anywhere else.",
+          "One plain read, pricing.category, the same as any field."
+        ],
+        "losses": [
+          {
+            "loss": "Seven field names are taken at module level, so 9 items are renamed once today.",
+            "mitigation": "Irreducible for direct reads; jet fix renames them, and the list is closed."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B frees the seven names, but every outside read becomes #module(pricing), a second form."
+          }
+        ],
+        "tradeoff": "Seven names taken in module bodies, for metadata you read like any field."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main. Every example now follows the owner's body rule: implicit braces in package.jet and module.jet, braces in any other file, metadata first. C wrote metadata as markers outside the body, which that rule excludes, so it was removed."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a module's metadata fields be read directly, as pricing.category?",
+        "lesson": "A package or module body holds metadata fields first, then bindings. package.jet and module.jet have implicit braces; any other file writes name :: module { ... }.",
+        "trio": {
+          "current": {
+            "note": "Today a module is only a name, and only the package name and version are readable. This file runs, in today's form.",
+            "code": "module pricing {\n    fn total(text: String) -> Int { text.len() }\n    fn name() -> String { \"standard rules\" }\n}\n\nNAME :: comptime { $package.name }\nVERSION :: comptime { $package.version }\n\nfn run() {\n    print(pricing.total(\"abc\"))      // 3\n    print(pricing.name())            // standard rules\n    print(NAME)                      // m01_today\n    print(VERSION)                   // 0.0.0\n}"
+          },
+          "wild": {
+            "lang": "Python",
+            "note": "Python reserves double-underscore names for module metadata.",
+            "code": "\"\"\"Price rules for the shop.\"\"\"\n\n\ndef total(text):\n    return len(text)\n\n\nprint(total(\"abc\"))   # 3\nprint(__name__)       # __main__\nprint(__doc__)        # Price rules for the shop."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Read directly",
+            "gist": "Fields first in the body; read pricing.category.",
+            "gains": [
+              "Typed fields with defaults.",
+              "One plain read."
+            ],
+            "losses": [
+              "Seven names taken in module bodies."
+            ],
+            "proposed": {
+              "code": "// pricing/module.jet: the file is the body, braces implicit (proposed, not built)\ncategory: \"billing\"                        // metadata first\ntotal :: fn(text: String) -> Int { text.len() }\n\n// run.jet: another file, so the body goes in braces\nmodule pricing\ndiscount :: module {\n    maturity: .Experimental                // metadata first, inside the braces\n    total :: fn(text: String) -> Int { text.len() - 1 }\n}\nrun :: fn() {\n    print(pricing.category)                // billing\n    print(discount.maturity)               // Experimental\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Read through #module",
+            "gist": "Same bodies; read #module(pricing).category.",
+            "gains": [
+              "No names taken."
+            ],
+            "losses": [
+              "A second, longer read form."
+            ],
+            "proposed": {
+              "code": "// pricing/module.jet: the file is the body, braces implicit (proposed, not built)\ncategory: \"billing\"                        // metadata first\nname :: fn() -> String { \"standard rules\" } // yours: no clash\n\n// run.jet: another file, so the body goes in braces\nmodule pricing\ndiscount :: module {\n    maturity: .Experimental                // metadata first, inside the braces\n    total :: fn(text: String) -> Int { text.len() - 1 }\n}\nrun :: fn() {\n    print(#module(pricing).category)       // billing\n    print(#module(discount).maturity)      // Experimental\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One mechanism: metadata are the body's own typed fields, read like any field.",
+          "gains": [
+            "Typed fields with defaults, opt-in.",
+            "One body rule, one plain read."
+          ],
+          "losses": [
+            {
+              "loss": "Seven names taken at module level.",
+              "mitigation": "Irreducible for direct reads; jet fix renames 9 items once."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Every outside read needs #module(pricing)."
+            }
+          ],
+          "tradeoff": "Seven names taken, for plain field reads."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-04T14:31:47.426Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-05",
+      "retiredAt": "2026-11-15T02:00:02.614Z"
+    },
+    {
+      "id": "D-EFFECT-ARGS1",
+      "cardId": "c09kjhit",
+      "group": "effects",
+      "title": "Effect arguments name a scope, such as a folder, a host or a device, with one covers rule from Core's scope types",
+      "situation": "Ratified D-DECL-TYPES1=A makes an effect a struct whose fields carry constant data, matched by equality. In installment 3 Main proposed one covers rule, so rows, grants and denials share one spelling, such as FS.Read(\"templates/\"). That question is still open with you.\n\nBallotReview3 marked the posted draft NOT CLEAN: an arbitrary covers function has no sound laws, and memory budgets are not scopes. This ballot keeps arguments to scopes and leaves budgets as they are. Keeping equality only is option E.",
+      "gist": "Should effect arguments name scopes, a folder, a host or a device, with one covers rule for rows, grants and denials?",
+      "lesson": "An effect says what a function may do, such as read files. Today it cannot say which files. An argument narrows it: reading templates/ only. This vote decides whether those arguments are allowed, how a wide permission covers a narrow need, and where the check happens.",
+      "explainer": "Words used here. A row is the effect list on a function, written -[FS.Read]>. A grant, in package.jet, says what a dependency may do. A denial is a ! entry that forbids an effect.\n\nA scope is what an argument names: a folder, a host or a device. Covers means a wider scope includes a narrower one, as templates/ includes templates/home.html.",
+      "story": "Sam adds a template library to a shop. It should read only the templates folder and call only api.example.com. Today Sam can grant it all files and all network, or pass a flag on every run.",
+      "inWild": "// Deno: permissions scoped by folder or host.\n$ deno run --allow-read=./templates --allow-net=api.example.com app.ts\n\n// Koka: effects take type parameters.\neffect ask<a>\n  ctl ask() : a",
+      "detail": "What this ballot decides. Whether effect arguments may name scopes, how coverage between scopes is defined, and how rows, grants and denials use them. Memory and copy budgets, such as !Mem.Alloc(above: 64), are not scopes; they keep today's aggregate rule, unchanged by every option.\n\nToday, on seed a0_042, re-running G6Lead's probes. e01's !Mem.Alloc(above: N) row runs and prints 1. e04's bare FS.Read row reads logo. e03's FS.Read(\"assets/\") row, e07's !Net(\"api.example.com\") denial and e08's !Mem.Copy(above: 64) give Expected , between effects in the row. e02's constant struct effect, ratified by DECL-TYPES1, fails the same way.\n\nScoping today is per run and per process. e09 reads logo and secret normally. With jet run --allow=FS.Read:assets it prints logo, then refused. That comes from CLI/Authority.jet and a Linux Landlock rule installed at launch, for the whole process, not per dependency.\n\nWhy budgets stay out. BallotReview3's memory probes show a budget adds up: one 40-byte reservation passes !Mem.Alloc(above: 64), and two give E0921. A covers rule treats a repeated need as one, so it would lose the second 40. Budgets therefore keep their own summing rule in Effects/Checks.jet.\n\nThe rule under A, part 1: scope types. Core defines three scope kinds, each with fixed laws. fs.Path covers by whole path components after normalization, so templates/ covers templates/home.html but not templates2/. net.Host covers by exact match after lower-casing and IDNA, so api.example.com never covers evilapi.example.com. Every other field covers by equality, as DECL-TYPES1 already says.\n\nPart 2: one covers rule. An effect instance covers another of the same type when every field covers the matching field. A bare type, FS.Read with no argument, covers every instance. Because each field law is fixed by Core, coverage is reflexive, transitive and always terminates; no library code runs to decide it.\n\nPart 3: library effects. A library declares its own effect as a struct whose fields use these scope types, such as Bucket: struct { name: String } with impl Effect. It gets the same covers rule with no extra code. Device arguments use HOST-CAPS1's hardware kinds, so GPU(acme_npu.Kind) names a library-declared kind; the provider work stays ACCEL-LIB1's.\n\nPart 4: rows. A function's row is inferred from what it calls, and arguments come from constant values in the calls. files.read(\"templates/{name}.html\") infers FS.Read(\"templates/\"), its longest constant prefix. A path known only at run time infers bare FS.Read. Core's file and network functions publish which parameter names the scope, and libraries may publish the same.\n\nPart 5: grants. A dependency's inferred row must be covered by its grant in package.jet, checked at build time. A bare need under a narrow grant is allowed only through mediated calls. The file or network function checks the actual path or host against the grant when it runs, and refuses the rest with an error value.\n\nPart 6: denials. A need covered by a denial is a build error. A need that only overlaps one, such as reading all of assets/ with assets/secret/ denied, builds, and the mediated call refuses the denied part at run time. A need disjoint from the denial is unaffected.\n\nWho is checked at run time. A callback runs with the authority of the package that wrote it. A task started by a dependency inherits that dependency's grant. Foreign code and subprocesses are not mediated, so a dependency that uses them needs the FFI or process grant, which covers everything; package.jet shows that.\n\nEngineering away the downsides. The unsound covers function is gone: coverage comes from three fixed laws. The host-suffix attack is gone: hosts match exactly. Budgets keep their summing rule. Inference costs nothing extra to write, because arguments come from constants already in the calls.\n\nWhat remains. Run-time mediation adds one check per mediated file or network call, only in a dependency whose grant is narrower than its row. Its cost is not measured; the mitigation is that a dependency whose row is statically covered pays nothing.\n\nCensus over Core, Compiler, Jetpack, Tools, Examples and tests. Argued rows in Jet source today are memory budgets, such as !Mem.Alloc(above: N) in 13 rows, and Fail with an error type. No program writes a scoped FS or Net row, so no program changes meaning; grants with arguments are new.\n\nThe same program under every option is templ, a library that reads templates/ and calls api.example.com, and a shop that grants it exactly that. Each option shows templ's row.\n\nBeginner path. Write no rows at all: they are inferred, and jet check shows what each dependency may do, folder and host included. Expert path. Write a scope in a grant or a denial, or declare a library effect whose fields use fs.Path or net.Host.\n\nOther options. B allows arguments only in grants and denials, never in rows, checked only at run time, as Deno does. C keeps today's form: arguments only on memory budgets, and scoping by a run flag. D lets each effect define its own covers function in ordinary code. E keeps DECL-TYPES1 as ratified: constant arguments matched by equality only.\n\nB gives up build-time checking of what a dependency may do. C cannot name a folder in a grant. D runs library code to decide coverage, which has no guaranteed laws and may not terminate. E cannot say that templates/ covers templates/home.html, so every file would need its own grant.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Scope arguments with one covers rule from Core's scope types",
+          "detail": "Effects take scope arguments: a folder, a host or a device. Coverage comes from three fixed laws in Core, so rows, grants and denials share one spelling. Budgets keep their own rule.",
+          "technical": "Amends D-DECL-TYPES1=A's equality-only coverage for fields of type fs.Path and net.Host. Rows inferred from constant call arguments; build-time grant coverage; run-time mediation for bare needs under narrow grants; overlap with a denial mediated. Mem.Alloc and Mem.Copy budgets unchanged.",
+          "code": "// templ, a library: reads one folder and calls one host.\nuse core.fs as files\nuse core.http as http\n\npub render: fn(name: String) -[FS.Read(\"templates/\"), Net(\"api.example.com\")]> String IOError! {\n    page: files.read(\"templates/{name}.html\")?\n    version: http.get_text(\"https://api.example.com/version\") ?? \"unknown\"\n    page.replace(\"{{version}}\", version)\n}\n\n// shop/package.jet\n// grants: { templ: [FS.Read(\"templates/\"), Net(\"api.example.com\")] }\n// Proposed (A), not built: today FS.Read(\"templates/\") does not parse (probe e03)."
+        },
+        {
+          "key": "B",
+          "name": "Arguments only in grants and denials",
+          "detail": "Rows stay bare. Grants and denials take arguments, and the limit is enforced only when the program runs.",
+          "technical": "Reverses DECL-TYPES1's constant rows. Every file and network call in a narrowly granted dependency is mediated at run time.",
+          "code": "// templ, a library: reads one folder and calls one host.\nuse core.fs as files\nuse core.http as http\n\npub render: fn(name: String) -[FS.Read, Net]> String IOError! {\n    page: files.read(\"templates/{name}.html\")?\n    version: http.get_text(\"https://api.example.com/version\") ?? \"unknown\"\n    page.replace(\"{{version}}\", version)\n}\n\n// shop/package.jet\n// grants: { templ: [FS.Read(\"templates/\"), Net(\"api.example.com\")] }   // checked at run time only\n// Proposed (B), not built."
+        },
+        {
+          "key": "C",
+          "name": "Keep today's form",
+          "detail": "Only memory budgets take arguments. File scoping is a run flag for the whole process.",
+          "technical": "No change. --allow=FS.Read:assets installs a Landlock rule at launch, per process.",
+          "code": "// templ, a library: reads one folder and calls one host.\nuse core.fs as files\nuse core.http as http\n\npub render: fn(name: String) -[FS.Read, Net]> String IOError! {\n    page: files.read(\"templates/{name}.html\")?\n    version: http.get_text(\"https://api.example.com/version\") ?? \"unknown\"\n    page.replace(\"{{version}}\", version)\n}\n\n// $ jet run --allow=FS.Read:templates shop.jet\n// Today (C): probe e09 prints logo, then refused."
+        },
+        {
+          "key": "D",
+          "name": "Each effect defines its own covers function",
+          "detail": "An effect's impl Effect has a covers function in ordinary code, so any library can define any coverage.",
+          "technical": "The posted draft's design. The compiler runs library code to compare instances; laws such as transitivity and termination are the author's duty.",
+          "code": "Net: struct {\n    host: String\n    impl Effect {\n        covers: fn(self, need: Net) -> Bool { need.host.ends_with(self.host) }\n    }\n}\n// Net(\"api.example.com\") covers Net(\"evilapi.example.com\"): ends_with is true.\n// templ, a library: reads one folder and calls one host.\nuse core.fs as files\nuse core.http as http\n\npub render: fn(name: String) -[FS.Read(\"templates/\"), Net(\"api.example.com\")]> String IOError! {\n    page: files.read(\"templates/{name}.html\")?\n    version: http.get_text(\"https://api.example.com/version\") ?? \"unknown\"\n    page.replace(\"{{version}}\", version)\n}\n// Proposed (D), not built."
+        },
+        {
+          "key": "E",
+          "name": "Keep DECL-TYPES1: constant arguments, equality only",
+          "detail": "Effects carry constant data matched by equality, as ratified. A folder argument covers only that exact value.",
+          "technical": "D-DECL-TYPES1=A unchanged. No scope laws; a grant lists every exact instance it allows.",
+          "code": "// templ, a library: reads one folder and calls one host.\nuse core.fs as files\nuse core.http as http\n\npub render: fn(name: String) -[FS.Read(\"templates/home.html\"), Net(\"api.example.com\")]> String IOError! {\n    page: files.read(\"templates/{name}.html\")?\n    version: http.get_text(\"https://api.example.com/version\") ?? \"unknown\"\n    page.replace(\"{{version}}\", version)\n}\n// Ratified (E), not built: each template file needs its own grant entry."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Folder and host permissions, checked at run time.",
+          "code": "deno run --allow-read=./templates --allow-net=api.example.com app.ts"
+        },
+        {
+          "lang": "Koka",
+          "note": "Effects take type parameters; no scope coverage.",
+          "code": "effect ask<a>\n  ctl ask() : a"
+        },
+        {
+          "lang": "WASI",
+          "note": "A program gets preopened folders and nothing else.",
+          "code": "wasmtime run --dir ./templates app.wasm"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A lets one spelling name a folder or host in rows, grants and denials. Coverage comes from fixed laws, so it is sound and fast, and budgets keep their rule.",
+        "gains": [
+          "A grant can say which folder and which host a dependency may use.",
+          "Coverage has fixed laws: no library code runs to decide it.",
+          "Rows are inferred from constants already in the calls."
+        ],
+        "losses": [
+          {
+            "loss": "A dependency granted less than its row needs pays a check per mediated call.",
+            "mitigation": "Statically covered dependencies pay nothing; the check runs only where grants narrow."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B gives up build-time checking of what a dependency may do."
+          },
+          {
+            "key": "C",
+            "reason": "C cannot name a folder in a grant."
+          },
+          {
+            "key": "D",
+            "reason": "D runs library code with no guaranteed laws to decide coverage."
+          },
+          {
+            "key": "E",
+            "reason": "E needs a grant entry for every single file."
+          }
+        ],
+        "tradeoff": "Three fixed scope laws in Core, in return for one checked spelling for rows, grants and denials."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it, and BallotReview3 reviewed an earlier draft. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+      },
+      "checkInstructions": "With seed a0_042 on PATH, run each file in $JET_SCRATCH_ROOT/lanes/G6Lead/ballots/probes/effargs, and e09 again with jet run --allow=FS.Read:assets. Read D-DECL-TYPES1, D-HOST-CAPS1 and D-EFFTYPE-GRANT1 in Tower. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "Should effect arguments name scopes, a folder, a host or a device, with one covers rule for rows, grants and denials?",
+        "lesson": "An effect says what a function may do, such as read files, but not which files. An argument narrows it to one folder. This vote decides whether arguments are allowed and how a wide permission covers a narrow need.",
+        "trio": {
+          "current": {
+            "note": "A scoped row does not parse.",
+            "code": "load: fn() -[FS.Read(\"assets/\")]> String\n// Expected , between effects in the row"
+          },
+          "wild": {
+            "lang": "Deno",
+            "note": "Scoped at run time.",
+            "code": "deno run --allow-read=./templates app.ts"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Scope arguments",
+            "gist": "Folders, hosts and devices, with fixed covers laws.",
+            "gains": [
+              "Grants name a folder.",
+              "Sound coverage."
+            ],
+            "losses": [
+              "Mediated calls pay a check."
+            ],
+            "proposed": {
+              "code": "pub render: fn(name: String) -[FS.Read(\"templates/\"), Net(\"api.example.com\")]> String"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Grants only",
+            "gist": "Arguments in grants and denials only.",
+            "gains": [
+              "Rows stay bare."
+            ],
+            "losses": [
+              "Run-time checks only."
+            ],
+            "proposed": {
+              "code": "grants: { templ: [FS.Read(\"templates/\")] }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Today",
+            "gist": "Budgets only; a run flag scopes reads.",
+            "gains": [
+              "Nothing to build."
+            ],
+            "losses": [
+              "No folder in a grant."
+            ],
+            "proposed": {
+              "code": "$ jet run --allow=FS.Read:templates shop.jet"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Library covers",
+            "gist": "Each effect writes its own covers.",
+            "gains": [
+              "Any coverage."
+            ],
+            "losses": [
+              "No guaranteed laws."
+            ],
+            "proposed": {
+              "code": "covers: fn(self, need: Net) -> Bool { ... }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Keep ratified",
+            "gist": "Constant arguments, equality only.",
+            "gains": [
+              "No new laws."
+            ],
+            "losses": [
+              "One grant per file."
+            ],
+            "proposed": {
+              "code": "-[FS.Read(\"templates/home.html\")]>"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One spelling names a folder or host everywhere, with sound fixed laws.",
+          "gains": [
+            "Grants name a folder.",
+            "Sound coverage."
+          ],
+          "losses": [
+            {
+              "loss": "Mediated calls pay a check.",
+              "mitigation": "Only where a grant is narrower than the row."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Run time only."
+            },
+            {
+              "key": "C",
+              "reason": "No folder in grants."
+            },
+            {
+              "key": "D",
+              "reason": "No guaranteed laws."
+            },
+            {
+              "key": "E",
+              "reason": "One grant per file."
+            }
+          ],
+          "tradeoff": "Three fixed scope laws, for one checked spelling."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-10T03:47:08.822Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-10",
+      "retiredAt": "2026-11-15T02:00:02.614Z"
+    },
+    {
+      "id": "D-TARGET-DECL1",
+      "cardId": "c09kjhit",
+      "group": "effects",
+      "title": "A build target is an ordinary Core type that implements Machine, so a package can add a board",
+      "situation": "A target describes the machine a build is for: its instruction set, memory, and services such as a clock or a serial port. Today the compiler holds a fixed table of machines, and a package names one by a string. A board the table lacks cannot be added by a package, and one table board quietly builds code for the wrong chip.\n\nThe owner asked for a target to be an ordinary Core type implementing a trait, declared by a library. That changes an earlier ruling, which made targets typed modules; keeping that ruling is option C. We recommend A: a board is a type implementing Machine, with one checked record of facts.\n\nOne limit holds under every option: a package can describe a board, but a chip family needs a code generator inside the compiler. Jet has two today, x86-64 and WebAssembly.",
+      "gist": "Should a build target be a type implementing Machine, with one typed facts record, so a package can add a board?",
+      "lesson": "Programs for small devices must know the machine: how much memory it has, whether it has a clock, how it reports a crash. This vote decides how that machine is described, so a board maker can ship it as an ordinary package instead of waiting for a compiler change.",
+      "explainer": "Words used here. A target is the machine a build is for. A fact is one thing known about it, such as its pointer size. A service is something the machine provides, such as a clock; its provider is the function that does it.\n\nAn emitter is the part of the compiler that writes machine code for one instruction set. A denial forbids an effect for a build.",
+      "story": "Kofi's company makes an x86-64 sensor gateway and an Arm sensor board. Today he asks the Jet team to add each to the compiler's table. Under A he publishes acme with both types, and jet check validates every fact. His customers build the gateway today, and the board build stops with a clear message until Jet has an Arm code generator.",
+      "inWild": "// Zig: the target is a plain struct that build code makes.\nconst t = b.resolveTargetQuery(.{ .cpu_arch = .thumb, .os_tag = .freestanding });\n\n// Rust: a custom target is a JSON file the compiler validates.\n{ \"llvm-target\": \"thumbv7em-none-eabihf\", \"target-pointer-width\": \"32\" }",
+      "detail": "What this ballot decides. How a target is declared and selected, and the one record of facts every option shares. What each fact means stays as ratified in D-FREESTAND-FACTS1, D-TARGET-ALLOC1, D-TARGET-MEMORY1, D-TARGET-LINKER1 and D-EFFTYPE-TARGET1.\n\nToday, with the t6c compiler on dev 76955986d0. Probe pkg_lib selects the profile board.sensor_v1, whose table triple is thumbv7em-none-eabihf, and builds an x86-64 ELF file. Its first bytes are 7f 45 4c 46 and its machine field is 0x3e. The board's facts do not reach code generation. Examples' package files spell profiles in a second vocabulary, web.no_os against the driver's wasm.no-os.\n\nProbe t_web builds with --target web and now prints words Web, as D-BUILD-TOOLCHAIN1=A requires. The seed printed words Linux; that building bug is fixed on dev.\n\nProbes p6 to p8 show the shape A uses already works for user traits. p6 prints a struct's trait constants, thumbv7em-none-eabihf 32 32 32. p7 prints 32 64 with a default constant. p8 leaves a required constant out and gets E0933, MissingTraitConstant.\n\nThe rule under A. core.target declares the trait Machine with one required constant, facts, of type MachineFacts. A target is a struct with no fields that implements Machine. Core declares its own machines this way, the host machines and web among them, and a package declares a board the same way.\n\nA package selects a machine by type in targets:, and code reads it as build.target, spelled as D-META-HASH1 ratifies. Hosted single-file programs never name a machine, as D-TARGET-SURFACE1 requires: the host machine is implied.\n\nThe record. MachineFacts maps one to one onto the compiler's TargetMachine record today. Required: triple, os, layout, allocator and panic. layout carries pointer and word size, cache line, endianness and atomic width, and is checked against the triple's ABI rather than assumed. os is one of the owner's #6206 list: Linux, MacOS, Windows, Web, Wasm or Freestanding.\n\nThe rest default to absent. Machine parts: memory regions, linker input, MMIO, volatile access, startup entry, vectors and placement. Services: the wall and monotonic clocks, zone data, sleep, entropy, scheduler and byte sink read, write and report. Host features: sockets, files, processes, environment, browser DOM, GPU and FFI. Hardware facts, programmers and audit carry over.\n\nToday's HostedDefault arms are gone. Core's host machines state each service explicitly, so no fact is hidden behind a default. This one record is the #6206 c24 capability union, declared once, so no second closed list exists.\n\nProviders. A present service names a provider function, as provider(uart_write). The compiler fills in the rest of D-FREESTAND-FACTS1's contract. Identity is the function's full path, and the digest and provenance come from its package's locked digest. ABI and limits come from the function's signature and declared limits.\n\nA bad provider is today's E3312. A missing allocator is E3303, a missing or host-only service E3311, MMIO E3313, and every other missing fact E3314. Those codes and their texts exist today.\n\nDenials. Each absent service becomes a denial for that build, per D-EFFTYPE-TARGET1. No allocator denies Mem.Alloc; no sockets, Net; no files, FS; no entropy, Rand; no sleep, Time.Wait; no processes, Exec; no environment, Env. Browser is present only on Web.\n\nPartial services are checked per operation, as the compiler does today. A board with a write-only byte sink allows print and refuses a read with E3311 at that line, naming the machine and the missing service. One clock allows only its own reads.\n\nStaging. Each artifact's code and every #if in it see that artifact's build.target. Build code also reads build.target as the target, and reads the machine it runs on as build.host, per D-BUILD-TOOLCHAIN1. A machine is checked when its package is checked, even if no application selects it.\n\nScope. A package may declare a machine for any triple Jet's layout table knows, Arm and AArch64 included, and jet check validates it. Building a machine whose triple has no emitter stops before code generation. A new registered error beside E3302 names the triple and the emitters Jet has: x86-64 and Wasm today. So pkg_lib's silent x86-64 build becomes that stop.\n\nCensus of the cutover on dev, Jet sources only. Six package.jet files in Examples/LowLevel/Embedded name a profile by string. Compiler/JetFoundation/Source/Target/TargetMachine.jet builds the machines from literals. The driver's list, the loader, the checker, Jetpack's Targets.jet parser, the embedded battery and Flash.jet read those names. 129 $build reads in 57 files keep working, respelled with HASH1.\n\nBeginner path. Write nothing: a single-file program builds for the host. To build for a board, add one line to package.jet naming the board's type, and errors name the machine and the missing service.\n\nExpert path. Declare a board as a struct implementing Machine with one MachineFacts record. Share a pure function that builds the record when several boards differ in one fact. Check the package with jet check, and every fact is validated before any application selects it.\n\nDownsides of A, and what the design does about them. Each configuration is its own type. A pure facts builder shared by several types keeps each one three lines long, and D is the option that takes configuration as a value.\n\nThe trait is named Machine, not the steer's Target. Target already names Core's codegen-family enum (Lang.jet:193) and the declaration every marker expansion receives (Core/Compiler/Compiler.jet:39). Another meaning would collide in every marker body, and probe p4b shows a user trait named Target beside #Target(Web) checks with no warning. A amends D-TARGET-SURFACE1's module wording; option C keeps it.\n\nWhat remains. No option can add an instruction set from a package: a chip family needs an emitter in the compiler. Under A the board is declared and checked anyway, and the build stop names the missing emitter. Deriving each provider's digest from the lock is compiler work, reusing digests the lock already records.\n\nOther options. B adds a target keyword whose braces hold the same record. C keeps the ratified typed module with a facts field. D takes a value of a type implementing Machine, with facts(self), so boards are configured by fields. E keeps today's compiler table selected by name, as Swift's closed platform list does.\n\nTheir best cases. B reads like a declaration of its own and can lower to A's checks. C needs no amendment and checks the module when its package is checked. D configures a board without a type per configuration, at the cost of putting the value into build cache keys. E needs no work.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A type implementing Machine",
+          "detail": "A target is a struct with no fields that implements core.target.Machine, whose one required constant is a MachineFacts record. A package selects it by type.",
+          "technical": "Amends D-TARGET-SURFACE1=A's module wording. MachineFacts maps TargetMachine one to one; triple, os, layout, allocator and panic are required, the rest absent by default. Providers get identity and digest from the lock. Denials per EFFTYPE-TARGET1, per-operation checks for partial services. Any layout-known triple may be declared; building one with no emitter is a registered stop naming the triple.",
+          "code": "use target: core.target\n\nSensorV1: struct {\n    impl target.Machine {\n        facts: target.MachineFacts{\n            triple: \"thumbv7em-none-eabihf\"\n            os: .Freestanding\n            layout: arm_eabi_layout()          // checked against the triple's ABI\n            memory: [flash(512.KiB), ram(128.KiB)]\n            allocator: .None\n            panic: .Report(provider(uart_panic))\n            byte_sink: .Write(provider(uart_write))\n            monotonic_clock: .Provider(provider(systick_now))\n            // every other service is absent unless written\n        }\n    }\n}\n// app/package.jet:\n// targets: { firmware: { profile: acme.SensorV1 }, sim: { profile: target.LinuxX64 } }\n\n// app/run.jet, the same under every option\nrun: fn() {\n    #if build.target.layout.word_bits == 32 { print(\"32-bit words\") }\n    print(\"cache line {build.target.layout.cache_line}\")\n    readings: [Int]{1, 2, 3}   // firmware: E3303, allocation needs an allocator\n}\n// Proposed (A), not built. Probe p6 shows the trait-constant shape; p8 shows E0933.\n// jet check validates SensorV1 today; building firmware for it stops until Jet has an Arm emitter."
+        },
+        {
+          "key": "B",
+          "name": "A target keyword",
+          "detail": "A new declaration word, target Name { }, whose braces hold the same MachineFacts fields.",
+          "technical": "Adds target as a reserved word. Lowers to A's Machine and MachineFacts, so the checks are shared. Selection, denials and scope as A.",
+          "code": "target SensorV1 {\n    triple: \"thumbv7em-none-eabihf\"\n    os: .Freestanding\n    layout: arm_eabi_layout()          // checked against the triple's ABI\n    memory: [flash(512.KiB), ram(128.KiB)]\n    allocator: .None\n    panic: .Report(provider(uart_panic))\n    byte_sink: .Write(provider(uart_write))\n    monotonic_clock: .Provider(provider(systick_now))\n    // every other service is absent unless written\n}\n// app/package.jet: targets: { firmware: { profile: acme.SensorV1 } }\n\n// app/run.jet, the same under every option\nrun: fn() {\n    #if build.target.layout.word_bits == 32 { print(\"32-bit words\") }\n    print(\"cache line {build.target.layout.cache_line}\")\n    readings: [Int]{1, 2, 3}   // firmware: E3303, allocation needs an allocator\n}\n// Proposed (B), not built: target is not a Jet word today (probe p3, E0003)."
+        },
+        {
+          "key": "C",
+          "name": "Keep the ratified typed module",
+          "detail": "A target is a module with a facts field of type MachineFacts, as D-TARGET-SURFACE1 ratified. A package selects the module.",
+          "technical": "D-TARGET-SURFACE1=A unchanged. The module's facts are checked when its package is checked. Same record, providers, denials and scope as A; generic code cannot take a machine as a type.",
+          "code": "sensor_v1: module {\n    facts: target.MachineFacts{\n        triple: \"thumbv7em-none-eabihf\"\n        os: .Freestanding\n        layout: arm_eabi_layout()          // checked against the triple's ABI\n        memory: [flash(512.KiB), ram(128.KiB)]\n        allocator: .None\n        panic: .Report(provider(uart_panic))\n        byte_sink: .Write(provider(uart_write))\n        monotonic_clock: .Provider(provider(systick_now))\n        // every other service is absent unless written\n    }\n}\n// app/package.jet: targets: { firmware: { profile: acme.sensor_v1 } }\n\n// app/run.jet, the same under every option\nrun: fn() {\n    #if build.target.layout.word_bits == 32 { print(\"32-bit words\") }\n    print(\"cache line {build.target.layout.cache_line}\")\n    readings: [Int]{1, 2, 3}   // firmware: E3303, allocation needs an allocator\n}\n// Proposed (C), the ratified D-TARGET-SURFACE1 module, not built."
+        },
+        {
+          "key": "D",
+          "name": "A value implementing Machine",
+          "detail": "A package selects a value, such as acme.Sensor{flash_kib: 256}, whose type implements Machine with facts(self).",
+          "technical": "Machine requires a pure facts(self) -> MachineFacts. The selected value is evaluated while building and enters the build cache key. Same record and checks as A.",
+          "code": "Sensor: struct {\n    flash_kib: Int{512}\n    impl target.Machine {\n        facts: fn(self) -> target.MachineFacts { sensor_facts(flash: self.flash_kib.KiB) }\n    }\n}\n// sensor_facts returns A's record with the given flash size.\n// app/package.jet: targets: { firmware: { profile: acme.Sensor{flash_kib: 256} } }\n\n// app/run.jet, the same under every option\nrun: fn() {\n    #if build.target.layout.word_bits == 32 { print(\"32-bit words\") }\n    print(\"cache line {build.target.layout.cache_line}\")\n    readings: [Int]{1, 2, 3}   // firmware: E3303, allocation needs an allocator\n}\n// Proposed (D), not built."
+        },
+        {
+          "key": "E",
+          "name": "Today's compiler table",
+          "detail": "The compiler holds a closed table of machines, and a package names one by string. A new board needs a compiler change.",
+          "technical": "Today's behavior: six machines in TargetMachine.jet, selected by profile string. Two name vocabularies, Jetpack's and the driver's. Reverses D-TARGET-SURFACE1's typed profiles.",
+          "code": "// app/package.jet, today:\n// targets: { machine: { profile: \"board.sensor_v1\" } }\n// The board's facts live in a table inside the compiler; a package cannot add one.\n\n// app/run.jet, the same under every option\nrun: fn() {\n    #if build.target.layout.word_bits == 32 { print(\"32-bit words\") }\n    print(\"cache line {build.target.layout.cache_line}\")\n    readings: [Int]{1, 2, 3}   // firmware: E3303, allocation needs an allocator\n}\n// Today (E): probe pkg_lib builds this profile to an x86-64 ELF file, not a board image."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "std.Target is a plain struct that build code makes; code reads builtin.target.",
+          "code": "if (builtin.target.ptrBitWidth() == 32) { }"
+        },
+        {
+          "lang": "Rust",
+          "note": "A custom target is a compiler-validated JSON file; its format is unstable.",
+          "code": "// thumbv7em-acme.json\n{ \"llvm-target\": \"thumbv7em-none-eabihf\", \"os\": \"none\" }"
+        },
+        {
+          "lang": "Swift",
+          "note": "Platforms are a closed list in the compiler.",
+          "code": "#if os(Linux) && arch(arm64)\nlet small = false\n#endif"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A lets a board maker ship a machine as an ordinary package. It adds no keyword and checks every fact before any application selects it.",
+        "gains": [
+          "A new board is a package, checked before any application selects it.",
+          "One MachineFacts record replaces the table and both name lists.",
+          "A missing fact is today's E0933, and a missing service names the machine.",
+          "A board for a chip Jet cannot yet emit stops with a clear message instead of building x86-64 code."
+        ],
+        "losses": [
+          {
+            "loss": "A package cannot add an instruction set or a GPU; this holds under every option.",
+            "mitigation": "The board is still declared and checked, and the build stop names the triple and the emitters Jet has."
+          },
+          {
+            "loss": "Each board configuration is its own type.",
+            "mitigation": "A shared pure facts builder keeps each type three lines long."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a reserved word for what a trait already says."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps machines out of the type system, so generic code cannot take one."
+          },
+          {
+            "key": "D",
+            "reason": "D puts a value into every build cache key and evaluates it to know the machine."
+          },
+          {
+            "key": "E",
+            "reason": "E keeps every board inside the compiler."
+          }
+        ],
+        "tradeoff": "One trait name, Machine, and one type per board, in return for boards that arrive as packages."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0; BallotReview3 reviewed an earlier draft. No separate adversarial review ran on this repair."
+      },
+      "checkInstructions": "With the t6c compiler (dev 76955986d0) run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/td check, then run; outputs are in probes/td/out6. In probes/td run jet build --target web t_web.jet, then node .jet/build/app.js (prints words Web). In probes/td/pkg_lib run jet build run.jet and read the first 20 bytes of .jet/build/run (an x86-64 ELF). Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "Should a build target be a type implementing Machine, with one typed facts record, so a package can add a board?",
+        "lesson": "Programs for small devices must know the machine: its memory, its clock, how it reports a crash. This vote decides how that machine is described, so a board maker can ship it as an ordinary package.",
+        "trio": {
+          "current": {
+            "note": "A closed table in the compiler.",
+            "code": "// package.jet\ntargets: { machine: { profile: \"board.sensor_v1\" } }\n// builds an x86-64 ELF file"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "A plain struct.",
+            "code": "if (builtin.target.ptrBitWidth() == 32) { }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Machine type",
+            "gist": "A struct implementing Machine, with one facts record.",
+            "gains": [
+              "Boards as packages.",
+              "No keyword."
+            ],
+            "losses": [
+              "No new instruction sets."
+            ],
+            "proposed": {
+              "code": "SensorV1: struct {\n    impl target.Machine {\n        facts: target.MachineFacts{\n            triple: \"thumbv7em-none-eabihf\"\n            os: .Freestanding\n            allocator: .None\n            panic: .Report(provider(uart_panic))\n        }\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keyword",
+            "gist": "target Name { } with the same fields.",
+            "gains": [
+              "Reads as its own kind."
+            ],
+            "losses": [
+              "A new reserved word."
+            ],
+            "proposed": {
+              "code": "target SensorV1 {\n    triple: \"thumbv7em-none-eabihf\"\n    os: .Freestanding\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Typed module",
+            "gist": "A module with a facts field, as ratified.",
+            "gains": [
+              "No amendment."
+            ],
+            "losses": [
+              "Not a type."
+            ],
+            "proposed": {
+              "code": "sensor_v1: module {\n    facts: target.MachineFacts{ ... }\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Machine value",
+            "gist": "Select a configured value.",
+            "gains": [
+              "Boards configured by fields."
+            ],
+            "losses": [
+              "Values in cache keys."
+            ],
+            "proposed": {
+              "code": "targets: { firmware: { profile: acme.Sensor{flash_kib: 256} } }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Compiler table",
+            "gist": "Name a built-in machine by string, as today.",
+            "gains": [
+              "No work."
+            ],
+            "losses": [
+              "Boards need a compiler change."
+            ],
+            "proposed": {
+              "code": "targets: { machine: { profile: \"board.sensor_v1\" } }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A lets a board maker ship a machine as a package, with no keyword and every fact checked.",
+          "gains": [
+            "Boards as packages.",
+            "One facts record."
+          ],
+          "losses": [
+            {
+              "loss": "No new instruction sets, under any option.",
+              "mitigation": "The board is still checked; the build stop names the triple and Jet's emitters."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A reserved word."
+            },
+            {
+              "key": "C",
+              "reason": "Not a type."
+            },
+            {
+              "key": "D",
+              "reason": "Values in cache keys."
+            },
+            {
+              "key": "E",
+              "reason": "Boards stay in the compiler."
+            }
+          ],
+          "tradeoff": "One type per board, for boards as packages."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-10T03:48:09.508Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-10",
+      "retiredAt": "2026-11-15T02:00:02.614Z"
     }
   ]
 }

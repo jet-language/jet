@@ -98150,6 +98150,1029 @@
       "completedAt": "2026-11-09T18:27:54.966Z",
       "questions": [],
       "retiredAt": "2026-11-14T22:25:24.322Z"
+    },
+    {
+      "id": "c09kjhit",
+      "num": 6129,
+      "title": "Effects on types: packages, targets and the compiler as effect-typed types (end-state proposal)",
+      "body": "Owner direction 2026-10-29, after a talk by Simon Peyton Jones on types that control which effects they may interact with and how: \"if we can define the usable and not usable effects on a type, then we can make packages and the compiler types themselves, which then echoes effects on types.\" This is the mechanism behind pillar 5, \"The Language Is A Library\", but it is not itself a pillar (owner, 2026-10-29).\n\nThe owner wants the exact end state first: every semantic rule and every spelling, as it will look once built, so he can fix it before any work starts. Main writes the proposal in Docs/proposals and links it here. The owner then corrects it, and the corrected surface becomes ballots on this card.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e16",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c66: jet test Compiler --profile ui --filter E3413 on seed-b8 (dev 8ed6cef36e) gives ERROR selection: no matching corpus entries. No E3413 UI snapshot exists on dev, so c66 is unproven and E3413 breaks I4 (every diagnostic has a UI snapshot). Routed to G8Scope-3."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Proof-line refresh (G8Scope-3 sweep on b5, 2026-11-11). c32: `grep -nF 'LibraryEffectListDenial: struct' Compiler/Prelude/Diagnostics.jet` hits; aaced3ca08 renamed LibraryEffectNotKernel. c33: `grep -nF 'E0756. Inside its package the name is bare' Docs/spec/spec.md` hits; the spec rewrapped. c34: the Effect enum moved to the generated Compiler/JetFoundation/Source/Registry/EffectRoots.jet; `grep -nF '#FX(Net, FS)' Core/Effects/Effects.jet` hits; `jet Tools/agent/CoreSourceRows.jet --check` is current. The ui library_effect_* (5/5) and golden ScopedEffects (o0/o1/o2) proofs exist and pass on b5; earlier reports of them missing were a sweep-planner miss."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Reopened by the G8 fresh-context review (Review3, 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md): FAIL with 10 gaps. Carded as c62 (empty cap is pure, high), c63 (repeated #FX drops a denial, high), c64 (module writes through a Shared parameter, high), c65 (scoped entries on caps and blocks), c66 (E3413 snapshot passes), c67 (spec #FX spelling); c24, c37, c39 and c54 wording corrected. Many criteria cite the same fR3 range and six fix commits; the review's ledger maps each criterion to its original implementation commit. Owner: G8Scope, top priority."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "All criteria met (verified by Main from landed dev commits; the last was #6129 c60 in t23, dev 9755703c76, 2026-11-11). Card closed; the G8 milestone sweep is the a0.0.44 admit's full suites."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Reopened by the G1/G8 fresh-context closeout review (Review1); see the reopened criteria."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Review1 could not recover the individual runtime outputs behind c61's t18a evidence (testing_tiers, web, cross coverage); the cited files are gone. c61 is not a false green: the patch was inspected and holds. The goal closeout sweep reruns those rows commit-bound."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t18a landed G1Lead-4-cederive (c2cecce162..0a995af312), a follow-up to c60: a Core function's scope publication is read off its declaration, and EFFECT_SCOPE_READERS/WRITERS with their kernel.tsv rows are deleted. G8Fix-13 meets c61, the last open criterion, and the card closes."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "G8Lead2-32 (c55 repair: App handler adapters are no longer held to Core's internal slot row) and G8Lead2-33 (c16 repair: the module record names core.meta's Module; core.meta loads only when a module carries a record) landed in ecf04d985a..76955986d0. They fix the 27 rows a0_043 cut 4 lost."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c30 is parked (G8Lead2, 2026-11-10). Beginner half: the dependency-upgrade error must follow the ratified lock route. Jetpack records each dependency effect row in the lock and reports widening, and --locked refuses it (syntax-decisions, authority rows). It must not follow proposal §7.2, where jet add writes grants, because met c18 rules that out. A grant-widening check on upgrade does not exist today. Expert half: waits on D-TARGET-DECL1."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c37 is partly done by G8Lead2-24 (landed 973d760c89): the four compiler.advanced.* spelling rows and their constants are removed, with no shim, and the lexical ledger is regenerated (58 rows). c37 stays open for the rest."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Decision (Main, within ratified scope) for c36, c37, c39 and c44. No new ballot is needed: D-META-LADDER1=A (2026-11-09) and D-REFLECT-EXPANDTYPE1=A settle them. (1) The rows use LADDER1's Meta effect family (Meta: enum { Generate, Include, Rewrite, Types, Raw }, implementing Effect, declared in Core's compiler package under D-EFFTYPE-KERNEL1, not in Prelude/Effects.jet). Read access is watching, which needs no Meta effect, so a read-only lint has an empty Meta row. The criteria's Compiler.* spelling reads as Meta.* under LADDER1. Compiler is the root-only value that only the root's own source makes. (2) c37: the advanced API is gated by Meta effect rows plus the root-only Compiler value. The compiler.advanced.* spellings in Spellings.jet are deleted with no shim, and a test proves that a grant enables the API and its absence refuses it. (3) c39: the example custom lint is read-only, with an empty Meta row; the example marker is typed -[Meta.Generate]>. Each has golden output on O0, O1 and O2. (4) c44: the row for Marker.expand(self, target: Target) and Derive.expand(target: Target) is Meta.Generate, since expand only adds generated members (Rewrite stays for existing-code transforms under D-META-OPTIN2). Docs/proposals/effect-types-2026-10-29.md section 9.1 is amended to match. c21-c24 and the expert half of c30 wait on D-TARGET-DECL1, which is in the ballot queue."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-09) for c27 (G8Lead2-17): the closed_lists duplicate guard measures each pair's shared-member count, not the overlap ratio, so deleting a unique member can never fail it and adding a shared member always does. Known debt left open: Jetpack HermeticBuildError and the compiler's BuildSessionError share 27 members; the shared vocabulary would live in jet_foundation as a generated list once there is a card for it."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c6 is met with E0749, the ratified ceiling code for a type row outside its cap; E0712 in older text is not the code. c54 waits for G8Lead2-15 (its case pins E0227) in train 2."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-09) for c25-c27, within the owner-reviewed proposal's rule that an action with ambient effects is never reused: an effect is ambient when its result is not fixed by the action's declared inputs. Net is ambient unless every fetched byte is pinned by a content hash in the key (a mismatch fails the action); FS is not ambient for declared input paths and the action's own output directory; Exec is not ambient for a declared tool identified by content in the key, and ambient for a PATH lookup; Env is ambient unless declared with its value in the key; Time.Now, Rand and other processes are always ambient; Time.Wait is not. These readings hold only where the sandbox enforces denial of undeclared FS, Env, Net and Exec; elsewhere every cap counts as ambient, and a case proves an undeclared read is refused. c27 removes ActionCache (Cached/UncachedPhony) and ActionSpec.uncached_phony, renames ActionSpec.cached to ActionSpec.new, and reuse becomes exactly: no ambient effect."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Owner ruling on C-G8-2: D-EFFTYPE-GRANT1=A's prompt and stop-on-upgrade are replaced by D-AUTH-DEFAULT1=A; c17 (a written grant is a ceiling) stands and c18 is reworded."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner gates: every D-EFFTYPE-* ballot is ratified and the end-state proposal exists (Docs/proposals/effect-types-2026-10-29.md). c44 still needs a ballot (the effect name for the row of Marker.expand and Derive.expand); none is drafted. c43 builds on the API snapshot guard of #3838 c6 (D-FAIL-PUBSIG1), so it waits for that guard. c46 is a plain-words diagnostic defect that stays here."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Correction: my earlier log said c49 stays open, which was wrong; my helper misnumbered the criteria. c49 is the impl Trait defect, met by e477930fe5."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "EffectsLead-3-13 landed on dev e477930fe5: impl Trait {} outside a type body is E0301 (UI snapshot). The author tagged it c49, but c49 is the 'self param on a module function' defect, so c49 stays open."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Lane paused by owner (4-lead cap). Landed c41, c45, c48, c51 (648603aa34); c50 fixed by 9e0a6f8943. Unlanded: EffectsLead-3-13 (c49: impl on a trait outside a type body -> E0301, UI snapshot; complete, unrun). Open: c46 (E3401 shows mangled __jet_ names). c48 gaps: alias/param-handle writes, separately checked lambdas, trait dispatch. c41 gaps: an uninherited trait default, and file caps on an inherited default."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Defect found 2026-11-04 (Prep, $JET_SCRATCH_ROOT/lanes/Main/prep/mv/m12b.jet): the ratified D-META-REFLECT2 ballot code '@FUNCTION(advance)?' is stale. A bare ? is E-ERR-PROPAGATE and @FUNCTION is E0102; the current reflection surface is T.reflect() and reflect.of(x). Any spec or example copying it must use the current surface."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6137 \"Effects on types: library-defined effects built on kernel effects\" into this card (effects on types); its 8 open item(s) are carried as \"(was #6137)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "D-EFFTYPE-MODEL1 A ratified by the owner 2026-10-30: #FX above a struct, enum or trait caps everything done in the type's name (methods, trait impls in any package, closures inside them, inherited default methods and Close impls). Method rows may only tighten it, and parameter work belongs to the caller, so there is no tail rule. C9 rewritten; C31 added."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6141 into this card (one card per stream). Its title: Effects on types: spec page, diagnostics registry and teaching examples. Body: Design: Docs/proposals/effect-types-2026-10-29.md (sections 12 and 14). Owner direction 2026-10-29: implement effects on types in the near future; ballots for the proposal's choice points are attached to the cards they govern. Every new or widened diagnostic ships with registered code, what/why/fix text and a UI snapshot (I4). Sema owns every check (I3); rows are erased in codegen and the same program means the same thing at O0, O1 and O2 (I9). Plan: Write the durable spec for effect rows on every rung (replacing the proposal once implemented), register every new code with what/why/fix text, and add one beginner-path and one expert-path example."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6140 into this card (one card per stream). Its title: Effects on types: build action reuse decided by the action's row. Body: Design: Docs/proposals/effect-types-2026-10-29.md (section 9.4; relates to D-BUILD-REUSESET1 and D-REAPI1). Owner direction 2026-10-29: implement effects on types in the near future; ballots for the proposal's choice points are attached to the cards they govern. Every new or widened diagnostic ships with registered code, what/why/fix text and a UI snapshot (I4). Sema owns every check (I3); rows are erased in codegen and the same program means the same thing at O0, O1 and O2 (I9). Plan: Make an action reusable exactly when its row is pure apart from declared `Build.Input`; never reuse actions with ambient effects. Remote execution ships only reusable actions."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6138 into this card (one card per stream). Its title: Effects on types: build targets are typed declarations with rows and facts. Body: Design: Docs/proposals/effect-types-2026-10-29.md (section 8 and ballot C4; relates to #6126 and #5006). Owner direction 2026-10-29: implement effects on types in the near future; ballots for the proposal's choice points are attached to the cards they govern. Every new or widened diagnostic ships with registered code, what/why/fix text and a UI snapshot (I4). Sema owns every check (I3); rows are erased in codegen and the same program means the same thing at O0, O1 and O2 (I9). Plan: Declare targets in Core as library code in the ratified form (ballot C4), each with a row and hardware facts. Check code reachable from each artifact's entry against that artifact's target row (new code, proposal E0763). Expose target facts as `$build.target.*`."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6136 into this card (one card per stream). Its title: Effects on types: package rows and dependency grants checked against inferred rows. Body: Design: Docs/proposals/effect-types-2026-10-29.md (section 7.1-7.3 and ballot C6). Owner direction 2026-10-29: implement effects on types in the near future; ballots for the proposal's choice points are attached to the cards they govern. Every new or widened diagnostic ships with registered code, what/why/fix text and a UI snapshot (I4). Sema owns every check (I3); rows are erased in codegen and the same program means the same thing at O0, O1 and O2 (I9). Plan: Treat the package `authority:` block as the package type's row. Compute each dependency's inferred row and check it against the depending package's `grants` (new code, proposal E0762) with the call path and the version that widened it. Implement the ratified `jet add` behavior (ballot C6). Retire the unenforced `policy: { effects: … }` in one cutover."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6135 into this card (one card per stream). Its title: Effects on types: module rung (file-head and inline `#FX`). Body: Design: Docs/proposals/effect-types-2026-10-29.md (section 6 and ballot C2; supersedes the module rung of D-EFFECT-RUNGS1). Owner direction 2026-10-29: implement effects on types in the near future; ballots for the proposal's choice points are attached to the cards they govern. Every new or widened diagnostic ships with registered code, what/why/fix text and a UI snapshot (I4). Sema owns every check (I3); rows are erased in codegen and the same program means the same thing at O0, O1 and O2 (I9). Plan: Accept `#FX(...)` at a file head and before an inline `module`; it bounds every item in the module, nested modules included. Module values stay named-only unless ballot C2 on this card says otherwise."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6134 into this card (one card per stream). Its title: Effects on types: trait rows bind every impl and make trait-value calls precise. Body: Design: Docs/proposals/effect-types-2026-10-29.md (section 5). Owner direction 2026-10-29: implement effects on types in the near future; ballots for the proposal's choice points are attached to the cards they govern. Every new or widened diagnostic ships with registered code, what/why/fix text and a UI snapshot (I4). Sema owns every check (I3); rows are erased in codegen and the same program means the same thing at O0, O1 and O2 (I9). Plan: Allow `#FX(...)` on trait declarations as a ceiling on every impl in every package; keep the per-method bound (D-EFF3) as the rung below. A call through a trait value uses the trait's row; without one, the union of the built program's impls."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6133 into this card (one card per stream). Its title: Effects on types: rows of generic types and the type-parameter tail. Body: Design: Docs/proposals/effect-types-2026-10-29.md (section 4.3 and ballot C1). Owner direction 2026-10-29: implement effects on types in the near future; ballots for the proposal's choice points are attached to the cards they govern. Every new or widened diagnostic ships with registered code, what/why/fix text and a UI snapshot (I4). Sema owns every check (I3); rows are erased in codegen and the same program means the same thing at O0, O1 and O2 (I9). Plan: Compute a generic type's row per instantiation, adding row(T) wherever T's methods are called. Implement the ratified spelling for naming a type parameter's effects in a ceiling (ballot C1 on this card)."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6132 into this card (one card per stream). Its title: Effects on types: `#FX(...)` rows on struct, enum and union. Body: Design: Docs/proposals/effect-types-2026-10-29.md (sections 3, 4.1, 4.2, 4.4, 13). Owner direction 2026-10-29: implement effects on types in the near future; ballots for the proposal's choice points are attached to the cards they govern. Every new or widened diagnostic ships with registered code, what/why/fix text and a UI snapshot (I4). Sema owns every check (I3); rows are erased in codegen and the same program means the same thing at O0, O1 and O2 (I9). Plan: Parse and register `#FX(...)` on struct/enum/union declarations (same list grammar as function rows). Infer each type's row as the fixed point of its methods (inherent and trait impls), function-typed fields, and field types. Check the inferred row against a written ceiling (E0712 widened) and denials (E0749 widened); report field-path overruns as a new code (proposal E0760). Calls through a value of the type add its row as today."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Owner 2026-10-29 08:31: ballot choice points C1-C7 and card all effects-on-types work for near-term delivery. Implementation cards #6132-#6141 filed under this card in e16; folding stays #6125. Ballots attach to: C1 #6133, C2 #6135, C3+C5 #6137, C4 #6138, C6 #6136, C7 #6139, core model #6129."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Main: end-state proposal written: Docs/proposals/effect-types-2026-10-29.md (queued to dev as 1793274134-Main). Seven owner choice points C1-C7 in section 15."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A proposal in Docs/proposals states the complete end state: the syntax and semantics for effects on types, packages as types, targets as effect types, and compiler parts as public types. It includes worked examples, every diagnostic, the inference rules, how existing mechanisms are absorbed or kept, and what is retired.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): Docs/proposals/effect-types-2026-10-29.md exists at a16a86d88f, linked to card #6129 on line 3. It covers everything the criterion asks for. Syntax and semantics: §3 Spellings, §4 Types (#FX rows on struct/enum/union, generic `..T`), §5 Traits, §6 Modules, §7 Packages are types, §8 Targets are types, §9 The compiler is types (extension points as function types with rows). Inference rules: §2 design rules (\"inferred ⊆ ceiling\", denials) and §4.2 \"Using a type spreads its row\". Worked examples: the #FX code blocks in §4-§8. Every diagnostic: §12 table, E0749/E0712/E0747 widened plus new E0760-E0765. Absorbed, kept or retired mechanisms: the §11 table, e.g. `policy: { effects: { deny } }` Retired, advanced compiler opt-in Replaced by `Compiler.*`.",
+          "at": "2026-10-31T19:09:08.754Z"
+        },
+        {
+          "n": 2,
+          "text": "The owner has reviewed the proposal and recorded his corrections; each new surface is on a ratified ballot on this card.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The owner ratified every effects-on-types ballot: D-EFFTYPE-MODEL1, D-EFFTYPE-USES1, D-EFFTYPE-KERNEL1, D-EFFTYPE-TARGET1, D-EFFTYPE-GRANT1 and D-EFFTYPE-MODVALUE1 are all ratified A.",
+          "at": "2026-11-07T03:04:06.630Z",
+          "closure": "decision"
+        },
+        {
+          "n": 5,
+          "text": "(from #6132 Effects on types: `#FX(...)` rows on struct, enum and union) A type's inferred row covers its methods, function-typed fields and field types, including recursive types (fixed point); a sema test pins each source of effects.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 3243a1b44d on dev (train 1). Train-1 compiler from dev 0f193199cc: jet test Compiler/JetSema/Tests/EffectTypeRowFixtures.jet gives 29 passed, 0 failed; effect_type_row_fixtures pins a method row (Logger.say), a function-typed field (Fetcher.get), field types (Service.log, .fetch), a recursive type and a holder through a list (Tree, Forest), a mutually recursive pair settling on the union (Ping, Pong), and trait implementations (Square, Shape, Canvas).",
+          "at": "2026-11-09T22:45:40.005Z"
+        },
+        {
+          "n": 6,
+          "text": "(from #6132 Effects on types: `#FX(...)` rows on struct, enum and union) Ceiling and denial violations on a type report E0712 and E0749 at the offending method or field with the type's `#FX` as the secondary label; a field-path overrun reports its own registered code; each has a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:10.767Z"
+        },
+        {
+          "n": 7,
+          "text": "(from #6132 Effects on types: `#FX(...)` rows on struct, enum and union) A type with no `#FX` behaves exactly as before: a case pins an unmarked type's inferred row and calls on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:12.428Z"
+        },
+        {
+          "n": 8,
+          "text": "(from #6133 Effects on types: rows of generic types and the type-paramet) A generic type's row is computed per instantiation; a test shows `Box<Pure>` is pure while `Box<Logger>` carries `Log`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:13.911Z"
+        },
+        {
+          "n": 9,
+          "text": "(from #6133 Effects on types: rows of generic types and the type-paramet) Per D-EFFTYPE-MODEL1 A there is no tail spelling: what a type or function parameter does belongs to the caller and is checked where the instantiation (Traced<Parser>) is written; an example with golden output on every tier shows Traced<Parser> doing Traced's work plus Parser's.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:15.338Z"
+        },
+        {
+          "n": 10,
+          "text": "(from #6133 Effects on types: rows of generic types and the type-paramet) Violations through a type parameter name the instantiation in the diagnostic, with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:16.917Z"
+        },
+        {
+          "n": 11,
+          "text": "(from #6134 Effects on types: trait rows bind every impl and make trait-) `#FX(...)` on a trait checks every impl, including impls in another package (new registered code, UI snapshot).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:18.876Z"
+        },
+        {
+          "n": 12,
+          "text": "(from #6134 Effects on types: trait rows bind every impl and make trait-) A call through a trait value (`[Shape]`, `s: Shape`) gets the trait's row when written, else the union of the program's impls; sema tests pin both.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:20.214Z"
+        },
+        {
+          "n": 13,
+          "text": "(from #6134 Effects on types: trait rows bind every impl and make trait-) Per-method trait bounds keep working unchanged; an example shows trait and method rungs together with golden output on every tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:21.872Z"
+        },
+        {
+          "n": 14,
+          "text": "(from #6135 Effects on types: module rung (file-head and inline `#FX`)) A file-head `#FX(...)` and an inline `#FX(...) module m { }` bound every item inside, with E0749/E0712 reported at the offending item and the module marker as secondary label (UI snapshots).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "on dev 6a06b917cb: b19942b4b2 and 925acbca54: file-head and inline module caps, E0749 with the secondary label; UI module_cap_* (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:08.213Z"
+        },
+        {
+          "n": 15,
+          "text": "(from #6135 Effects on types: module rung (file-head and inline `#FX`)) An example with golden output on every tier shows a deterministic offline module (`#FX(!Net, !FS, !Exec, !Time, !Rand)`).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in train 1 (dev 6a06b917cb..0f193199cc). Main 2026-11-09 with the train-1 compiler on dev 0f193199cc: in Examples/ErrorsAndEffects/Effects, jet run --optimize=none|basic|full ModuleCap.jet each matches ModuleCap.out byte for byte (cmp rc 0 three times); the example's module `offline` carries #FX(!Net, !FS, !Exec, !Time, !Rand).",
+          "at": "2026-11-09T21:30:24.700Z"
+        },
+        {
+          "n": 16,
+          "text": "(from #6135 Effects on types: module rung (file-head and inline `#FX`)) The ratified D-EFFTYPE-MODVALUE1 outcome (A) is implemented: module and package metadata fields are read directly (pricing.category), a module passes as a Module, and a module argument to a generic module (billing<pricing>) is admitted as that Module value, with a case on O0, O1 and O2 (was c47).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G8Lead2-3r2. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md).",
+          "at": "2026-11-10T05:06:44.808Z"
+        },
+        {
+          "n": 17,
+          "text": "(from #6136 Effects on types: package rows and dependency grants checked) A dependency whose inferred row exceeds its grant fails the build with a registered code naming the dependency, the effect, and the call path (UI snapshot).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:23.571Z"
+        },
+        {
+          "n": 18,
+          "text": "jet add follows D-AUTH-DEFAULT1=A: it writes no grant line and asks nothing; a dependency's inferred row is recorded in the lock, a widening on upgrade is reported with the call path, and --locked refuses it (E3513). A grant line the user writes is a ceiling (c17). A Jetpack test proves both, including an upgrade that widens a row.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "8feeb74cf0: tests/cases/pkg/add_writes_no_grant_and_an_upgrade_that_widens_names_the_call_path.case PASS. jet add writes no grant or authority line; an upgrade that widens a row is refused by --locked with one E3513 per effect and its call chain; a plain build prints the note and records the row. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
+          "at": "2026-11-10T02:36:37.037Z"
+        },
+        {
+          "n": 19,
+          "text": "(from #6136 Effects on types: package rows and dependency grants checked) `policy: { effects: … }` is removed from the manifest model, docs and examples, with no shim.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "on dev 6a06b917cb: policy has no effects field (Manifest/Blocks/Policy.jet:102); no docs or examples use policy effects (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:09.173Z"
+        },
+        {
+          "n": 20,
+          "text": "(from #6136 Effects on types: package rows and dependency grants checked) An example package with a dependency and a grant has golden output on every tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:24.887Z"
+        },
+        {
+          "n": 21,
+          "text": "(from #6138 Effects on types: build targets are typed declarations with ) Core declares at least the native host, web and GPU targets in the ratified form, each with a row and facts (word size, pointer size, cache line, CPU features).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G6LeadE-1s + G6LeadE-1sfixr. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). Core/Target/Target.jet declares LinuxX64, MacOSArm64, WindowsX64, Web and GPU machines, each with a row and facts (triple, pointer, word and cache-line size, CPU features), from one hand-written OS list.",
+          "at": "2026-11-10T19:44:49.356Z"
+        },
+        {
+          "n": 22,
+          "text": "(from #6138 Effects on types: build targets are typed declarations with ) Code reached from an entry built for a target that denies an effect it uses reports a registered code naming the line and the target (UI snapshot).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G6LeadE-1s. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). E1123 jet.TargetDeniedEffect names the line, the effect and the target; UI snapshot target_denied_effect_e1123.",
+          "at": "2026-11-10T19:44:51.048Z"
+        },
+        {
+          "n": 23,
+          "text": "(from #6138 Effects on types: build targets are typed declarations with ) One `fn build` builds the same source for two targets and each artifact is checked against its own row; an example with golden output proves it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G6LeadE-1s. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). golden Metaprogramming/BuildTime/TwoTargets on O0/O1/O2, plus case cross/build_fn_checks_each_target_against_its_own_row.",
+          "at": "2026-11-10T19:44:53.295Z"
+        },
+        {
+          "n": 24,
+          "text": "(from #6138 Effects on types: build targets are typed declarations with ) `#build.target.<fact>` reads work in `comptime if` and in code, with a test.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Re-met after the 2026-11-11 wording correction, on the G8 fresh-context review's ledger (Review3, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md), which read the landed diff and the a0.0.44 release rows: 95ae5a3980 provides the selected target facts; its case compares native and web layout facts in code and in comptime, spelled #build.target.",
+          "at": "2026-11-11T17:49:01.231Z"
+        },
+        {
+          "n": 25,
+          "text": "(from #6140 Effects on types: build action reuse decided by the action's) A pure action with declared inputs is reused on an unchanged rebuild and rerun when an input changes; a test proves both.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G8Lead2-17r. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md). cases run_steps_reuse_follows_their_effects PASS; packages Jetpack/CLI action reuse PASS. Check.jet --area CLI and 3 build_entry rows fail identically on origin/dev (pre-existing; G6Lead-6750c3 fixes build_entry).",
+          "at": "2026-11-10T05:06:54.347Z"
+        },
+        {
+          "n": 26,
+          "text": "(from #6140 Effects on types: build action reuse decided by the action's) An action with an ambient effect is never reused; a test proves it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G8Lead2-17r. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md). Same case and executor test: an Exec+Time action is never restored.",
+          "at": "2026-11-10T05:06:56.153Z"
+        },
+        {
+          "n": 27,
+          "text": "(from #6140 Effects on types: build action reuse decided by the action's) The reuse rule is the only reuse switch: no separate verify or trust flag remains for it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G8Lead2-17r. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md). ActionCache is the only reuse switch; no verify or trust flag remains.",
+          "at": "2026-11-10T05:06:57.725Z"
+        },
+        {
+          "n": 28,
+          "text": "(from #6141 Effects on types: spec page, diagnostics registry and teachi) Docs/spec states the rung rule, spellings and inference once, linking to the registry and examples instead of listing behavior.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "bcd7bb5bf4 (G8Lead2-20): Docs/spec states the rung rule, its spellings and inference once, and links to the registry and the Effects examples. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:19.101Z"
+        },
+        {
+          "n": 29,
+          "text": "(from #6141 Effects on types: spec page, diagnostics registry and teachi) Every code from the effects-on-types cards is registered with what/why/fix text and a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "At dev e4096a0f3b (G8Lead2 census): DiagnosticRows.jet registers 57 E07xx/E34xx codes, each with what/why/fix text; 52 have a tests/ui .stderr snapshot. The remaining 5: E0741 and E0745 are retired; E3402 is snapshotted at tests/fixtures/module-eval-diagnostics/E3402.stderr; E3415 (GateDeniedByPolicy) is pinned by stderr compares in 5 tests/cases files; E3404 is not an effects-on-types code (staged #5007, no emitter; listed in tests/guards/diagnostics_coverage.jet). Command: git grep of code: \"E(07|34)NN\" in DiagnosticRows.jet against jet-lang.dev/e/ links in tests/ui/**.stderr, then comm -23.",
+          "at": "2026-11-10T02:03:43.268Z"
+        },
+        {
+          "n": 30,
+          "text": "(from #6141 Effects on types: spec page, diagnostics registry and teachi) A beginner example (no rows written; a dependency upgrade that widens the locked effect row fails with E3513 LockedEffectRowWidened and its call chain) has golden output.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB G8Lead2-31. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). The beginner half: the beginner example golden PASS on O0/O1/O2. The expert half is c56 (D-TARGET-DECL1).",
+          "at": "2026-11-10T10:26:15.850Z"
+        },
+        {
+          "n": 31,
+          "text": "D-EFFTYPE-MODEL1 A: #FX above a type also bounds closures written inside its methods, inherited default methods and its Close impl, and a method row may only tighten it; concrete calls, trait-value fields and fixed-row function fields count against the cap (no laundering); a cases row per path proves each on o0/o1/o2, and the check is erased before IR.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:26.251Z"
+        },
+        {
+          "n": 32,
+          "text": "(was #6137) A library effect, a struct or enum that implements Effect with #FX(...) above it naming the kernel effects it relies on, checks, is qualified outside its package, and is blocked by a denial of any kernel effect it relies on; sema tests pin each rule.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:27.577Z"
+        },
+        {
+          "n": 33,
+          "text": "(was #6137) A body that uses a kernel effect not listed for its library effect reports a registered code with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:28.785Z"
+        },
+        {
+          "n": 34,
+          "text": "(was #6137) The kernel effect list matches the ratified D-EFFTYPE-KERNEL1 outcome (A); the moved effects are Core declarations, with a case on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB EffectsLead-3-21r2. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md).",
+          "at": "2026-11-10T05:06:38.424Z"
+        },
+        {
+          "n": 35,
+          "text": "(was #6137) An example (a small sql-style library effect written as a type that implements Effect, with #FX above it) has golden output on every tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:30.155Z"
+        },
+        {
+          "n": 36,
+          "text": "(was #6137) (was #6139) core.compiler exposes the extension-point function types with their rows; a marker or lint that exceeds its row reports a registered code (UI snapshot).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G8Lead2-21r. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md). ui effects/marker_row_outside_contract_is_e0774 and lint_generates_outside_row_is_e0775 PASS.",
+          "at": "2026-11-10T05:06:48.777Z"
+        },
+        {
+          "n": 37,
+          "text": "(was #6137) (was #6139) The advanced compiler API is gated only by `Meta.*` effect grants; the old opt-in spelling is gone with no shim, and a test proves a grant enables and its absence refuses.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Re-met after the 2026-11-11 wording correction, on the G8 fresh-context review's ledger (Review3, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md), which read the landed diff and the a0.0.44 release rows: 735ff3c36f removes the compiler.advanced spellings; Meta effect grants gate the advanced API under the ratified ladder amendment; the GeneratingMarker and row refusal rows pass in the a0.0.44 release.",
+          "at": "2026-11-11T17:49:02.411Z"
+        },
+        {
+          "n": 38,
+          "text": "(was #6137) (was #6139) Comptime tier tests (E3410-E3413) still pass unchanged.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Already true on dev 76955986d0 (G6LeadB sweep, 2026-11-10, t6c compiler, logs in $JET_SCRATCH_ROOT/lanes/G6LeadB/s1/): the comptime-tier ui rows comptime_io_rejected, impure_no_flag, impure_tier2_no_gate, impure_net_stub, runtime_only_in_prep and runtime_only_in_prep_environment, plus the cases comptime_rejects_file_backed_streams_at_named_boundary, pure_core_call_inside_impure_does_not_require_gates and vault_is_denied_unconditionally_inside_impure_build_context, all pass (9/9). E3413 is unchanged: its only snapshot, comptime_net_fetch_bad_hash, stays KNOWN-FAILING under #6419 (net.fetch is unbuilt).",
+          "at": "2026-11-10T11:07:26.229Z"
+        },
+        {
+          "n": 39,
+          "text": "(was #6137) (was #6139) An example custom lint or marker typed with the pure read-only compiler row of the ratified Meta amendment has golden output on every tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Re-met after the 2026-11-11 wording correction, on the G8 fresh-context review's ledger (Review3, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md), which read the landed diff and the a0.0.44 release rows: 095943e0f9: the read-only lint is typed -[]> under the ladder amendment; the ReadOnlyLint golden passes at o0, o1 and o2 in the a0.0.44 release.",
+          "at": "2026-11-11T17:49:03.672Z"
+        },
+        {
+          "n": 40,
+          "text": "(replaces C4: Jet has no union declaration) #FX(...) on struct and enum parses, is in the syntax registry, and appears in a passing example with golden output at O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main 2026-11-09, admitted seed a0_042 on dev 6a06b917cb: in Examples/ErrorsAndEffects/Effects, jet run --optimize=none|basic|full TypeCap.jet each matches TypeCap.out byte for byte (cmp rc 0, three tiers); the example carries #FX(IO, !FS) on a struct and #FX(!IO) on an enum; registry row Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:119-125 (found already built by EffectsLead-3).",
+          "at": "2026-11-09T20:35:26.494Z"
+        },
+        {
+          "n": 41,
+          "text": "A module #FX limit also covers methods inside struct and enum bodies and trait default bodies in that module; a function row wider than its module limit is an error; and a file-head #FX above use lines applies to the file instead of being dropped silently. Each has a UI or case proof.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "on dev 6a06b917cb: b19942b4b2 (EffectsLead-3-10) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:10.116Z"
+        },
+        {
+          "n": 42,
+          "text": "A module function used as a value (pricing.total passed where fn(String) -[]> Int is expected) type-checks and runs on O0, O1 and O2 instead of failing with E0107; it keeps its inferred row, so a narrower parameter refuses it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met on dev e4096a0f3b, fix train F (0f193199cc..e4096a0f3b; G8Lead2 commits 43be4371b9, 21093550fd, 6405fa1757, 6801c13c15, d4bfc1948b, 17c8a02a53). G8Lead2's rows for this criterion passed on the dev+F stage-2 compiler, and the fR3 full ui, golden and cases suites showed an empty diff against base 6a06b917cb.",
+          "at": "2026-11-10T00:56:31.670Z"
+        },
+        {
+          "n": 43,
+          "text": "The API snapshot and publish guard that #3838 builds for failure signatures also pins each public type's and module's #FX row, so widening one fails the guard; one shared guard, with a case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB EffectsLead-3-24r2. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md). cases pkg/cli_publish_cap_widening_e1218 PASS.",
+          "at": "2026-11-10T05:06:42.740Z"
+        },
+        {
+          "n": 44,
+          "text": "(proof addition for criterion 36; reflection proposal B11) The published types for marker expansion and derive are the D-DECL-TYPES1 methods, `Marker.expand(self, target: Target)` and `Derive.expand(target: Target)`, with template bodies (D-CTCODEGEN1). The 2026-10-29 effect-types proposal, section 9.1, is amended to match, and the effect name for their row is settled by this card.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G8Lead2-21r. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md).",
+          "at": "2026-11-10T05:06:52.507Z"
+        },
+        {
+          "n": 45,
+          "text": "(Defect, found 2026-11-04 on 52d3e9cf79; holds under every D-EFFTYPE-MODVALUE1 option) A generic module's #FX cap is checked. Today '#FX(!IO) module quiet<T>(...)' with a direct print passes (probe $JET_SCRATCH_ROOT/lanes/Main/prep/mv/m3g_ctrl_gen.jet), while the same cap on a plain module is E0749 (m3f_ctrl). The cap also bounds what a module argument does inside the instance (m3c_cap). Each has a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "on dev 6a06b917cb: 925acbca54 (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:11.089Z"
+        },
+        {
+          "n": 46,
+          "text": "(Defect, found 2026-11-04; holds under every option) Diagnostics name source paths, not mangled symbols. E3401 today says '__jet_shouty_dbill calls the impure function __jet_loud_dtotal' ($JET_SCRATCH_ROOT/lanes/Main/prep/mv/m3e_pure.jet). For billing<Int>, the error is reported at the instance line and names the missing function, not 'Nothing named R' in the template body (m3d). Each has a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB EffectsLead-3-22r2. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md).",
+          "at": "2026-11-10T05:06:40.561Z"
+        },
+        {
+          "n": 48,
+          "text": "(Defect, found 2026-11-04, effect soundness; breaks D-DET1) A function declared pure (-[]>) can write module state: a 'shared' and a '#Persist' module value are written from a -[]> function, which prints 1 then 2 ($JET_SCRATCH_ROOT/lanes/Main/prep/mv/st/run.jet, run3.jet). Writing module state is an effect the row must show, or it is refused, with a UI snapshot and a case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "on dev 6a06b917cb: c962b0554e (E3401) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:12.013Z"
+        },
+        {
+          "n": 49,
+          "text": "(Defect, found 2026-11-04) 'impl Trait { }' outside a type body is accepted, its method gives E0102, and calling it through the trait is an ICE ($JET_SCRATCH_ROOT/lanes/Main/prep/mv/n11c.jet). It gets a meaning per the D-EFFTYPE-MODVALUE1 outcome or a registered diagnostic, never an ICE (I2), with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "on dev 6a06b917cb: e477930fe5 (EffectsLead-3-13): impl Trait outside a type body is E0301, UI snapshot (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:12.934Z"
+        },
+        {
+          "n": 50,
+          "text": "(Defect, found 2026-11-04) A constant in an inline module ('RATE: 3') is E0107 inside that module's own function ($JET_SCRATCH_ROOT/lanes/Main/prep/mv/n8.jet). It resolves, with a case on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "on dev 6a06b917cb: 9e0a6f8943 (MetaLead, G6 #6281 c62) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:13.849Z"
+        },
+        {
+          "n": 51,
+          "text": "(Defect, found 2026-11-04) A parameter named self on a module function outside any impl is silently an ordinary parameter ($JET_SCRATCH_ROOT/lanes/Main/prep/mv/n6.jet). It is refused with a registered diagnostic and a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "on dev 6a06b917cb: 648603aa34 (EffectsLead-3-12, E0639) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:14.767Z"
+        },
+        {
+          "n": 52,
+          "text": "(was #4291) [#4243] Calls inside loop bodies are inference edges, not direct failures of the enclosing function. (was #4275 c47)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "6c88e0feef: tests/cases/effects/loop_body_calls_are_inference_edges.case PASS. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
+          "at": "2026-11-10T02:36:38.763Z"
+        },
+        {
+          "n": 53,
+          "text": "(was #4291) [#4491] Panic effect rows match canonical inference: RequireStop/Never, and lambda bodies feeding the lambda and fn rows. (was #4275 c50)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "36b6c481b3: tests/cases/effects/lambda_body_stop_feeds_fn_row.case PASS. A stop inside a lambda body puts Panic in the enclosing fn row. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
+          "at": "2026-11-10T02:36:40.516Z"
+        },
+        {
+          "n": 54,
+          "text": "(was #4291) [#4386] Named bounded unit handlers keep their effect and failure contracts as function values. Mismatched bounds and access modes are still rejected (handler-borrow.jet stays E0227), and sendability facts are kept. (was #4275 c51)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Re-met after the 2026-11-11 wording correction, on the G8 fresh-context review's ledger (Review3, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md), which read the landed diff and the a0.0.44 release rows: 397a88e807 pins the effect, failure, access and sendability behavior of named handlers, with handler-borrow refused as E0227; its case passes in the a0.0.44 release.",
+          "at": "2026-11-11T17:49:04.907Z"
+        },
+        {
+          "n": 55,
+          "text": "Found 2026-11-09 by G8Lead2 (probe on the train-1 compiler): a function value escapes its parameter's effect row. A lambda whose inferred effects include IO is accepted where the parameter type is `fn() -[]>`, and a lambda or named fn that can panic is accepted where it is `fn() -[!Panic]>`; E0747 covers only written rows and named fns today. The check runs at the function-value boundary with the value's inferred row: both programs are refused at the call site with a registered diagnostic and UI snapshots, a lambda that fits is accepted, and cases prove it on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G8Lead2-14r2. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md).",
+          "at": "2026-11-10T05:06:46.819Z"
+        },
+        {
+          "n": 56,
+          "text": "(split from c30) An expert example (module, type, trait and target rows) has golden output on every tier. Waits on D-TARGET-DECL1 for the target rows.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G6LeadE-1s + G6LeadE-1sfixr. `jet test Compiler --profile golden --filter=ErrorsAndEffects/Effects/EffectRowLayers` passes on o0, o1 and o2 with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md, census2 rc=0). The expert example declares module, type, trait and target rows, and the target rows use the core.target machines (D-TARGET-DECL1).",
+          "at": "2026-11-10T19:45:33.130Z"
+        },
+        {
+          "n": 57,
+          "text": "E0749 prints a real call chain (never \"f → f\" for a direct self-call), with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G6Lead-6129q-a (491029a43d) landed on dev c460ba91e5 (train t9d, 1e1492c924..c460ba91e5), run with the t9d-built compiler: PASS ui --filter=effects/panic_prohibition (panic_prohibition_self_call_chain_is_one_function: a chain back to the same function is one function), panic_effect_prohibition and panic_effect_budget; PASS cases effects/every_effect_leaf_checks_through_every_path; PASS jet test Compiler/JetSema.",
+          "at": "2026-11-10T12:18:41.371Z"
+        },
+        {
+          "n": 58,
+          "text": "core.process.exit declares Exec.Exit (the narrow leaf), not the whole Exec effect; callers bound to Exec.Exit check clean, with a case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6Lead-6129q-b. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). case effects/process_exit_needs_only_the_exit_leaf PASS.",
+          "at": "2026-11-10T16:28:28.147Z"
+        },
+        {
+          "n": 59,
+          "text": "E0111 (changing a `:` binding) names the actual binding in its what and fix text, never a literal `x`. E0119 (an unknown effect) suggests the registered spelling (`io` → `IO`, `fs.read` → `FS.Read`) with a machine edit. Both have UI snapshots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G6Lead-6129q-a (491029a43d) landed on dev c460ba91e5 (train t9d, 1e1492c924..c460ba91e5), run with the t9d-built compiler: PASS ui --filter=effects/unknown_effect; PASS cases effects/unknown_effect_case_suggests_registered_spelling (a machine edit to the registered spelling) and cli_parts_surface/explain_e0111_names_no_placeholder_binding; PASS DiagnosticRows --check and CoreSourceRows --check.",
+          "at": "2026-11-10T12:18:43.082Z"
+        },
+        {
+          "n": 60,
+          "text": "D-EFFECT-ARGS1=A is built. An effect argument names a scope from the Core scope types: a folder (FS.Read(\"templates/\")), a host (Net(\"api.example.com\")) or a device. One covers rule from those types decides coverage for effect rows, run grants (--allow) and denials. A mediated call checks its scope at run time. The rule works on every tier (O0, O1, O2), with an executable golden example and UI snapshots for each refusal.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G8Scope-1b 3c190cd44e (review finding, part 2 of 2): the compiler's covers is the runtime's one covers rule over the Core scope types. The interim CI_ALLOWED row is removed by the follow-up on #6615 c11 (G8Scope-1c/1d). Landed in train t23 (dev 9755703c76, 2026-11-11 09:07): the train census and every named row are green on the t23 compiler, and the rows skipped there were rerun green.",
+          "at": "2026-11-11T14:10:07.238Z"
+        },
+        {
+          "n": 61,
+          "text": "Regression found by TlsLead3 on dev 8327f5ae47: in `jet test Compiler --profile cases`, the web suite's testing_tiers case fails with E1123 jet.TargetDeniedEffect (added by G6LeadE-1s in t14a). Either the case's web build really reaches a denied effect, so the case is wrong and is fixed to the target's row, or the denial row is wrong and is fixed at its root. The case passes, and no other web or cross case newly fails.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 0a995af312 (train t18a, c2cecce162..0a995af312), SUB G8Fix-13. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t18a/REPORT.md). c61 is built and its listed proofs pass.",
+          "at": "2026-11-11T03:23:20.854Z"
+        },
+        {
+          "n": 62,
+          "text": "An explicitly written empty type cap is pure: a type marked #FX whose method performs IO is refused at check time. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R1, high; the closure of c6, c31 and c40 and #6614 c5 did not cover it): Checks.jet:1098-1124 returns early when the positive ceiling is empty, so it can't tell a pure cap from a deny-only cap, and Modules.jet:383-406 records a present bare marker with zero entries. Fix the representation and the check, not a fixture. Proof: probes/pure-type.jet is refused with a registered code and a UI snapshot; a deny-only cap still allows its other effects; a tier case at O0/O1/O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ff78e92e51 (G8Scope-23) with fixture fix 1512da8e2a (G8Scope-23f): a bare #FX is pure (E0749); the case passes on batch compiler b3.",
+          "at": "2026-11-11T19:40:26.607Z"
+        },
+        {
+          "n": 63,
+          "text": "A repeated #FX marker on one type never drops a limit: either both caps apply (their intersection) or the repeat is refused with a registered diagnostic. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R2, high; also #6614 c6): parser_type_fx_cap (Modules.jet:413-420) returns the first marker and ignores the second, so a second denial is silently discarded. Pick the rule that matches the one-list contract, record it on this card, and prove it with probes/duplicate-cap.jet plus a UI snapshot or tier case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "155962df1f (G8Scope-24) with fixture fix 39de19a03f (G8Scope-24f): a repeated #FX is E0999 and never drops a limit; the case passes on batch compiler b3.",
+          "at": "2026-11-11T19:40:28.150Z"
+        },
+        {
+          "n": 64,
+          "text": "A function with an empty effect row cannot write module state through a parameter, an alias, a separately checked lambda or a trait dispatch: the write is refused or charged to the caller. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R3, high; c48 was closed on the direct-name path only): Scopes.jet:2225-2230 records a module write only when the syntactic root is a Constant, and c962b0554e disclosed the parameter, alias, lambda and trait limits. Proof: probes/alias.jet (fn(c: Shared<Count>) -[]> Int { c.value += 1; ... } called with module HITS) is refused or accounted, plus one case per path at O0/O1/O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6755 c1 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:28.259Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 65,
+          "text": "A scoped effect entry such as FS.Read(\"data/\") is accepted on a type #FX cap and on an #FX block, not only on a function arrow row, and every inherited scoped limit is enforced at run time. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R7, medium; c60 and the one-list-on-every-rung contract of c28): Modules.jet:383-406 calls parser_authority_effect_path instead of the scoped row parser (E0930), and the runtime descriptor (CheckProgram.jet:2314-2320) is built from func.declared_effects only. Proof: probes/scoped-type.jet and scoped-block.jet print refused for a path outside data/ at O0/O1/O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/cases/effects/fx_cap_and_block_scopes_refuse_a_parent_escape_at_every_tier.case encodes the criterion's probes: type.jet is the #FX(FS.Read(\"data/\")) type cap and block.jet the #FX block. Each prints exactly refused for data/../secret.txt under jet run, --optimize=basic and --optimize=full. inside.jet is the positive control and reads at all three tiers. It PASSes on seed-b8 in the b8 deferred run (deferred-b8 line 14 and merged cases JSON: status PASS, exit 0). That run was judged with the canary after the jq fix. It landed with 8ed3b3fddb and is unchanged by G8Scope-44 7e5d1d45c8.",
+          "at": "2026-11-12T00:44:30.995Z"
+        },
+        {
+          "n": 66,
+          "text": "The E3413 UI snapshot passes, rather than staying KNOWN-FAILING under #6419. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap E1): c38 says the E3410-E3413 tests pass unchanged, but the a0.0.44 receipt keeps E3413 KNOWN-FAILING, and dev now has an E3413 emitter (BuildAdapter.jet:513), so the receipt's no-emit-site explanation is stale. Proof: jet test Compiler --profile ui --filter E3413 passes on a train compiler.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6755 c2 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:29.740Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 67,
+          "text": "Docs/spec/spec.md teaches the current pure-cap spelling: bare #FX, never #FX(), which the compiler rejects. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap E2): spec.md:2030 says #FX() is pure. Fix the spec text only; no compatibility spelling. Proof: the spec paragraph's example checks on the train compiler.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a437a0019c (G8Scope-22): the spec spells bare #FX; its deferred proof passes on batch compiler b3 (seed-b3 at 38cb96129c).",
+          "at": "2026-11-11T19:40:25.041Z"
+        },
+        {
+          "n": 68,
+          "text": "An effectful lambda publishes its effect row: calling a local lambda that performs IO from a function declared -[IO]> is accepted with that row, not rejected as E0740 with the maximal row (probe: a: fn() -[IO]> Int { step: () -> { print(\"x\") }; step(); 1 }). Cases on O0/O1/O2 and a UI snapshot for the over-row case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6755 c3 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:30.808Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 69,
+          "text": "A call of a local lambda from inside another lambda's body publishes the callee's effect row, as a direct call does since c68: a nested call is no longer treated as maximal. Cases on O0/O1/O2, and the spec's stated limit is removed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6755 c4 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:31.901Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 70,
+          "text": "Compile-time input calls publish their effects: net.fetch(url, sha256:) carries Net, and embed_file/find carry FS.Read, so a function declared -[!Net]> or without FS.Read is refused (tests/ui/build_io_net_denied and an FS.Read denial snapshot), and jet explain effects lists them. Found by G6Meta-2 on dev b181be688c, 2026-11-11: dev's net.fetch and embed_file record no effect.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6755 c5 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:33.010Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 71,
+          "text": "From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). Denials are truthful beyond TLS. An inventory lists every host read that runtime or Core code performs under an effect other than its own: resolver reads such as /etc/hosts, pure runtime clock access, FFI and loader boundaries. Each one is classified (declared, ruled exempt by an owner decision, or fixed). No doc or diagnostic claims universal truthful denial until the inventory is complete. This does not wait on D-NET-HOSTREADS1's TLS fix.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6755 c6 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:34.126Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G8"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-29T11:29:47.978Z",
+      "updated": "2026-11-12T01:52:39.000Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 71,
+      "completedAt": "2026-11-12T01:52:39.000Z",
+      "questions": [
+        {
+          "id": "q11knr3g",
+          "cardId": "c09kjhit",
+          "decisionId": "D-EFFTYPE-MODEL1",
+          "by": "owner",
+          "kind": "question",
+          "text": "This throws away the original ask without addressing it. The original ask was based on SPJ's haskell idea that types should be able to define/limit the effects with which they can interact. I thought that was a good idea & this recommendation just removes it",
+          "status": "answered",
+          "answer": "Agreed: the recommendation dropped your ask. The ballot is being rebuilt around it. A type states the most effect any code acting in its name may perform, as Peyton Jones's typed effects let a type bound its effects. The type-level cap becomes the recommendation, with its generic-type and trait-impl rules designed so none of the old downsides remain. It must also agree with D-DECL-TYPES1 rule 4 (#FX above any type has one reading). The ballot returns to you after an adversarial pass.",
+          "created": "2026-10-30T09:45:34.443Z",
+          "answeredAt": "2026-10-30",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q1pjj5iw",
+          "cardId": "c09kjhit",
+          "decisionId": "D-EFFTYPE-MODVALUE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "modules as values/data seems to be cohesive and idiomatic with jet. please further explore that concept, update this ballot accordingly, and present the implications of that perspective",
+          "status": "answered",
+          "answer": "Updated after exploring it. Recommended (A): a module is a value of its own type, and it fits a trait the same way a struct does, by writing impl PriceRules { ... } in its body. It can then be passed as a trait value, stored in a list beside structs, or used as a generic argument; its #FX limit travels with it, and reflection reads it like a type. Fitting by shape alone is option B, a record of functions is C, and keeping modules as names is D. The detail covers module state, self, visibility, identity, run time vs build time, reflection, cost and the beginner/expert paths.",
+          "created": "2026-11-04T16:40:56.921Z",
+          "answeredAt": "2026-11-04",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q1vmvgyo",
+          "cardId": "c09kjhit",
+          "decisionId": "D-EFFTYPE-MODVALUE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "an even deeper extension of this idea, since markers and effects, etc  are all structs now (or at least planned), why not modules and packages? technically considered as structs? see what Im going for?",
+          "status": "answered",
+          "answer": "Yes, and it wins, so it is now recommended (A): a module is a struct with no fields and one value of the same name. A file is such a struct, as in Zig, and a package is its root module; package.jet already builds its Package value. A module then passes, fits a trait through impl, reflects and takes markers exactly as a struct does, while init order, privacy and separate compilation stay as today. The costs are that struct bodies gain nested types and constants, and a one-value type is a new idea, though beginner code reads as before. Last time's A is now B, keeping modules as names is C, and the shape and record options are dropped.",
+          "created": "2026-11-04T19:56:49.737Z",
+          "answeredAt": "2026-11-04",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q8dletl9",
+          "cardId": "c09kjhit",
+          "decisionId": "D-EFFTYPE-MODVALUE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Structs should already have nested constant support, need to engineer away the downside. Also maybe module and package since they use a special keyword can have special reserved properties that normal structs don't? Idk",
+          "status": "answered",
+          "answer": "You are right: the ratified rule that every named thing is a binding already lets a struct body hold constants and nested types (it is just not built yet), so that cost is no longer A's. Modules and packages get their special properties through their reflection record, such as pricing.reflect().file and json.reflect().package.version, so no member name is taken from your code (plain reserved names would break a module that defines version(), probe v07). The module keyword keeps one power plain structs lack: its name is its value.",
+          "created": "2026-11-04T23:57:14.183Z",
+          "answeredAt": "2026-11-05",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q91vyiey",
+          "cardId": "c09kjhit",
+          "decisionId": "D-EFFTYPE-MODVALUE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Also like in zig file as a strict sounds like a good idea",
+          "status": "answered",
+          "answer": "A keeps Zig's rule: a file is a struct, and loading it gives you its one value. The new B takes Zig all the way, so a file with top-level fields becomes a type you build; it is shown on the same program. We recommend A because under B, adding one field line turns a file into a type and breaks every caller, and Jet would gain a second way to declare a struct.",
+          "created": "2026-11-04T23:59:39.320Z",
+          "answeredAt": "2026-11-05",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "qcxinhy3",
+          "cardId": "c09kjhit",
+          "decisionId": "D-EFFTYPE-MODVALUE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "I need to see code examples with the recommended format, also there is info/metadata for packages and modules, what do you mean field less structs?? They should not be field less? They should have all the relevant metadata and there should be optionals/defaults so it's opt in for given features/customization for them. Understood? Update accorsingly",
+          "status": "answered",
+          "answer": "Understood and done: modules and packages are no longer fieldless. Every module has one member, module, with typed fields: name, file, package and doc come from the compiler; maturity, category and deprecated have defaults you opt in to, as in module :: { category: \"billing\" }. A package's metadata is the Package value its package.jet already writes (plus one new optional field, authors), read as #package.license or json.module.package.version. module is a keyword, so nothing you write can clash with it, and reflect() is dropped for modules and packages. The ballot shows complete examples in this format.",
+          "created": "2026-11-05T00:44:23.028Z",
+          "answeredAt": "2026-11-05",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "qdqeqeh4",
+          "cardId": "c09kjhit",
+          "decisionId": "D-EFFTYPE-MODVALUE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "this STILL does not seem cohesive, what is the nested module thing?? we are planning to move to jai style declarations where functions and methods etc are all constants defined with :: -> so your syntax wont be accurate and it already mixes things and is very confusing. fix it",
+          "status": "answered",
+          "answer": "Fixed: the nested module member is gone. A module's metadata are its own typed fields with defaults (name, file, doc, package, maturity, category, deprecated). You set one with a single line at the top of the module, category: \"billing\", the same line form package.jet uses, and read it as pricing.category; package metadata reads as json.package.version, or #package.version for your own package. Every example uses the ratified binding form, such as total :: fn(text: String) -> Int { … }, with nothing mixed. The one cost: those seven names are taken at module level (a clash is the generic duplicate-name error), so 9 existing items are renamed once by jet fix. B avoids that by reading through #module(pricing); C writes the fields with markers.",
+          "created": "2026-11-05T02:20:11.480Z",
+          "answeredAt": "2026-11-05",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-15T02:00:02.613Z"
+    },
+    {
+      "id": "c0tbm7r0",
+      "num": 6551,
+      "title": "jet explain effects: list the effect caps in force, nearest first",
+      "body": "The ratified effect-rung ruling (option A, #FX on the module line) promises that `jet explain effects` lists every cap in force, nearest first. The type-rung ruling repeats it and adds `jet explain effects --caps`, which lists each module cap with its file and line. Today `jet explain effects` is E2104 (not built yet). The rulings name the command but not its arguments: which site it explains (a file, a function, a file:line), and its JSON shape. Those choices are an owner gate, so a ballot comes first. The checks it reads already exist: module caps (E0712/E0749 with the cap line as a secondary label), #FX block regions, function rows, package authority and run --allow/--deny. Split from #6046 so that card can close on its spelling criterion.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Reopened by the G8 fresh-context review (Review3, 2026-11-11): c4 (generic-module cap and generated names in the ladder and --caps), c5 (deny-only effects in reaches), c6 (jet.report/v1 JSON envelope). Owner: G8Scope."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "All criteria met (verified by Main from landed dev commits; the last was #6129 c60 in t23, dev 9755703c76, 2026-11-11). Card closed; the G8 milestone sweep is the a0.0.44 admit's full suites."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-08 (Q27 A): jet explain effects [<file>[:<line>]] [--caps] [--json]. A line explains the innermost scope there, a file its module, bare the entry jet run would pick; one line per rung nearest first (block, function, module, package, run) with (none written) for empty rungs, then what the site reaches with the first call reaching each; --caps lists every module cap as file:line; --json uses the jet.report/v1 envelope. Shares one walker with jet inspect rights. Ballot text: EffectsLead draft (ballot-6551.md, option A). EffectsLead builds c2 and c3."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An owner ballot fixes the command form of jet explain effects (the site it explains, --caps, and --json) and is ratified.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-JET-EXPLAIN-EFFECTS1 ratified A 2026-11-09 (owner Q27 A): jet explain effects [<file>[:<line>]] [--caps] [--json]. The decision is attached to #6614 on Tower.",
+          "at": "2026-11-09T18:28:16.657Z",
+          "closure": "decision"
+        },
+        {
+          "n": 2,
+          "text": "jet explain effects prints every cap in force at the chosen site, nearest first, across the block, function, type, module (file-head and inline), package and run rungs, with (none written) for an empty rung, and a golden or snapshot for each rung.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 492097d9c2 and 6ec52b404a on dev (train 1). Train-1 compiler from dev 0f193199cc: jet test Compiler --profile cases --filter explain_effects_ladder PASS 1 FAIL 0; the case has one step per rung (block, function, type, module file-head and inline, package, run), nearest first, and pins the line `type      (none written)` for an empty rung. Also tests/guards 129 passed 0 failed, cli_parts_commands and cli_parts_runtime 0 FAIL.",
+          "at": "2026-11-09T22:45:41.395Z"
+        },
+        {
+          "n": 3,
+          "text": "jet explain effects --caps lists each module cap (file-head and inline) and each type cap with its file and line, with a snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 492097d9c2 and 6ec52b404a on dev (train 1). Train-1 compiler from dev 0f193199cc: the explain_effects_ladder case (PASS 1 FAIL 0) has a --caps step whose snapshot lists each file-head module cap, inline module cap and type cap with its file and line.",
+          "at": "2026-11-09T22:45:42.623Z"
+        },
+        {
+          "n": 4,
+          "text": "jet explain effects shows an instantiated generic module's cap in its ladder and in --caps, and never prints a compiler-generated name such as __jet_counter_dbump. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R4, medium; c2 and c3): ExplainEffects.jet:366 descends through GenericModule without adding nested.cap, and the report prints the lowered function.name. Repair the shared source and fact projection, not a label for one example. Proof: probes/generic.jet shows the #FX(IO,!FS) cap at the generic module's rung and in --caps, under its source name, with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6755 c7 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:35.340Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 5,
+          "text": "jet explain effects reports every effect a site reaches, including the deny-only ones (Panic, Mem, Time.Wait), as the ratified command contract promises. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R5, medium): ExplainEffects.jet:456 drops deny-only authorities in jet_cli_effects_reach_add. Proof: probes/panic.jet lists Panic in its reaches line, with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6755 c8 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:36.484Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 6,
+          "text": "jet explain effects --json follows the current ratified machine-output contract (D-REPORT-MACHINE1, D-REPORT-LAW1): the command result is one jet.status/v1 record, action explain.effects, holding the reach ladder and caps as status data; any diagnostic inside it is a jet.report/v3 object. Proof: a golden of --json for probes/explain.jet, accepted by the testkit validator (StepsMachine.jet), plus D-JET-EXPLAIN-EFFECTS1's text in syntax-decisions.md and the spec reading its jet.report/v1 phrase as this contract. Gap R6 from the G8 review by Review3, 2026-11-11.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G8Scope-30 17ccdae881, proved by Lander3 before landing: the jet explain effects --json golden for probes/explain.jet is a jet.status/v1 record (action explain.effects) accepted by the StepsMachine validator; D-JET-EXPLAIN-EFFECTS1 prose in syntax-decisions.md with the DecisionIndex regenerated in the same commit; cli.md note.",
+          "at": "2026-11-11T20:22:10.631Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ladder",
+        "effects-authority"
+      ],
+      "goals": [
+        "G8"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-03T12:02:19.438Z",
+      "updated": "2026-11-12T01:52:40.701Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-12T01:52:40.700Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T02:00:02.614Z"
     }
   ]
 }
