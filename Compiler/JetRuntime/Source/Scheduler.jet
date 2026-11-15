@@ -195,7 +195,9 @@ scheduler_control_new: fn() -> I64 {
 // exit with no captured report (jet_rt_process_exit called directly, as an
 // `#Import(c)` caller does) has nothing to publish, so it returns 0 and the
 // trap ends the process with `a` itself. DROP discards the capture of
-// control `a`. The others return 1.
+// control `a`. SITE_BEGIN, SITE_END and JOINED_SITE are a task stop's site
+// (Trap.jet trap_task_site_begin) with its message `a` of `b` bytes;
+// SITE_BEGIN returns 1 only when it began a capture. The others return 1.
 #Export(c) jet_rt_trap_root: fn(op: I64, a: I64, b: I64, c: I64) -> I64 {
     if (op == TRAP_ROOT_PREPARE) {
         if !scheduler_stop_fatal() -> scheduler_root_capture_begin()
@@ -207,8 +209,14 @@ scheduler_control_new: fn() -> I64 {
         jet_rt_string_drop(scheduler_root_capture_take(a))
     } else if (op == TRAP_ROOT_WRITE) {
         rt_text_append(a, b, c)
-    } else {
+    } else if (op == TRAP_ROOT_WRITE_WORD) {
         rt_text_append_raw_word(a, b, c)
+    } else if (op == TRAP_ROOT_SITE_BEGIN) {
+        return trap_task_site_open()
+    } else if (op == TRAP_ROOT_SITE_END) {
+        trap_task_site_publish(a, b)
+    } else {
+        trap_joined_site_write(a, b)
     }
     I64{1}
 }
@@ -249,7 +257,7 @@ scheduler_control_drop: fn(control: I64) {
 }
 
 // A task stop's site travels with its failure. The stop writes its report
-// context and stores it here (Trap.jet trap_task_site_end); its publication
+// context and stores it here (Trap.jet trap_task_site_publish); its publication
 // moves it onto the stop record (rt_task_panic_publish_owned); the join that
 // takes the failure hands the site and the failure's reason to the joiner's
 // control (Task.jet task_panic_site_hand). A stop whose message is that

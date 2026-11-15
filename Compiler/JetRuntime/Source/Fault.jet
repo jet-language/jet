@@ -171,12 +171,23 @@ fault_raise: fn(signal: I64) {
 #Export(c) jet_rt_context_trace: fn() -> I64 { trace_text() }
 
 // The calling chain's frame lines, innermost first, as
-// jet_rt_context_trace returns them. A stop raised in Core reads it too
-// (Trap.jet trap_user_location). Its own frame and every runtime frame on
-// the way add no line, because the table doesn't hold them.
+// jet_rt_context_trace returns them. Its own frame and every runtime frame
+// on the way add no line, because the table doesn't hold them.
 trace_text: fn() -> I64 {
     text: rt_text_builder_with_capacity(I64{0})
     if (text == I64{0}) -> return I64{0}
+    _ := trace_walk(text, false)
+    text
+}
+
+// Walk the calling chain. With a `text`, each Jet frame appends its line to
+// it. With none (0), the walk stops at the innermost frame whose file is not
+// Core's and writes that frame's `-->` line (Trap.jet trap_user_frame, with
+// its function when `with_function`); it returns whether one was written.
+// That form allocates nothing, so a stop raised in Core (Trap.jet
+// trap_user_location) links no allocator into an image that never
+// allocates.
+trace_walk: fn(text: I64, with_function: Bool) -> Bool {
     // The frame walk needs rbp, which no admitted asm leaf reads. As
     // alloc_check_start does, this maps the four-byte stub `mov rax, rbp;
     // ret`. os_call_address_i64 is an inline leaf, so the stub returns this
@@ -184,20 +195,20 @@ trace_text: fn() -> I64 {
     // caller. The stub, path and image pages are untracked: the runtime
     // alone reads them.
     stub: alloc_map_try(I64{4096})
-    if (stub == I64{0}) -> return text
+    if (stub == I64{0}) -> return false
     frame := I64{0}
     #Unsafe("stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call") {
         os_store_i64(stub, I64{3286796616})
         if (os_syscall_i64(I64{10}, stub, I64{4096}, I64{5}, I64{0}, I64{0}, I64{0}) == I64{0}) { frame = os_call_address_i64(stub, I64{0}) }
     }
     trace_unmap(stub, I64{4096})
-    if (frame == I64{0}) -> return text
+    if (frame == I64{0}) -> return false
     loaded: host_getauxval(HOST_AT_IMAGE)
     image := loaded
     length := I64{0}
     if (image == I64{0}) {
         path: alloc_map_try(I64{4096})
-        if (path == I64{0}) -> return text
+        if (path == I64{0}) -> return false
         #Unsafe("path is a fresh private page; the executable is mapped read-only and only read") {
             // "/proc/self/exe\0", little-endian.
             os_store_i64(path, I64{7310238724270485551})
@@ -217,10 +228,10 @@ trace_text: fn() -> I64 {
         }
         trace_unmap(path, I64{4096})
     }
-    if (image == I64{0}) -> return text
-    trace_frames(text, image, alloc_check_bias(image), frame)
+    if (image == I64{0}) -> return false
+    found: trace_frames(text, image, alloc_check_bias(image), frame, with_function)
     if (length > I64{0}) -> trace_unmap(image, length)
-    text
+    found
 }
 
 // Unmap a mapping the trace made: its stub page, its path page or its view
@@ -231,9 +242,10 @@ trace_unmap: fn(address: I64, bytes: I64) {
     }
 }
 
-// One line per Jet frame of the chain from `start` onto `text`, read from
-// the .debug_jetline section of `image` (its load bias `bias`).
-trace_frames: fn(text: I64, image: I64, bias: I64, start: I64) {
+// Each Jet frame of the chain from `start`, read from the .debug_jetline
+// section of `image` (its load bias `bias`), as trace_walk takes them:
+// onto `text`, or to the first frame outside Core when `text` is 0.
+trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, with_function: Bool) -> Bool {
     table := I64{0}
     table_end := I64{0}
     #Unsafe("image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table") {
@@ -258,7 +270,7 @@ trace_frames: fn(text: I64, image: I64, bias: I64, start: I64) {
             }
         }
     }
-    if (table == I64{0}) -> return
+    if (table == I64{0}) -> return false
     frame := start
     steps := I64{0}
     loop frame != (I64{0}) && frame.bit_and(I64{7}) == (I64{0}) && steps < (I64{4096}) {
@@ -269,20 +281,24 @@ trace_frames: fn(text: I64, image: I64, bias: I64, start: I64) {
             above = os_load_i64(frame)
         }
         // The call's own address, at link time.
-        if (address != I64{0}) -> trace_frame(text, table, table_end, wrapping(wrapping(address - I64{1}) - bias))
+        if (address != I64{0} && trace_frame(text, table, table_end, wrapping(wrapping(address - I64{1}) - bias), with_function)) -> return true
         frame = if (above > frame && wrapping(above - frame) < I64{16777216}) -> above else -> I64{0}
         steps = wrapping(steps + I64{1})
     }
+    false
 }
 
-// The line of the Jet function whose code holds link-time address `pc`,
-// from the table [table, table_end). Its layout is DebugPrune.jet's, and
-// its lookup is report.S `find`. Nothing when no function holds pc.
-trace_frame: fn(text: I64, table: I64, table_end: I64, pc: I64) {
+// The Jet function whose code holds link-time address `pc`, from the table
+// [table, table_end): its line appended to `text`, or with no `text`, its
+// `-->` line written when its file is not Core's (Trap.jet
+// trap_user_frame). True when that line was written. The table's layout is
+// DebugPrune.jet's, and its lookup is report.S `find`. Nothing when no
+// function holds pc.
+trace_frame: fn(text: I64, table: I64, table_end: I64, pc: I64, with_function: Bool) -> Bool {
     block := table
     loop wrapping(block + I64{20}) <= table_end {
         end: wrapping(wrapping(block + I64{4}) + trace_u32(block))
-        if (end < wrapping(block + I64{20}) || end > table_end) -> return
+        if (end < wrapping(block + I64{20}) || end > table_end) -> return false
         count: trace_u32(wrapping(block + I64{4}))
         strings: wrapping(block + trace_u32(wrapping(block + I64{8})))
         low := I64{0}
@@ -303,15 +319,19 @@ trace_frame: fn(text: I64, table: I64, table_end: I64, pc: I64) {
             rows_length: trace_uleb(cursor)
             cursor = trace_leb_end(cursor)
             rows_end: wrapping(cursor + rows_length)
-            if (rows_end > end) -> return
+            if (rows_end > end) -> return false
             if (pc >= low && pc < high) {
-                trace_text_cstr(text, wrapping(strings + name), end)
+                name_at: wrapping(strings + name)
+                file_at: wrapping(strings + file)
+                line: trace_line(cursor, rows_end, low, high, pc)
+                if (text == I64{0}) -> return trap_user_frame(name_at, trace_cstr_len(name_at, end), file_at, trace_cstr_len(file_at, end), line, with_function)
+                rt_text_append(text, name_at, trace_cstr_len(name_at, end))
                 rt_text_push_scalar(text, I64{9})
-                trace_text_cstr(text, wrapping(strings + file), end)
+                rt_text_append(text, file_at, trace_cstr_len(file_at, end))
                 rt_text_push_scalar(text, I64{9})
-                rt_text_push_number(text, trace_line(cursor, rows_end, low, high, pc))
+                rt_text_push_number(text, line)
                 rt_text_push_scalar(text, I64{10})
-                return
+                return false
             }
             cursor = rows_end
             low = high
@@ -319,6 +339,7 @@ trace_frame: fn(text: I64, table: I64, table_end: I64, pc: I64) {
         }
         block = end
     }
+    false
 }
 
 // The line of `pc` in the function [low, high) whose rows are [rows,
@@ -343,14 +364,14 @@ trace_line: fn(rows: I64, rows_end: I64, low: I64, high: I64, pc: I64) -> I64 {
     I64{0}
 }
 
-// The NUL-terminated string at `at` appended to `text`; it ends at `end`
-// at the latest.
-trace_text_cstr: fn(text: I64, at: I64, end: I64) {
+// The length of the NUL-terminated string at `at`; it ends at `end` at the
+// latest.
+trace_cstr_len: fn(at: I64, end: I64) -> I64 {
     length := I64{0}
     loop wrapping(at + length) < end && trace_u8(wrapping(at + length)) != (I64{0}) {
         length = wrapping(length + I64{1})
     }
-    rt_text_append(text, at, length)
+    length
 }
 
 trace_u8: fn(at: I64) -> I64 {
