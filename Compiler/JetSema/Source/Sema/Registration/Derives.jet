@@ -2580,14 +2580,18 @@ sema_derive_fields_ready: fn(readiness: &SemaDeriveReadiness, items: [Item], ite
             true
         }
         // A type alias, a node of the graph's codec fixed point only
-        // (sema_derive_codec_ready), has the codec of the type it names.
+        // (sema_derive_codec_ready), has the codec of the type it names; a
+        // distinct type, a codec node only, codes as its base.
         .TypeAlias(definition) -> sema_derive_type_ready(readiness, items, definition.target, definition.type_params)
-        .Func(_) | .Distinct(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
+        .Distinct(definition) -> owned_trait_codec(readiness.trait_name) && sema_derive_type_ready(readiness, items, definition.base, [TypeParam]{})
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
     }
 }
 
 // `foreign` holds the codecs other modules give the types this module's
 // declarations hold (sema_derive_foreign_codecs); empty for any other trait.
+// A distinct type is a candidate for a codec only: it codes as its base
+// unless `#!Codable` or a package denying auto_derive refuses it.
 sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_name: String, foreign: [String:Bool]) -> [String:Bool] {
     readiness := SemaDeriveReadiness{indexes: [SemaDeriveItemIndex]{index}, module: 0, trait_name: trait_name, candidates: [String:Int]{}, relied_on: [Int]{}, foreign: foreign, global: false}
     names := [String]{}
@@ -2604,7 +2608,12 @@ sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_n
                 name = definition.name
                 requested = sema_type_metadata_enum_auto_ok(definition) && sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+            .Distinct(definition) -> {
+                if !owned_trait_codec(trait_name) -> next
+                name = definition.name
+                requested = sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
+            }
+            .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
                 next
             }
         }
@@ -2718,6 +2727,7 @@ sema_derive_codec_ready: fn(readiness: &SemaDeriveReadiness, inputs: [SemaRegist
                 .Distinct(definition) -> {
                     name = definition.name
                     asked = sema_derive_has_name(definition.derives, trait_name)
+                    requested = sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
                 }
                 .TypeAlias(definition) -> {
                     name = definition.name
@@ -2849,7 +2859,7 @@ sema_derive_unordered_comparable: fn(item: Item, diagnostics: &[Diagnostic]) -> 
 }
 
 // A distinct type's bundle request (`#Comparable`, `#Printable`, `#Numeric`,
-// `#CodableAsBase`) forwards the base type's own implementation, so the base
+// `#Codable`) forwards the base type's own implementation, so the base
 // must have that trait. A base with no order was already refused at
 // registration (sema_derive_unordered_comparable); the rest is answered here
 // against the checked types, E0905 at the request naming trait and base.

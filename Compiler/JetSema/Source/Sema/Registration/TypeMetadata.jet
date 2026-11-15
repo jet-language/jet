@@ -3,11 +3,13 @@
 use jet_foundation.[
     EnumDef,
     Item,
+    MARKER_CODABLE,
     Marker,
     StructDef,
     TraitImplBlock,
     Type,
     VariantPayload,
+    codable_derives,
     owned_trait_family,
     type_name,
 ]
@@ -73,12 +75,16 @@ sema_type_metadata_enum_auto_ok: fn(definition: EnumDef) -> Bool Never! {
 
 // Rust `auto_derive_requested`: the last marker naming the trait or a family
 // holding it (`#Codable` names both codec traits) decides (`!` refuses it).
-// With no marker the package default applies.
+// `#Codable(only: …)` names one codec and refuses the other. With no marker
+// the package default applies.
 sema_type_metadata_trait_requested: fn(markers: [Marker], trait_name: String, package_default: Bool) -> Bool Never! {
     index := markers.len() - 1
     loop index >= 0 {
         marker: markers[index]
-        if marker.name == trait_name || owned_trait_family(marker.name, false).contains(trait_name) -> return !marker.negated
+        if marker.name == trait_name || owned_trait_family(marker.name, false).contains(trait_name) {
+            if marker.negated -> return false
+            return marker.name != MARKER_CODABLE || codable_derives(marker, trait_name)
+        }
         index -= 1
     }
     package_default

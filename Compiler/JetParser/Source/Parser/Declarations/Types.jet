@@ -19,7 +19,6 @@ use {
         UnitRatio,
         UnitScaleProvenance,
         codable_derives,
-        codable_from_base,
         owned_trait_bundle,
         owned_trait_family,
     ]
@@ -136,13 +135,12 @@ parser_unit_family_ahead: fn(state: &JetParserState) -> Bool Never! {
 }
 
 // The traits a distinct type's bundle markers re-expose from its base type.
-// `#Codable(from: .Base)` re-exposes the base's codecs, in the directions
-// its `only:` keeps.
+// `#Codable` codes the type as its base, in the directions its `only:` keeps.
 parser_distinct_marker_derives: fn(markers: [Marker]) -> [NamedSpan] Never! {
     derives := [NamedSpan]{}
     loop marker in markers {
         if marker.name == MARKER_CODABLE {
-            if marker.negated || !codable_from_base(marker) -> next
+            if marker.negated -> next
             loop name in owned_trait_family(MARKER_CODABLE, false) {
                 if codable_derives(marker, name) -> derives.push(NamedSpan{name: name, span: marker.name_span})
             }
@@ -193,7 +191,7 @@ parser_parse_distinct: fn(state: &JetParserState, modifiers: ParsedItemModifiers
     }
     parser_expect(state, TOKEN_SEMI, "after a distinct type declaration")
     markers: modifiers.markers
-    value: DistinctDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, type_markers: markers, derives: parser_distinct_marker_derives(markers), quantity: None, name: parser_value(state, name), name_span: name.span, base: base.ty, base_span: base.span, range: range_value.move(), span: parser_cover(start, end)}
+    value: DistinctDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, type_markers: markers, derives: parser_distinct_marker_derives(markers), auto_derive_default: true, quantity: None, name: parser_value(state, name), name_span: name.span, base: base.ty, base_span: base.span, range: range_value.move(), span: parser_cover(start, end)}
     Item.Distinct{value: value}
 }
 

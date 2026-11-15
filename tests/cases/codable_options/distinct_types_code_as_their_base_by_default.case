@@ -1,0 +1,30 @@
+# A distinct type codes as its base with no marker: as a field, as a
+# top-level value, from another package, and through a range type's checked
+# conversion. Decode errors are the base's at the field's path. `#!Codable`, a
+# base with no wire form, or a package denying auto_derive leaves the type
+# with none, and E2411 names it with its own fix.
+fixture: distinct_types_code_as_their_base_by_default.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet run app/main.jet
+exit: 0
+stdout: ~ "{\"id\":\"t1\",\"depth\":3,\"level\":4,\"note\":\"hi\"}" # every distinct field rides as its base value
+stdout: ~ "back: t1 3 4 hi" # and decodes back through its conversion
+stdout: ~ "alone: \"t2\"" # a distinct value alone codes as its base
+stdout: ~ "depth bad: [at `depth`" # a distinct Int refuses text at its own path
+stdout: ~ "level bad: [at `level`" # a range type refuses an out-of-range base
+stdout: ~ "expected Level, found out-of-range Int"
+stderr: empty
+step refused: jet check refused/main.jet
+exit: 1
+stderr: ~ "`Secret` has no wire form" # `#!Codable` refuses the base codec
+stderr: ~ "in place of any `#!Codable`"
+stderr: ~ "`Wrapped` codes as its base type `Hidden`, which has no wire form" # the fix names the base
+stderr: count "can't be serialized" = 2
+stderr: ~ "jet-lang.dev/e/E2411"
+step strict: jet check strict/main.jet
+exit: 1
+stderr: ~ "`Code` can't be serialized" # a package denying auto_derive marks its distinct types
+stderr: count "can't be serialized" = 1 # `#Codable` on a distinct type means base coding

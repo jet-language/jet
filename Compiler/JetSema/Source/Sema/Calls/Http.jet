@@ -337,15 +337,9 @@ sema_call_http_method_arg_types: fn(name: String, method: String, count: Int) ->
 }
 
 sema_call_http_check_serde: fn(direction: SemaSerdeDirection, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
-    if sema_serde_type_is_admissible(environment, program, ty, direction) -> return
+    lack: sema_serde_lack(environment, program, ty, direction) ?? return
     shown: sema_type_show_quoted(ty)
-    fix := sema_serde_wire_fix(shown, direction)
-    if ty == .Named(name) {
-        if sema_serde_type_definition(environment, program, name) == .Val(definition) {
-            if definition.kind == .Distinct(_, _) -> fix = sema_serde_distinct_wire_fix(shown, direction)
-        }
-    }
-    diagnostics.push(sema_error("E2411", span, "{shown} can't be {if direction == SemaSerdeDirection.Encode -> "serialized" else -> "decoded"}", "only types that opt in (and their fields) have a wire form; {shown} does not", fix))
+    diagnostics.push(sema_error("E2411", span, "{shown} can't be {if direction == SemaSerdeDirection.Encode -> "serialized" else -> "decoded"}", sema_serde_lack_why(lack.shown, shown), lack.fix))
 }
 
 // Preserve the existing server JSON admission diagnostic while its ordinary

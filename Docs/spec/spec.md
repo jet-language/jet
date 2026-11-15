@@ -922,8 +922,13 @@ map or a function has no order, so an explicit `#Comparable` over a type that
 holds one is E0905 at the marker.
 
 A distinct type forwards the traits it names from its base (D-CAPBUNDLE1):
-`#[Comparable, Printable, CodableAsBase] Score: distinct Int` orders, prints,
-and encodes a `Score` exactly as its `Int`. Equality comes with every distinct
+`#[Comparable, Printable] Score: distinct Int` orders and prints a `Score`
+exactly as its `Int`. Its wire form needs no marker (D-CODABLE-DISTINCT1=A):
+a distinct type whose base has a codec codes as that base value, as a field,
+an element or a top-level value, and decodes through its own conversion, so a
+range type refuses an out-of-range value as a decode error at its path.
+`#!Codable` refuses it; under a package that denies `auto_derive`, `#Codable`
+asks for it; a hand-written codec wins. Equality comes with every distinct
 type whose base has it, and a distinct type is a map key or set element exactly
 when its base is. A base without the named trait (`#Numeric` over a `String`)
 is E0905 at the marker, naming the trait and the base. `jet inspect expand

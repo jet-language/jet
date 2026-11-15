@@ -1528,7 +1528,9 @@ D-CAPPLANE1=A** *(ratified 2026-07-23, card #762)*: capability rules expose
 one concept on every type. `#Comparable` and `#Printable` derive from fields
 on structs and enums, and re-expose the base capability on distinct types.
 Distinct-only `#Numeric` exposes `+ - * /` and ordering for the same type
-(E0138); `#CodableAsBase` exposes base coding.
+(E0138). **D-CODABLE-DISTINCT1=A** *(ratified 2026-11-14)*: a distinct type
+codes as its base with no marker, as D-AUTODERIVE1=E gives structs; `#!Codable`
+refuses it and `#Codable` asks for it where `auto_derive` is denied.
 A marker-led declaration such as `#Numeric Meters: distinct Float` attaches
 the marker to the distinct type, not to a module constant; an intervening
 newline does not change that attachment.

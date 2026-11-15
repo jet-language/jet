@@ -21006,11 +21006,11 @@ NotSerializable: struct {
         }
 
         why: fn(self) -> String {
-            "Only a structurally qualifying type gets a compiler-generated codec (by default or through `#Codable`/`#Encode`/`#Decode`), unless it supplies a hand-written codec. Anonymous-union decoding also needs each member's outer wire shape; a custom or imported decoder does not declare one."
+            "Only a structurally qualifying type gets a compiler-generated codec (by default, or through `#Codable`), unless it supplies a hand-written codec; a distinct type codes as its base. Anonymous-union decoding also needs each member's outer wire shape; a custom or imported decoder does not declare one."
         }
 
         fix: fn(self) -> String {
-            "Add a compiler-derived codec, use a configured tagged enum or `#CodableAsBase` distinct type for a union member, or remove the unsupported type from the encoded value (for example, with `#Skip`)."
+            "Add a compiler-derived codec, use a configured tagged enum or a `#Codable` distinct type for a union member, or remove the unsupported type from the encoded value (for example, with `#Codable(.Skip)`)."
         }
     }
 }

@@ -3903,7 +3903,8 @@ sema_registration_serde_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                     next
                 }
                 if flatten || sema_serde_items_skips(field) -> next
-                sema_registration_serde_wire_form(items, facts, no_auto, field.ty, encode, decode, field.name_span, diagnostics)
+                if encode -> sema_registration_serde_wire_report(sema_registration_serde_wire_form(items, facts, no_auto, field.ty, SemaSerdeDirection.Encode), field.ty, SemaSerdeDirection.Encode, field.name_span, diagnostics)
+                if decode -> sema_registration_serde_wire_report(sema_registration_serde_wire_form(items, facts, no_auto, field.ty, SemaSerdeDirection.Decode), field.ty, SemaSerdeDirection.Decode, field.name_span, diagnostics)
                 if decode -> sema_registration_serde_union_shapes(items, field.ty, field.name_span, diagnostics)
             }
         }
@@ -3916,11 +3917,13 @@ sema_registration_serde_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                 if variant.payload == {
                     .Unit -> {}
                     .Single(ty, _) -> {
-                        sema_registration_serde_wire_form(items, facts, no_auto, ty, encode, decode, variant.name_span, diagnostics)
+                        if encode -> sema_registration_serde_wire_report(sema_registration_serde_wire_form(items, facts, no_auto, ty, SemaSerdeDirection.Encode), ty, SemaSerdeDirection.Encode, variant.name_span, diagnostics)
+                        if decode -> sema_registration_serde_wire_report(sema_registration_serde_wire_form(items, facts, no_auto, ty, SemaSerdeDirection.Decode), ty, SemaSerdeDirection.Decode, variant.name_span, diagnostics)
                         if decode -> sema_registration_serde_union_shapes(items, ty, variant.name_span, diagnostics)
                     }
                     .Named(fields) -> loop field in fields {
-                        sema_registration_serde_wire_form(items, facts, no_auto, field.ty, encode, decode, variant.name_span, diagnostics)
+                        if encode -> sema_registration_serde_wire_report(sema_registration_serde_wire_form(items, facts, no_auto, field.ty, SemaSerdeDirection.Encode), field.ty, SemaSerdeDirection.Encode, variant.name_span, diagnostics)
+                        if decode -> sema_registration_serde_wire_report(sema_registration_serde_wire_form(items, facts, no_auto, field.ty, SemaSerdeDirection.Decode), field.ty, SemaSerdeDirection.Decode, variant.name_span, diagnostics)
                         if decode -> sema_registration_serde_union_shapes(items, field.ty, variant.name_span, diagnostics)
                     }
                 }
@@ -4028,27 +4031,51 @@ sema_registration_serde_any_explicit: fn(items: [Item]) -> Bool Never! {
 }
 
 // Rust `e2411` over `is_encodable_ty`/`is_decodable_ty`: the generated and
-// written codecs are already items here, so no automatic set is needed. The
-// type is shown only for a report.
-sema_registration_serde_wire_form: fn(items: [Item], facts: SemaDeriveItemIndex, no_auto: [String:Bool], ty: Type, encode: Bool, decode: Bool, span: Span, diagnostics: &[Diagnostic]) {
-    if encode && !sema_serde_items_codable(items, facts, ty, "Encode", no_auto) {
-        shown: sema_type_show_quoted(ty)
-        diagnostics.push(sema_error("E2411", span, "{shown} can't be serialized", "only types that opt in (and their fields) have a wire form; {shown} does not", sema_registration_serde_wire_fix(items, facts, ty, shown, SemaSerdeDirection.Encode)))
+// written codecs are already items here, so no automatic set is needed.
+// None when `ty` has the `direction` codec; otherwise the type on its path
+// that has none, innermost first (an element, a map value, a wire-reaching
+// type argument or a union member, else `ty` itself), with that type's own
+// fix. A distinct type this module declares codes as its base: when the base
+// has a codec the type was refused one, otherwise the fix is the base's.
+sema_registration_serde_wire_form: fn(items: [Item], facts: SemaDeriveItemIndex, no_auto: [String:Bool], ty: Type, direction: SemaSerdeDirection) -> SemaSerdeLack? Never! {
+    trait_name: sema_serde_codec_name(direction)
+    if sema_serde_items_codable(items, facts, ty, trait_name, no_auto) -> return None
+    if ty == {
+        .List(element) | .Option(element) | .Shared(element) | .FixedList(element, _) -> return sema_registration_serde_wire_form(items, facts, no_auto, element, direction)
+        .Map(key, _, value) -> {
+            if key == Type.String -> return sema_registration_serde_wire_form(items, facts, no_auto, value, direction)
+        }
+        .Apply(name, args) -> {
+            if sema_serde_items_nominal_codable(items, facts, name, trait_name, no_auto) {
+                wire: sema_serde_items_wire_params(items, facts, name)
+                loop (index, arg) in args {
+                    if wire == .Val(flags) && index < flags.len() && !flags[index] -> next
+                    lack: sema_registration_serde_wire_form(items, facts, no_auto, arg, direction) ?? next
+                    return Val(lack)
+                }
+            }
+        }
+        .Union(members) -> loop member in members {
+            lack: sema_registration_serde_wire_form(items, facts, no_auto, member, direction) ?? next
+            return Val(lack)
+        }
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .Named(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
-    if decode && !sema_serde_items_codable(items, facts, ty, "Decode", no_auto) {
-        shown: sema_type_show_quoted(ty)
-        diagnostics.push(sema_error("E2411", span, "{shown} can't be decoded", "only types that opt in (and their fields) have a wire form; {shown} does not", sema_registration_serde_wire_fix(items, facts, ty, shown, SemaSerdeDirection.Decode)))
+    shown: sema_type_show_quoted(ty)
+    if ty == .Named(name) && facts.nominals.get(name) == .Val(position) && items[position] == .Distinct(definition) {
+        fix: if sema_serde_items_codable(items, facts, definition.base, trait_name, no_auto) -> sema_serde_distinct_wire_fix(shown, direction) else -> sema_serde_distinct_base_wire_fix(shown, sema_type_show_quoted(definition.base))
+        return Val(SemaSerdeLack{shown: shown, fix: fix})
     }
+    fix: sema_serde_wire_fix(shown, direction)
+    Val(SemaSerdeLack{shown: shown, fix: fix})
 }
 
-// E2411's fix for `ty`; a distinct type this module declares gets its own.
-sema_registration_serde_wire_fix: fn(items: [Item], facts: SemaDeriveItemIndex, ty: Type, shown: String, direction: SemaSerdeDirection) -> String Never! {
-    if ty == .Named(name) {
-        if facts.nominals.get(name) == .Val(position) {
-            if items[position] == .Distinct(_) -> return sema_serde_distinct_wire_fix(shown, direction)
-        }
-    }
-    sema_serde_wire_fix(shown, direction)
+// E2411 on `span` for `ty`, whose path holds `lack`, when there is one.
+sema_registration_serde_wire_report: fn(lack: SemaSerdeLack?, ty: Type, direction: SemaSerdeDirection, span: Span, diagnostics: &[Diagnostic]) {
+    found: lack ?? return
+    shown: sema_type_show_quoted(ty)
+    verb: if direction == SemaSerdeDirection.Encode -> "serialized" else -> "decoded"
+    diagnostics.push(sema_error("E2411", span, "{shown} can't be {verb}", sema_serde_lack_why(found.shown, shown), found.fix))
 }
 
 // (Rust `check_deprecated_visibility`, E0932): a
@@ -4153,7 +4180,7 @@ sema_registration_serde_union_members: fn(items: [Item], union_ty: Type, members
         resolved: jfmt_decode_shapes(items, member, visited)
         member_label: sema_registration_serde_label(member)
         if resolved == None {
-            diagnostics.push(sema_error("E2411", span, "union `{union_shown}` can't be decoded — `{member_label}` has no compiler-known wire shape", "`{member_label}` uses a custom or imported decoder; anonymous unions need each member's outer wire shape before codegen", "use a compiler-derived codec, a configured tagged enum, or a #CodableAsBase distinct type"))
+            diagnostics.push(sema_error("E2411", span, "union `{union_shown}` can't be decoded — `{member_label}` has no compiler-known wire shape", "`{member_label}` uses a custom or imported decoder; anonymous unions need each member's outer wire shape before codegen", "use a compiler-derived codec, a configured tagged enum, or a `#Codable` distinct type"))
             next
         }
         loop shape in sema_registration_serde_sorted_shapes(resolved) {

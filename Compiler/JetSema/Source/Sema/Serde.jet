@@ -58,11 +58,67 @@ sema_serde_wire_fix: fn(shown: String, direction: SemaSerdeDirection) -> String 
     "add `#[Codable]` or `#[{sema_serde_codec_name(direction)}]` to {shown}, or remove it from the encoded value"
 }
 
-// E2411's fix for a distinct type with no `direction` codec: it codes as its
-// base only through `#CodableAsBase`, since a distinct type forwards only the
-// traits it names; the struct and enum markers do not apply to it.
+// E2411's fix for a distinct type whose base has a wire form but which has
+// none itself: `#!Codable`, or a package denying auto_derive, refused it.
 sema_serde_distinct_wire_fix: fn(shown: String, direction: SemaSerdeDirection) -> String Never! {
-    "add `#CodableAsBase` to {shown} so it is {if direction == SemaSerdeDirection.Encode -> "encoded" else -> "decoded"} as its base type, or remove it from the encoded value"
+    "mark {shown} `#Codable` in place of any `#!Codable` so it is {if direction == SemaSerdeDirection.Encode -> "encoded" else -> "decoded"} as its base type, or remove it from the encoded value"
+}
+
+// E2411's fix for a distinct type whose base has no wire form: the fix is
+// the base's.
+sema_serde_distinct_base_wire_fix: fn(shown: String, base: String) -> String Never! {
+    "{shown} codes as its base type {base}, which has no wire form: give {base} one, or remove {shown} from the encoded value"
+}
+
+// The type on a wire path that has no codec, as E2411 names it (`shown`),
+// and its own fix.
+SemaSerdeLack: struct {
+    shown: String
+    fix: String
+}
+
+// E2411's Why line for `shown`, whose path holds the type `lacking` with no
+// wire form.
+sema_serde_lack_why: fn(lacking: String, shown: String) -> String Never! {
+    if lacking == shown -> return "{shown} has no wire form"
+    "{lacking} has no wire form, so {shown} has none"
+}
+
+// The type on `ty`'s path with no `direction` codec, innermost first: an
+// element, a map value, a union member or a type argument that has none,
+// else `ty` itself. None when `ty` has the codec.
+sema_serde_lack: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, direction: SemaSerdeDirection) -> SemaSerdeLack? Never! {
+    if sema_serde_type_is_admissible(environment, program, ty, direction) -> return None
+    inner: if ty == {
+        .List(element) | .Option(element) | .Shared(element) | .FixedList(element, _) -> sema_serde_lack(environment, program, element, direction)
+        .Map(key, _, value) -> if key == Type.String -> sema_serde_lack(environment, program, value, direction) else -> None
+        .Union(members) -> sema_serde_lack_first(environment, program, members, direction)
+        .Apply(_, args) -> sema_serde_lack_first(environment, program, args, direction)
+        .Int | .Float | .Bool | .String | .Char | .Named(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
+    }
+    found: inner ?? return Val(sema_serde_lack_of(environment, program, ty, direction))
+    Val(found)
+}
+
+sema_serde_lack_first: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, types: [Type], direction: SemaSerdeDirection) -> SemaSerdeLack? Never! {
+    loop ty in types {
+        lack: sema_serde_lack(environment, program, ty, direction) ?? next
+        return Val(lack)
+    }
+    None
+}
+
+// `ty` itself has no `direction` codec. A distinct type codes as its base:
+// when the base has one the type was refused one, otherwise the fix is the
+// base's.
+sema_serde_lack_of: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, direction: SemaSerdeDirection) -> SemaSerdeLack Never! {
+    shown: sema_type_show_quoted(ty)
+    if ty == .Named(name) && sema_serde_type_definition(environment, program, name) == .Val(definition) && definition.kind == .Distinct(base, _) {
+        fix: if sema_serde_type_is_admissible(environment, program, base, direction) -> sema_serde_distinct_wire_fix(shown, direction) else -> sema_serde_distinct_base_wire_fix(shown, sema_type_show_quoted(base))
+        return SemaSerdeLack{shown: shown, fix: fix}
+    }
+    fix: sema_serde_wire_fix(shown, direction)
+    SemaSerdeLack{shown: shown, fix: fix}
 }
 
 sema_serde_implementation: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, definition: TTypeDef, direction: SemaSerdeDirection) -> Bool Never! {

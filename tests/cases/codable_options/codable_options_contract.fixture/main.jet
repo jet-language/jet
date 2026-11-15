@@ -94,8 +94,10 @@ run: fn() {
     attempt_account("account", "{{\"name\":\"Bo\"}}")
     attempt_account("account extra", "{{\"name\":\"Bo\",\"extra\":1}}")
 
-    print(json.to_string(Shape.Circle(radius: 2)) ?? panic("circle"))
-    print(json.to_string(Shape.Dot) ?? panic("dot"))
+    circle: Shape.Circle{radius: 2}
+    dot: Shape.Dot
+    print(json.to_string(circle) ?? panic("circle"))
+    print(json.to_string(dot) ?? panic("dot"))
     shape: json.decode<Shape>("{{\"kind\":\"Circle\",\"radius\":5}}") ?? panic("shape")
     if shape == {
         .Circle(radius) -> print("circle {radius}")

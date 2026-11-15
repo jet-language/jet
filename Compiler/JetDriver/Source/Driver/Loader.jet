@@ -2587,9 +2587,10 @@ jet_driver_bind_dependency_imports: fn(program: &Program, unit: JetDriverSourceU
 }
 
 // `policy: { lints: { deny: [auto_derive] } }` turns the package default off
-// for every struct and enum its own files declare: only a
-// signed marker (`#Debug`) or a handwritten implementation then supplies a
-// structural trait. A dependency keeps its own package's default.
+// for every struct, enum and distinct type its own files declare: only a
+// signed marker (`#Debug`, `#Codable`) or a handwritten implementation then
+// supplies a structural trait or a codec. A dependency keeps its own
+// package's default.
 jet_driver_apply_auto_derive_policy: fn(program: &Program, unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo]) {
     package_index: jet_driver_find_package_by_root(packages, unit.root_index) ?? return
     if !packages[package_index].policy_lints_deny.contains(lint_auto_derive_name()) -> return
@@ -2605,7 +2606,12 @@ jet_driver_apply_auto_derive_policy: fn(program: &Program, unit: JetDriverSource
                 updated.auto_derive_default = false
                 program.items[index] = Item.Enum{value: updated}
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Distinct(definition) -> {
+                updated := definition
+                updated.auto_derive_default = false
+                program.items[index] = Item.Distinct{value: updated}
+            }
+            .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }

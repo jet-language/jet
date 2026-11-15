@@ -1180,6 +1180,10 @@ DistinctDef: struct {
     is_package_pub: Bool
     type_markers: [Marker]
     derives: [NamedSpan]
+    // Whether the package's auto-derive default gives the type its base's
+    // codecs without a `#Codable` marker; a package denying auto_derive
+    // clears it.
+    auto_derive_default: Bool
     quantity: QuantityInfo?
     name: String
     name_span: Span
@@ -1285,7 +1289,7 @@ unit_family_distinct_defs: fn(family: UnitFamilyDef) -> [DistinctDef] Never! {
                 }
                 quantity = Val(QuantityInfo{dimension: dimension, kind: kind})
             }
-            definitions.push(DistinctDef{is_pub: family.is_pub, is_package_pub: family.is_package_pub, type_markers: [Marker]{}, derives: derives, quantity: quantity, name: name, name_span: member.name_span, base: Type.Float, base_span: member.name_span, range: None, span: member.name_span})
+            definitions.push(DistinctDef{is_pub: family.is_pub, is_package_pub: family.is_package_pub, type_markers: [Marker]{}, derives: derives, auto_derive_default: false, quantity: quantity, name: name, name_span: member.name_span, base: Type.Float, base_span: member.name_span, range: None, span: member.name_span})
         }
     }
     definitions

@@ -5,14 +5,14 @@
 // `#Decode`) or when the structural auto-derive selects it: every declaration
 // is Codable by default unless a `#!Codable`/`#!Encode`/`#!Decode` marker
 // refuses it, a stored field has no wire form, or a hand-written `impl
-// T.Encode`/`impl T.Decode` already supplies that codec. A `#CodableAsBase`
-// distinct type gets both, coding as its base value. The meaning is
-// selected eagerly, the work on demand: registration adds each selected codec
-// as an impl whose method has its header only (so the type IS Encode/Decode for
-// every bound and lookup), and the body is generated and checked only once an
-// Encode/Decode requirement reaches the type (sema_codec_waves): a codec bound
-// or call a check records (sema_codec_demand_type), or a wire field of a
-// demanded generated codec.
+// T.Encode`/`impl T.Decode` already supplies that codec. A distinct type
+// codes as its base value by the same rule, its base standing in for its
+// fields. The meaning is selected eagerly, the work on demand: registration
+// adds each selected codec as an impl whose method has its header only (so
+// the type IS Encode/Decode for every bound and lookup), and the body is
+// generated and checked only once an Encode/Decode requirement reaches the
+// type (sema_codec_waves): a codec bound or call a check records
+// (sema_codec_demand_type), or a wire field of a demanded generated codec.
 use jet_foundation.[
     symbol_table_key,
     AST_NODE_GENERATED,
@@ -124,9 +124,10 @@ sema_serde_expand_builtin_items: fn(items: &[Item], foreign: [String:Bool]) {
                 span: sema_serde_items_derive_span(definition.derives, definition.name_span)
                 codecs: [String]{"Encode", "Decode"}
                 loop trait_name in codecs {
-                    if !sema_derive_has_name(definition.derives, trait_name) || sema_serde_items_generated(sema_serde_items_impl_flags(facts, definition.name, trait_name)) -> next
-                    codable: if trait_name == "Encode" -> sema_serde_items_codable(items, facts, definition.base, trait_name, auto_encode) else -> sema_serde_items_codable(items, facts, definition.base, trait_name, auto_decode)
-                    if !codable -> next
+                    auto: if trait_name == "Encode" -> auto_encode else -> auto_decode
+                    flags: sema_serde_items_impl_flags(facts, definition.name, trait_name)
+                    wanted: sema_derive_has_name(definition.derives, trait_name) || (!sema_serde_items_written(flags) && auto.get(definition.name) != None)
+                    if !wanted || sema_serde_items_generated(flags) || !sema_serde_items_codable(items, facts, definition.base, trait_name, auto) -> next
                     generated.push(sema_serde_items_distinct_codec(definition, trait_name, span))
                 }
             }
@@ -429,8 +430,8 @@ sema_serde_items_enum_streams: fn(definition: EnumDef) -> Bool Never! {
     true
 }
 
-// A `#CodableAsBase` distinct type's codec header: `encode` codes `self.raw()`,
-// `decode` decodes the base and converts it (sema_serde_items_distinct_body).
+// A distinct type's codec header: `encode` codes `self.raw()`, `decode`
+// decodes the base and converts it (sema_serde_items_distinct_body).
 sema_serde_items_distinct_codec: fn(definition: DistinctDef, trait_name: String, span: Span) -> Item Never! {
     if trait_name == "Encode" {
         method: sema_serde_items_method("encode", [TypeParam]{}, [Param]{sema_serde_items_param("self", Type.Named{name: ""}, span)}, sema_dyn_type(), span)
