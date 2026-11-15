@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106000,
+    "rev": 106010,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -91877,12 +91877,12 @@
         },
         {
           "n": 7,
-          "text": "One shared IR pass makes exact-Int spills, fixed-width traps and the stop protocol explicit for every writer: the IR has explicit operations for the inline-Int test and the big-integer spill (jet_int_add, jet_int_sub, jet_int_mul, jet_int_compare, jet_rt_int_clone), for fixed-width traps with their stop texts, and for the stop protocol, proved by an IR dump test. X64Select.jet and Web/Select.jet consume those operations and no longer decide them; `! git grep -n ir_x64_ Compiler/JetWeb/Source/Web/Select.jet`, and the golden and web suites pass. c3 and c4 build on it. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "text": "One shared IR pass makes exact-Int spills, fixed-width traps and the stop protocol explicit for every writer: the IR has explicit operations for the inline-Int test and the big-integer spill (jet_int_add, jet_int_sub, jet_int_mul, jet_int_compare, jet_rt_int_clone), for fixed-width traps with their stop texts, and for the stop protocol, proved by an IR dump test. X64Select.jet and Web/Select.jet consume those operations and no longer decide them; `! git grep -n ir_x64_ Compiler/JetWeb/Source/Web/Select.jet`, and the golden and web suites pass. c3 and c4 build on it. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md) Proof: the IR dump test `jet test Compiler --profile cases --filter jetir/explicit_int_traps_stop`, `! git grep -n ir_x64_ Compiler/JetWeb/Source/Web/Select.jet`, and the golden and web suites pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T06:31:17.786Z"
+          "at": "2026-11-15T05:46:54.387Z"
         },
         {
           "n": 8,
@@ -91970,7 +91970,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T16:22:00.126Z",
-      "updated": "2026-11-15T02:44:37.116Z",
+      "updated": "2026-11-15T05:46:54.387Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 15
     },
@@ -93263,12 +93263,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "binary32: every Core F32 elementary function (exp/log/pow/trig/hyperbolic/inverse, erf/erfc, tgamma/lgamma, cbrt, hypot, the pi variants) is correctly rounded to nearest, proven by an exhaustive scan of all 2^32 inputs against MPFR (f32scan receipts).",
+          "text": "binary32: every Core F32 elementary function (exp/log/pow/trig/hyperbolic/inverse, erf/erfc, tgamma/lgamma, cbrt, hypot, the pi variants) is correctly rounded to nearest, proven by an exhaustive scan of all 2^32 inputs against MPFR (f32scan receipts). Proof: the committed f32scan receipts with zero misrounded inputs per function.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T07:23:14.880Z"
+          "at": "2026-11-15T05:46:55.312Z"
         },
         {
           "n": 2,
@@ -93356,7 +93356,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-15T03:46:42.613Z",
+      "updated": "2026-11-15T05:46:55.312Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 12
     },
@@ -94724,30 +94724,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "An adversarially reviewed owner ballot (revising D-GPU-UI1) decides the desktop and web GPU default for core.ui, the fallback, the driver-loading model, and what 'the same look native and in the browser' means, with same-program alternatives.",
+          "text": "An adversarially reviewed owner ballot (revising D-GPU-UI1) decides the desktop and web GPU default for core.ui, the fallback, the driver-loading model, and what 'the same look native and in the browser' means, with same-program alternatives. Proof: `timeout 120 node Tools/tower/tower.mjs decision show` for the D-GPU-UI1 revision shows it ratified with its review.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T14:01:11.242Z"
+          "at": "2026-11-15T05:46:56.293Z"
         },
         {
           "n": 2,
-          "text": "core.ui draws through the GPU from native Jet code only (#Shader/#Kernel), with no shader-language source, per-vendor path or DSL in the repository, on Linux native and in the browser.",
+          "text": "core.ui draws through the GPU from native Jet code only (#Shader/#Kernel), with no shader-language source, per-vendor path or DSL in the repository, on Linux native and in the browser. Proof: `jet test Compiler --profile golden --filter ui/gpu_draw` on Linux native and web, and `git ls-files \"*.wgsl\" \"*.glsl\" \"*.hlsl\" \"*.metal\"` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T14:01:12.130Z"
+          "at": "2026-11-15T05:46:57.411Z"
         },
         {
           "n": 3,
-          "text": "The same Showcase program renders the same look native and in the browser, proven by headless checksums or a perceptual-difference bound the ballot fixes, on every applicable tier.",
+          "text": "The same Showcase program renders the same look native and in the browser, proven by headless checksums or a perceptual-difference bound the ballot fixes, on every applicable tier. Proof: `jet test Compiler --profile golden --filter ui/showcase_same_look` on native and web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T14:01:13.023Z"
+          "at": "2026-11-15T05:46:58.612Z"
         }
       ],
       "refs": [],
@@ -94758,8 +94758,8 @@
       "parentId": "c0f9brds",
       "needsAcceptance": false,
       "created": "2026-11-09T14:01:03.460Z",
-      "updated": "2026-11-13T02:06:12.363Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:46:58.612Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 4
     },
     {
@@ -95818,30 +95818,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "core.crypto and core.net.tls contain no file derived from mbedtls: every file is MIT, written from the cited specifications (RFC, FIPS, SP 800), and the public and private module boundaries are unchanged.",
+          "text": "core.crypto and core.net.tls contain no file derived from mbedtls: every file is MIT, written from the cited specifications (RFC, FIPS, SP 800), and the public and private module boundaries are unchanged. Proof: `git grep -l -i mbedtls -- Core/Crypto Core/Net/Tls` prints nothing, and each file header cites its specification.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T16:50:00.823Z"
+          "at": "2026-11-15T05:46:59.833Z"
         },
         {
           "n": 2,
-          "text": "The rewrite passes the same vectors (NIST CAVP plus the fetched Wycheproof), the interop matrix and the constant-time checks as #6694.",
+          "text": "The rewrite passes the same vectors (NIST CAVP plus the fetched Wycheproof), the interop matrix and the constant-time checks as #6694. Proof: `jet test Compiler --profile core --filter crypto` and `jet test Compiler --profile core --filter tls` with the CAVP, Wycheproof, interop and constant-time rows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T16:50:01.672Z"
+          "at": "2026-11-15T05:47:00.847Z"
         },
         {
           "n": 3,
-          "text": "The full mbedtls surface that Core does not use is complete in Jet: every mbedtls test-suite vector, interop with OpenSSL and the old mbedtls build on every TLS 1.2 and 1.3 version, suite and curve, client certificates and the remaining X.509 and PSA features, with constant-time checks on every secret-dependent primitive (moved from #6694 c2-c4 by owner order 2026-11-09).",
+          "text": "The full mbedtls surface that Core does not use is complete in Jet: every mbedtls test-suite vector, interop with OpenSSL and the old mbedtls build on every TLS 1.2 and 1.3 version, suite and curve, client certificates and the remaining X.509 and PSA features, with constant-time checks on every secret-dependent primitive. Proof: `jet test Compiler --profile core --filter crypto` with every mbedtls test-suite vector, and the interop receipt for every TLS version, suite and curve.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T17:21:00.055Z"
+          "at": "2026-11-15T05:47:01.915Z"
         },
         {
           "n": 4,
@@ -95880,7 +95880,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:49:47.742Z",
-      "updated": "2026-11-15T03:44:55.682Z",
+      "updated": "2026-11-15T05:47:01.915Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 6
     },
@@ -105062,12 +105062,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A ballot presents 2-3 worked one-lookup upsert spellings with peer-language evidence and a one-mechanism argument (I8), ready for the owner.",
+          "text": "A ballot presents 2-3 worked one-lookup upsert spellings with peer-language evidence and a one-mechanism argument (I8), ready for the owner. Proof: `timeout 120 node Tools/tower/tower.mjs decision list` shows the upsert ballot with its worked spellings.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:07.715Z"
+          "at": "2026-11-15T05:47:02.826Z"
         },
         {
           "n": 2,
@@ -105090,7 +105090,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:07.715Z",
-      "updated": "2026-11-15T03:03:07.715Z",
+      "updated": "2026-11-15T05:47:02.826Z",
       "updatedBy": "TowerKeeper-1"
     },
     {
@@ -105194,12 +105194,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A research note under Docs/research and a ballot settle the library, API and placement for mail and MIME parsing; parsing and formatting stay separate from sending and authentication.",
+          "text": "A research note under Docs/research and a ballot settle the library, API and placement for mail and MIME parsing; parsing and formatting stay separate from sending and authentication. Proof: `git ls-files \"Docs/research/*mime*\"` names the note, and the decision list shows the placement ballot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:09.559Z"
+          "at": "2026-11-15T05:47:03.746Z"
         },
         {
           "n": 2,
@@ -105231,7 +105231,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:09.559Z",
-      "updated": "2026-11-15T03:19:45.133Z",
+      "updated": "2026-11-15T05:47:03.746Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
@@ -218274,6 +218274,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:47:03.746Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0qpy1t3",
+      "note": "#1: proof; was: A research note under Docs/research and a ballot settle the library, API and placement for mail and MIME parsing; parsing and formatting stay separate from sending and authentication."
+    },
+    {
+      "at": "2026-11-15T05:47:02.826Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w8b7vb",
+      "note": "#1: proof; was: A ballot presents 2-3 worked one-lookup upsert spellings with peer-language evidence and a one-mechanism argument (I8), ready for the owner."
+    },
+    {
+      "at": "2026-11-15T05:47:01.915Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0miof6j",
+      "note": "#3: strip debris; proof; was: The full mbedtls surface that Core does not use is complete in Jet: every mbedtls test-suite vector, interop with OpenSSL and the old mbedtls build on every TLS 1.2 and 1.3 version, suite and curve, c"
+    },
+    {
+      "at": "2026-11-15T05:47:00.847Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0miof6j",
+      "note": "#2: proof; was: The rewrite passes the same vectors (NIST CAVP plus the fetched Wycheproof), the interop matrix and the constant-time checks as #6694."
+    },
+    {
+      "at": "2026-11-15T05:46:59.833Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0miof6j",
+      "note": "#1: proof; was: core.crypto and core.net.tls contain no file derived from mbedtls: every file is MIT, written from the cited specifications (RFC, FIPS, SP 800), and the public and private module boundaries are unchan"
+    },
+    {
+      "at": "2026-11-15T05:46:58.612Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0leoyxb",
+      "note": "#3: proof; was: The same Showcase program renders the same look native and in the browser, proven by headless checksums or a perceptual-difference bound the ballot fixes, on every applicable tier."
+    },
+    {
+      "at": "2026-11-15T05:46:57.411Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0leoyxb",
+      "note": "#2: proof; was: core.ui draws through the GPU from native Jet code only (#Shader/#Kernel), with no shader-language source, per-vendor path or DSL in the repository, on Linux native and in the browser."
+    },
+    {
+      "at": "2026-11-15T05:46:56.293Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0leoyxb",
+      "note": "#1: proof; was: An adversarially reviewed owner ballot (revising D-GPU-UI1) decides the desktop and web GPU default for core.ui, the fallback, the driver-loading model, and what 'the same look native and in the brows"
+    },
+    {
+      "at": "2026-11-15T05:46:55.312Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c028lxdd",
+      "note": "#1: proof; was: binary32: every Core F32 elementary function (exp/log/pow/trig/hyperbolic/inverse, erf/erfc, tgamma/lgamma, cbrt, hypot, the pi variants) is correctly rounded to nearest, proven by an exhaustive scan "
+    },
+    {
+      "at": "2026-11-15T05:46:54.387Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#7: proof; was: One shared IR pass makes exact-Int spills, fixed-width traps and the stop protocol explicit for every writer: the IR has explicit operations for the inline-Int test and the big-integer spill (jet_int_"
+    },
     {
       "at": "2026-11-15T05:46:53.269Z",
       "by": "TowerKeeper-1",
