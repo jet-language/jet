@@ -555,9 +555,11 @@ ir_named_function_tree: fn(tree: BodyTree, expression: Int, keys: &[String], dec
 }
 
 ir_named_conversion_key: fn(conversion: TTryConvert, keys: &[String]) Never! {
-    if conversion == .Typed(key, _, _) {
-        if !keys.contains(key) -> keys.push(key.copy())
+    key: if conversion == {
+        .Typed(key, _, _) | .TypedIntoUnion(key, _, _, _, _) -> key
+        .NoConversion | .Never | .DefaultErr | .WidenUnion(_, _) | .RewidenUnion(_) -> return
     }
+    if !keys.contains(key) -> keys.push(key.copy())
 }
 
 // A type whose Encode (`encode`) or Decode (`decode`) implementation a

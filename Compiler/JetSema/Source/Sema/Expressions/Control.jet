@@ -455,6 +455,25 @@ sema_expression_try_union_conversion: fn(target: Type, source: Type, environment
     }
 }
 
+// How a failure outside the named members of an open union contract
+// (`(ParseError | Err)!`) passes up: the union's `Err` member keeps the
+// contract open, so the failure converts into `Err` as it would under a
+// written `Err!` (a declared conversion, else the Prelude's) and boxes under
+// that member. None when the target has no `Err` member or the failure has
+// no route into `Err`.
+sema_failure_open_union_conversion: fn(target: Type, source: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TTryConvert? {
+    if target == .Union(members) {
+        tags: loop member in members -> type_name(member)
+        loop member in members {
+            if sema_expr_unwrap_tag(member) != (Type.Named{name: "Err"}) -> next
+            open_member: Type.Named{name: "Err"}
+            key: sema_failure_declared_conversion(source, open_member, environment, program, scopes) ?? sema_prelude_error_conversion_key(source, open_member, environment, program) ?? return None
+            return Val(TTryConvert.TypedIntoUnion{fn_name: key, source: source, target: open_member, enum_name: "__JetUnion_{tags.join("_")}", tag: type_name(member)})
+        }
+    }
+    None
+}
+
 // A call is a value-producing expression, and its
 // Result carrier is transparent in an ordinary value position. An expectation
 // is the carrier itself only when it names a reachable failure domain, or when
@@ -1161,6 +1180,8 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             if widened == .Val(widening) -> return sema_expression_propagation_taken(context, widening)
             if sema_failure_declared_conversion(error, target, environment, program, scopes) == .Val(key) -> return sema_expression_propagation_taken(context, TTryConvert.Typed{fn_name: key, source: error, target: target})
             if sema_prelude_error_conversion_key(error, target, environment, program) == .Val(key) -> return sema_expression_propagation_taken(context, TTryConvert.Typed{fn_name: key, source: error, target: target})
+            opened: sema_failure_open_union_conversion(normalized_target, error, environment, program, scopes)
+            if opened == .Val(conversion) -> return sema_expression_propagation_taken(context, conversion)
             if normalized_target == (Type.Named{name: "Err"}) {
                 diagnostics.push(sema_failure_no_default_conversion(error, span, implicit))
                 // #6281 c176: the union solve projects an inferable body that

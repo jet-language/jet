@@ -1,0 +1,42 @@
+// `Err` inside a written contract keeps it open: `measure` names
+// `ParseError`, and any other failure its body meets (here `load`'s
+// `DiskError`) passes up as the contract's `Err` member, so the program
+// checks clean.
+#Error
+ParseError: enum {
+    Empty
+}
+
+#Error
+DiskError: enum {
+    Missing
+}
+
+parse: fn(text: String) -> Int ParseError! {
+    if text == "" -> return Err(ParseError.Empty)
+    text.len()
+}
+
+load: fn(path: String) -> Int DiskError! {
+    if path == "none" -> return Err(DiskError.Missing)
+    path.len()
+}
+
+measure: fn(path: String) -> Int (ParseError | Err)! {
+    size: load(path)
+    parse(path) + size
+}
+
+describe: fn(path: String) -> String {
+    if measure(path) == {
+        .Ok(n) -> "ok {n}"
+        .Err(.ParseError(_)) -> "parse failed"
+        .Err(.Err(other)) -> "failed: {other.message}"
+    }
+}
+
+run: fn() {
+    print(describe("ab"))
+    print(describe(""))
+    print(describe("none"))
+}

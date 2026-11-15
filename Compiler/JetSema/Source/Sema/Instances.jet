@@ -196,10 +196,18 @@ sema_fact_node: fn(tree: &BodyTree, kind: NodeKind) Never! {
                 sema_fact_type(tree, source)
                 sema_fact_type(tree, target)
             }
+            if conversion == .TypedIntoUnion(_, source, target, _, _) {
+                sema_fact_type(tree, source)
+                sema_fact_type(tree, target)
+            }
             sema_fact_failure(tree, failure)
         }
         .TryWithContext(_, _, conversion, _, _, _) -> {
             if conversion == .Typed(_, source, target) {
+                sema_fact_type(tree, source)
+                sema_fact_type(tree, target)
+            }
+            if conversion == .TypedIntoUnion(_, source, target, _, _) {
                 sema_fact_type(tree, source)
                 sema_fact_type(tree, target)
             }

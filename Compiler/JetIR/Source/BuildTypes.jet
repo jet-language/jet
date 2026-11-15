@@ -3527,7 +3527,7 @@ ir_try_reraise: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conv
                 .DefaultErr -> true
                 .Typed(_, _, target) -> ir_default_err(p, target)
                 .NoConversion -> ir_default_err(p, source)
-                .Never | .WidenUnion(_, _) | .RewidenUnion(_) -> false
+                .Never | .WidenUnion(_, _) | .RewidenUnion(_) | .TypedIntoUnion(_, _, _, _, _) -> false
             }
         }
     }
@@ -3553,55 +3553,15 @@ ir_try_reraise: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conv
             ir_release(m, b, payload)
         }
         .Typed(function_name, _, target) -> {
-            if (ir_host_value_row(m, p, source_row) ?? "") == "BuildError" && ir_default_err(p, target) {
-                // A BuildError is a compiler value whose record already is a
-                // default Err with its typed identity and details; the
-                // compiler answers it as that Err rather than through the
-                // Prelude's message-only conversion.
-                converted = ir_host_method_words(m, p, b, target, "BuildError.into_err", [Int]{payload}, span)
-                if ir_failed(b) -> return -1
-                b.fresh[converted] = true
-                ir_release(m, b, payload)
-            } else {
-                row: ir_function_row(p, function_name) ?? return ir_fail_slot(b, span, "error conversion {function_name} outside the checked program")
-                // A conversion declared for a generic error type is built for
-                // the failing value's own instantiation (`Unsent<Int>`).
-                type_args: if p.functions[row].generic_params.len() > 0 -> ir_row_args(m, source_row) else -> [Type]{}
-                callee: ir_function_id(m, p, function_name, type_args) ?? return ir_fail_slot(b, span, "call of {function_name}")
-                routine_return: ir_executable_return(p.functions[row]) ?? return ir_fail_slot(b, span, "error conversion {function_name} without a result")
-                returned_row: ir_value_type(m, p, routine_return) ?? return ir_type_fail(b, span, routine_return)
-                returned: ir_fresh_temp(m, b, returned_row)
-                start: ir_args(b.f, [Int]{payload})
-                ir_emit(b.f, IROp.Call, returned, callee, start, 1, b.line)
-                ir_stop_check(m, b)
-                // A routine that moves its source owns the failure from here;
-                // one that borrows it (a kept From hook's) leaves it to this site.
-                if p.functions[row].params.len() == 1 && p.functions[row].params[0].convention == .Move {
-                    b.fresh[payload] = false
-                } else { ir_release(m, b, payload) }
-                converted = returned
-                if ir_untag(routine_return) == .Result(_, _) {
-                    target_row: ir_value_type(m, p, target) ?? return ir_type_fail(b, span, target)
-                    converted_value: ir_load_at(m, b, returned, 8, target_row)
-                    converted = ir_own(m, p, b, converted_value)
-                    b.fresh[converted] = true
-                    ir_release(m, b, returned)
-                }
-            }
-            if ir_default_err(p, target) {
-                string_row: ir_string_row(m)
-                source_text: ir_intern_text(m, ir_error_spelling(p, source))
-                target_text: ir_intern_text(m, ir_error_spelling(p, target))
-                source_name: ir_temp(m, b, string_row)
-                ir_emit(b.f, IROp.ConstText, source_name, source_text, -1, -1, b.line)
-                target_name: ir_temp(m, b, string_row)
-                ir_emit(b.f, IROp.ConstText, target_name, target_text, -1, -1, b.line)
-                error_row: b.f.slot_type[converted]
-                applied: ir_runtime(m, b, "jet_err_apply_conversion", [Int]{converted, source_name, target_name}, error_row)
-                b.fresh[applied] = true
-                ir_release(m, b, converted)
-                converted = applied
-            }
+            converted = ir_try_convert_typed(m, p, b, payload, source, source_row, function_name, target, span)
+            if ir_failed(b) -> return -1
+        }
+        .TypedIntoUnion(function_name, _, target, _, _) -> {
+            member: ir_try_convert_typed(m, p, b, payload, source, source_row, function_name, target, span)
+            if ir_failed(b) -> return -1
+            converted = ir_union_box(m, p, b, member, target, error, span)
+            if ir_failed(b) -> return -1
+            b.fresh[converted] = true
         }
         .WidenUnion(_, _) -> {
             converted = ir_union_box(m, p, b, payload, source, error, span)
@@ -3621,6 +3581,68 @@ ir_try_reraise: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conv
     }
     ir_release(m, b, subject)
     ir_result_box(m, p, b, Type.Result{ok: success, err: error}, false, converted)
+}
+
+// The failure `payload` (of type `source`, laid out as `source_row`) converted
+// into `target` by the conversion routine `function_name`; a conversion into
+// the default `Err` also records its `source -> Err` step.
+ir_try_convert_typed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, source: Type, source_row: Int, function_name: String, target: Type, span: Span) -> Int Never! {
+    converted: ir_try_convert_routine(m, p, b, payload, source_row, function_name, target, span)
+    if ir_failed(b) || !ir_default_err(p, target) -> return converted
+    string_row: ir_string_row(m)
+    source_text: ir_intern_text(m, ir_error_spelling(p, source))
+    target_text: ir_intern_text(m, ir_error_spelling(p, target))
+    source_name: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, source_name, source_text, -1, -1, b.line)
+    target_name: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, target_name, target_text, -1, -1, b.line)
+    error_row: b.f.slot_type[converted]
+    applied: ir_runtime(m, b, "jet_err_apply_conversion", [Int]{converted, source_name, target_name}, error_row)
+    b.fresh[applied] = true
+    ir_release(m, b, converted)
+    applied
+}
+
+// The failure `payload` (laid out as `source_row`) passed to the conversion
+// routine `function_name` into `target`; its result is the converted value.
+ir_try_convert_routine: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, source_row: Int, function_name: String, target: Type, span: Span) -> Int Never! {
+    if (ir_host_value_row(m, p, source_row) ?? "") == "BuildError" && ir_default_err(p, target) {
+        // A BuildError is a compiler value whose record already is a
+        // default Err with its typed identity and details; the
+        // compiler answers it as that Err rather than through the
+        // Prelude's message-only conversion.
+        converted: ir_host_method_words(m, p, b, target, "BuildError.into_err", [Int]{payload}, span)
+        if ir_failed(b) -> return -1
+        b.fresh[converted] = true
+        ir_release(m, b, payload)
+        return converted
+    }
+    row: ir_function_row(p, function_name) ?? return ir_fail_slot(b, span, "error conversion {function_name} outside the checked program")
+    // A conversion declared for a generic error type is built for
+    // the failing value's own instantiation (`Unsent<Int>`).
+    type_args: if p.functions[row].generic_params.len() > 0 -> ir_row_args(m, source_row) else -> [Type]{}
+    callee: ir_function_id(m, p, function_name, type_args) ?? return ir_fail_slot(b, span, "call of {function_name}")
+    routine_return: ir_executable_return(p.functions[row]) ?? return ir_fail_slot(b, span, "error conversion {function_name} without a result")
+    returned_row: ir_value_type(m, p, routine_return) ?? return ir_type_fail(b, span, routine_return)
+    returned: ir_fresh_temp(m, b, returned_row)
+    start: ir_args(b.f, [Int]{payload})
+    ir_emit(b.f, IROp.Call, returned, callee, start, 1, b.line)
+    ir_stop_check(m, b)
+    // A routine that moves its source owns the failure from here;
+    // one that borrows it (a kept From hook's) leaves it to this site.
+    if {
+        p.functions[row].params.len() == 1 && p.functions[row].params[0].convention == .Move -> b.fresh[payload] = false
+        else -> ir_release(m, b, payload)
+    }
+    if ir_untag(routine_return) == .Result(_, _) {
+        target_row: ir_value_type(m, p, target) ?? return ir_type_fail(b, span, target)
+        converted_value: ir_load_at(m, b, returned, 8, target_row)
+        converted: ir_own(m, p, b, converted_value)
+        b.fresh[converted] = true
+        ir_release(m, b, returned)
+        return converted
+    }
+    returned
 }
 
 // Whether `ty` is the compiler-owned default error `Err`.

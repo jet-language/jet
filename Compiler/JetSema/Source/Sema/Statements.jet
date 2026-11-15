@@ -8417,6 +8417,7 @@ sema_stmt_returns_module_call: fn(value: Expr, environment: SemaScopeEnvironment
 // A returned value (a `return` or a value tail) with its ownership and view
 // obligations: the value moves out and its views must outlive the call.
 sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_stmt_never_contract_returns_err(value, value, environment, program, scopes, state, tail_store, context, diagnostics) -> return None
     if sema_ownership_report_lending_view_escape(value, "be returned", scopes, context, diagnostics) {
         // Rust `check_return` still runs the view-return check on the lent
         // view, whose loan names no stable owner (E2305).
@@ -8521,6 +8522,55 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
     moved: materialized_string_view || string_view_return || one_value_window || (!view_valid) || sema_stmt_move_direct(value, state, scopes, "`return`", diagnostics)
     if !view_valid || !moved -> return None
     Val(checked)
+}
+
+// A `Never!` contract denies failure, so an `Err(…)` it returns (a `return`
+// or a value tail, `returned` as written) is a failure outside it: E2404
+// names what the `Err` fails with and offers the return type that admits
+// it. Answers whether it reported.
+sema_stmt_never_contract_returns_err: fn(value: Expr, returned: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if value == .Paren(inner, _, _) -> return sema_stmt_never_contract_returns_err(inner, returned, environment, program, scopes, state, tail_store, context, diagnostics)
+    contract: scopes.return_type ?? return false
+    denied := false
+    // A success slot that holds the default error (`-> Err Never!`, `Err?`)
+    // takes `Err(…)` as its value, not as a failure.
+    if sema_expr_unwrap_tag(contract) == .Result(success, error) -> denied = sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) && sema_expr_expected_assignable(success, Type.Named{name: "Err"}, environment, program) != (Val(true))
+    if !denied -> return false
+    found := false
+    failure := ""
+    if value == .Err(payload, _, _) {
+        found = true
+        failure = sema_stmt_denied_err_failure(payload, environment, program, scopes, state, tail_store, context)
+    }
+    if value == .Call(call, _) {
+        if call.name != "Err" || call.args.len() != 1 || call.args[0].label != None -> return false
+        if sema_scope_resolve_index(scopes, call.name) == .Val(index) {
+            if !sema_scope_binding_is_compiler_builtin(scopes.bindings[index], "Err") -> return false
+        }
+        found = true
+        failure = sema_stmt_denied_err_failure(call.args[0].expr, environment, program, scopes, state, tail_store, context)
+    }
+    if !found -> return false
+    what: if failure == "" -> "This `Err` can't propagate into `Never` here" else -> "This `Err` fails with `{failure}`, which can't propagate into `Never` here"
+    fix: if failure == "" -> "Declare the failure type in the return type, or handle the failure here instead of returning it" else -> "Declare `{failure}!` in the return type, or handle the failure here instead of returning it"
+    diagnostic: sema_error("E2404", expr_span(returned), what, "The function is declared `Never!`, a failure contract that denies every failure, so a returned `Err` is outside it", fix)
+    if failure == "" || context.failure_repair == None {
+        diagnostics.push(diagnostic)
+        return true
+    }
+    repair: context.failure_repair ?? return true
+    diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: repair.return_span, new_text: "{type_name(repair.success)} {failure}!"}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
+    true
+}
+
+// What a returned `Err(payload)` fails with: the default `Err` for a message,
+// else the payload's error type; empty when the payload's type needs the
+// contract to infer (`Err(.Empty)`).
+sema_stmt_denied_err_failure: fn(payload: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> String {
+    probe_diagnostics := [Diagnostic]{}
+    probed: sema_probe_expression(payload, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return ""
+    if sema_expr_unwrap_tag(probed.ty) == Type.String -> return "Err"
+    sema_failure_conversion_leaf(probed.ty)
 }
 
 // Whether the returned `checked` is a write borrow of a place, bare or as the

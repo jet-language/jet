@@ -816,6 +816,10 @@ TTryConvert: enum {
     WidenUnion(enum_name: String, tag: String)
     // A union error whose every member is a member of the enclosing union.
     RewidenUnion(enum_name: String)
+    // A failure outside an open union contract (`(ParseError | Err)!`):
+    // `fn_name` converts it into `target`, the union's `Err` member, which
+    // then boxes under that member's `tag`.
+    TypedIntoUnion(fn_name: String, source: Type, target: Type, enum_name: String, tag: String)
 }
 
 TFailureCarrier: enum {
