@@ -2337,51 +2337,51 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 200,
+      "line": 202,
       "column": 5,
       "reason": "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 212,
+      "line": 214,
       "column": 9,
       "reason": "path is a fresh private page; the executable is mapped read-only and only read"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 240,
+      "line": 242,
       "column": 5,
       "reason": "the trace made this mapping and holds no pointer into it past this call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 251,
+      "line": 328,
       "column": 5,
       "reason": "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 279,
+      "line": 356,
       "column": 9,
       "reason": "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 305,
+      "line": 382,
       "column": 9,
       "reason": "block + 12 is inside this block, which lies in the read-only table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 379,
+      "line": 456,
       "column": 5,
-      "reason": "at lies in the executable's read-only mapping: its ELF header, section table or location table"
+      "reason": "at lies in a mapping the trace reads: the executable's read-only ELF header, section table or location table, or the page the host's frames were written to"
     },
     {
       "package": "Compiler",
@@ -9995,7 +9995,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "tests",
       "file": "tests/run/FailureFoundation/TransactOSStop.jet",
-      "line": 33,
+      "line": 34,
       "column": 5,
       "reason": "the stop runs the shared cleanup boundary"
     },
@@ -10878,13 +10878,13 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 98:5 | "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 116:5 | "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 148:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 200:5 | "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 212:9 | "path is a fresh private page; the executable is mapped read-only and only read" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 240:5 | "the trace made this mapping and holds no pointer into it past this call" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 251:5 | "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 279:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 305:9 | "block + 12 is inside this block, which lies in the read-only table" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 379:5 | "at lies in the executable's read-only mapping: its ELF header, section table or location table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 202:5 | "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 214:9 | "path is a fresh private page; the executable is mapped read-only and only read" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 242:5 | "the trace made this mapping and holds no pointer into it past this call" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 328:5 | "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 356:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 382:9 | "block + 12 is inside this block, which lies in the read-only table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 456:5 | "at lies in a mapping the trace reads: the executable's read-only ELF header, section table or location table, or the page the host's frames were written to" |
 | Compiler | Compiler/JetRuntime/Source/FaultAllocation.jet | 21:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/FaultSchedule.jet | 32:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 108:5 | "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it" |
@@ -11972,7 +11972,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/run/CoreIO/CleanupMatrix.jet | 35:5 | "the stop runs the shared cleanup boundary" |
 | tests | tests/run/CoreIO/CleanupMatrix.jet | 85:5 | "the exit callbacks have no captured state" |
 | tests | tests/run/Dyn/NumberInUnsafe.jet | 7:5 | "the literal below is a valid JSON number lexeme" |
-| tests | tests/run/FailureFoundation/TransactOSStop.jet | 33:5 | "the stop runs the shared cleanup boundary" |
+| tests | tests/run/FailureFoundation/TransactOSStop.jet | 34:5 | "the stop runs the shared cleanup boundary" |
 | tests | tests/run/PatternsAndFields/FixedSizeListWidensAtCoreCall.jet | 5:5 | "fixed signature vector" |
 | tests | tests/run/UnsafeAndRuntime/MemFromAddrDirect.jet | 11:5 | "the borrowed value is live in the caller and the pointer never escapes" |
 | tests | tests/ui/E3113_package_without_kernel_files/run.jet | 6:1 | "the caller releases the storage with `free_raw`, exactly once" |
