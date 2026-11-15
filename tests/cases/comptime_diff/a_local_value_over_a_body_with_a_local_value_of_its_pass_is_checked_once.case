@@ -1,0 +1,22 @@
+# `x` and `z` are local values whose closures check `helper`, which holds
+# the local value `base` of the same comptime pass: `x` before the pass
+# reaches `base`, `z` while `base` waits in the batch. A check of `helper`
+# made before `base` lands keeps its initializer as run-time code, which the
+# landing replaces, so neither closure waits on `base` (only a site other
+# than a local value is waited on, jet_driver_comptime_site_waits). Each item
+# is checked once, and the three build one program. Waiting on `base` would
+# check `x` again in a second pass and land the batch early for `z`.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "run: fn() {\n    x: helper(1)\n    print(\"{x} {tail()}\")\n}\n\nsquare: fn(n: Int) -> Int {\n    n * n\n}\n\nhelper: fn(n: Int) -> Int {\n    base: square(4)\n    base + n\n}\n\ntail: fn() -> Int {\n    z: helper(2)\n    z\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "17 18\n"
+stderr: count "> comptime.check x (main.jet)" = 1 # `x` does not wait on `base`
+stderr: count "> comptime.closure x (main.jet)" = 1
+stderr: count "> comptime.check z (main.jet)" = 1 # `z` does not land the batch early
+stderr: count "> comptime.closure z (main.jet)" = 1
+stderr: ~ "comptime.build x, base, z (main.jet)" # one program for the three
+stderr: ~ "# comptime.programs_built = 1\n"
+stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's

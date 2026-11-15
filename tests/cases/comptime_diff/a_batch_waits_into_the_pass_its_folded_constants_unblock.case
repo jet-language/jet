@@ -1,0 +1,14 @@
+# `B`'s closure reaches `scale`, which reads `K`. `K` has no value until its
+# fold lands later in the same pass, so `B` waits for the next pass. `A`
+# waits in the batch, and no waiting item reads it. The batch therefore
+# carries into the next pass instead of being built at the end of the first
+# one, and `A` and `B` are evaluated together in one program.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "A: helper(2)\nB: table()\nK: 4 * 2\n\nhelper: fn(n: Int) -> Int {\n    n + 1\n}\n\nscale: fn(x: Int) -> Int {\n    x * K\n}\n\ntable: fn() -> Int {\n    scale(5)\n}\n\nrun: fn() {\n    print(\"{A} {B}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "3 40\n"
+stderr: ~ "# comptime.programs_built = 1\n" # A and B build one program
+stderr: !~ "# comptime.programs_built = 2\n" # not one per pass
+stderr: !~ "comptime.build A (main.jet)" # `A` is not built alone

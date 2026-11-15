@@ -996,6 +996,12 @@ JetDriverComptimeRunIndex: struct {
     // What the run's body walks have read of each nominal type's render
     // methods (jet_driver_comptime_owner_refs).
     render: SemaComptimeRenderMemo{SemaComptimeRenderMemo{}}
+    // The `#run` sites the current pass has yet to land (its items and the
+    // batch it took over, jet_driver_comptime_pass_sites), other than local
+    // values: each site's key, under the source offset its span starts at.
+    // A function check that captured one ran before its value landed
+    // (jet_driver_comptime_site_waits).
+    pass_sites: [Int:[String]]{[Int:[String]]{}}
 }
 
 // A function whose visit is the same in every later closure of the run,
@@ -1112,6 +1118,10 @@ JetDriverComptimeFunctionClosure: struct {
     // The foreign functions the closure reaches, which no check reads as Jet
     // (SemaComptimeFunctionResult.foreign): a call of one stops the run.
     foreign: [SemaCheckedForeignFunction]{[SemaCheckedForeignFunction]{}}
+    // A function check of the closure captured a `#run` site the pass has
+    // yet to land, and the closure waits on it
+    // (jet_driver_comptime_site_waits).
+    site_waits: Bool{false}
 }
 
 JetDriverComptimeWaitRow: struct {
@@ -1451,6 +1461,7 @@ jet_driver_comptime_function_closure: fn(
     functions := [FnBody]{}
     foreign := [SemaCheckedForeignFunction]{}
     waiting := [String]{}
+    site_waits := false
     complete := true
     incomplete := [SemaTotalityRow]{}
     // A local value whose own initializer reads `#phase` stays run-time code,
@@ -1533,9 +1544,17 @@ jet_driver_comptime_function_closure: fn(
             }
             next
         }
+        // A fresh check that captured a `#run` site the pass has yet to land
+        // ran before that site's value did, so its body holds no binding for
+        // the site's local: the closure waits on the site, and this check is
+        // neither kept nor settled, so the function is checked again once
+        // the site has landed. The closure's other checks are kept for that
+        // next check of the item.
+        unlanded: fresh && jet_driver_comptime_site_waits(index, checked, request.key, waiting)
+        if unlanded -> site_waits = true
         // A fresh check of a function with no row yet adds its row below,
         // which every later visit reuses.
-        settles := (reused_row >= 0 || (fresh && index.checked_at[node] < 0)) && checked.waiting_dependencies.len() == 0 && !index.nodes[node].settled
+        settles := (reused_row >= 0 || (fresh && index.checked_at[node] < 0)) && checked.waiting_dependencies.len() == 0 && !index.nodes[node].settled && !unlanded
         // A new result is stored once its calls are queued, so it moves in.
         store := false
         loop dependency in checked.waiting_dependencies {
@@ -1572,7 +1591,7 @@ jet_driver_comptime_function_closure: fn(
                 // A reused row's body walks ran at the first closure that
                 // read it (JetDriverComptimeClosureRow); a new row is kept
                 // at the position it is pushed to below.
-                kept_row := if reused_row >= 0 -> reused_row else if index.checked_at[node] < 0 -> checked_functions.len() else -> -1
+                kept_row := if reused_row >= 0 -> reused_row else if index.checked_at[node] < 0 && !unlanded -> checked_functions.len() else -> -1
                 if kept_row >= 0 && index.closure_rows.get(kept_row) == None {
                     prefetched_refs: index.prefetched_refs.remove(node)
                     if prefetched_refs == .Val(refs) {
@@ -1590,7 +1609,7 @@ jet_driver_comptime_function_closure: fn(
                 functions.push(function)
                 functions.extend(checked.conversions)
                 sema_comptime_failure_closure_add(graph, failure_closure, checked)
-                if index.checked_at[node] < 0 -> store = true
+                if index.checked_at[node] < 0 && !unlanded -> store = true
             }
         }
         loop call in checked.calls {
@@ -1626,7 +1645,7 @@ jet_driver_comptime_function_closure: fn(
     if waiting.len() == 0 && !sema_comptime_failure_closure_settle(graph, failure_closure, diagnostics) {
         complete = false
     }
-    JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete: incomplete, impurity: impurity, foreign: foreign}
+    JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete: incomplete, impurity: impurity, foreign: foreign, site_waits: site_waits}
 }
 
 // The check jet_driver_comptime_prefetch made of node `node`'s function
@@ -2279,18 +2298,77 @@ jet_driver_module_values_refused: fn(
 }
 
 // Whether an item's check or closure, which ran while a batch held its
-// values back, settled: it reported nothing (`reported`) and it completed
-// or waits on values (`waiting`), so it neither stops nor reports. A
-// settled one named no batch constant, and then the batch landing first
-// changes nothing, or it waits on that constant's key (a constant without a
-// value is a dependency, sema_comptime_dependencies_from_references) and is
-// checked again once the value lands. An unsettled one stops or reports,
-// which the run does only after the batch's values and reports. A local
-// value's check and closure always settle: whatever they report is
+// values back, settled: it reported no error (`failed`) and it completed or
+// waits on values (`waiting`), so it does not stop. A settled one named no
+// batch constant, and then the batch landing first changes nothing, or it
+// waits on that constant's key (a constant without a value is a dependency,
+// sema_comptime_dependencies_from_references) and is checked again once the
+// value lands. Its warnings (a multiline HTML text's, say) are reported
+// ahead of the batch's own reports. An unsettled one stops or reports
+// errors, which the run does only after the batch's values and reports. A
+// local value's check and closure always settle: whatever they report is
 // withdrawn, and one that fails or does not complete stays run-time code,
 // which no other item reads.
-jet_driver_comptime_settled: fn(local_value: Bool, reported: Bool, complete: Bool, waiting: [String]) -> Bool Never! {
-    local_value || (!reported && (complete || waiting.len() > 0))
+jet_driver_comptime_settled: fn(local_value: Bool, failed: Bool, complete: Bool, waiting: [String]) -> Bool Never! {
+    local_value || (!failed && (complete || waiting.len() > 0))
+}
+
+// Indexes the `#run` sites the pass starting now has yet to land
+// (JetDriverComptimeRunIndex.pass_sites): its items' and those of the batch
+// it takes over from the last pass, local values aside. A function check
+// that ran before a local value landed keeps the local's initializer as
+// run-time code, which the landing replaces (Comptime/LocalSplice.jet), so
+// its body stands. One that ran before any other site landed holds no
+// binding for the site's local (sema_stmt_check_prepared_binding), and the
+// finalization would take that body as the function's
+// (sema_comptime_find_checked_function).
+jet_driver_comptime_pass_sites: fn(index: &JetDriverComptimeRunIndex, pending: [SemaComptimeItemSource], batch: JetDriverComptimeBatch) Never! {
+    index.pass_sites = [Int:[String]]{}
+    loop source in pending -> jet_driver_comptime_pass_site_add(index, source)
+    loop entry in batch.entries -> jet_driver_comptime_pass_site_add(index, entry.source)
+}
+
+jet_driver_comptime_pass_site_add: fn(index: &JetDriverComptimeRunIndex, source: SemaComptimeItemSource) Never! {
+    if source.kind != SemaComptimeItemKind.BodyExpression || source.local_value -> return
+    keys := index.pass_sites.remove(source.span.start) ?? [String]{}
+    jet_driver_comptime_wait_add(keys, source.key)
+    index.pass_sites[source.span.start] = keys
+}
+
+// Adds to `waiting` the key of each site of the pass
+// (JetDriverComptimeRunIndex.pass_sites) other than item `own` that the
+// function check `checked` captured with no value
+// (SemaComptimeFunctionResult.comptime_body_sources); true when it added
+// one. Each captured site is one lookup, by the offset its span starts at.
+jet_driver_comptime_site_waits: fn(index: &JetDriverComptimeRunIndex, checked: SemaComptimeFunctionResult, own: String, waiting: &[String]) -> Bool Never! {
+    found := false
+    loop captured in checked.comptime_body_sources {
+        if captured.local_value || captured.key == own -> next
+        keys: index.pass_sites.get(captured.span.start) ?? next
+        loop key in keys {
+            if key == captured.key {
+                jet_driver_comptime_wait_add(waiting, key)
+                found = true
+            }
+        }
+    }
+    found
+}
+
+// Whether `batch` holds one of the items `keys`.
+jet_driver_comptime_batch_holds: fn(batch: JetDriverComptimeBatch, keys: [String]) -> Bool Never! {
+    loop key in keys {
+        if batch.keys.get(key) != None -> return true
+    }
+    false
+}
+
+// Whether an item of `wait_rows` waits on an item `batch` holds.
+jet_driver_comptime_batch_awaited: fn(batch: JetDriverComptimeBatch, wait_rows: [JetDriverComptimeWaitRow]) -> Bool Never! {
+    loop row in wait_rows {
+        if jet_driver_comptime_batch_holds(batch, row.dependencies) -> return true
+    }
+    false
 }
 
 // Whether one of `keys` has a value now.
@@ -2311,7 +2389,9 @@ jet_driver_comptime_any_available: fn(available: SemaComptimeAvailableConstants,
 // local value, an explicit `name: #run value` local or a `#run` expression
 // in a body. No other item of the run reads a body site (code that reads a
 // `#run` local waits until that local has landed, so it is staged only in
-// a later pass, sema_comptime_reads_pending_local), and the flush keeps each
+// a later pass, sema_comptime_reads_pending_local; a closure that checks
+// the owner body of a site other than a local value waits for that site,
+// jet_driver_comptime_site_waits), and the flush keeps each
 // entry's own outcome: a local value's value or run-time reason, any other
 // site's value or its own report, with the entries after a reported failure
 // left unevaluated as one item at a time leaves them. A batch that doesn't
@@ -2774,6 +2854,24 @@ jet_driver_merged_names: fn(graph: &SemaGraphResult, registration: &&SemaRegistr
     returned
 }
 
+// Puts the comptime items of Core and of the compiler's canonical Prelude
+// ahead of the program's, each group in its own order (the sort is
+// stable). The program reads Core's constants and Core never reads the
+// program's, so a program item's closure finds the Core constants it
+// reaches already landed: otherwise every function of the closure that
+// reads one (as the Regex functions read Regex's) waits, and the closure is
+// checked again next pass.
+jet_driver_comptime_core_first: fn(sources: &[SemaComptimeItemSource]) {
+    prelude: "{JET_CANONICAL_EFFECT_PACKAGE_IDENTITY}/"
+    sources.sort_by(fn(left: SemaComptimeItemSource, right: SemaComptimeItemSource) { jet_driver_comptime_item_rank(left, prelude) <=> jet_driver_comptime_item_rank(right, prelude) })
+}
+
+// 0 for an item of Core or the canonical Prelude (whose files start with
+// `prelude`), 1 for one of the program.
+jet_driver_comptime_item_rank: fn(source: SemaComptimeItemSource, prelude: String) -> Int Never! {
+    if module_is_core(source.module_identity) || source.source_file.starts_with(prelude) -> 0 else -> 1
+}
+
 // `staged` is the graph the run's program tables own (moved in, never
 // copied): the declaration pass's graph (SemaComptimeDeclarationStage.graph)
 // or the caller's own copy. Every edit the run makes to it is recorded on the
@@ -2931,8 +3029,11 @@ jet_driver_comptime_run: fn(
     // admits them, wait in `batch` to be evaluated together on one IR
     // build. One that waits on a batch key waits like any item that names
     // an unvalued constant: the pass's last flush lands the batch, and the
-    // next pass checks it again. So one IR build and one load serve every
-    // item of a dependency level, not one stretch of the declaration order.
+    // next pass checks it again. A batch that no waiting item names, in a
+    // pass that landed other values, is not flushed at the pass's end: it
+    // waits into the next pass (jet_driver_comptime_batch_awaited). So one
+    // IR build and one load serve every item of a dependency level, and the
+    // levels a fold unblocks, not one stretch of the declaration order.
     // An item whose check is unsettled lands the batch first and is checked
     // again; one whose closure is unsettled withdraws the closure's reports
     // and function checks, lands the batch and starts over (`retry`). Either
@@ -2941,7 +3042,10 @@ jet_driver_comptime_run: fn(
     // other item flushes the batch before it is evaluated alone. A literal
     // (sema_comptime_fold) or a literal input lands at its turn even with a
     // batch waiting: it reads no batch value, and a later item that names it
-    // then reads it landed instead of flushing the batch early.
+    // then reads it landed instead of flushing the batch early. A closure
+    // that checked the owner body of a `#run` site the pass has yet to land
+    // (in the batch or later in the pass) waits on that site, keeping its
+    // other function checks (jet_driver_comptime_site_waits).
     batch := jet_driver_comptime_batch_new()
     // The waits of each pending item (`module\nkey`) whose last check, with
     // its closure, reported nothing: until one of those keys has a value,
@@ -2968,6 +3072,7 @@ jet_driver_comptime_run: fn(
             }
             resolved_count = values.len()
         }
+        jet_driver_comptime_pass_sites(run_index, pending, batch)
         jet_driver_trace_step_begin(request.trace_sink, "comptime.precheck")
         prechecks := sema_comptime_precheck_items(environments, programs, available, pending, request.compiler_threads, jet_driver_comptime_prefetches(request.compiler_threads), memory_plan)
         jet_driver_trace_step_end(request.trace_sink, "comptime.precheck", pending.len())
@@ -3012,7 +3117,7 @@ jet_driver_comptime_run: fn(
                 precheck = None
                 counters.items_checked += 1
                 // A settled check that waits on a batch key waits below.
-                if batch.entries.len() > 0 && !jet_driver_comptime_settled(source.local_value, checked_item.diagnostics.len() > 0, checked_item.complete, checked_item.waiting_dependencies) {
+                if batch.entries.len() > 0 && !jet_driver_comptime_settled(source.local_value, jet_driver_has_errors(checked_item.diagnostics), checked_item.complete, checked_item.waiting_dependencies) {
                     flushed := jet_driver_comptime_staged_flush(request, batch, values, checked_functions, trace, programs, staging, counters, diagnostics)
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
@@ -3173,8 +3278,14 @@ jet_driver_comptime_run: fn(
                 }
                 closure := jet_driver_comptime_function_closure(environments[0], programs[0], probe, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value || source.local_value, source.local_value, diagnostics, request.compiler_threads)
                 jet_driver_trace_step_end(request.trace_sink, "comptime.closure", closure.functions.len() + closure.rows.len())
+                // A closure that waits on a site of the pass withdraws its
+                // reports: the item is checked again once the site has
+                // landed, and reports then.
+                if closure.site_waits {
+                    loop diagnostics.len() > closure_diagnostic_start -> _ := diagnostics.pop()
+                }
                 // A settled closure that waits on a batch key waits below.
-                if batch.entries.len() > 0 && !jet_driver_comptime_settled(source.local_value, diagnostics.len() > item_diagnostic_start, closure.complete, closure.waiting_dependencies) {
+                if batch.entries.len() > 0 && !jet_driver_comptime_settled(source.local_value, jet_driver_has_errors_since(diagnostics, item_diagnostic_start), closure.complete, closure.waiting_dependencies) {
                     loop diagnostics.len() > item_diagnostic_start -> _ := diagnostics.pop()
                     jet_driver_comptime_forget_functions(checked_functions, run_index, checked_mark)
                     flushed := jet_driver_comptime_staged_flush(request, batch, values, checked_functions, trace, programs, staging, counters, diagnostics)
@@ -3257,7 +3368,9 @@ jet_driver_comptime_run: fn(
                     loop dependency in closure.waiting_dependencies {
                         jet_driver_comptime_wait_add(dependencies, dependency)
                     }
-                    if checked_item.diagnostics.len() == 0 && diagnostics.len() == item_diagnostic_start {
+                    // A wait on a body site is checked again next pass: a
+                    // site's value never joins the available constants.
+                    if checked_item.diagnostics.len() == 0 && diagnostics.len() == item_diagnostic_start && !closure.site_waits {
                         settled_waits[source_key] = dependencies
                     } else { _ := settled_waits.remove(source_key) }
                     wait_rows.push(
@@ -3323,7 +3436,11 @@ jet_driver_comptime_run: fn(
                 }
             }
         }
-        if batch.entries.len() > 0 {
+        // A batch that no waiting item names waits into the next pass when
+        // this pass landed other values: the items that waited on those are
+        // evaluated in the same program as the batch, so a run whose items
+        // wait on folded constants builds one program, not one per pass.
+        if batch.entries.len() > 0 && (!made_progress || next_pending.len() == 0 || jet_driver_comptime_batch_awaited(batch, wait_rows)) {
             flushed := jet_driver_comptime_staged_flush(request, batch, values, checked_functions, trace, programs, staging, counters, diagnostics)
             batch = jet_driver_comptime_batch_new()
             if flushed.progressed -> made_progress = true
@@ -5110,6 +5227,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     declared_facts := comptime_stage.graph_facts.move()
     comptime_stage.graph_facts = None
     memory_plan := [SemaFunctionMemoryPlan]{}
+    jet_driver_comptime_core_first(comptime_stage.sources)
     comptime_run := jet_driver_run_comptime(
         run_staged,
         declared_modules,
