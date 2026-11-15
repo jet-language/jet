@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106026,
+    "rev": 106033,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41686,6 +41686,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c1 third adversarial review (2026-11-15 01:45, of GoalsB-5-17r3; Docs/audits/2026-11-15-sync-partial-bootstrap-review-3.md lands with the next batch). S8, S14 and N3 now hold within limits; S5 and N1 fail narrowly (Postgres watermark: no xid/commit-LSN record; C never passes pg_current_wal_lsn on an idle database); N4 (web leader: opfs-wl likely needs COOP/COEP, steal does not free a frozen sahpool leader's handles), N5 (concurrent joins both upload the seed) and N7 (the nonce ledger grows with commits) fail. G36 is closed in code (2ded9a1ded). Open: G5, G10, G14, G22, G41, G45, G64, plus new G65-G88. c1 stays open; -17r4 next."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c1 second adversarial review (2026-11-15 01:10, of GoalsB-5-17r2; Docs/audits/2026-11-15-sync-partial-bootstrap-review-2.md, landing with the next batch): S2, S10 and S13 now hold within stated limits; S5, S8 and S14 still fail; of the new claims, N1 (Postgres watermark), N3 (endpoint epoch in key) and N5 (UUIDv5 seed IDs) fail; G36-G64 added. c1 stays open; -17r3 next."
         },
         {
@@ -42016,7 +42021,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-15T06:19:37.998Z",
+      "updated": "2026-11-15T06:25:47.993Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -43296,20 +43301,20 @@
         {
           "n": 20,
           "text": "`dbg(expr)` returns `expr` unchanged and writes one line to standard error (`[dbg] score.jet:3 word.len() * 3 = 9`); it adds no effect, so it works in `-[]>` functions, `#Memo` functions (printing only when the body runs) and compile-time code (D-DBG1=A). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Debugging/Dbg` on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:42:07.118Z"
+          "evidence": "GoalsA-1-3-debug-trace-comptime landed a0ec433ee0. on batch compiler p154 (dev 31ee594ec7), 2026-11-15 01:30: jet test Compiler --profile golden --filter ErrorsAndEffects/Debugging/Dbg PASS 3 FAIL 0; jet Tools/agent/BodyTreeRows.jet --check passed.",
+          "at": "2026-11-15T06:32:48.367Z"
         },
         {
           "n": 21,
           "text": "A release-profile build (`jet build`, or `--release` on any command) refuses any remaining `dbg` with a registered error, and `jet fix` removes the wrapper and keeps the expression (D-DBG1=A). Proof: `jet test Compiler --profile ui --filter dbg_in_release_build` and `jet test Compiler --profile cases --filter fix_removes_dbg`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:42:07.995Z"
+          "evidence": "GoalsA-1-3-debug-trace-comptime landed a0ec433ee0. on batch compiler p154 (dev 31ee594ec7), 2026-11-15 01:30: --profile ui --filter dbg_in_release_build PASS 4; --profile ui --filter E3405_debug_trace_left_in_build PASS 4; --profile cases --filter fix_removes_dbg PASS 1.",
+          "at": "2026-11-15T06:32:49.273Z"
         },
         {
           "n": 22,
@@ -43368,7 +43373,7 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-15T06:19:30.698Z",
+      "updated": "2026-11-15T06:32:49.274Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -61234,11 +61239,11 @@
         {
           "n": 56,
           "text": "About 270 MiB of each Core compile is Unicode and collation table literals; they become binary assets (embed_bytes relative to Core) with identical results on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter unicode` on every tier, and the `jet check` peak RSS of a `use core.text` program in a committed receipt.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:29:32.826Z"
+          "evidence": "Speed-3-5910-c56-unicode-tables-as-binary-assets landed 31ee594ec7 (9.2 MB of [U8] literals -> 17.5 KB Jet + 2.27 MB embed_bytes .bin assets). on batch compiler p154 (dev 31ee594ec7), 2026-11-15 01:30: UnicodeTables.jet --check and CollationTable.jet --check exit 0; jet test Tools/agent/UnicodeTables.jet 4 passed, CollationTable.jet 2 passed; CoreSources.jet --filter=built-in 2 passed; textparity.jet output byte-identical on O0, O1 and O2 (2333 bytes); guards 171/0. p154 vs p153 gate: instructions -3.0%, self-build peak 6721 -> 5791 MiB.",
+          "at": "2026-11-15T06:32:50.191Z"
         },
         {
           "n": 57,
@@ -61306,7 +61311,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-15T06:11:01.367Z",
+      "updated": "2026-11-15T06:32:50.191Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -75137,6 +75142,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c22 second adversarial review (2026-11-15 01:30, of note r3; Docs/audits/2026-11-15-lazy-core-interfaces-review-2.md lands with the next batch): of 23 claims, 6 fail (R4, R5 for step B, R9, R13, R15, R22), 16 hold within limits, 1 holds; gaps H1-H26. The note's peak-RSS figures read RUSAGE_CHILDREN's running maximum, so they are re-measured per run (H4). Main ruling H12 (fact): rendering a reported diagnostic's span from embedded Core text is display, not reading Core source; it may happen only when a diagnostic is reported, so a clean compile reads 0 bytes of Core text. H16 (a B step that slows a 6.2 program vs c37 never-slower) is owner-only: PrecompiledCore-4 drafts the ballot; until it is ratified, no B step that slows a program merges."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c22 rulings by Main, 2026-11-15 01:15, within the ratified c22 text (recorded as fact). (1) G1(b) = T1: a toolchain tree is read only when named (JET_TOOLCHAIN_ROOT, Core tests, compiler builds). jet run inside a checkout makes 0 statx/openat/getdents64 calls on the tree, because c22 states the strace clause with no exception for checkouts; T2 would add one. (2) G17 split: c22 keeps the Core- and Prelude-attributable CPU of hello (at most 1 ms, per note r3); hello's fixed compiler cost (traced: register 7.6, finalize 4.1, link 3.0 ms) moves to #6759 under c22's own wording."
         },
         {
@@ -75854,7 +75864,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T06:11:51.951Z",
+      "updated": "2026-11-15T06:23:41.310Z",
       "updatedBy": "Main",
       "criteriaLastN": 38
     },
@@ -104796,11 +104806,11 @@
         {
           "n": 8,
           "text": "A write inside a database transaction marks the live bindings over its table stale at the commit or rollback, never at the statement. A binding re-run on another connection while the transaction is open keeps no pre-commit result as current after the commit, and a write outside a transaction marks them at once. Proof: `jet test Compiler --profile cases --filter db_scope_live_marks_writes_stale_only_after_commit`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:41:40.937Z"
+          "evidence": "GoalsB-5-19 landed 5fa1fd1c85 (marks at commit) and GoalsB-5-21 landed 2ded9a1ded (per-binding generation: a re-run an invalidation overtakes stays stale, review G36). on batch compiler p154 (dev 31ee594ec7), 2026-11-15 01:30: --profile cases --filter live_rerun_overtaken PASS 1; --filter db_scope_live PASS 3; --filter sync_crdt/ PASS 3; golden --filter AppLive PASS 3. The livelock bound is c11.",
+          "at": "2026-11-15T06:32:51.135Z"
         },
         {
           "n": 9,
@@ -104819,6 +104829,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T06:14:38.705Z"
+        },
+        {
+          "n": 11,
+          "text": "Overtaken re-runs are bounded (sync review 3, G86): under sustained writes to a table a live binding reads, the generation rule (2ded9a1ded) does not re-run the source on every read forever. After a stated bound, the binding settles: it serves a value marked stale, or stores one as current with its generation. Proof: a case with a writer loop that invalidates continuously and a reader that reads N times, where the source runs a bounded number of times and the reader gets a value each time.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T06:25:58.582Z"
         }
       ],
       "refs": [],
@@ -104833,9 +104852,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-15T06:14:38.705Z",
+      "updated": "2026-11-15T06:32:51.135Z",
       "updatedBy": "Main",
-      "criteriaLastN": 10
+      "criteriaLastN": 11
     },
     {
       "id": "c0ems7zb",
@@ -218346,6 +218365,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T06:32:51.135Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00cqn1l",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T06:32:50.192Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#56"
+    },
+    {
+      "at": "2026-11-15T06:32:49.274Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-15T06:32:48.367Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T06:25:58.582Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00cqn1l",
+      "note": "#11 Overtaken re-runs are bounded (sync review 3, G86): under su"
+    },
+    {
+      "at": "2026-11-15T06:25:47.993Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ttcd0k",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T06:23:41.311Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T06:19:44.283Z",
       "by": "Main",
