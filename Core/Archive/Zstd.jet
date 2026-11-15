@@ -311,7 +311,7 @@ decompress: fn(data: [U8]) -> [U8] ZstdFileError! {
     decoder.feed(data)
     out := [U8]{}
     loop {
-        chunk: decoder.read(C_BLOCK_MAX)
+        chunk: decoder.read_bytes(C_BLOCK_MAX)
         if chunk.len() == 0 -> break
         if chunk.len() > C_OUTPUT_MAX - out.len() -> return Err(ZstdFileError.Unsupported)
         loop byte in chunk -> out.push(byte)
@@ -321,10 +321,10 @@ decompress: fn(data: [U8]) -> [U8] ZstdFileError! {
 }
 
 /// An incremental Zstandard decoder. `feed` appends compressed bytes in any
-/// chunking; `read(limit)` returns at most `limit` decoded bytes, and `[]` once
-/// it needs more input or every fed frame is complete. After the last chunk
-/// (and a `read` that returned `[]`), `finish` reports a truncated frame as
-/// `ZstdFileError.Malformed`.
+/// chunking; `read_bytes(limit)` returns at most `limit` decoded bytes, and
+/// `[]` once it needs more input or every fed frame is complete. After the
+/// last chunk (and a `read_bytes` that returned `[]`), `finish` reports a
+/// truncated frame as `ZstdFileError.Malformed`.
 ZstdDecoder: struct {
     priv input: [U8]
     priv consumed: Int
@@ -344,7 +344,7 @@ ZstdDecoder: struct {
         loop byte in bytes -> self.input.push(byte)
     }
 
-    read: fn(&self, limit: Int) -> [U8] ZstdFileError! {
+    read_bytes: fn(&self, limit: Int) -> [U8] ZstdFileError! {
         if limit <= 0 -> return Ok([U8]{})
         loop self.ready >= self.state.out.len() {
             progressed: self.step()
@@ -418,17 +418,17 @@ decoder: fn() -> ZstdDecoder Never! {
     ZstdDecoder{input: [U8]{}, consumed: 0, phase: 0, frame: ZFrame{size: 0, content: -1, window: 0, checksum: false}, state: zstate(), ready: 0, produced: 0, hash: zhash()}
 }
 
-/// A `FileReader` decoded as Zstandard frames: `read(limit)` returns at most
-/// `limit` decoded bytes, and `[]` at the end of the file once every frame it
-/// held is complete. A failed file read is `ZstdFileError.Read`.
+/// A `FileReader` decoded as Zstandard frames: `read_bytes(limit)` returns at
+/// most `limit` decoded bytes, and `[]` at the end of the file once every frame
+/// it held is complete. A failed file read is `ZstdFileError.Read`.
 ZstdReader: struct {
     priv file: FileReader
     priv decoder: ZstdDecoder
     priv ended: Bool
 
-    read: fn(&self, limit: Int) -[FS.Read]> [U8] ZstdFileError! {
+    read_bytes: fn(&self, limit: Int) -[FS.Read]> [U8] ZstdFileError! {
         loop {
-            out: self.decoder.read(limit)
+            out: self.decoder.read_bytes(limit)
             if out.len() > 0 || limit <= 0 || self.ended -> return Ok(out)
             chunk: self.file.read_bytes(C_READ_CHUNK) ?? return Err(ZstdFileError.Read)
             if chunk.len() == 0 {

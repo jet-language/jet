@@ -83,7 +83,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     serving: task { https.serve() ?? panic("serve TLS") }
     secure: tls.client(net.tcp_connect(https_addr) ?? panic("connect loopback"), server_name: "localhost", config: config, deadline: 5s) ?? panic("TLS handshake")
     crlf: "\r\n"
-    secure.write_all("GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}{crlf}".bytes(), deadline: 5s) ?? panic("request")
+    secure.write_bytes("GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}{crlf}".bytes(), deadline: 5s) ?? panic("request")
     tls_buffer := [U8]{}
     loop {
         count: secure.read_into(tls_buffer, 64, deadline: 5s) ?? panic("tls read_into")

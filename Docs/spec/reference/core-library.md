@@ -6232,11 +6232,11 @@ Mbed TLS 3.6.7); configuration carriers are validated before network use. See
 | `ClientConfig.default().with_version_bounds(min: version, max: version)` | `ClientConfig IOError!` | Select inclusive `.TLS12` / `.TLS13` bounds; reversed bounds fail before network use. |
 | `tls.client(tcp, server_name:, config:, deadline:)` | `TLSStream NetError!` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
 | `client(host: String, port: Int)` | `TLSStream IOError!` | Convenience form that connects and verifies a host and port. |
-| `read(stream: &TLSStream, n: Int)` / `read_text(stream, n)` | `[U8] IOError!` / `String IOError!` | Read bounded TLS bytes or checked UTF-8 text. Like `tcp_read_text`, `read_text` loses no byte: a cut character stays for the next read, and bytes that are not UTF-8 fail the read and stay for `read`. |
-| `write(stream: &TLSStream, bytes: [U8])` / `write_all(stream, bytes)` | `Int IOError!` / `IOError!` | Write application bytes, partially or completely. |
-| `write_text(stream: &TLSStream, text)` / `close(stream)` | `IOError!` | Write text or send close-notify on the same handle; repeated close is harmless. |
+| `read(stream: &TLSStream, n: Int)` / `read_bytes(stream, n)` | `String IOError!` / `[U8] IOError!` | Read checked UTF-8 text or bounded TLS bytes. Like `tcp_read_text`, `read` loses no byte: a cut character stays for the next read, and bytes that are not UTF-8 fail the read and stay for `read_bytes`. |
+| `write(stream: &TLSStream, text: String)` / `write_bytes(stream, bytes)` / `write_some(stream, bytes)` | `IOError!` / `IOError!` / `Int IOError!` | Write every UTF-8 byte of the text, or every byte; `write_some` writes every byte too and returns the count. |
+| `close(stream)` | `IOError!` | Send close-notify on the same handle; repeated close is harmless. |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Read the verified server name, certificate chain, cipher suite, and negotiated TLS version. |
-| `stream.read(limit, deadline:)` / `stream.write_all(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
+| `stream.read_bytes(limit, deadline:)` / `stream.write_bytes(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
 | `stream.read_into(buffer: &[U8], limit, deadline:)` | `Int IOError!` | Append up to `limit` decrypted bytes to the caller's `buffer` and return the count; 0 is close-notify, and a limit below one is `IOError.InvalidInput`. |
 | `stream.close_write(deadline:)` | `IOError!` | Flush close-notify and close only writes while reads continue. |
 

@@ -113,7 +113,7 @@ TLSVersion: enum {
 TLSStream: struct {
     state: Shared<__TLSState>?{None}
 
-    read: fn(self, max_bytes: Int, /, *, deadline: Duration) -[Net, Time.Wait]> [U8] IOError! {
+    read_bytes: fn(self, max_bytes: Int, /, *, deadline: Duration) -[Net, Time.Wait]> [U8] IOError! {
         if max_bytes <= 0 -> return Err(IOError.InvalidInput(__io_context(.Read, "tls read limit must be positive")))
         end_ns: __deadline_end(deadline, "tls read") ?? return Err(__net_to_io(err))
         state: __state(self) ?? return Err(__io_error(.Read, "TLS stream is closed"))
@@ -133,7 +133,7 @@ TLSStream: struct {
         __read_into(guard.value, buffer, limit, end_ns)
     }
 
-    write_all: fn(self, bytes: [U8], /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
+    write_bytes: fn(self, bytes: [U8], /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
         end_ns: __deadline_end(deadline, "tls write all") ?? return Err(__net_to_io(err))
         state: __state(self) ?? return Err(__io_error(.Write, "TLS stream is closed"))
         guard := state.guard_edit()
@@ -349,34 +349,35 @@ __server_context: fn(cert_pem: String, key_pem: String) -> __TLSContext __TLSFai
 }
 
 
-read: fn(&stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
-    if n <= 0 -> return Err(tls_error("read", "", "read limit must be positive"))
-    stream.read(n, deadline: __forever())
+read_bytes: fn(&stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
+    if n <= 0 -> return Err(tls_error("read_bytes", "", "read limit must be positive"))
+    stream.read_bytes(n, deadline: __forever())
 }
 
 // Up to `n` bytes as text; no byte is lost (#4664). A character the limit or
 // a record cuts stays for the next read, and one that starts the read is
 // read whole, up to 3 bytes past `n`. Bytes that are not UTF-8, and a
-// character the end of the stream cuts, fail the read and stay for `read`.
-read_text: fn(&stream: TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
-    if n <= 0 -> return Err(tls_error("read_text", "", "read limit must be positive"))
+// character the end of the stream cuts, fail the read and stay for
+// `read_bytes`.
+read: fn(&stream: TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
+    if n <= 0 -> return Err(tls_error("read", "", "read limit must be positive"))
     end_ns: __deadline_end(__forever(), "tls read") ?? return Err(__net_to_io(err))
     state: __state(stream) ?? return Err(__io_error(.Read, "TLS stream is closed"))
     guard := state.guard_edit()
     __read_text(guard.value, n, end_ns)
 }
 
-write: fn(&stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
-    _: stream.write_all(bytes, deadline: __forever()) ?? return Err(err)
+write_some: fn(&stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
+    _: stream.write_bytes(bytes, deadline: __forever()) ?? return Err(err)
     Ok(bytes.len())
 }
 
-write_all: fn(&stream: TLSStream, bytes: [U8]) IOError! -[Net, Time.Wait]> {
-    stream.write_all(bytes, deadline: __forever())
+write_bytes: fn(&stream: TLSStream, bytes: [U8]) IOError! -[Net, Time.Wait]> {
+    stream.write_bytes(bytes, deadline: __forever())
 }
 
-write_text: fn(&stream: TLSStream, text: String) IOError! -[Net, Time.Wait]> {
-    write_all(stream, text.bytes())
+write: fn(&stream: TLSStream, text: String) IOError! -[Net, Time.Wait]> {
+    write_bytes(stream, text.bytes())
 }
 
 close: fn(stream: TLSStream) IOError! -[Net, Time.Wait]> {

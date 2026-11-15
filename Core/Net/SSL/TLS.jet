@@ -2784,7 +2784,7 @@ vec_sha256_hex: fn(bytes: [U8]) -> String Never! { core.encoding.bytes_to_hex(ha
 vec_https_get: fn(host: String, path: String) -[Net, Time.Wait]> [U8] {
     url: "https://{host}{path}"
     stream := core.net.tls.client(host, 443) ?? panic("Fetching {url}: {err}")
-    _: core.net.tls.write_text(stream, "GET {path} HTTP/1.1\r\nHost: {host}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n") ?? panic("Fetching {url}: {err}")
+    _: core.net.tls.write(stream, "GET {path} HTTP/1.1\r\nHost: {host}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n") ?? panic("Fetching {url}: {err}")
     raw := [U8]{}
     head := -1
     length := 0
@@ -2794,7 +2794,7 @@ vec_https_get: fn(host: String, path: String) -[Net, Time.Wait]> [U8] {
             if head >= 0 -> length = vec_body_length(url, ssldefs.ssl_bytes_of(raw, 0, head))
         }
         if head >= 0 && raw.len() >= head + length -> break
-        chunk: core.net.tls.read(stream, 65536) ?? panic("Fetching {url}: {err}")
+        chunk: core.net.tls.read_bytes(stream, 65536) ?? panic("Fetching {url}: {err}")
         if chunk.is_empty() -> panic("Fetching {url}: the connection closed after {raw.len()} bytes")
         loop b in chunk -> raw.push(b)
     }

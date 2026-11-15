@@ -14,10 +14,10 @@ connect: fn(name: String, config: ClientConfig) -[Net, Time.Wait]> TLSStream Net
 }
 
 exchange: fn(&secure: TLSStream) -[Net, Time.Wait]> String {
-    secure.write_all("ping\n".bytes(), deadline: 5s) ?? panic("write: {err}")
+    secure.write_bytes("ping\n".bytes(), deadline: 5s) ?? panic("write: {err}")
     reply := [U8]{}
     loop reply.len() < 5 {
-        chunk: secure.read(64, deadline: 5s) ?? panic("read: {err}")
+        chunk: secure.read_bytes(64, deadline: 5s) ?? panic("read: {err}")
         if chunk.len() == 0 -> panic("early end of stream")
         loop b in chunk -> reply.push(b)
     }
@@ -53,7 +53,7 @@ run: fn() {
     print(exchange(secure))
     secure.close() ?? panic("close: {err}")
     print(secure.close() == .Ok(_))
-    print(secure.write_all("late".bytes(), deadline: 5s) == .Err(_))
+    print(secure.write_bytes("late".bytes(), deadline: 5s) == .Err(_))
 
     tls12: config.with_version_bounds(min: TLSVersion.TLS12, max: TLSVersion.TLS12) ?? panic("version policy")
     older := connect("localhost", tls12) ?? panic("TLS 1.2 handshake: {err}")

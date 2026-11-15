@@ -22,8 +22,8 @@ exchange: fn(addr: String, ca: String, index: Int) -> String {
     peer: secure.peer_identity()
     version: if tls.is_tls13(peer.tls_version) -> "TLS13" else -> "TLS12"
     crlf: "\r\n"
-    secure.write_all("GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}{crlf}".bytes(), deadline: budget) ?? panic("request {index}")
-    reply: secure.read(8192, deadline: budget) ?? panic("response {index}")
+    secure.write_bytes("GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}{crlf}".bytes(), deadline: budget) ?? panic("request {index}")
+    reply: secure.read_bytes(8192, deadline: budget) ?? panic("response {index}")
     secure.close() ?? panic("close TLS {index}")
     text: String.from_bytes(reply) ?? panic("response text {index}")
     "client {index}: {peer.verified_server_name} {version} {text.starts_with("HTTP/1.1 200")}"

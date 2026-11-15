@@ -499,7 +499,7 @@ CcPackTarStream: struct {
     // At least `need` unread bytes buffered; false at the end of the stream.
     fill: fn(&self, need: Int) -[FS.Read]> Bool CcToolchainError! {
         loop self.buffer.len() - self.at < need {
-            chunk: self.reader.read(CC_PACK_READ_CHUNK) ?? return Err(CcToolchainError.Invalid("decompress C toolchain pack: {err}"))
+            chunk: self.reader.read_bytes(CC_PACK_READ_CHUNK) ?? return Err(CcToolchainError.Invalid("decompress C toolchain pack: {err}"))
             if chunk.len() == 0 -> return Ok(false)
             rest := self.buffer.slice(self.at, self.buffer.len())
             rest.extend(chunk)

@@ -37,10 +37,10 @@ exchange: fn(r: Row, roots: RootCertificates, identity: ClientIdentity) -[Net, T
     secure := tls.client(tcp, server_name: "localhost", config: config, deadline: budget) ?? return "{r.name}: {err}"
     peer: secure.peer_identity()
     version: if tls.is_tls13(peer.tls_version) -> "TLS 1.3" else -> "TLS 1.2"
-    secure.write_all("ping\n".bytes(), deadline: budget) ?? return "{r.name}: write: {err}"
+    secure.write_bytes("ping\n".bytes(), deadline: budget) ?? return "{r.name}: write: {err}"
     reply := [U8]{}
     loop {
-        got: secure.read(4096, deadline: budget) ?? return "{r.name}: read: {err}"
+        got: secure.read_bytes(4096, deadline: budget) ?? return "{r.name}: read: {err}"
         if got.len() == 0 -> break
         reply.extend(got)
         if reply[reply.len() - 1] == 10 -> break

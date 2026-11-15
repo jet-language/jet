@@ -68,7 +68,7 @@ NarByteSource: struct {
         if &self.input == {
             .File(file) -> file.read_bytes(limit)
             .Zstd(decoder) -> {
-                if decoder.read(limit) == {
+                if decoder.read_bytes(limit) == {
                     .Ok(bytes) -> Ok(bytes)
                     .Err(error) -> Err(IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("zstd stream is corrupt: {error}")}))
                 }

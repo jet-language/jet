@@ -54,7 +54,7 @@ run: fn() {
         decoder.feed(big[at..<stop])
         at = stop
         loop {
-            piece: decoder.read(4096) ?? panic("stream")
+            piece: decoder.read_bytes(4096) ?? panic("stream")
             if piece.len() == 0 -> break
             if piece.len() > largest -> largest = piece.len()
             loop byte in piece -> streamed.push(byte)
@@ -70,7 +70,7 @@ run: fn() {
     reader := zstd.reader(file)
     from_file := [U8]{}
     loop {
-        piece: reader.read(65536) ?? panic("reader")
+        piece: reader.read_bytes(65536) ?? panic("reader")
         if piece.len() == 0 -> break
         loop byte in piece -> from_file.push(byte)
     }
@@ -85,7 +85,7 @@ run: fn() {
     truncated := zstd.decoder()
     truncated.feed(big[0..<big.len() - 100])
     loop {
-        piece: truncated.read(65536) ?? panic("truncated read")
+        piece: truncated.read_bytes(65536) ?? panic("truncated read")
         if piece.len() == 0 -> break
     }
     if truncated.finish() == {

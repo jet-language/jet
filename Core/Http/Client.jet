@@ -668,7 +668,7 @@ __build_send: fn(&wire: __BuildWire, bytes: [U8]) -[Net, Time.Wait]> Int __Build
         message := ""
         if wire.tls == {
             .Val(stream) -> {
-                if stream.write_all(rest, deadline: Duration{ns: remaining}) == .Err(err) {
+                if stream.write_bytes(rest, deadline: Duration{ns: remaining}) == .Err(err) {
                     failed = __build_io_portable(err)
                     message = "{err}"
                 }
