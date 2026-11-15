@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6889,
-    "rev": 103675,
+    "nextNum": 6890,
+    "rev": 103700,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36386,8 +36386,8 @@
     {
       "id": "c025w7rd",
       "num": 3551,
-      "title": "CoreLib specialized: complete Jet ownership",
-      "body": "Complete compute/models, UI/TUI/font, games, plugin/mod, compiler/reflect, testing, and remaining host domains. Keep unsafe/provider seams narrow and explicit.",
+      "title": "Specialized Core modules are fully Jet-owned: compute, ui, game, testing, app, perf, plugin and devtools",
+      "body": "Destination: every specialized Core module (compute, ui, game, testing, app, perf, plugin, mod, devtools, reflect, rt) is owned by Jet source: each declaration has a Jet body or a narrow typed provider leaf with an audit reason, every caller reaches the Jet body, and no dispatcher row remains for a member its source module owns.\n\nWhy it matters: dispatcher rows are a second implementation that drifts; Jet-owned bodies give one meaning on O0, O1, O2 and web.\n\nState: Compiler/Prelude/Core.rows still holds specialized dispatcher rows; the CoreSurfaceLedger tool (Tools/agent/CoreSurfaceLedger.jet) reports them.\n\nMoved out 2026-11-15: tui run and controls to #6446 (D-TUI-HOME1=A, tui package); compression and image codecs to the Core codecs card.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
@@ -36401,6 +36401,11 @@
       "blockedBy": [],
       "assignee": "Main",
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: c1, c3, c6 restated (c2 merged into c6). c7, c8 moved to #6446 (tui package); c9-c15 and c17 moved to #6888."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -36555,129 +36560,140 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every specialized declaration has a real Jet body or typed provider leaf.",
+          "text": "Every declaration in the specialized Core modules (Compute, Ui, Game, Testing, App, Perf, Plugin, Mod, Devtools, Reflect, Rt) has a Jet body or a typed provider leaf. Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` reports no bodiless row for those modules.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-22T00:15:58.218Z"
+          "at": "2026-11-15T03:30:14.297Z"
         },
         {
           "n": 2,
           "text": "All specialized callers, routes, and generated projections use the canonical contract.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-22T00:15:58.881Z"
+          "evidence": "Merged into #3551 c6: callers using the canonical contract is the same outcome as no dispatcher row",
+          "at": "2026-11-15T03:30:20.216Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
-          "text": "Specialized APIs pass failure/effect proof on O0, O1 and O2 through their Core/<module> Jet bodies (Core #Tests under `jet test Compiler --profile core`).",
+          "text": "Specialized APIs pass their failure and effect proofs on O0, O1 and O2 through their Core/<module> Jet bodies. Proof: `jet test Compiler --profile core --filter Core/Compute`, then the same for Ui, Game, Testing, App and Perf.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:21.074Z"
+          "at": "2026-11-15T03:30:15.258Z"
         },
         {
           "n": 6,
-          "text": "After each specialized module cutover, Compiler/Prelude/Core.jet has no dispatcher_row for a member its source_module owns, and `jet Tools/agent/CoreSurfaceLedger.jet --check` exits 0.",
+          "text": "After each specialized module cutover, every caller, route and generated projection uses the Jet body: Compiler/Prelude/Core.rows has no dispatcher row for a member its source module owns. Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` exits 0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:22.501Z"
+          "at": "2026-11-15T03:30:16.342Z"
         },
         {
           "n": 7,
           "text": "[#3034] Only managed `tui.run` is published. It takes the typed Model/update/view/adapt callbacks and returns the owned final model. Commands are children of the structured task scope. The terminal guard is the only raw-mode boundary, with exact cleanup on exit, failure and panic. Non-TTY paints one frame and returns NonTty (ui/tui_run_tasks golden; PTY `tui_run_pty_`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:53.688Z"
+          "evidence": "Moved to #6446 c9: D-TUI-HOME1=A moves tui to the first-party tui package (#6446)",
+          "at": "2026-11-15T03:30:21.187Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
           "text": "[#3035] `core.ui.UiNodeId` is the public identity. TuiListState drives list and table. The promoted UiTextEditorState handles editing. There are typed mouse press, drag and scroll events, stale-layout drop, TuiError.Input on malformed records, and focus restored by id. NO_COLOR keeps interaction (PTY `tui_controls_`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:54.354Z"
+          "evidence": "Moved to #6446 c10: D-TUI-HOME1=A moves tui to the first-party tui package (#6446)",
+          "at": "2026-11-15T03:30:22.110Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
           "text": "[#3561] One checked Core image codec and value mechanism with bounded malformed/bomb handling and an image example and golden on every level and web (core_image tests: PNG round trip, GIF limits).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:55.013Z"
+          "evidence": "Moved to #6888 c5: image codec belongs on the codecs card",
+          "at": "2026-11-15T03:30:23.021Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
           "text": "[#3562] One source-owned inflater enforces the caller's output ceiling before each byte, with a typed Limit error. core.image.decode reports ImageError.Limit within budget.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:55.728Z"
+          "evidence": "Moved to #6888 c4: shared inflater belongs on the codecs card",
+          "at": "2026-11-15T03:30:23.949Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
           "text": "[#3564] JPEG encode rejects non-opaque RGBA before output allocation; fully transparent input never leaks RGB (`core_image_jpeg_alpha_rejects_nonopaque_across_tiers`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:56.391Z"
+          "evidence": "Moved to #6888 c6: image codec belongs on the codecs card",
+          "at": "2026-11-15T03:30:24.893Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
           "text": "(was #499 c1) core.archive gzip helpers moved to core.compress; module registry + prelude templates updated; examples/golden adjusted; docs/reference updated [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:47:57.603Z"
+          "evidence": "Moved to #6888 c1: compress module split belongs on the codecs card",
+          "at": "2026-11-15T03:30:25.813Z",
+          "closure": "obsolete"
         },
         {
           "n": 13,
           "text": "(was #499 c2) core.compress is the only public home for gzip and zstd byte-stream codecs; core.archive exposes only zip and tar container APIs, with no compatibility alias or duplicate registry entry [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:47:58.241Z"
+          "evidence": "Merged into #6888 c1: same outcome: one home for codecs",
+          "at": "2026-11-15T03:30:26.730Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
           "text": "(was #499 c3) Real gzip compress/decompress round trips execute through core.compress in O0, O1 and O2 paths; legacy core.archive gzip use rejects with a pinned Jet diagnostic or ordinary unknown-member diagnostic [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:47:58.914Z"
+          "evidence": "Moved to #6888 c2: compress round trips belong on the codecs card",
+          "at": "2026-11-15T03:30:27.699Z",
+          "closure": "obsolete"
         },
         {
           "n": 15,
           "text": "(was #499 c4) Existing zip and tar behavior remains byte-correct; examples, golden outputs, Core reference docs, and module inventories name the canonical split [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:47:59.553Z"
+          "evidence": "Merged into #6888 c2: zip and tar byte-correctness is part of the round-trip criterion; docs part in CODEC:0",
+          "at": "2026-11-15T03:30:28.655Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
           "text": "core.compress's gzip and zstd encoders compress: their output for compressible input is smaller than the input, within 10% of the reference tool at its default level. On seed-b13 they write stored blocks only (Core/Archive/Zstd.jet, Archive.jet), found by the D-COMPTIME-SIZE1 review, 2026-11-12.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T22:19:10.071Z"
+          "evidence": "Moved to #6888 c3: encoder ratio belongs on the codecs card",
+          "at": "2026-11-15T03:30:29.737Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -36690,8 +36706,8 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:05.017Z",
-      "updated": "2026-11-13T01:57:26.840Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:30:32.420Z",
+      "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-13T01:49:50.563Z",
       "goals": [
         "G3"
@@ -39272,6 +39288,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-15 TowerKeeper-1: c1 retargeted to Examples/Systems/Process; c6 proof is now a case, not a scratch script; c14 debris stripped."
+        },
+        {
           "at": "2026-11-10",
           "by": "Main",
           "text": "Finding 2026-11-09 (G1Lead-3, StoreCache lease fix): Jetpack's run() wait sends SIGKILL to the child's whole process group. Triage whether that matches the process-group contract for a normal wait; tests also must not hard-code /bin/sleep, which this host does not have."
@@ -39320,12 +39341,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Binary pipes, replace_process, terminal handoff, keep_open, signals() and identity each have a focused proof. Goldens `Examples/features/io/process_{bytes,keep_open,signals,identity}.jet` pass `jet test Compiler --profile golden io/process_`, and `jet run` diffs empty. A Jet case covers exec refusal and PTY terminal handoff.",
+          "text": "Binary pipes, replace_process, terminal handoff, keep_open, signals() and identity each have a focused proof. Proof: `jet test Compiler --profile golden --filter Systems/Process` passes the process bytes, keep_open, signals and identity examples on O0, O1 and O2, and `jet test Compiler --profile cases --filter process/` covers exec refusal and PTY terminal handoff.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:21:17.188Z"
+          "at": "2026-11-15T03:30:17.353Z"
         },
         {
           "n": 2,
@@ -39365,12 +39386,12 @@
         },
         {
           "n": 6,
-          "text": "Jetpack verified-lease commands run (found by CardClose-1, 2026-11-01): CacheLease.jet keep_open_for hands the lease's descriptors to the child at their pinned slots (STORE_LEASE_NEXT_SLOT 64+) through core.process, instead of returning STORE_LEASE_HANDOFF_UNSUPPORTED (E1340 'Core cannot pass the lease's open descriptors to a child process'). CardClose/s6428/fmtprobe4.sh with fail=0 exits 0 and formats flake.nix, and with fail=1 exits 7 from the formatter. A case covers a leased env -- cmd reading a pinned file through /proc/self/fd/<slot> on o0/o1/o2.",
+          "text": "Jetpack verified-lease commands run: CacheLease.jet keep_open_for hands the lease's descriptors to the child at their pinned slots (STORE_LEASE_NEXT_SLOT 64 and up) through core.process instead of returning STORE_LEASE_HANDOFF_UNSUPPORTED (E1340). Proof: `jet test Compiler --profile cases --filter process/leased_child_reads_pinned_fd` (a leased `env -- cmd` reads a pinned file through /proc/self/fd/<slot> on O0, O1 and O2).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T10:52:22.341Z"
+          "at": "2026-11-15T03:30:18.353Z"
         },
         {
           "n": 7,
@@ -39437,12 +39458,12 @@
         },
         {
           "n": 14,
-          "text": "(was #3226) [#3373]  • Non-Unicode argv and env follow platform law. • Argv order, env snapshot/unset and command removal entries are exact. • Golden `io/os_sources` + `non_unicode_argv_and_env_follow_platform_law`. (was #3239 c18)",
+          "text": "Non-Unicode argv and env follow platform law; argv order, the env snapshot, unset and command removal entries are exact. Proof: `jet test Compiler --profile golden --filter Systems/Process/OSSources` and `jet test Compiler --profile cases --filter non_unicode_argv_and_env_follow_platform_law`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:46:12.315Z"
+          "at": "2026-11-15T03:30:19.283Z"
         },
         {
           "n": 15,
@@ -39487,8 +39508,8 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-13T10:42:23.534Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:30:33.414Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
@@ -79563,6 +79584,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:30:12.265Z"
+        },
+        {
+          "n": 10,
+          "text": "`ui.UiNodeId` is the public identity in the `tui` package's controls: TuiListState drives list and table, UiTextEditorState handles editing, mouse press, drag and scroll are typed events, stale layouts are dropped, malformed input records give TuiError.Input, focus is restored by id, and NO_COLOR keeps interaction. Proof: `jet test Compiler --profile cases --filter tui_controls_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:30:13.384Z"
         }
       ],
       "refs": [],
@@ -79573,9 +79603,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:11:03.846Z",
-      "updated": "2026-11-15T03:30:12.265Z",
+      "updated": "2026-11-15T03:30:13.384Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 9
+      "criteriaLastN": 10
     },
     {
       "id": "c02t52c5",
@@ -79688,12 +79718,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Core/Db/Sql.jet and Core/Auth/Auth.jet are gone from Core; their examples and tests import the `sql`/`auth` packages and goldens pass on O0/O1/O2; the old imports fail with the ordinary unknown-module error (no teaching error or snapshot).",
+          "text": "Core/Db/Sql.jet and Core/Auth/Auth.jet are gone from Core; their examples and tests import the `sql` and `auth` packages and their goldens pass on O0, O1 and O2; the old imports fail with the ordinary unknown-module error (no teaching error or snapshot). Proof: `git ls-files Core/Db/Sql.jet Core/Auth` prints nothing and `jet test Compiler --profile golden --filter Db/` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:10:33.326Z"
+          "at": "2026-11-15T03:31:06.788Z"
         },
         {
           "n": 2,
@@ -79743,11 +79773,12 @@
         {
           "n": 7,
           "text": "(was #2456 c1) The ratified command surface appears in grouped help and explains create, preview, status, apply, target, step, and rollback behavior, proven by a case running `jet db --help`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:47.649Z"
+          "evidence": "Moved to #6889 c2: db tooling gets its own card",
+          "at": "2026-11-15T03:31:08.547Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
@@ -79788,11 +79819,12 @@
         {
           "n": 12,
           "text": "(was #2851 c1) Implementation-only closure: core.db.pool enforces a bounded FIFO acquisition deadline, validates health on checkout, resets on release, replaces unhealthy connections, and exposes readiness, drain, and receipt facts through the same Prelude semantics on every tier [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:53.471Z"
+          "evidence": "Moved to #6889 c1: core.db stays in Core; db tooling gets its own card",
+          "at": "2026-11-15T03:31:07.679Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -79803,8 +79835,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:11:14.430Z",
-      "updated": "2026-11-13T02:10:33.326Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T03:31:08.547Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0y7kqfw",
@@ -104304,6 +104336,122 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:30:11.324Z",
       "updated": "2026-11-15T03:30:11.324Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0ujz0kr",
+      "num": 6889,
+      "title": "core.db tools: a bounded connection pool, `jet db` migrations with preview and receipts, the SQL console and EXPLAIN facts",
+      "body": "Destination: core.db pools connections with a bounded FIFO deadline and health checks; `jet db` creates, previews, applies, steps and rolls back migrations with receipts and no partial schema change; the local SQL console reads typed sources, scripts and stdin within explicit bounds and inspects tables, plans and stats; a loopback-only browser inspector shows the same session; one typed fact stream gives bounded query stats and authority-gated read-only EXPLAIN without leaking credentials, query text or bindings.\n\nWhy it matters: these are the everyday database workflows; each was designed and none is proven.\n\nDecisions: D-DB-AUTH-HOME1=A (core.db stays in Core; the SQL engine goes to the `sql` package, #6448), D-SQL-SAFETY (offline pull, diff and migrate; #4520 c4).\n\nSource: #6448 c2-c12 (archived #2450, #2456, #2460, #2851).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "core.db.pool enforces a bounded FIFO acquisition deadline, checks health on checkout, resets on release, replaces unhealthy connections, and reports readiness, drain and receipt facts, the same on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter db/pool_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:31:05.913Z"
+        },
+        {
+          "n": 2,
+          "text": "`jet db --help` shows the grouped command surface and explains create, preview, status, apply, target, step and rollback. Proof: `jet test Compiler --profile cases --filter cli/jet_db_help`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:31:05.913Z"
+        },
+        {
+          "n": 3,
+          "text": "A migration declaration generates a deterministic versioned change and a SQL and data-risk preview without changing the database. Proof: `jet test Compiler --profile cases --filter db/migration_preview`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:31:05.913Z"
+        },
+        {
+          "n": 4,
+          "text": "Status, apply, target, step, lock and rollback each write an explicit receipt, and a failed apply leaves no partial schema change. Proof: `jet test Compiler --profile cases --filter db/migration_apply_receipts`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:31:05.913Z"
+        },
+        {
+          "n": 5,
+          "text": "Migration conflicts and authority failures are actionable errors in human and machine output. Proof: `jet test Compiler --profile cases --filter db/migration_conflicts`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:31:05.913Z"
+        },
+        {
+          "n": 6,
+          "text": "The local SQL console accepts typed sources, scripts, stdin and bounded multiline input through the one SQL parser and executor, and enforces typed schemas and explicit byte, row and result bounds; projection, aliases and aggregates use the one SQL kernel. Proof: `jet test Compiler --profile cases --filter sql/console_sources`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:31:05.913Z"
+        },
+        {
+          "n": 7,
+          "text": "The console's tables, schema, plan, stats and export commands and structured result metadata work on the same source and session. Proof: `jet test Compiler --profile cases --filter sql/console_inspect`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:31:05.913Z"
+        },
+        {
+          "n": 8,
+          "text": "The browser inspector binds loopback only and shows the same authorized source, session and query state; remote, file and export authority and resource limits fail closed with structured errors. Proof: `jet test Compiler --profile cases --filter sql/inspector_loopback`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:31:05.913Z"
+        },
+        {
+          "n": 9,
+          "text": "One typed database fact stream gives bounded query statistics and authority-gated read-only EXPLAIN to browser, terminal and native adapters without exposing credentials, query text or bindings. Proof: `jet test Compiler --profile cases --filter db/explain_facts`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:31:05.913Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "db",
+        "cli"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:31:05.913Z",
+      "updated": "2026-11-15T03:31:05.913Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -209723,6 +209871,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:31:08.547Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0du93i4",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T03:31:07.679Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0du93i4",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T03:31:06.788Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0du93i4",
+      "note": "#1: add proof; was: Core/Db/Sql.jet and Core/Auth/Auth.jet are gone from Core; their examples and tests import the `sql`/`auth` packages and goldens pass on O0/O1/O2; the old imports fail with the ordinary unknown-module"
+    },
+    {
+      "at": "2026-11-15T03:31:05.913Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0ujz0kr",
+      "note": "core.db tools: a bounded connection pool, `jet db` migrations with preview and receipts, the SQL console and EXPLAIN facts"
+    },
+    {
+      "at": "2026-11-15T03:30:33.414Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ufrhm0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:30:32.420Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c025w7rd",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:30:31.448Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c025w7rd",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:30:29.737Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c025w7rd",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-15T03:30:28.655Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c025w7rd",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-15T03:30:27.699Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c025w7rd",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T03:30:26.730Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c025w7rd",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T03:30:25.814Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c025w7rd",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T03:30:24.893Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c025w7rd",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T03:30:23.949Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c025w7rd",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T03:30:23.021Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c025w7rd",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T03:30:22.110Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c025w7rd",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T03:30:21.188Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c025w7rd",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T03:30:20.216Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c025w7rd",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T03:30:19.284Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ufrhm0",
+      "note": "#14: strip debris; proof; was: (was #3226) [#3373]  • Non-Unicode argv and env follow platform law. • Argv order, env snapshot/unset and command removal entries are exact. • Golden `io/os_sources` + `non_unicode_argv_and_env_follow"
+    },
+    {
+      "at": "2026-11-15T03:30:18.353Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ufrhm0",
+      "note": "#6: replace scratch-script proof with a case; was: Jetpack verified-lease commands run (found by CardClose-1, 2026-11-01): CacheLease.jet keep_open_for hands the lease's descriptors to the child at their pinned slots (STORE_LEASE_NEXT_SLOT 64+) throug"
+    },
+    {
+      "at": "2026-11-15T03:30:17.354Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ufrhm0",
+      "note": "#1: Examples moved to Examples/Systems/Process (2c3e68a70b); was: Binary pipes, replace_process, terminal handoff, keep_open, signals() and identity each have a focused proof. Goldens `Examples/features/io/process_{bytes,keep_open,signals,identity}.jet` pass `jet te"
+    },
+    {
+      "at": "2026-11-15T03:30:16.342Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c025w7rd",
+      "note": "#6: current path; absorbs c2; was: After each specialized module cutover, Compiler/Prelude/Core.jet has no dispatcher_row for a member its source_module owns, and `jet Tools/agent/CoreSurfaceLedger.jet --check` exits 0."
+    },
+    {
+      "at": "2026-11-15T03:30:15.258Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c025w7rd",
+      "note": "#3: exact proof; was: Specialized APIs pass failure/effect proof on O0, O1 and O2 through their Core/<module> Jet bodies (Core #Tests under `jet test Compiler --profile core`)."
+    },
+    {
+      "at": "2026-11-15T03:30:14.298Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c025w7rd",
+      "note": "#1: one outcome with proof; was: Every specialized declaration has a real Jet body or typed provider leaf."
+    },
+    {
+      "at": "2026-11-15T03:30:13.384Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0isxyo3",
+      "note": "#10 `ui.UiNodeId` is the public identity in the `tui` package's "
+    },
     {
       "at": "2026-11-15T03:30:12.265Z",
       "by": "TowerKeeper-1",
