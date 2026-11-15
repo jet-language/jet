@@ -893,7 +893,8 @@ intermediate state drops (for an executable, the graphs drop on a detached
 task while `ir.build` runs, so the span holds only what stays), and under
 `--keep-going` `keepgoing.final` and
 `keepgoing.report`), the host's checks of the result (`cli.diagnostics`,
-`cli.authority`), `jet build`'s `store.open` (the machine-wide artifact store,
+`cli.authority`) and its lock records after a build (`cli.lock`), `jet build`'s
+`store.open` (the machine-wide artifact store,
 which a cold store lays out first; opened only while saved work is reused) and
 the native backend's (`native.sources`,
 `native.rust_foreign`, `ir.build`, `ir.opt` (named by the build's optimize
@@ -907,7 +908,8 @@ symbol collection and the realization of the providers it reaches),
 of a `build: fn`) also traces `build.plan`, the check of its build entry and
 the plan's query, and one `build.step` per batch of its steps, named by the
 steps; a target's compile result drops on a detached task once its image is
-written, while the next node runs. A step's
+written (`cli.release` is the hand-off), while the next node runs, and an
+executable a step runs is copied to its host copy in `build.host`. A step's
 own processes are not jet's, so the span's `proc_cpu_ns` is jet's alone;
 with `--trace=FILE` each step runs with `JET_TRACE_FILE` naming `%p.json`
 in its sandbox, and when its batch ends the trace of every jet process it

@@ -1914,9 +1914,11 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
         }
     }
     if built.exit_code == JET_DRIVER_EXIT_OK {
+        if result.trace_sink == .Val(sink) -> sink.begin("cli.lock", "", -1, -1)
         rows: if options.locked -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK} else -> jet_cli_lock_effect_rows(file, result, snapshot, false, color, json)
+        read_inputs: if rows.exit_code != JET_DRIVER_EXIT_OK -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK} else -> jet_cli_lock_comptime_inputs(file, result, options.locked, color)
+        if result.trace_sink == .Val(sink) -> sink.end("cli.lock", -1)
         if rows.exit_code != JET_DRIVER_EXIT_OK -> return rows
-        read_inputs: jet_cli_lock_comptime_inputs(file, result, options.locked, color)
         if read_inputs.exit_code != JET_DRIVER_EXIT_OK -> return read_inputs
         if json {
             built.stdout = jet_cli_build_effects_json(authority)
@@ -1980,7 +1982,9 @@ jet_cli_compile_target: fn(file: String, name: String, source: String, sources: 
                 .Refused(refusal) -> refusal
                 .Checked(result, inputs, checked_snapshot) -> {
                     built: jet_cli_build_result(file, name, source, color, options, invocation, false, false, false, false, result, inputs, checked_snapshot)
+                    if trace_sink == .Val(sink) -> sink.begin("cli.release", "", -1, -1)
                     jet_cli_compile_release(result, checked_snapshot)
+                    if trace_sink == .Val(sink) -> sink.end("cli.release", -1)
                     built
                 }
             }

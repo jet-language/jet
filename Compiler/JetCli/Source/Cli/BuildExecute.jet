@@ -494,7 +494,12 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     if cross -> return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
     tool: cli_files.join(host_dir, row.name)
     cli_files.create_dir_all(host_dir) ?? return jet_cli_build_failed("couldn't create `{host_dir}` for the host copy of `{row.name}`: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
-    cli_files.copy2(image, tool) ?? return jet_cli_build_failed("couldn't copy `{row.name}`'s image to its host copy `{tool}`: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
+    if trace_sink == .Val(sink) -> sink.begin("build.host", row.name, -1, -1)
+    if cli_files.copy2(image, tool) == .Err(err) {
+        if trace_sink == .Val(sink) -> sink.end("build.host", -1)
+        return jet_cli_build_failed("couldn't copy `{row.name}`'s image to its host copy `{tool}`: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
+    }
+    if trace_sink == .Val(sink) -> sink.end("build.host", -1)
     cli_files.set_mode(tool, 493) ?? return jet_cli_build_failed("couldn't make the host copy `{tool}` executable: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
     built
 }
