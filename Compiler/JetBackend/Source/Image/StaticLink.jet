@@ -3011,8 +3011,11 @@ link_symbol_header: fn(c: LinkContext, class_headers: [Int], s: Int) -> Int Neve
     class_headers[class]
 }
 
-link_image_symbol: fn(symtab: &[U8], strtab: &[U8], name: String, info: Int, header: Int, value: Int, size: Int) Never! {
-    elf64_u32(symtab, elf64_string(strtab, name))
+// Append to `symtab` the symbol `name`, whose bytes go to `strtab`, a
+// string table whose first byte lies at `names_base` in the table the
+// section headers name.
+link_image_symbol: fn(symtab: &[U8], strtab: &[U8], names_base: Int, name: String, info: Int, header: Int, value: Int, size: Int) Never! {
+    elf64_u32(symtab, names_base + elf64_string(strtab, name))
     symtab.push(U8{info})
     symtab.push(U8{0})
     elf64_u16(symtab, header)
@@ -3082,7 +3085,7 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
             s: link_sym_shndx(c, obj, k)
             header: link_symbol_header(c, class_headers, s)
             if header < 0 -> next
-            link_image_symbol(symtab, strtab, link_cstr(c.bufs, b, c.obj_strtab[obj] + name_offset), info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
+            link_image_symbol(symtab, strtab, 0, link_cstr(c.bufs, b, c.obj_strtab[obj] + name_offset), info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
         }
     }
     first_global: symtab.len().div_euclid(24)
@@ -3095,7 +3098,7 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
         if class == LINK_TDATA || class == LINK_TBSS -> next
         bind: if c.g_weak_def[g] -> 2 else -> 1
         kind: if class == LINK_TEXT -> 2 else -> 1
-        link_image_symbol(symtab, strtab, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
+        link_image_symbol(symtab, strtab, 0, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
     }
     elf64_pad(out, 8)
     symtab_at: out.len()

@@ -397,16 +397,14 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
     }
     // The image's string table and symbols are copied as they are: its
     // headers keep their indexes and its names their offsets. Without
-    // them the table starts with the empty name and the null symbol.
-    strtab := [U8]{}
-    symtab := [U8]{}
-    if image_symbols {
-        strtab.extend(c.bufs[1][view.strtab_at..<view.strtab_at + view.strtab_size])
-        symtab.extend(c.bufs[1][view.symtab_at..<view.symtab_at + 24 * view.first_global])
-    } else {
-        strtab.push(U8{0})
-        loop _ in 0..<24 -> symtab.push(U8{0})
-    }
+    // them the table starts with the empty name and the null symbol. The
+    // program's local and global symbols are made apart first, their names
+    // in `symbol_names` at offsets past the image's, so the image's tables,
+    // which are megabytes, are copied once, straight into `out`, after it
+    // grows once for everything this function appends.
+    names_base: if image_symbols -> view.strtab_size else -> 1
+    symbol_names := [U8]{}
+    locals := [U8]{}
     loop obj in 0..<c.obj_name.len() {
         b: c.obj_buffer[obj].copy()
         loop k in 1..<c.obj_first_global[obj] {
@@ -418,13 +416,10 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
             s: link_sym_shndx(c, obj, k)
             header: link_symbol_header(c, class_headers, s)
             if header < 0 -> next
-            link_image_symbol(symtab, strtab, link_cstr(c.bufs, b, c.obj_strtab[obj] + name_offset), info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
+            link_image_symbol(locals, symbol_names, names_base, link_cstr(c.bufs, b, c.obj_strtab[obj] + name_offset), info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
         }
     }
-    first_global: symtab.len().div_euclid(24)
-    if image_symbols {
-        symtab.extend(c.bufs[1][view.symtab_at + 24 * view.first_global..<view.symtab_at + 24 * view.symtab_count])
-    }
+    globals := [U8]{}
     loop g in 0..<c.g_name.len() {
         if c.g_kind[g] != LINK_G_FILE || c.g_alias[g] >= 0 -> next
         s: c.g_section[g]
@@ -432,17 +427,33 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
         if header < 0 -> next
         bind: if c.g_weak_def[g] -> 2 else -> 1
         kind: if c.live_class[c.live[s]] == LINK_TEXT -> 2 else -> 1
-        link_image_symbol(symtab, strtab, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
+        link_image_symbol(globals, symbol_names, names_base, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
     }
+    image_locals: if image_symbols -> 24 * view.first_global else -> 24
+    image_globals: if image_symbols -> 24 * (view.symtab_count - view.first_global) else -> 0
+    // The padding, both tables, then the section names and headers
+    // (link_write_section_headers), with room to spare for the names.
+    out.try_reserve(8 + image_locals + locals.len() + image_globals + globals.len() + names_base + symbol_names.len() + 64 * (headers.len() + 3) + 512) ?? panic("the bound executable's symbol tables: {err}")
     elf64_pad(out, 8)
     symtab_at: origin + out.len()
-    symtab_size: symtab.len()
-    out.extend(symtab.move())
+    if image_symbols -> out.extend(c.bufs[1][view.symtab_at..<view.symtab_at + image_locals]) else {
+        loop _ in 0..<24 -> out.push(U8{0})
+    }
+    first_global: (image_locals + locals.len()).div_euclid(24)
+    out.extend(locals.move())
+    if image_symbols {
+        out.extend(c.bufs[1][view.symtab_at + image_locals..<view.symtab_at + image_locals + image_globals])
+    }
+    out.extend(globals.move())
+    symtab_size: origin + out.len() - symtab_at
     strtab_index: headers.len() + 2
     headers.push(LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symtab_at, size: symtab_size, link: strtab_index, info: first_global, align: 8, entry_size: 24})
     strtab_at: origin + out.len()
-    strtab_size: strtab.len()
-    out.extend(strtab.move())
+    if image_symbols -> out.extend(c.bufs[1][view.strtab_at..<view.strtab_at + view.strtab_size]) else {
+        out.push(U8{0})
+    }
+    out.extend(symbol_names.move())
+    strtab_size: origin + out.len() - strtab_at
     headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab_size, link: 0, info: 0, align: 1, entry_size: 0})
     shoff: link_write_section_headers(out, origin, headers)
     link_elf_sections(elf, shoff, headers.len() + 2)
