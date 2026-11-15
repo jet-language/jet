@@ -205,6 +205,13 @@ ir_opt_report_add: fn(total: &IROptReport, part: IROptReport) Never! {
 // calling thread.
 IR_OPT_MIN_INSTRUCTIONS_PER_THREAD: 2000
 
+// The largest box frame storage stands for: a box that never leaves its
+// function (`localbox`, OptLocalBox.jet) and the box a function returns into
+// its caller's storage (`retslot`, OptReturnSlot.jet). A `T E!` Result's box
+// is its selector word and then the larger of its two payloads, so every
+// Result whose payloads fit seven words qualifies, such as a Region's four.
+IR_FRAME_BOX_BYTES: 64
+
 // Optimizes `m` in place at `options.level` (0, 1 or 2), on as many threads
 // as `threads` admits. A function's passes read only its own body and the
 // final bodies of its non-recursive callees, so a function runs once those

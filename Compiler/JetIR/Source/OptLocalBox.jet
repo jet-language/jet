@@ -1,7 +1,7 @@
 // Local boxes (O1, O2, pass "localbox", after Simplify, which runs again
 // when a box moved, and before scalar replacement): a small fresh box
 // (`jet_rt_alloc(size, 8)` or a program value's `jet_rt_alloc_value(size,
-// 8)`, size at most 64) that never leaves its function
+// 8)`, size at most IR_FRAME_BOX_BYTES) that never leaves its function
 // becomes frame storage (StackAddress), such as the Result box an inlined
 // `route() ?? return` builds around each call of a runtime route. The box
 // never leaves when its slot is written only by the allocation and every
@@ -57,7 +57,7 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
         if facts.defs[boxed] != 1 -> next
         bytes: ir_opt_const_at(f, facts, f.args[f.b[at]], at) ?? -1
         align: ir_opt_const_at(f, facts, f.args[f.b[at] + 1], at) ?? -1
-        if bytes >= 8 && bytes <= 64 && align == 8 -> size[boxed] = bytes
+        if bytes >= 8 && bytes <= IR_FRAME_BOX_BYTES && align == 8 -> size[boxed] = bytes
     }
     // Until no candidate drops out: an Else arm is dead only while its box
     // stays a candidate, and the reads in it then count again.

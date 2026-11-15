@@ -1,11 +1,12 @@
 // Return slots (O1, O2, pass "retslot", first of the passes, programs
 // only): a function whose every value Return gives a fresh box of at most
-// 16 bytes (`jet_rt_alloc(size, 8)` or a program value's
-// `jet_rt_alloc_value(size, 8)`, then only Stores of values without a
-// Drop at offsets in it, such as a `T E!` Result of a Float, a word, a
-// Bool or an error enum without payload drops; an Option's None is null,
-// no box) writes that box
-// into caller-owned frame storage instead:
+// IR_FRAME_BOX_BYTES (`jet_rt_alloc(size, 8)` or a program value's
+// `jet_rt_alloc_value(size, 8)`, then written only with values without a
+// Drop at offsets in it: Stores, and CopyBytes into a field's address (an
+// Offset in the box, as a struct payload is moved in), such as a `T E!`
+// Result of a Float, a word, a Bool or a struct of such fields, with an
+// error enum without payload drops; an Option's None is null, no box)
+// writes that box into caller-owned frame storage instead:
 //
 //     narrow: fn(value: Float, f32: Bool) -> Float ComputeError!
 //
@@ -19,9 +20,11 @@
 // whole program, so every caller is rewritten with it.
 //
 // The function keeps its boxes when some caller does more with the result
-// than Load from it at offsets at least 0, Drop it, test it unique and
-// free it (a Move, a Store, a Return, a call argument: the box would
-// outlive the call's frame or reach code that frees it), or when anything
+// than Load from it at offsets at least 0, take a field's address at such
+// an offset that only a Load or a CopyBytes reads from (a struct payload
+// moved out), Drop it, test it unique and free it (a Move, a Store, a
+// Return, a call argument: the box would outlive the call's frame or reach
+// code that frees it), or when anything
 // but a direct call reaches the function (a FunctionAddress, a runtime
 // call or a drop or clone glue of its symbol, the program entry). A box
 // stored with a value that has a Drop keeps its boxes too: the caller's
@@ -194,8 +197,8 @@ ir_opt_slot_scan: fn(m: IRModule, f: IRFunction, calls: [Int], results: [Int], a
     }
     // Every direct call's result used only so.
     if f.asm != None || f.op.len() == 0 -> return size
-    loose: ir_opt_slot_loose(f, calls[2], calls[3])
     facts: ir_opt_facts(f)
+    loose: ir_opt_slot_loose(f, facts, calls[2], calls[3])
     loop at in 0..<f.op.len() {
         if f.op[at] != .Call -> next
         callee: f.a[at]
@@ -253,7 +256,7 @@ ir_opt_slot_size: fn(m: IRModule, f: IRFunction, alloc: Int, value: Int, allocs:
         if def < 0 || f.op[def] != .CallRuntime || (f.a[def] != alloc && f.a[def] != value) || f.c[def] != 2 -> return -1
         bytes: ir_opt_const_at(f, facts, f.args[f.b[def]], def) ?? return -1
         align: ir_opt_const_at(f, facts, f.args[f.b[def] + 1], def) ?? return -1
-        if bytes < 8 || bytes > 16 || align != 8 || (size >= 0 && bytes != size) -> return -1
+        if bytes < 8 || bytes > IR_FRAME_BOX_BYTES || align != 8 || (size >= 0 && bytes != size) -> return -1
         size = bytes
         if !boxes.contains(boxed) {
             boxes.push(boxed)
@@ -261,45 +264,84 @@ ir_opt_slot_size: fn(m: IRModule, f: IRFunction, alloc: Int, value: Int, allocs:
         }
     }
     if size < 0 -> return -1
-    // Each box only stored into, at its own offsets, and returned.
+    // Each box only written, at its own offsets (Stores, and Stores and
+    // CopyBytes through a field's address: an Offset in it), and returned.
+    shifts := [Int]{}
+    loop _ in 0..<f.slot_type.len() -> shifts.push(-1)
+    loop at in 0..<f.op.len() {
+        field: f.dst[at]
+        if f.op[at] == .Offset && field >= 0 && facts.defs[field] == 1 && boxes.contains(f.a[at]) && f.b[at] >= 0 && f.b[at] < size -> shifts[field] = f.b[at]
+    }
     reads := [Int]{}
     loop at in 0..<f.op.len() {
         ir_x64_reads_into(f, at, reads)
-        loop slot in reads {
-            if !boxes.contains(slot) -> next
-            op: f.op[at]
-            if op == .Return -> next
-            if op != .Store || f.a[at] != slot || f.c[at] == slot -> return -1
-            if f.b[at] < 0 || f.b[at] + 8 > size -> return -1
-            if m.types[f.slot_type[f.c[at]]].drop != "" -> return -1
+        loop (index, slot) in reads {
+            if slot < 0 || slot >= shifts.len() -> next
+            if boxes.contains(slot) {
+                if f.op[at] == .Return || (f.op[at] == .Offset && f.dst[at] >= 0 && shifts[f.dst[at]] >= 0) -> next
+                if !ir_opt_slot_written(m, f, at, index, slot, 0, size) -> return -1
+            } else if shifts[slot] >= 0 && !ir_opt_slot_written(m, f, at, index, slot, shifts[slot], size) {
+                return -1
+            }
         }
     }
     size
 }
 
+// Whether read `index` of instruction `at` (ir_x64_reads_into order) writes
+// into the box of `size` bytes through `slot`, its address plus `shift`,
+// within the box and with a value without a Drop: a Store at an offset of
+// at least 0, or a CopyBytes from other storage.
+ir_opt_slot_written: fn(m: IRModule, f: IRFunction, at: Int, index: Int, slot: Int, shift: Int, size: Int) -> Bool Never! {
+    if index != 0 || f.a[at] != slot -> return false
+    if f.op[at] == .Store -> return f.c[at] != slot && f.b[at] >= 0 && shift + f.b[at] + 8 <= size && m.types[f.slot_type[f.c[at]]].drop == ""
+    if f.op[at] == .CopyBytes -> return f.b[at] != slot && f.c[at] >= 0 && shift + f.c[at] <= size && m.types[f.slot_type[f.b[at]]].drop == ""
+    false
+}
+
 // Per slot of `f`: whether some instruction reads it other than as a box a
-// return slot can stand for (a Load at an offset of at least 0, a Drop,
-// the unique test, the first argument of a free).
-ir_opt_slot_loose: fn(f: IRFunction, unique: Int, free: Int) -> [Bool] Never! {
+// return slot can stand for (a Load at an offset of at least 0, a field's
+// address at such an offset, a Drop, the unique test, the first argument
+// of a free). A field's address (an Offset with one def, `facts`) may be
+// read only by a Load at such an offset or as a CopyBytes source; else its
+// box is loose too.
+ir_opt_slot_loose: fn(f: IRFunction, facts: OptFacts, unique: Int, free: Int) -> [Bool] Never! {
     loose := [Bool]{}
-    loop _ in 0..<f.slot_type.len() -> loose.push(false)
+    fields := [Int]{}
+    loop _ in 0..<f.slot_type.len() {
+        loose.push(false)
+        fields.push(-1)
+    }
+    loop at in 0..<f.op.len() {
+        field: f.dst[at]
+        if f.op[at] == .Offset && field >= 0 && facts.defs[field] == 1 && f.a[at] >= 0 && f.b[at] >= 0 -> fields[field] = f.a[at]
+    }
     reads := [Int]{}
     loop at in 0..<f.op.len() {
         ir_x64_reads_into(f, at, reads)
         loop (index, slot) in reads {
             if slot < 0 || slot >= loose.len() -> next
-            if !ir_opt_slot_read(f, at, index, unique, free) -> loose[slot] = true
+            if !ir_opt_slot_read(f, fields, at, index, slot, unique, free) -> loose[slot] = true
         }
+    }
+    loop slot in 0..<fields.len() {
+        if fields[slot] >= 0 && loose[slot] -> loose[fields[slot]] = true
     }
     loose
 }
 
-// Whether read `index` of instruction `at` (ir_x64_reads_into order) is
-// one a return slot keeps meaning.
-ir_opt_slot_read: fn(f: IRFunction, at: Int, index: Int, unique: Int, free: Int) -> Bool Never! {
+// Whether read `index` of instruction `at` (ir_x64_reads_into order), of
+// `slot`, is one a return slot keeps meaning (`fields`: per slot, the box a
+// field's address is in, -1 for none).
+ir_opt_slot_read: fn(f: IRFunction, fields: [Int], at: Int, index: Int, slot: Int, unique: Int, free: Int) -> Bool Never! {
     op: f.op[at]
+    if fields[slot] >= 0 {
+        if op == .Load -> return index == 0 && f.b[at] >= 0
+        return op == .CopyBytes && index == 1 && f.a[at] != slot
+    }
     if op == .Drop -> return true
     if op == .Load -> return index == 0 && f.b[at] >= 0
+    if op == .Offset -> return index == 0 && f.dst[at] >= 0 && fields[f.dst[at]] == slot
     if op == .CallRuntime {
         if f.a[at] == unique -> return f.c[at] == 1
         if f.a[at] == free -> return index == 0 && f.c[at] == 3 && f.args[f.b[at] + 1] != f.args[f.b[at]] && f.args[f.b[at] + 2] != f.args[f.b[at]]
@@ -398,10 +440,10 @@ ir_opt_slot_emit: fn(v: &IRFunction, f: IRFunction, k: Int, map: [Int]) Never! {
     _ := ir_emit(v, op, dst, a, b, c, f.code_line[k])
 }
 
-// make(x) boxes a tag and x (jet_rt_alloc(16, 8), two Stores); run reads
+// make(x) boxes a tag and x (jet_rt_alloc(bytes, 8), two Stores); run reads
 // both words of the box and ends it (its unique test, free and Drop). With
 // `forward`, run gets the box through pass(x) = make(x), which returns it.
-ir_opt_slot_test_module: fn(forward: Bool) -> IRModule Never! {
+ir_opt_slot_test_module: fn(forward: Bool, bytes: Int) -> IRModule Never! {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
@@ -414,7 +456,7 @@ ir_opt_slot_test_module: fn(forward: Bool) -> IRModule Never! {
     x: ir_slot(make, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     make.result = boxed
     size: ir_slot(make, word, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(make, IROp.Const, size, 16, -1, -1, 2)
+    _ := ir_emit(make, IROp.Const, size, bytes, -1, -1, 2)
     align: ir_slot(make, word, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(make, IROp.Const, align, 8, -1, -1, 2)
     box: ir_slot(make, boxed, IRSlotKind.Temp, -1, 0)
@@ -457,11 +499,11 @@ ir_opt_slot_test_module: fn(forward: Bool) -> IRModule Never! {
     tested: ir_args(run, [Int]{got})
     _ := ir_emit(run, IROp.CallRuntime, alone, unique, tested, 1, 10)
     _ := ir_emit(run, IROp.If, -1, alone, -1, -1, 10)
-    bytes: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(run, IROp.Const, bytes, 16, -1, -1, 10)
+    freed_bytes: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Const, freed_bytes, bytes, -1, -1, 10)
     eight: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(run, IROp.Const, eight, 8, -1, -1, 10)
-    freed: ir_args(run, [Int]{got, bytes, eight})
+    freed: ir_args(run, [Int]{got, freed_bytes, eight})
     _ := ir_emit(run, IROp.CallRuntime, -1, free, freed, 3, 10)
     _ := ir_emit(run, IROp.Else, -1, -1, -1, -1, 10)
     _ := ir_emit(run, IROp.Drop, -1, got, -1, -1, 10)
@@ -492,7 +534,7 @@ ir_opt_slot_test_calls: fn(m: IRModule, name: String) -> Int Never! {
 // scan and the rewrite split across threads; with `leak`, the last one
 // returns make's box instead.
 ir_opt_slot_test_wide: fn(users: Int, leak: Bool) -> IRModule Never! {
-    m := ir_opt_slot_test_module(false)
+    m := ir_opt_slot_test_module(false, 16)
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     boxed: m.functions[0].result
     loop k in 0..<users {
@@ -531,9 +573,90 @@ ir_opt_slot_test_use: fn(m: &IRModule, word: Int, boxed: Int, k: Int, leaks: Boo
     f
 }
 
+// make(x) boxes a tag and a struct of four words of x, built in frame
+// storage and copied into the box through the field's address (a struct
+// payload's move, Build.jet ir_store_at); run copies the struct out through
+// the field's address of its box into frame storage of its own (Build
+// ir_box_hand_over), then ends the box. The struct's type has drop `glue`.
+ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    quad: ir_intern_type(m, "Quad", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "Quad"}, 32, 8, IRClass.Memory, false, 0, glue))
+    res: ir_intern_type(m, "QuadRes", ir_layout(IRTypeKind.Pointer, Type.Named{name: "QuadRes"}, 8, 8, IRClass.Pointer, false, 64, ""))
+    boxed: ir_mark_box(m, res)
+    alloc: ir_intern_name(m, "jet_rt_alloc")
+    unique: ir_intern_name(m, "jet_rt_block_unique")
+    free: ir_intern_name(m, "jet_rt_free")
+    make := ir_function_new("make", "test:quad.jet::make", "", "quad.jet", 1)
+    x: ir_slot(make, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+    make.result = boxed
+    size: ir_slot(make, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(make, IROp.Const, size, 40, -1, -1, 2)
+    align: ir_slot(make, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(make, IROp.Const, align, 8, -1, -1, 2)
+    payload: ir_slot(make, quad, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(make, IROp.StackAddress, payload, 32, 8, -1, 2)
+    loop part in 0..<4 {
+        _ := ir_emit(make, IROp.Store, -1, payload, 8 * part, x, 2)
+    }
+    box: ir_slot(make, boxed, IRSlotKind.Temp, -1, 0)
+    sized: ir_args(make, [Int]{size, align})
+    _ := ir_emit(make, IROp.CallRuntime, box, alloc, sized, 2, 3)
+    marked: ir_slot(make, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(make, IROp.Const, marked, 1, -1, -1, 3)
+    _ := ir_emit(make, IROp.Store, -1, box, 0, marked, 3)
+    into: ir_slot(make, quad, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(make, IROp.Offset, into, box, 8, -1, 3)
+    _ := ir_emit(make, IROp.CopyBytes, -1, into, payload, 32, 3)
+    _ := ir_emit(make, IROp.Return, -1, box, -1, -1, 3)
+    ir_opt_compact(make)
+    name_rows_set(m.function_rows, make.key, 0)
+    m.functions.push(make)
+    run := ir_function_new("run", "test:quad.jet::run", "", "quad.jet", 7)
+    run.result = word
+    seed: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Const, seed, 3, -1, -1, 8)
+    got: ir_slot(run, boxed, IRSlotKind.Temp, -1, 0)
+    seeded: ir_args(run, [Int]{seed})
+    _ := ir_emit(run, IROp.Call, got, 0, seeded, 1, 8)
+    tag_word: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Load, tag_word, got, 0, -1, 9)
+    field: ir_slot(run, quad, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Offset, field, got, 8, -1, 9)
+    taken: ir_slot(run, quad, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.StackAddress, taken, 32, 8, -1, 9)
+    _ := ir_emit(run, IROp.CopyBytes, -1, taken, field, 32, 9)
+    alone: ir_slot(run, flag, IRSlotKind.Temp, -1, 0)
+    tested: ir_args(run, [Int]{got})
+    _ := ir_emit(run, IROp.CallRuntime, alone, unique, tested, 1, 10)
+    _ := ir_emit(run, IROp.If, -1, alone, -1, -1, 10)
+    freed_bytes: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Const, freed_bytes, 40, -1, -1, 10)
+    eight: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Const, eight, 8, -1, -1, 10)
+    freed: ir_args(run, [Int]{got, freed_bytes, eight})
+    _ := ir_emit(run, IROp.CallRuntime, -1, free, freed, 3, 10)
+    _ := ir_emit(run, IROp.Else, -1, -1, -1, -1, 10)
+    _ := ir_emit(run, IROp.Drop, -1, got, -1, -1, 10)
+    _ := ir_emit(run, IROp.End, -1, -1, -1, -1, 10)
+    last: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Load, last, taken, 24, -1, 11)
+    sum: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Add, sum, tag_word, last, IR_OVERFLOW_WRAP, 11)
+    _ := ir_emit(run, IROp.Return, -1, sum, -1, -1, 11)
+    ir_opt_compact(run)
+    m.entry = m.functions.len()
+    name_rows_set(m.function_rows, run.key, m.entry)
+    m.functions.push(run)
+    m
+}
+
 #Test("A function returning a small fresh box writes it into its caller's frame storage") {
-    loop level in 1..<3 {
-        m := ir_opt_slot_test_module(false)
+    loop step in 0..<4 {
+        level: 1 + step % 2
+        bytes: if step < 2 -> 16 else -> IR_FRAME_BOX_BYTES
+        m := ir_opt_slot_test_module(false, bytes)
         options := ir_opt_options(level)
         options.inline = IROptInline.Off
         options.verify = true
@@ -547,15 +670,42 @@ ir_opt_slot_test_use: fn(m: &IRModule, word: Int, boxed: Int, k: Int, leaks: Boo
         framed := 0
         loop at in 0..<run.op.len() {
             if run.op[at] == .Call -> assert_eq(run.c[at], 2)
-            if run.op[at] == .StackAddress && run.a[at] == 16 -> framed += 1
+            if run.op[at] == .StackAddress && run.a[at] == bytes -> framed += 1
             assert(run.op[at] != .Drop)
         }
         assert_eq(framed, 1)
     }
 }
 
+#Test("A box above the frame box bytes stays on the heap") {
+    m := ir_opt_slot_test_module(false, IR_FRAME_BOX_BYTES + 8)
+    options := ir_opt_options(1)
+    options.inline = IROptInline.Off
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    assert_eq(m.functions[0].param_count, 1)
+    assert_eq(ir_opt_slot_test_calls(m, "jet_rt_alloc"), 1)
+}
+
+#Test("A struct payload moved in and out through its field's address uses the return slot") {
+    loop step in 0..<3 {
+        level: 1 + step % 2
+        glued: step == 2
+        m := ir_opt_slot_test_quad(if glued -> "test_quad_drop" else -> "")
+        options := ir_opt_options(level)
+        options.inline = IROptInline.Off
+        options.verify = !glued
+        report: ir_optimize_module(m, options, compiler_threads_single())
+        if !glued -> assert_eq(report.lint.len(), 0)
+        assert_eq(m.functions[0].param_count, if glued -> 1 else -> 2)
+        assert_eq(ir_opt_slot_test_calls(m, "jet_rt_alloc"), if glued -> 1 else -> 0)
+        assert_eq(ir_opt_slot_test_calls(m, "jet_rt_free"), if glued -> 1 else -> 0)
+    }
+}
+
 #Test("A box a caller returns keeps the function that makes it allocating") {
-    m := ir_opt_slot_test_module(true)
+    m := ir_opt_slot_test_module(true, 16)
     options := ir_opt_options(1)
     options.inline = IROptInline.Off
     options.verify = true
