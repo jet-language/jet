@@ -388,10 +388,14 @@ sema_serde_items_codec_params: fn(params: [TypeParam], wire_types: [Type], encod
 
 // The item builders make the header (owner, trait, signature, codec bounds);
 // sema_serde_items_codec_body makes the body when the codec is demanded.
+// A struct's codec types are its coded fields', `#Secret` ones included:
+// the storage codec carries them.
 sema_serde_items_struct_wire: fn(definition: StructDef) -> [Type] Never! {
     wire := [Type]{}
     loop field in definition.fields {
-        if field.computed == None && !sema_serde_items_skips(field) -> wire.push(field.ty.copy())
+        if field.computed == None && !sema_serde_items_drops(field, true) {
+            wire.push(field.ty.copy())
+        }
     }
     wire
 }

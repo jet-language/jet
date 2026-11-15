@@ -4101,7 +4101,11 @@ the type's, and `#Rename(.Camel)` on a type sets the casing of every field or
 variant. Unknown fields are
 ignored unless a type opts into rejection. A field conversion or missing
 required field is reported as a `FieldError` rather than silently defaulting to
-an unrelated type.
+an unrelated type. A `#Secret` field has no wire form: the derived codec
+leaves it out as it does a `#Codable(.Skip)` field, and decodes it to its
+default or its type's zero. Only storage keeps it: a struct with a `#Secret`
+field also derives a storage codec, which carries the field, and only Core
+calls it (a typed table stores rows through it).
 Text never implicitly decodes as an integer, float, or Boolean, except in
 text-native sources: environment variables, CSV cells, route and query
 parameters. `Dyn.Int` owns its exact integer even beyond machine range.
@@ -6395,8 +6399,10 @@ Task) { task.id })` names the table and the key function; `K` is `Encode`,
 is pure, so a row's key is a function of the row alone. The table's columns
 are one per field of the encoded key (one `key` column when `K` is a scalar),
 which together form the primary key, and a `jet_row` column holding the row's
-JSON encoding. The first write creates the table; reading a table that was
-never written finds no rows. `get` and `query` carry `DB.Read`, and `add`,
+JSON encoding through the storage codec, so `#Secret` fields are kept there
+while the row's wire form leaves them off. The first write creates the
+table; reading a table that was never written finds no rows. `get` and
+`query` carry `DB.Read`, and `add`,
 `put` and `delete` carry `DB.Read` and `DB.Write` (a write may run the
 table's row policy, which reads), so a function that writes a table must
 allow `DB.Write` (E0740 otherwise). A `get` or `query` made while an

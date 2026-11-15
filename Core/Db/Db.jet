@@ -954,7 +954,9 @@ Who: enum {
 
 // A typed table, from `store.table(name, key:)`. Each field of the key is a
 // key column (a key that is not a record is the one column `key`) and those
-// columns are the primary key; the column `jet_row` holds the encoded row.
+// columns are the primary key; the column `jet_row` holds the row as its
+// storage codec encodes it, `#Secret` fields included (its wire codec,
+// `encode()`, leaves them off).
 // The first write creates the table, and until then it reads as empty. Reads
 // carry DB.Read and join a running live binding's read set; writes carry
 // DB.Write and re-run the bindings that read the table (DBState.wrote).
@@ -1101,11 +1103,11 @@ priv table_allows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(tabl
 }
 
 // `add` (replace false) and `put` (replace true): creates the table on its
-// first write, then inserts the encoded row under its key columns.
+// first write, then inserts the row's storage encoding under its key columns.
 priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, row: T, replace: Bool) -[DB.Write]> T DBError! {
     key: table.key_of(row.copy())
     cells: table_cells(table.name, key.encode()) ?? return Err(err)
-    encoded: json.to_string<T>(row) ?? return Err(db_error("the row for table `{table.name}` does not encode: {err}"))
+    encoded: json.to_string(row.encode_stored()) ?? return Err(db_error("the row for table `{table.name}` does not encode: {err}"))
     columns := [String]{}
     loop cell in cells -> columns.push("\"{cell.column}\"")
     names: columns.join(", ")
@@ -1190,10 +1192,11 @@ priv table_read: fn(driver: &__Driver, name: String, sql: String, values: [DBVal
     __driver_query(driver, sql, values)
 }
 
+// A stored row, read back through its type's storage codec.
 priv table_decode: fn<T: Decode>(stored: [String:DBValue]) -> T DBError! {
     text: row_text(stored, TABLE_ROW_COLUMN) ?? return Err(err)
     tree: json.parse(text) ?? return Err(db_error("a stored row is not JSON: {err}"))
-    if tree.decode<T>() == {
+    if tree.decode_stored<T>() == {
         .Ok(value) -> Ok(value)
         .Err(failures) -> Err(db_error("a stored row does not decode: {failures[0].reason}"))
     }
