@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6966,
-    "rev": 105650,
+    "rev": 105660,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -70620,11 +70620,12 @@
         {
           "n": 7,
           "text": "Last-use moves (#3836): a paired perf cell for the last-use-move probes is recorded (from #3836 c3)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:53:44.117Z"
+          "evidence": "Merged into #6201 c8: c8 covers every D-COPY-DEFAULT1 slice including the last-use-move probes",
+          "at": "2026-11-15T05:32:19.843Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
@@ -70653,7 +70654,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T18:52:25.097Z",
-      "updated": "2026-11-15T05:31:42.963Z",
+      "updated": "2026-11-15T05:32:19.843Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 9
     },
@@ -82392,21 +82393,21 @@
         },
         {
           "n": 2,
-          "text": "The empty image links no allocator (jet_rt_alloc/free absent) and no fault-report text tables; any cell that cannot fault or allocate gets the same by liveness, not a flag.",
+          "text": "The empty image links no allocator (jet_rt_alloc and free absent) and no fault-report text tables, and any cell that cannot fault or allocate gets the same by liveness, not a flag. Proof: `jet test Compiler --profile cases --filter size/empty_image_links_no_allocator`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T20:20:10.429Z"
+          "at": "2026-11-15T05:32:13.259Z"
         },
         {
           "n": 3,
-          "text": "The hello asm-parity cell image is at most 12288 B in release (asm-parity release and default builds; ab-stderr 0 DIFF; cell outputs identical). Baseline 360e470044: 25.6 KB.",
+          "text": "The hello asm-parity cell image is at most 12288 B in release, with identical output (baseline 360e470044: 25.6 KB). Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate --cells hello --modes default,release`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T20:20:11.452Z"
+          "at": "2026-11-15T05:32:14.351Z"
         }
       ],
       "refs": [],
@@ -82417,7 +82418,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T00:45:29.538Z",
-      "updated": "2026-11-15T05:32:12.094Z",
+      "updated": "2026-11-15T05:32:14.351Z",
       "updatedBy": "TowerKeeper-1"
     },
     {
@@ -83480,21 +83481,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`#Layout(packed)` and first-argument align (D-JAI-LAYOUT1=A) build on O0, O1 and O2 and web, with sizes shown as facts (D-LAYOUT-SHOW1).",
+          "text": "`#Layout(packed)` and first-argument align (D-JAI-LAYOUT1=A) build on O0, O1, O2 and web, with sizes shown as facts (D-LAYOUT-SHOW1). Proof: `jet test Compiler --profile golden --filter layout/packed_and_align`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:42.442Z"
+          "at": "2026-11-15T05:32:15.355Z"
         },
         {
           "n": 2,
-          "text": "`#Policy(no_alloc)` and `#Policy(vectorize)` fail the build with a registered diagnostic naming the line that broke the promise, with UI snapshots.",
+          "text": "`#Policy(no_alloc)` and `#Policy(vectorize)` fail the build with a registered diagnostic naming the line that broke the promise. Proof: `jet test Compiler --profile ui --filter policy_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:46.908Z"
+          "at": "2026-11-15T05:32:16.296Z"
         },
         {
           "n": 3,
@@ -83507,12 +83508,12 @@
         },
         {
           "n": 6,
-          "text": "(was #2887 c1) Ratified layout/alignment facts and safe Atomic scalar operations are implemented with exact Int ownership, nonblocking reclamation, fallible growth, and tier carriers, proven by tests and goldens on every applicable tier. (merged from #5027 c5)",
+          "text": "D-PLACE1=A is built: the `T.reflect().layout` size and alignment facts, `#Layout(c, align(N))` and lock-free Atomic scalar cells, with exact Int ownership, nonblocking reclamation and fallible growth, on every applicable tier. Proof: `jet test Compiler --profile golden --filter layout/place_align_atomics`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:52:24.881Z"
+          "at": "2026-11-15T05:32:17.178Z"
         },
         {
           "n": 7,
@@ -83536,7 +83537,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:55.459Z",
-      "updated": "2026-11-15T05:23:52.977Z",
+      "updated": "2026-11-15T05:32:17.178Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 7
     },
@@ -84321,12 +84322,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The asm-parity hello and taskfile cycles:u and instructions columns drop against dev 45ab3b5ef5 (instructions, plus the median of at least 21 interleaved runs for cycles). No asm-parity cell is worse in bytes or cycles, and output is identical.",
+          "text": "The asm-parity hello and taskfile cycles:u and instructions columns drop against dev 45ab3b5ef5 (instructions, plus the median of at least 21 interleaved runs for cycles), no asm-parity cell is worse in bytes or cycles, and output is identical. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate --cells hello,taskfile --runs 21` and then the full cell set.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T13:09:16.273Z"
+          "at": "2026-11-15T05:32:18.066Z"
         }
       ],
       "refs": [],
@@ -84337,8 +84338,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T06:50:49.342Z",
-      "updated": "2026-11-13T02:02:23.161Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:32:18.066Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
     {
@@ -100486,7 +100487,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -100605,9 +100606,10 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:03.329Z",
-      "updated": "2026-11-15T05:32:04.393Z",
+      "updated": "2026-11-15T05:32:21.057Z",
       "updatedBy": "Main",
-      "criteriaLastN": 9
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-15T05:32:21.057Z"
     },
     {
       "id": "c0se7lpr",
@@ -100924,7 +100926,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -100967,9 +100969,10 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:29.121Z",
-      "updated": "2026-11-15T05:32:06.115Z",
+      "updated": "2026-11-15T05:32:22.592Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-15T05:32:22.592Z"
     },
     {
       "id": "c0e5gz4o",
@@ -104313,11 +104316,11 @@
         {
           "n": 7,
           "text": "A request body read under ?? (request.json<T>() ?? return ...) stays in the route contract and web.openapi. Proof: jet test Compiler --profile cases --filter openapi_request_body_survives_a_decode_fallback.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:56:20.224Z"
+          "evidence": "p149 (batch compiler from dev 413cddeab5, 2026-11-15 00:20; GoalsB-5-15 landed c979f70f49): jet test Compiler --profile cases --filter openapi_: PASS 3 FAIL 0, including openapi_request_body_survives_a_decode_fallback; --filter auto_derived_http_inputs: PASS 1 FAIL 0.",
+          "at": "2026-11-15T05:32:18.957Z"
         }
       ],
       "refs": [],
@@ -104332,7 +104335,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:52:16.627Z",
-      "updated": "2026-11-15T05:32:10.122Z",
+      "updated": "2026-11-15T05:32:18.957Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -217437,6 +217440,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:32:22.592Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pwde2g",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T05:32:21.058Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vc9b8r",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T05:32:19.843Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0frcmcx",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T05:32:18.957Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0sf9ixl",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T05:32:18.067Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0h8jjrp",
+      "note": "#1: proof; was: The asm-parity hello and taskfile cycles:u and instructions columns drop against dev 45ab3b5ef5 (instructions, plus the median of at least 21 interleaved runs for cycles). No asm-parity cell is worse "
+    },
+    {
+      "at": "2026-11-15T05:32:17.178Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0wv2wmp",
+      "note": "#6: strip debris; name the decision; proof; was: (was #2887 c1) Ratified layout/alignment facts and safe Atomic scalar operations are implemented with exact Int ownership, nonblocking reclamation, fallible growth, and tier carriers, proven by tests "
+    },
+    {
+      "at": "2026-11-15T05:32:16.296Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0wv2wmp",
+      "note": "#2: proof; was: `#Policy(no_alloc)` and `#Policy(vectorize)` fail the build with a registered diagnostic naming the line that broke the promise, with UI snapshots."
+    },
+    {
+      "at": "2026-11-15T05:32:15.355Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0wv2wmp",
+      "note": "#1: proof; was: `#Layout(packed)` and first-argument align (D-JAI-LAYOUT1=A) build on O0, O1 and O2 and web, with sizes shown as facts (D-LAYOUT-SHOW1)."
+    },
+    {
+      "at": "2026-11-15T05:32:14.351Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0nqr80d",
+      "note": "#3: proof; was: The hello asm-parity cell image is at most 12288 B in release (asm-parity release and default builds; ab-stderr 0 DIFF; cell outputs identical). Baseline 360e470044: 25.6 KB."
+    },
+    {
+      "at": "2026-11-15T05:32:13.259Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0nqr80d",
+      "note": "#2: proof; was: The empty image links no allocator (jet_rt_alloc/free absent) and no fault-report text tables; any cell that cannot fault or allocate gets the same by liveness, not a flag."
+    },
     {
       "at": "2026-11-15T05:32:12.094Z",
       "by": "TowerKeeper-1",
