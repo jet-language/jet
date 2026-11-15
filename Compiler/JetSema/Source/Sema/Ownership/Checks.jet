@@ -6170,6 +6170,30 @@ sema_ownership_path_join: fn(index: SemaOwnershipState, fork: SemaOwnershipFork,
     }
 }
 
+// The join of the paths that reach one merge, each a whole branch, in their
+// order; None without paths. It takes the paths out of `paths`. Joining a
+// growing merge with one path at a time rejoins every earlier path's rows
+// once per path, the square of a long arm chain; joining neighbours pairwise
+// touches each row once per level, the log of the path count.
+sema_ownership_paths_join: fn(index: SemaOwnershipState, fork: SemaOwnershipFork, paths: &[SemaOwnershipPath]) -> SemaOwnershipPath? Never! {
+    loop paths.len() > 1 {
+        // Pairs from the back, so `level` runs back to front and an odd
+        // first path rises unjoined.
+        level := [SemaOwnershipPath]{}
+        loop paths.len() > 1 {
+            second: paths.pop() ?? break
+            first: paths.pop() ?? break
+            level.push(sema_ownership_path_join(index, fork, first, second, true, first.share_found))
+        }
+        if paths.len() == 1 -> level.push(paths.pop() ?? break)
+        loop level.len() > 0 {
+            joined: level.pop() ?? break
+            paths.push(joined)
+        }
+    }
+    paths.pop()
+}
+
 // The freeze site of `key` (whose name_rows_hash is `hash`) at the end of
 // `path`: the path's own row, else the last declaration row in `state`.
 sema_ownership_path_frozen: fn(state: SemaOwnershipState, path: SemaOwnershipPath, key: String, hash: Int) -> SemaOwnershipFreezeSite? Never! {
@@ -6348,21 +6372,11 @@ sema_ownership_join_loop_value_paths: fn(state: &SemaOwnershipState, context: Se
     if may_skip -> paths.push(sema_ownership_fork_base(base))
     if after_body == .Val(path) -> paths.push(path)
     loop exit in sema_loop_value_break_flows(context, frame_index) -> paths.push(sema_ownership_fork_path(sema_ownership_loop_path_to_depth(exit, target_depth), fork))
-    joined := sema_ownership_fork_base(base)
-    if paths.len() == 0 {
-        joined = sema_ownership_path_join(state, base, joined, joined, false, found)
-    } else {
-        joined = paths[0]
-        index := 1
-        loop index < paths.len() {
-            joined = sema_ownership_path_join(state, base, joined, paths[index], true, joined.share_found)
-            index += 1
-        }
-        joined = sema_ownership_path_join(state, base, joined, joined, true, found)
-    }
+    reached: paths.len() > 0
+    joined: if sema_ownership_paths_join(state, base, paths) == .Val(merged) -> sema_ownership_path_join(state, base, merged, merged, true, found) else -> sema_ownership_path_join(state, base, sema_ownership_fork_base(base), sema_ownership_fork_base(base), false, found)
     sema_ownership_fork_apply(state, joined)
     sema_ownership_fork_close(state, fork)
-    paths.len() > 0
+    reached
 }
 
 // ────────────────────────────────────────────────────────────────────────────

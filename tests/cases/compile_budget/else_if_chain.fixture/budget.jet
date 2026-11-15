@@ -1,0 +1,33 @@
+// Reads the compiler's peak RSS from the traces of each mode's 1,000- and
+// 20,000-branch steps (`<mode>-<count>.json`, the largest `peak_rss_kb` of
+// the trace). The 20,000-branch peak stays under 1 GB and at most 20 times
+// the 1,000-branch peak: it grows at most linearly with the branch count.
+use {
+    core.files
+    core.process.[args]
+    core.regex
+}
+
+GIGABYTE_KB: 1048576
+
+peak_kb: fn(path: String) -> Int {
+    text: files.read(path) ?? panic("budget.jet: read {path}: {err}")
+    field: regex.compile("\"peak_rss_kb\":[0-9]+") ?? panic("budget.jet: peak_rss_kb pattern")
+    peak := 0
+    loop found in regex.find_all(field, text) {
+        value: Int.parse(found.removeprefix("\"peak_rss_kb\":")) ?? next
+        if value > peak -> peak = value
+    }
+    if peak == 0 -> panic("budget.jet: {path} records no peak_rss_kb")
+    peak
+}
+
+run: fn() {
+    loop mode in args() {
+        small: peak_kb("{mode}-1000.json")
+        large: peak_kb("{mode}-20000.json")
+        if large >= GIGABYTE_KB -> panic("{mode}: peak RSS {large} KB at 20000 branches is over 1 GB")
+        if large > small * 20 -> panic("{mode}: peak RSS {small} KB at 1000 branches grows to {large} KB at 20000, more than linearly")
+        print("{mode}: under 1 GB, linear")
+    }
+}

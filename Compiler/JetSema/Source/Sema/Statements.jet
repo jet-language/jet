@@ -1577,19 +1577,23 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     if !multi_head && sema_gone_failure_arms(arms, else_body, scopes, environment, program, diagnostics) == .Val(kept) -> return sema_stmt_check_switch(subject, kept, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
     // Arm conditions are checked on the fallthrough path in place; each arm
     // body and the else body are checked in place and rolled back, on the
-    // scope table and on the ownership state (sema_ownership_fork). Paths are
-    // taken against the state before the table, `fork`.
+    // scope table and on the ownership state (sema_ownership_fork). A body's
+    // path is taken against the state after its condition, so a chain of arms
+    // holds each condition's rows once, in the fallthrough state, not once
+    // more in the path of every arm after it.
     fork: sema_ownership_fork(state)
     before_hardware: sema_scope_hardware_facts(scopes)
     fallthrough_mark: sema_scope_mark(scopes)
     conditions := [SemaCheckedCondition?]{}
     branches := [SemaStatementResult]{}
     branch_hardware := [SemaScopeHardwareFacts]{}
-    merged_path := sema_ownership_fork_base(fork)
-    has_branch := false
+    // The fallthrough state after the condition of the last arm that reaches
+    // the merge.
+    reach := SemaOwnershipFork?{None}
     arm_found := [SemaOwnershipShareSite]{}
     complete := true
-    single_use_paths := [SemaOwnershipPath]{}
+    // The paths of the arms that reach the merge.
+    arm_paths := [SemaOwnershipPath]{}
     // Rust `check_switch`: a subjectless table with a readiness arm waits on
     // channels and timers; its heads are not Boolean guards.
     readiness: subjectless_guard && sema_readiness_is_table(arms)
@@ -1661,7 +1665,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
             ran_on: if arm_return != None -> sema_stmt_check_through(arms, arm_index, else_body, through, value_tail, branch.value, arm_return, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth) else -> sema_stmt_check_through(arms, arm_index, else_body, through, value_tail, branch.value, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
             if !ran_on -> complete = false
         }
-        branch_path := sema_ownership_fork_path(state, fork)
+        branch_path: sema_ownership_fork_path(state, branch_fork)
         sema_ownership_fork_rollback(state, branch_fork)
         sema_ownership_fork_close(state, branch_fork)
         branch_hardware.push(sema_scope_hardware_facts(scopes))
@@ -1671,15 +1675,8 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         // An arm that leaves does not reach the merge.
         loop site in branch_path.share_found -> arm_found.push(site)
         if falls_through {
-            if has_branch {
-                merged_path = sema_ownership_path_join(state, fork, merged_path, branch_path, true, merged_path.share_found)
-            } else {
-                // copy: the first falling-through arm's path is both the merge
-                // seed and its own row of the single-use check below.
-                merged_path = branch_path.copy()
-                has_branch = true
-            }
-            single_use_paths.push(branch_path)
+            reach = Val(sema_ownership_state_fork(state))
+            arm_paths.push(branch_path)
         }
         arm_index += 1
     }
@@ -1701,7 +1698,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         else_result = Val(checked_value.move())
     }
     if through_from == .Val(from) -> sema_stmt_through_dedupe(diagnostics, from)
-    else_path: sema_ownership_fork_path(state, fork)
+    else_path: sema_ownership_fork_path(state, else_fork)
     sema_ownership_fork_rollback(state, else_fork)
     sema_ownership_fork_close(state, else_fork)
     else_hardware: sema_scope_hardware_facts(scopes)
@@ -1719,20 +1716,32 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     // A blocking readiness wait always selects an arm, so without an `else`
     // no path skips the table (Rust merges only the arm paths).
     else_reaches_merge: if else_body == None -> !readiness else -> sema_stmt_tree_block_can_fall_through(else_result ?? [TStmt]{})
+    // The paths that reach the merge ran the conditions up to the last arm
+    // among them, or all of them when the else path reaches it. The
+    // fallthrough state keeps just those, taken as one path.
+    if !else_reaches_merge {
+        if reach == .Val(mark) -> sema_ownership_fork_rollback(state, mark) else -> sema_ownership_fork_rollback(state, fork)
+    }
+    conditions_path: sema_ownership_fork_path(state, fork)
     // The fallthrough path ends here: the live state is the one before the
-    // table again, which the single-use check reads; the join reports
-    // nothing, so the order holds.
+    // table again, which the single-use check reads.
     sema_ownership_fork_rollback(state, fork)
     single_use_moves := [[Bool]]{}
-    loop path in single_use_paths -> single_use_moves.push(sema_single_use_path_moves(state, path))
+    loop path in arm_paths -> single_use_moves.push(sema_single_use_path_moves(state, path))
     if else_reaches_merge -> single_use_moves.push(sema_single_use_path_moves(state, else_path))
     sema_single_use_check_paths(state, single_use_moves, diagnostics)
+    // The conditions apply ahead of the bodies' paths, which are joined over
+    // the state they started from; the join reports nothing, so the order
+    // holds.
+    sema_ownership_fork_apply(state, conditions_path)
+    has_branch: arm_paths.len() > 0
     base: sema_ownership_fork_base(fork)
+    arms_path: sema_ownership_paths_join(state, fork, arm_paths) ?? sema_ownership_fork_base(fork)
     joined: if {
-        has_branch && else_reaches_merge -> sema_ownership_path_join(state, fork, merged_path, else_path, true, state.share_found)
-        has_branch -> sema_ownership_path_join(state, fork, merged_path, merged_path, true, state.share_found)
-        else_reaches_merge -> sema_ownership_path_join(state, fork, else_path, else_path, true, state.share_found)
-        else -> sema_ownership_path_join(state, fork, base, base, false, state.share_found)
+        has_branch && else_reaches_merge -> sema_ownership_path_join(state, fork, arms_path, else_path, true, fork.share_found)
+        has_branch -> sema_ownership_path_join(state, fork, arms_path, arms_path, true, fork.share_found)
+        else_reaches_merge -> sema_ownership_path_join(state, fork, else_path, else_path, true, fork.share_found)
+        else -> sema_ownership_path_join(state, fork, base, base, false, fork.share_found)
     }
     sema_ownership_fork_apply(state, joined)
     sema_ownership_fork_close(state, fork)

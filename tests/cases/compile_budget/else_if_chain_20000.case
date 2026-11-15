@@ -1,0 +1,45 @@
+# A 20,000-branch statement else-if chain, written by gen.jet with a
+# 1,000-branch twin, checks and runs on O0, O1 and O2. Each step's trace
+# records the compiler's peak RSS; budget.jet holds the 20,000-branch peak
+# under 1 GB and at most linear in the branch count. Each arm's ownership
+# path once held every earlier condition's rows, so the peak grew with the
+# square of the chain (16 GB at 20,000 branches).
+fixture: else_if_chain.fixture
+env: NO_COLOR=1
+step: jet run --allow=FS gen.jet 1000
+exit: 0
+stdout: = ""
+step: jet run --allow=FS gen.jet 20000
+exit: 0
+stdout: = ""
+step check-1000: jet check --trace=check-1000.json chain1000.jet
+exit: 0
+step check-20000: jet check --trace=check-20000.json chain20000.jet
+exit: 0
+step o0-1000: jet run -O0 --trace=o0-1000.json chain1000.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = "5924\n"
+step o0-20000: jet run -O0 --trace=o0-20000.json chain20000.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = "119915\n"
+step o1-1000: jet run -O1 --trace=o1-1000.json chain1000.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = "5924\n"
+step o1-20000: jet run -O1 --trace=o1-20000.json chain20000.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = "119915\n"
+step o2-1000: jet run --release --trace=o2-1000.json chain1000.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = "5924\n"
+step o2-20000: jet run --release --trace=o2-20000.json chain20000.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = "119915\n"
+step budget: jet run --allow=FS budget.jet check o0 o1 o2
+exit: 0
+stdout: = "check: under 1 GB, linear\no0: under 1 GB, linear\no1: under 1 GB, linear\no2: under 1 GB, linear\n"
