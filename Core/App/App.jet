@@ -241,9 +241,14 @@ remote: fn<S>(service: &&S) -> Remote<S> Never! { Remote<S>{service: Val(service
 remote_at: fn<S>(address: String) -> Remote<S> Never! { Remote<S>{service: None, address: address} }
 
 // One remote call: POST the JSON array of `args` to `{address}/{method}`;
-// the reply's body on 200, else the failure its status names.
+// the reply's body on 200, else the failure its status names. The call
+// carries a W3C `traceparent` that starts its trace, and that trace's id as
+// its `x-request-id`, so the server's span of the call has both.
 __remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wait]> String CallError! {
-    response: http.post("{address}/{method}", "[{args.join(",")}]") ?? return Err(.Unreachable("{address}/{method}: {err}"))
+    seed: "{rt.clock_mono_ns()}:{__trace_next()}:{address}/{method}"
+    trace: __trace_id("trace:{seed}", 16)
+    sent: http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{__trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_body("[{args.join(",")}]")
+    response: sent.send() ?? return Err(.Unreachable("{address}/{method}: {err}"))
     text: response.body.text(REMOTE_MAX_REPLY) ?? return Err(.Unreachable("{address}/{method}: {err}"))
     if {
         response.status == 200 -> Ok(text)
@@ -253,6 +258,24 @@ __remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.W
         response.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {response.header("retry-after") ?? "?"} s"))
         else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
     }
+}
+
+// A W3C trace-context id of `n` bytes (16 for a trace, 8 for a span) as
+// lowercase hex: the leading bytes of `seed`'s SHA-256. Each caller's seed
+// holds a clock reading and a count, so no two ids it makes repeat; ids
+// need no random source, which a handler's effects do not allow.
+__trace_id: fn(seed: String, n: Int) -> String Never! {
+    digest: crypto.sha256(seed)
+    crypto.hex_encode(digest.bytes.slice(0, n))
+}
+
+// The process's count of the trace seeds a Remote makes.
+TRACE_SEEDS: Shared{0}
+
+__trace_next: fn() -> Int Never! {
+    guard := TRACE_SEEDS.guard_edit()
+    guard.value += 1
+    guard.value
 }
 
 // The field errors of a 422 reply, `{"invalid": [{"path": …, "reason":

@@ -24,7 +24,10 @@ use {
     // core.web.forms values and calls, so core.web reaches that module.
     core.web.forms.[WebFormTyped]
     core.prelude.[SourceLocation]
-    app.[Signature, __webhook_header, __webhook_signed]
+    app.[Signature, __trace_id, __webhook_header, __webhook_signed]
+    log: core.log
+    core.log.[LogField, TraceSpan]
+    log_rt: jet.runtime.log
     rt: jet.runtime.time
 }
 
@@ -202,6 +205,9 @@ __AppState: struct {
     // The handler of GET `/a/*jet_image`, made with the first page, which is
     // where its file reads are charged; serving the app only adds the row.
     image_handler: HTTPHandler?
+    // The endpoint and webhook rows, which a served app with a trace
+    // export spans (`__app_trace_install`).
+    traced: [__AppTraced]
 }
 
 // The compiler's web rules key on this marker, not on this module's name: the
@@ -343,6 +349,7 @@ App: struct {
     // `window_ns` are the marker's `limit:` and `per:` (`__AppRemote`).
     __remote_public: fn(self, path: String, answer: &&fn(__RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
         endpoint: __AppRemote{answer: answer, limit: __app_remote_limit(limit, window_ns)}
+        __app_traced(self, path, __app_endpoint_method(path))
         http_server.__route_add(__app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_remote_response(endpoint, request)) }), "", at)
         self.copy()
     }
@@ -354,6 +361,7 @@ App: struct {
     // names an account, the count is per network address.
     __remote_signed_in: fn(self, path: String, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
         counted: __app_remote_limit(limit, window_ns)
+        __app_traced(self, path, __app_endpoint_method(path))
         http_server.__route_add(
             __app_table(self),
             "POST",
@@ -379,6 +387,7 @@ App: struct {
         names := [String]{}
         if params != "" -> names = params.split(",").to_list()
         hook: __AppWebhook{signature: signature, params: names, key: key, answer: answer}
+        __app_traced(self, path, "")
         http_server.__route_add(__app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_webhook_response(hook, request)) }), "", at)
         self.copy()
     }
@@ -591,6 +600,7 @@ app: fn() -> App Never! {
             image_settings: __image_settings(),
             dev: false,
             image_handler: None,
+            traced: [__AppTraced]{},
         }},
     }
 }
@@ -608,11 +618,13 @@ serve: fn<Settings: Decode>(*, prefix: String, build: fn(Settings) -> App, port:
 }
 
 // `web.bind<Settings>(address, prefix:, build:)`: `serve`'s settings step,
-// then `App.bind` of the app `build` makes on `address`.
+// then `App.bind` of the app `build` makes on `address`, with the trace
+// export `serve` starts (`__app_trace_start`).
 bind: fn<Settings: Decode>(address: String, *, prefix: String, build: fn(Settings) -> App, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Env, IO, Net, FS, Exec, Time]> HTTPServer HTTPError! {
     settings: __app_settings<Settings>(prefix)
     app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, __app_build_failure("{err}"))
     __app_image_route(app)
+    _: __app_trace_start(app)
     http_server.__bind(address, __app_table(app), tls, deadline)
 }
 
@@ -690,7 +702,8 @@ __app_dev: fn() -> Bool Never! {
 // Under `jet dev` the table gains the live-reload row and layer. Every GET
 // no row answers renders the not-found page, unless a catch-all row of the
 // program's own answers it. Stderr names the port and what chose it
-// (__app_port) before the ready line.
+// (__app_port) before the ready line. The spans still queued for export when
+// serving stops are sent before it returns.
 __app_serve: fn(app: App, chosen: __AppPort) Never! -[Env, IO, Net, FS.Read, Time]> {
     dev: __app_dev()
     if dev {
@@ -704,9 +717,11 @@ __app_serve: fn(app: App, chosen: __AppPort) Never! -[Env, IO, Net, FS.Read, Tim
         fallback: app.copy()
         http_server.__route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_not_found_response(fallback, request)) }), "", #here)
     }
+    trace: __app_trace_start(app)
     core.term.eprint("web app port {chosen.port}: {chosen.source}")
     server: __app_listen(table, chosen.port, dev)
     _: server.serve() ?? panic("web app server failed: {err}")
+    if trace == .Val(export) -> __app_trace_flush(export)
 }
 
 __app_has_root_catch_all: fn(table: HTTPMux) -> Bool Never! {
@@ -1365,6 +1380,328 @@ __app_webhook_response: fn(hook: __AppWebhook, request: HTTPRequest) -[Net, FS.R
     // `__reply_err` leads a failed run's reply.
     if reply.starts_with("{{\"err\":") -> return __app_json(500, reply)
     __app_json(200, reply)
+}
+
+// ── Traces ──────────────────────────────────────────────────────────────
+//
+// A served App exports a server span for each endpoint call and webhook
+// delivery when OpenTelemetry's standard SDK variables name a collector:
+// OTEL_EXPORTER_OTLP_TRACES_ENDPOINT as it is, else OTEL_EXPORTER_OTLP_ENDPOINT
+// with `/v1/traces` added. OTEL_SDK_DISABLED=true, or an OTEL_TRACES_EXPORTER
+// that lists no `otlp`, turns the export off. OTEL_SERVICE_NAME names the
+// service, and OTEL_BSP_SCHEDULE_DELAY, OTEL_BSP_MAX_QUEUE_SIZE and
+// OTEL_BSP_MAX_EXPORT_BATCH_SIZE set the batching. Spans go out as OTLP/HTTP
+// JSON (`log.otlp_traces_json`) from a task of their own, as requests under
+// the program's Net authority like any other. With no collector named, no
+// layer is installed, so the request path is the untraced one.
+
+// One traced row: its route pattern, and the endpoint method it runs ("" for
+// a webhook).
+__AppTraced: struct {
+    pattern: String
+    method: String
+}
+
+__app_traced: fn(app: App, pattern: String, method: String) Never! {
+    guard := app.__state.guard_edit()
+    guard.value.traced.push(__AppTraced{pattern: pattern, method: method})
+}
+
+// An endpoint's method: the last segment of its row's path.
+__app_endpoint_method: fn(path: String) -> String Never! {
+    parts := path.split("/").to_list()
+    parts.pop() ?? ""
+}
+
+// Where a served App's spans go, and how they are batched: every `delay_ms`
+// the queue of at most `max_queue` spans goes out, `batch` spans a request.
+__AppTraceSettings: struct {
+    url: String
+    service: String
+    delay_ms: Int
+    max_queue: Int
+    batch: Int
+}
+
+// The OpenTelemetry SDK's batch span processor defaults.
+C_APP_TRACE_DELAY_MS: 5000
+C_APP_TRACE_MAX_QUEUE: 2048
+C_APP_TRACE_BATCH: 512
+
+// The OTEL_* variables the export reads, by name; an unset one is absent.
+__app_trace_env: fn() -> [String:String] Never! {
+    values := [String:String]{}
+    __app_trace_env_put(values, "OTEL_SDK_DISABLED")
+    __app_trace_env_put(values, "OTEL_TRACES_EXPORTER")
+    __app_trace_env_put(values, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+    __app_trace_env_put(values, "OTEL_EXPORTER_OTLP_ENDPOINT")
+    __app_trace_env_put(values, "OTEL_SERVICE_NAME")
+    __app_trace_env_put(values, "OTEL_BSP_SCHEDULE_DELAY")
+    __app_trace_env_put(values, "OTEL_BSP_MAX_QUEUE_SIZE")
+    __app_trace_env_put(values, "OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
+    values
+}
+
+__app_trace_env_put: fn(values: &[String:String], name: String) Never! {
+    raw: core.sys.__env_value(name) ?? return
+    values[name.copy()] = String.from_bytes(raw) ?? return
+}
+
+// The export `values` ask for; None when they name no collector or turn the
+// export off. A count that is not a whole number in range keeps its default.
+__app_trace_settings: fn(values: [String:String]) -> __AppTraceSettings? Never! {
+    if (values.get("OTEL_SDK_DISABLED") ?? "").trim().to_lower() == "true" -> return None
+    exporters := (values.get("OTEL_TRACES_EXPORTER") ?? "").trim().to_lower()
+    if exporters == "" -> exporters = "otlp"
+    chosen := false
+    loop name in exporters.split(",") {
+        if name.trim() == "otlp" -> chosen = true
+    }
+    if !chosen -> return None
+    url := (values.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") ?? "").trim()
+    if url == "" {
+        base: (values.get("OTEL_EXPORTER_OTLP_ENDPOINT") ?? "").trim()
+        if base == "" -> return None
+        url = if base.ends_with("/") -> "{base}v1/traces" else -> "{base}/v1/traces"
+    }
+    service := (values.get("OTEL_SERVICE_NAME") ?? "").trim()
+    if service == "" -> service = "unknown_service"
+    max_queue: __app_trace_count(values, "OTEL_BSP_MAX_QUEUE_SIZE", C_APP_TRACE_MAX_QUEUE, 1)
+    batch: __app_trace_count(values, "OTEL_BSP_MAX_EXPORT_BATCH_SIZE", C_APP_TRACE_BATCH, 1)
+    Val(__AppTraceSettings{
+        url: url,
+        service: service,
+        delay_ms: __app_trace_count(values, "OTEL_BSP_SCHEDULE_DELAY", C_APP_TRACE_DELAY_MS, 0),
+        max_queue: max_queue,
+        batch: if batch > max_queue -> max_queue else -> batch,
+    })
+}
+
+// The whole number `name` holds when it is at least `least`, else `fallback`.
+__app_trace_count: fn(values: [String:String], name: String, fallback: Int, least: Int) -> Int Never! {
+    text: values.get(name) ?? return fallback
+    count: Int.parse(text.trim()) ?? return fallback
+    if count < least -> return fallback
+    count
+}
+
+// A started export: its settings, the traced rows each request is matched
+// against, the Unix time at monotonic 0, and the queue its task drains.
+__AppTraceExport: struct {
+    settings: __AppTraceSettings
+    rows: [__AppTraceRow]
+    epoch_ns: Int
+    queue: Shared<__AppTraceQueue>
+}
+
+// A traced row as the table matches it.
+__AppTraceRow: struct {
+    segments: [http_server.__HTTPSegment]
+    pattern: String
+    method: String
+}
+
+// The spans waiting for export: a ring of at most `max_queue`, `first` the
+// oldest's slot. A span pushed onto a full ring takes the oldest's place;
+// `dropped` counts every span lost that way or in a failed export, and `ids`
+// the spans pushed, which seeds their ids.
+__AppTraceQueue: struct {
+    spans: [TraceSpan]
+    first: Int
+    count: Int
+    dropped: Int
+    ids: Int
+}
+
+// Reads the export variables and, when they name a collector, puts the
+// tracing layer on the app's table and starts the export task.
+__app_trace_start: fn(app: App) -[Env, Net, FS.Read, Time]> __AppTraceExport? Never! {
+    settings: __app_trace_settings(__app_trace_env()) ?? return None
+    export: __app_trace_install(app, settings, core.time.unix_ns() - rt.clock_mono_ns())
+    held: export.copy()
+    exporter: task { __app_trace_export_loop(held) }
+    exporter.detach()
+    Val(export)
+}
+
+// The layer that spans the app's traced rows, over an empty queue.
+__app_trace_install: fn(app: App, settings: __AppTraceSettings, epoch_ns: Int) -> __AppTraceExport Never! {
+    table: __app_table(app)
+    guard: app.__state.guard_read()
+    rows := [__AppTraceRow]{}
+    loop route in http_server.__mux_routes(table) {
+        if route.method != "POST" -> next
+        loop item in guard.value.traced {
+            if item.pattern == route.pattern {
+                rows.push(__AppTraceRow{segments: route.segments.copy(), pattern: route.pattern.copy(), method: item.method.copy()})
+                break
+            }
+        }
+    }
+    export: __AppTraceExport{settings: settings, rows: rows, epoch_ns: epoch_ns, queue: Shared{__AppTraceQueue{spans: [TraceSpan]{}, first: 0, count: 0, dropped: 0, ids: 0}}}
+    held: export.copy()
+    http_server.__layer_add(table, fn(next: HTTPHandler) { __app_trace_handler(held, next) })
+    export
+}
+
+__app_trace_handler: fn(export: __AppTraceExport, next: HTTPHandler) -> HTTPHandler Never! {
+    http_server.__handler(fn(request: HTTPRequest) { __app_trace_apply(export, next, request) })
+}
+
+// One request through the layer: a traced row's answer is timed and queued
+// as a server span; any other request passes straight through.
+__app_trace_apply: fn(export: __AppTraceExport, next: HTTPHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
+    row: __app_trace_row(export.rows, request) ?? return next.handle(request)
+    start: rt.clock_mono_ns()
+    answered := next.handle(request) ?? return __app_trace_failed(export, export.rows[row], request, start, err)
+    __app_trace_push(export, __app_trace_span(export, export.rows[row], request, start, rt.clock_mono_ns(), answered.status))
+    Ok(answered)
+}
+
+// A traced request whose handler failed: its span has the status the server
+// answers that failure with.
+__app_trace_failed: fn(export: __AppTraceExport, row: __AppTraceRow, request: HTTPRequest, start: Int, error: HTTPError) -> HTTPResponse HTTPError! {
+    status: http_server.__error_response(error).status
+    __app_trace_push(export, __app_trace_span(export, row, request, start, rt.clock_mono_ns(), status))
+    Err(error)
+}
+
+// The index of the traced row `request` selects.
+__app_trace_row: fn(rows: [__AppTraceRow], request: HTTPRequest) -> Int? Never! {
+    if request.method != "POST" -> return None
+    segments: http_server.__path_segments(http_server.access_log_path(request.path)) ?? return None
+    loop index in 0..<rows.len() {
+        if http_server.__route_matches(rows[index].segments, segments) -> return Val(index)
+    }
+    None
+}
+
+// The server span of one traced request, its ids still to be given
+// (`__app_trace_push`). A valid W3C `traceparent` puts it in the caller's
+// trace under the caller's span; without one it starts a trace. Its request
+// id is the one the server tagged the request with: the caller's
+// `x-request-id` when that is valid, else the server's own.
+__app_trace_span: fn(export: __AppTraceExport, row: __AppTraceRow, request: HTTPRequest, start: Int, end: Int, status: Int) -> TraceSpan Never! {
+    caller: __app_traceparent(request.header("traceparent") ?? "")
+    attributes := [LogField]{
+        log.field("jet.request_id", request.header("x-request-id") ?? ""),
+        log.field("http.request.method", "POST"),
+        log.field("http.route", row.pattern),
+        log.int("http.response.status_code", status),
+    }
+    if row.method != "" -> attributes.push(log.field("jet.method", row.method))
+    TraceSpan{
+        trace_id: caller.trace_id.copy(),
+        span_id: "",
+        parent_span_id: caller.span_id.copy(),
+        name: "POST {row.pattern}",
+        kind: .Server,
+        start_ns: export.epoch_ns + start,
+        end_ns: export.epoch_ns + end,
+        attributes: attributes,
+        status: if status >= 500 -> log.SpanStatus.Error("HTTP {status}") else -> log.SpanStatus.Unset,
+    }
+}
+
+// A caller's trace context from its W3C `traceparent`; both ids are "" when
+// the header is absent or not valid.
+__AppTraceParent: struct {
+    trace_id: String
+    span_id: String
+}
+
+__app_traceparent: fn(header: String) -> __AppTraceParent Never! {
+    none: __AppTraceParent{trace_id: "", span_id: ""}
+    parts: header.trim().split("-").to_list()
+    if parts.len() < 4 -> return none
+    // Version ff is invalid; a later version may add fields after these four.
+    if !__app_lower_hex(parts[0], 2) || parts[0] == "ff" -> return none
+    if parts[0] == "00" && parts.len() != 4 -> return none
+    if !__app_lower_hex(parts[1], 32) || !__app_lower_hex(parts[2], 16) || !__app_lower_hex(parts[3], 2) -> return none
+    if parts[1] == "00000000000000000000000000000000" || parts[2] == "0000000000000000" -> return none
+    __AppTraceParent{trace_id: parts[1].copy(), span_id: parts[2].copy()}
+}
+
+// Whether `text` is `size` lowercase hex digits.
+__app_lower_hex: fn(text: String, size: Int) -> Bool Never! {
+    raw: text.bytes()
+    if raw.len() != size -> return false
+    loop byte in raw {
+        n: Int{byte}
+        if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> return false
+    }
+    true
+}
+
+// Queues `span` for export, giving it its span id and, when it starts a
+// trace, its trace id: both from the export's start time and the span's
+// count. On a full queue it takes the oldest span's place, and the
+// `jet.trace.dropped_spans` metric counts the loss.
+__app_trace_push: fn(export: __AppTraceExport, span: &&TraceSpan) Never! {
+    capacity: export.settings.max_queue
+    guard := export.queue.guard_edit()
+    guard.value.ids += 1
+    seed: "{export.epoch_ns}:{guard.value.ids}"
+    held := span.move()
+    held.span_id = __trace_id("span:{seed}", 8)
+    if held.trace_id == "" -> held.trace_id = __trace_id("trace:{seed}", 16)
+    slot: (guard.value.first + guard.value.count) %% capacity
+    if slot < guard.value.spans.len() {
+        guard.value.spans[slot] = held
+    } else {
+        guard.value.spans.push(held)
+    }
+    if guard.value.count < capacity {
+        guard.value.count += 1
+        return
+    }
+    guard.value.first = (guard.value.first + 1) %% capacity
+    guard.value.dropped += 1
+    log_rt.metric_publish("jet.trace.dropped_spans", guard.value.dropped)
+}
+
+// Takes up to one batch of the oldest queued spans.
+__app_trace_take: fn(export: __AppTraceExport) -> [TraceSpan] Never! {
+    capacity: export.settings.max_queue
+    guard := export.queue.guard_edit()
+    size: if guard.value.count < export.settings.batch -> guard.value.count else -> export.settings.batch
+    taken := [TraceSpan]{}
+    loop index in 0..<size -> taken.push(guard.value.spans[(guard.value.first + index) %% capacity].copy())
+    guard.value.first = (guard.value.first + size) %% capacity
+    guard.value.count -= size
+    taken
+}
+
+// The export task: every schedule delay, the queue goes out.
+__app_trace_export_loop: fn(export: __AppTraceExport) Never! -[Net, Time.Wait]> {
+    loop {
+        core.tasks.sleep(export.settings.delay_ms)
+        __app_trace_flush(export)
+    }
+}
+
+// Sends the queued spans, one batch a request. A batch the collector does
+// not take with a 2xx is dropped and counted, so a collector that is down
+// never holds more than the queue's bound.
+__app_trace_flush: fn(export: __AppTraceExport) Never! -[Net, Time.Wait]> {
+    loop {
+        batch: __app_trace_take(export)
+        size: batch.len()
+        if size == 0 -> return
+        if !__app_trace_post(export.settings, batch) {
+            guard := export.queue.guard_edit()
+            guard.value.dropped += size
+            log_rt.metric_publish("jet.trace.dropped_spans", guard.value.dropped)
+        }
+        if size < export.settings.batch -> return
+    }
+}
+
+__app_trace_post: fn(settings: __AppTraceSettings, batch: [TraceSpan]) -[Net, Time.Wait]> Bool Never! {
+    body: log.otlp_traces_json(settings.service, batch)
+    sent: web_http.__request("POST", settings.url).__with_header("content-type", "application/json").__with_body(body)
+    answer: sent.send() ?? return false
+    answer.status >= 200 && answer.status < 300
 }
 
 // `{"invalid": [{"path": …, "reason": …}, …]}`, the 422 body a Remote reads
@@ -2298,4 +2635,113 @@ __app_webhook_test_status: fn(hook: __AppWebhook, project: String, sent: String,
     request := web_http.__server_request("POST", "/hooks/{project}", web_http.body_text(body), fields)
     request.__params = [web_http.Header]{web_http.Header{name: "project", value: project}}
     __app_webhook_response(hook, request).status
+}
+
+#Test("trace settings follow the OpenTelemetry SDK variables") {
+    assert(!(__app_trace_settings([String:String]{}) == .Val(_)))
+    base := [String:String]{}
+    base["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
+    chosen: __app_trace_settings(base) ?? panic("an endpoint names a collector")
+    assert_eq(chosen.url, "http://127.0.0.1:4318/v1/traces")
+    assert_eq(chosen.service, "unknown_service")
+    assert_eq(chosen.delay_ms, 5000)
+    assert_eq(chosen.max_queue, 2048)
+    assert_eq(chosen.batch, 512)
+    tuned := base.copy()
+    tuned["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "http://collector/traces"
+    tuned["OTEL_SERVICE_NAME"] = "crew"
+    tuned["OTEL_BSP_SCHEDULE_DELAY"] = "50"
+    tuned["OTEL_BSP_MAX_QUEUE_SIZE"] = "8"
+    tuned["OTEL_BSP_MAX_EXPORT_BATCH_SIZE"] = "100"
+    traces: __app_trace_settings(tuned) ?? panic("a traces endpoint names a collector")
+    assert_eq(traces.url, "http://collector/traces")
+    assert_eq(traces.service, "crew")
+    assert_eq(traces.delay_ms, 50)
+    assert_eq(traces.max_queue, 8)
+    assert_eq(traces.batch, 8)
+    wrong := base.copy()
+    wrong["OTEL_BSP_MAX_QUEUE_SIZE"] = "0"
+    assert_eq((__app_trace_settings(wrong) ?? panic("a bad size keeps its default")).max_queue, 2048)
+    off := base.copy()
+    off["OTEL_SDK_DISABLED"] = "TRUE"
+    assert(!(__app_trace_settings(off) == .Val(_)))
+    other := base.copy()
+    other["OTEL_TRACES_EXPORTER"] = "none"
+    assert(!(__app_trace_settings(other) == .Val(_)))
+    listed := base.copy()
+    listed["OTEL_TRACES_EXPORTER"] = "console, otlp"
+    assert(__app_trace_settings(listed) == .Val(_))
+}
+
+#Test("a traceparent is taken only when it is valid W3C trace context") {
+    taken: __app_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+    assert_eq(taken.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736")
+    assert_eq(taken.span_id, "00f067aa0ba902b7")
+    refused := [String]{
+        "",
+        "00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01",
+        "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-later",
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7",
+    }
+    loop header in refused -> assert_eq(__app_traceparent(header).trace_id, "")
+    assert_eq(__app_traceparent("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-later").span_id, "00f067aa0ba902b7")
+}
+
+#Test("with no collector named an app runs no trace layer; with one, an endpoint call is one span") {
+    served: app().__remote_public("/api/status", fn(args: __RemoteArgs) { Ok(args.__reply_value<String>("up")) }, 0, 0)
+    table: __app_table(served)
+    // No collector named: nothing is installed, so a request runs no layer.
+    assert(!(__app_trace_settings([String:String]{}) == .Val(_)))
+    assert_eq(http_server.__mux_layers(table).len(), 0)
+    named := [String:String]{}
+    named["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
+    export: __app_trace_install(served, __app_trace_settings(named) ?? panic("an endpoint names a collector"), 1000)
+    assert_eq(http_server.__mux_layers(table).len(), 1)
+    fields := web_http.headers_set(web_http.headers(), "traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+    fields = web_http.headers_set(fields, "x-request-id", "4bf92f3577b34da6a3ce929d0e0e4736")
+    answer: http_server.__dispatch(table, web_http.__server_request("POST", "/api/status", web_http.body_text("[]"), fields))
+    assert_eq(answer.status, 200)
+    // Only the traced rows are spanned.
+    refused: http_server.__dispatch(table, web_http.__server_request("GET", "/api/status", web_http.body_empty(), web_http.headers()))
+    assert_eq(refused.status, 405)
+    spans: __app_trace_take(export)
+    assert_eq(spans.len(), 1)
+    assert_eq(spans[0].trace_id, "4bf92f3577b34da6a3ce929d0e0e4736")
+    assert_eq(spans[0].parent_span_id, "00f067aa0ba902b7")
+    assert_eq(spans[0].span_id.len(), 16)
+    assert_eq(spans[0].name, "POST /api/status")
+    assert(spans[0].start_ns >= 1000 && spans[0].end_ns >= spans[0].start_ns)
+    pairs := [String]{}
+    loop field in spans[0].attributes -> pairs.push("{field.key}={field.value}")
+    assert_eq(pairs.join(" "), "jet.request_id=4bf92f3577b34da6a3ce929d0e0e4736 http.request.method=POST http.route=/api/status http.response.status_code=200 jet.method=status")
+}
+
+#Test("a full trace queue drops its oldest span and counts the loss") {
+    named := [String:String]{}
+    named["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
+    named["OTEL_BSP_MAX_QUEUE_SIZE"] = "2"
+    export: __app_trace_install(app(), __app_trace_settings(named) ?? panic("an endpoint names a collector"), 0)
+    __app_trace_push(export, __app_trace_test_span("a"))
+    __app_trace_push(export, __app_trace_test_span("b"))
+    __app_trace_push(export, __app_trace_test_span("c"))
+    assert_eq(__app_trace_test_names(export), "b,c")
+    __app_trace_push(export, __app_trace_test_span("d"))
+    assert_eq(__app_trace_test_names(export), "d")
+    guard: export.queue.guard_read()
+    assert_eq(guard.value.dropped, 1)
+    assert_eq(guard.value.count, 0)
+}
+
+__app_trace_test_span: fn(name: String) -> TraceSpan Never! {
+    TraceSpan{trace_id: "", span_id: "", parent_span_id: "", name: name, kind: .Server, start_ns: 0, end_ns: 0, attributes: [LogField]{}, status: log.SpanStatus.Unset}
+}
+
+// The names of the spans one take gives, in order.
+__app_trace_test_names: fn(export: __AppTraceExport) -> String Never! {
+    names := [String]{}
+    loop span in __app_trace_take(export) -> names.push(span.name.copy())
+    names.join(",")
 }

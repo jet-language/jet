@@ -5487,6 +5487,24 @@ the webhook: 200 with `{"ok": value}`, 500 with `{"err": error}`, or 422 when
 the body does not decode. Neither method is an endpoint, so no Remote calls
 it.
 
+A served App exports a server span for each endpoint call and webhook
+delivery when the OpenTelemetry SDK variables name a collector:
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with
+`/v1/traces` added. `OTEL_SDK_DISABLED=true`, or an `OTEL_TRACES_EXPORTER`
+list without `otlp`, turns export off. With no collector named, no tracing
+layer is installed, so a request does no tracing work. Spans are OTLP/HTTP
+JSON, POSTed through the app's own network authority by a task off the
+request path. `OTEL_BSP_SCHEDULE_DELAY` (ms, default 5000),
+`OTEL_BSP_MAX_QUEUE_SIZE` (2048) and `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` (512)
+bound the batching. A full queue drops its oldest span, and so does a failed
+export. The `jet.trace.dropped_spans` metric counts every dropped span. A span is
+named `POST {route}`. It carries `jet.request_id`, `http.request.method`,
+`http.route`, `http.response.status_code` and, for an endpoint, `jet.method`.
+A status of 500 or more is an error. A valid W3C `traceparent` puts the span
+in its caller's trace. A Remote call sends one, with that trace's id as its
+`x-request-id`, so the server span of a Remote call has the caller's trace
+and request id.
+
 ### `core.web` — server-rendered applications
 
 `core.web` builds server-rendered applications on top of `core.http`. An
