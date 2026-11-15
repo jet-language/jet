@@ -4433,6 +4433,9 @@ JetDriverLoweringInputs: struct {
     // The checked functions whose `#On(.Deep)` bodies the build emits, by
     // key (jet_driver_deep_checks).
     deep_checks: [String]{[String]{}}
+    // The Core library's check (JetDriverCompileRequest.core_seal): the
+    // lines of the Core seal (JetSema CoreSeal.jet sema_core_seal_lines).
+    core_seal: [String]{[String]{}}
 }
 
 JetDriverLoweringInputsResult: struct {
@@ -4943,6 +4946,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     }
     if request.doc_core_on_demand -> registration_graph.retained_core_demand = true
     if kg.enabled || request.every_core_body -> registration_graph.every_core_body = true
+    if request.core_seal -> registration_graph.core_seal = true
     // A compile that lowers, a Check compile and a `doc_core_on_demand` Doc
     // compile check Core bodies on demand (CoreDemand.jet); JET_KEEP_GOING
     // and `jet check Core` check every body.
@@ -5506,7 +5510,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             registration_graph.decls = DeclTable{}
             symbols := registration_graph.symbols.move()
             registration_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
-            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move()})
+            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), core_seal: checked_graph.core_seal.move()})
             jet_driver_trace_step_end(request.trace_sink, "driver.check.capture", -1)
         }
         return result

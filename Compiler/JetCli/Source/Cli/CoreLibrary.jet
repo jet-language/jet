@@ -7,7 +7,9 @@
 // O2 optimizer, and written as `{prefix}.o`, `{prefix}.exports`
 // (ir_core_exports_text: each global's symbol, key and IR signature),
 // `{prefix}.facts` (ir_core_facts_text: each Core function's key and whether
-// the library seals it) and `{prefix}.threads`, the exports whose call can
+// the library seals it), `{prefix}.seal` (the Core check's summaries a
+// bound program may take for a Core function's reach, JetSema CoreSeal.jet)
+// and `{prefix}.threads`, the exports whose call can
 // start a second thread (ir_thread_exports over the runtime's own receipt,
 // since Core starts threads through the runtime). The runtime image links
 // the object beside the runtime (jet_cli_runtime_pack).
@@ -61,6 +63,7 @@ jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_thr
     // not on this thread as the function returns. The task owns it alone; a
     // process that exits first hands its pages back to the kernel. The rows
     // the build took are refilled empty, so the rest moves whole.
+    seal: inputs.core_seal.join("\n")
     inputs.functions = [FnBody]{}
     inputs.symbols = symbol_table()
     inputs.sources = [String:String]{}
@@ -96,6 +99,7 @@ jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_thr
             core_library_files.write_bytes("{prefix}.o", object.bytes) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core object: {err}"}
             core_library_files.write("{prefix}.exports", ir_core_exports_text(library.rows)) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core exports: {err}"}
             core_library_files.write("{prefix}.facts", ir_core_facts_text(library.facts)) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core facts: {err}"}
+            core_library_files.write("{prefix}.seal", seal) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core seal: {err}"}
             core_library_files.write("{prefix}.threads", thread_exports.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core thread receipt: {err}"}
             skipped: loop failure in library.skipped -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
             core_library_files.write("{prefix}.skipped", skipped.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the skipped Core roots: {err}"}
@@ -149,6 +153,7 @@ jet_cli_core_checked: fn(trace_sink: JetCLITraceSink?) -> JetCLICoreChecked {
         .Prepared(request, snapshot) -> {
             selected := request
             selected.every_core_body = true
+            selected.core_seal = true
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             front := jet_driver_lowering_inputs(selected, None)
             if trace_sink == .Val(sink) -> sink.begin("core_check.diagnostics", "", -1, -1)

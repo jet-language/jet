@@ -22,15 +22,16 @@
 // `#Memo` function for this). The pack carries no C or libc: a program's C
 // closure links the musl sysroot of jet's C toolchain pack (JetCli
 // ForeignLink.jet). The Core library (jet_core.o, core.exports, core.facts,
-// core.threads: jet's embedded Core as global symbols, and which of them a
-// bound program may take as sealed) lands here too: the image links its
+// core.seal, core.threads: jet's embedded Core as global symbols, which of
+// them a bound program may take as sealed, and what it may know of them
+// unchecked) lands here too: the image links its
 // object beside the runtime, and jet carries the object and its lists as
 // parts, by which a `jet run` binds its Core calls to the image's Core code,
 // or to the object's in a full link (JetCli Host.jet).
 RUNTIME_DIR: "JetCli/.jet/build/jet-runtime"
 RUNTIME_FILES: [String]{
     "jet_runtime_jet.o", "runtime.abi.json", "runtime.exports", "runtime.threads",
-    "jet_core.o", "core.exports", "core.facts", "core.threads",
+    "jet_core.o", "core.exports", "core.facts", "core.seal", "core.threads",
     "jet_runtime.pack.o", "jet_runtime.image", "jet_runtime.wasm", "jet_runtime.wasm.tsv",
     "provenance.json", "native.key",
 }

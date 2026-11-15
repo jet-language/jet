@@ -15,9 +15,10 @@
 // `pack` lowers Compiler/JetRuntime/sources.list and lifecycle.list as one
 // object with JET, the jet-bare this build made: its native library hook writes
 // the object, the prelinked pack and image, the web partition and the Core
-// library (jet_core.o, core.exports, core.facts, core.threads: every
-// non-generic function of a shipped package of JET's embedded Core as a
-// global symbol, and which of them a bound program may take as sealed),
+// library (jet_core.o, core.exports, core.facts, core.seal, core.threads:
+// every non-generic function of a shipped package of JET's embedded Core as
+// a global symbol, which of them a bound program may take as sealed, and
+// what it may know of them unchecked),
 // which the image links beside the runtime and the pack does not. A `jet
 // run` whose Core is the Core built into jet binds its Core calls to the
 // image's Core code, or to jet_core.o's in a full link (JetCli Host.jet). Jet's
@@ -491,8 +492,8 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         fail("`{RUNTIME_INTERFACE}` disagrees with the interface the runtime source renders; copy `{stale}` over it")
     }
     threads_sha256 := sha256_file("{prefix}.threads")
-    // The Core object's, export list's, facts' and thread receipt's digests.
-    core_sha256: "{sha256_file("{core}.o")} {sha256_file("{core}.exports")} {sha256_file("{core}.facts")} {sha256_file("{core}.threads")}"
+    // The Core object's, export list's, facts', seal's and thread receipt's digests.
+    core_sha256: "{sha256_file("{core}.o")} {sha256_file("{core}.exports")} {sha256_file("{core}.facts")} {sha256_file("{core}.seal")} {sha256_file("{core}.threads")}"
     key: pack_identity(source.sha256, abi_sha256, threads_sha256, backend.sha256, lifecycle.sha256, core_sha256)
     out: tool.out
     files.create_dir_all(out) ?? fail("cannot create `{out}`: {err}")
@@ -503,6 +504,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     copy_into("{core}.o", files.join(out, "jet_core.o"))
     copy_into("{core}.exports", files.join(out, "core.exports"))
     copy_into("{core}.facts", files.join(out, "core.facts"))
+    copy_into("{core}.seal", files.join(out, "core.seal"))
     copy_into("{core}.threads", files.join(out, "core.threads"))
     copy_into(pack, files.join(out, "jet_runtime.pack.o"))
     copy_into(image, files.join(out, "jet_runtime.image"))
@@ -527,6 +529,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         "coreObjectSha256": Dyn.Text(sha256_file("{core}.o")),
         "coreExportsSha256": Dyn.Text(sha256_file("{core}.exports")),
         "coreFactsSha256": Dyn.Text(sha256_file("{core}.facts")),
+        "coreSealSha256": Dyn.Text(sha256_file("{core}.seal")),
         "coreThreadsSha256": Dyn.Text(sha256_file("{core}.threads")),
     }
     provenance: Dyn.Object(fields)

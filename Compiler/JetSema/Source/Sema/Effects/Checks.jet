@@ -191,6 +191,9 @@ SemaEffectGraphResult: struct {
     complete: Bool
     memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
     memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
+    // With `seal`, the Core library's check: each Core function's effect
+    // summary a bound program may take for its reach (sema_effect_core_seal_rows).
+    core_seal: [SemaCoreSealEffects]{[SemaCoreSealEffects]{}}
     // The run's symbol table the check borrowed, handed back to its graph.
     symbols: SymbolTable
 }
@@ -3806,6 +3809,95 @@ sema_effect_sealed_edge: fn(table: ModuleTable, core_db: ModuleID?, caller: Sema
     db == caller.module_identity && module_is_core(target.module_identity) && module_text(table, target.module_identity).starts_with("<corelib>/__core_db_")
 }
 
+// The Core library's effect summary of each Core function (CoreSeal.jet)
+// whose reach, along the call edges the solve follows, is plain
+// (sema_effect_seal_plain) and solves to its direct effects and a stop
+// alone: its solved row is then a fact of Core's code, the same in every
+// program, and so are the direct effects the driver's walks sum along it.
+// The summaries take the graph's nodes, which are done with: each takes its
+// node's key.
+sema_effect_core_seal_rows: fn(nodes: &&[SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]], table: ModuleTable) -> [SemaCoreSealEffects] Never! {
+    core_db: module_find(table, "<corelib>/core.db")
+    plain: loop node in nodes -> sema_effect_seal_plain(node)
+    seen := loop _ in nodes -> false
+    rows := [SemaCoreSealEffects]{}
+    roots := [Int]{}
+    loop root in 0..<nodes.len() {
+        if !module_is_core(nodes[root].module_identity) || !plain[root] -> next
+        reach := [Int]{root}
+        seen[root] = true
+        sealed := true
+        direct := [String]{}
+        panic := false
+        writes := false
+        cursor := 0
+        loop cursor < reach.len() {
+            at: reach[cursor]
+            cursor += 1
+            if !plain[at] {
+                sealed = false
+                break
+            }
+            loop name in nodes[at].direct -> sema_effect_set_add(direct, name)
+            if nodes[at].module_writes.len() > 0 -> writes = true
+            loop edge in nodes[at].call_edges {
+                if edge == "__jet_panic__" {
+                    panic = true
+                    next
+                }
+                target: sema_effect_node_index(calls.node_by_key, edge) ?? next
+                if sema_effect_sealed_edge(table, core_db, nodes[at], nodes[target]) {
+                    sealed = false
+                    break
+                }
+                if seen[target] -> next
+                seen[target] = true
+                reach.push(target)
+            }
+            if !sealed -> break
+        }
+        loop at in reach -> seen[at] = false
+        if !sealed -> next
+        // Both rows are sets in the same canonical order (sema_effect_set_add),
+        // so a solved row that holds the direct row and the stop alone lists
+        // the direct row as it is.
+        matched := 0
+        loop name in solved[root] {
+            if direct.contains(name) {
+                matched += 1
+                next
+            }
+            if !(panic && name == "Panic") -> sealed = false
+        }
+        if !sealed || matched != direct.len() || (panic && !solved[root].contains("Panic")) -> next
+        rows.push(SemaCoreSealEffects{key: "", effects: direct.move(), panic: panic, writes: writes})
+        roots.push(root)
+    }
+    at := 0
+    index := 0
+    loop node in nodes.move() {
+        if at < roots.len() && roots[at] == index {
+            rows[at].key = node.key.move()
+            at += 1
+        }
+        index += 1
+    }
+    rows
+}
+
+// Whether `node`'s part of the effect graph is the same in every program
+// that calls it: no open-world call, no call through a trait value or a
+// type parameter, no function taken as a value, no scope publisher's
+// renamed row, no context read, comptime input or library effect, and not
+// one of the platform port's env reads the driver leaves out
+// (JetDriver Pipeline.jet jet_driver_toolchain_env_read).
+sema_effect_seal_plain: fn(node: SemaEffectNode) -> Bool Never! {
+    if node.maximal || node.dispatches.len() > 0 || node.param_dispatches.len() > 0 || node.value_edges.len() > 0 || node.scoped_calls.len() > 0 -> return false
+    if node.context_reads.len() > 0 || node.context_keys.len() > 0 || node.context_open || node.comptime_inputs.len() > 0 -> return false
+    if node.library_rows.len() > 0 || node.library_denials.len() > 0 || node.hook_lambdas.len() > 0 -> return false
+    node.display_key != "core.web.__app_port" && node.display_key != "core.web.__app_dev"
+}
+
 // Propagate each newly reached effect to callers once. Set insertion keeps
 // the established root-rank/name order, so worklist order cannot change
 // published rows or diagnostics. Direct rows and call-site spans are untouched.
@@ -5446,8 +5538,10 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // callees, whose call sites no module records): prep code, never a runtime
 // entry (sema_effect_runtime_input_paths). `closed` is an executable build,
 // which seals each call through a function value to the program's own
-// functions and lambdas (sema_effect_stack_seal).
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}) -> SemaEffectGraphResult {
+// functions and lambdas (sema_effect_stack_seal). `seal`, the Core
+// library's check, also summarizes each Core function for a bound program
+// (SemaEffectGraphResult.core_seal).
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -5721,8 +5815,9 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         pure_diagnostics.push(sema_pure_root_find(nodes[node_index].key, modules, decls, calls.symbols, true) ?? sema_effect_pure_diagnostic(nodes[node_index], pure_rows[pending]))
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, pure_diagnostics)
     }
+    core_seal: if seal -> sema_effect_core_seal_rows(nodes.move(), calls, solved, table) else -> [SemaCoreSealEffects]{}
     complete: !sema_has_error_since(diagnostics, 0)
-    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), symbols: calls.symbols.move()}
+    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), core_seal: core_seal, symbols: calls.symbols.move()}
 }
 
 // The rows of the effect graph each input module contributes on its own:

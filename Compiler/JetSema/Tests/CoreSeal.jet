@@ -1,0 +1,41 @@
+// The Core seal's failure fixpoint and its stand-in facts.
+use {
+    jet_sema.[SemaCoreSeal, sema_core_seal_fixpoint, sema_core_seal_stand_in_effects, sema_core_seal_stand_in_failure]
+    jet_foundation.[Span]
+}
+
+#Test("core_seal_fixpoint") {
+    // 10 calls 11, which fails nowhere; 12 calls 13, which calls a function
+    // with no callable row; 14 and 15 call each other; 16 calls 12.
+    inferred := [Int:Bool]{10: true, 11: true, 12: true, 13: true, 14: true, 15: true, 16: true}
+    rows: [Int]{10, 11, 12, 13, 14, 15, 16}
+    edges: [[Int]]{[Int]{11}, [Int]{}, [Int]{13}, [Int]{-1}, [Int]{15}, [Int]{14}, [Int]{12}}
+    sema_core_seal_fixpoint(inferred, rows, edges)
+    if !(inferred.get(10) ?? false) || !(inferred.get(11) ?? false) -> panic("a reach that fails nowhere stays infallible")
+    if (inferred.get(12) ?? true) || (inferred.get(13) ?? true) || (inferred.get(16) ?? true) -> panic("an edge with no callable row falls its whole reach")
+    if !(inferred.get(14) ?? false) || !(inferred.get(15) ?? false) -> panic("a cycle that fails nowhere stays infallible")
+}
+
+#Test("core_seal_stand_in_facts") {
+    seal := SemaCoreSeal{rows: [Int:Int]{3: 0, 4: 1}, flags: [String]{"SPWI", "SG"}, effects: [[String]]{[String]{"IO", "Net"}, [String]{}}}
+    span: Span{start: 2, end: 7}
+    stopping: sema_core_seal_stand_in_effects(seal, 0, "core.a::f", span)
+    if stopping.direct != ([String]{"IO", "Net"}) || stopping.call_edges != ([String]{"__jet_panic__"}) || stopping.maximal {
+        panic("a stand-in's direct row is its effects, and it reaches a stop")
+    }
+    if stopping.module_writes.len() != 1 || stopping.direct_spans.len() != 2 || stopping.solved.len() != 0 {
+        panic("a stand-in that writes module state has one write")
+    }
+    infallible: sema_core_seal_stand_in_failure(seal, 0, "core.a::f")
+    if infallible.direct || infallible.edges.len() != 0 || infallible.union_general || infallible.function_key != "core.a::f" {
+        panic("an infallible stand-in has no failure source")
+    }
+    quiet: sema_core_seal_stand_in_effects(seal, 1, "core.a::g", span)
+    if quiet.direct.len() != 0 || quiet.call_edges.len() != 0 || quiet.module_writes.len() != 0 {
+        panic("a stand-in with no effects names none")
+    }
+    general: sema_core_seal_stand_in_failure(seal, 1, "core.a::g")
+    if !general.direct || !general.union_general {
+        panic("a fallible stand-in keeps its failure source and its general union")
+    }
+}

@@ -576,6 +576,9 @@ SemaGraphResult: struct {
     // #3708: the unannotated top-level functions the bundle failure solve
     // proved infallible, by symbol key.
     inferred_infallible: [String]{[String]{}}
+    // SemaRegistrationGraph.core_seal: the Core seal's lines
+    // (sema_core_seal_lines); empty otherwise.
+    core_seal: [String]{[String]{}}
     // The registration graph finalization checked against (values and
     // failure projections applied), handed back by sema_finalize_graph so its
     // caller can undo the edits (sema_graph_trail_undo); None otherwise.
@@ -12140,6 +12143,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // the unannotated functions that can never fail.
     if trace_sink == .Val(sink) -> sink.begin("sema.failure", "", -1, -1)
     inferred_infallible := sema_failure_solve(after_body_graph, modules)
+    // The Core library's check summarizes Core's failure rows before the
+    // projections below change any declaration they read.
+    seal_failure: if after_body_graph.core_seal -> sema_core_seal_failure(after_body_graph, modules) else -> sema_core_seal_failure_none()
     // The same rows settle the
     // failure union of every unannotated function. Each inferred contract,
     // and the `T Never!` plain return of each infallible one (#3708 T1), is
@@ -12272,8 +12278,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // solved row onto `modules`.
     // The effect check borrows the run's symbol table and hands it back.
     effect_symbols := final_graph.symbols.move()
-    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effect_symbols, final_graph.module_table, prep_functions, threads, closed, organization_denials, organization_source)
+    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effect_symbols, final_graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, final_graph.core_seal)
     final_graph.symbols = effects.symbols.move()
+    core_seal: if final_graph.core_seal -> sema_core_seal_lines(final_graph, seal_failure, effects.core_seal) else -> [String]{}
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
@@ -12504,6 +12511,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         diagnostics: diagnostics,
         complete: complete,
         inferred_infallible: inferred_infallible,
+        core_seal: core_seal,
         programs: programs,
         outputs: outputs.move(),
         memory_declarations: effects.memory_declarations.move(),

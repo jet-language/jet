@@ -1,0 +1,312 @@
+// The Core seal: what a program bound to the Core image may know of a Core
+// function without checking its body or any body it reaches. The Core
+// library's check, with every Core body checked (JetCli CoreLibrary.jet),
+// summarizes each Core function whose whole reach leaves the passes after
+// the body checks nothing a program can change (sema_core_seal_lines), and
+// the library writes the summaries as `{prefix}.seal`, one line each:
+//
+//   key<TAB>flags[<TAB>effect]...
+//
+// sorted by key. The flags are letters, in this order:
+//   S  a stand-in: a program may take this summary for the function's body
+//      and everything it reaches (sema_core_seal_stand_in_effects,
+//      sema_core_seal_stand_in_failure);
+//   P  it reaches a stop (`Panic`);
+//   W  it, or a function it reaches, writes module state;
+//   I  the failure solve proves it infallible over what it reaches alone,
+//      none of it taken as a value;
+//   G  its failure union is the general `Err` (sema_failure_union_infer).
+// The effects of an S line are its solved row without the stop, which is
+// also every direct effect of its reach: a stand-in's own direct row.
+//
+// A line with I but not S names a function a stand-in may rely on: a
+// program that takes it as a value makes it fallible to the solve, so such
+// a program checks the Core bodies it reaches instead.
+use jet_foundation.[
+    Span,
+    TEffectFacts,
+    TEffectSpan,
+    decl_id_index,
+    decl_table_find,
+    symbol_table_key,
+]
+
+// The flag letters of a seal line (above).
+SEMA_CORE_SEAL_STAND_IN: "S"
+SEMA_CORE_SEAL_PANIC: "P"
+SEMA_CORE_SEAL_WRITES: "W"
+SEMA_CORE_SEAL_INFALLIBLE: "I"
+SEMA_CORE_SEAL_GENERAL: "G"
+// The edge a body that may stop has (sema_effect_solve).
+SEMA_CORE_SEAL_PANIC_EDGE: "__jet_panic__"
+
+// One Core function's effect summary from the Core library's effect graph
+// (sema_effect_core_seal_rows): its key, its solved row without the stop,
+// whether it reaches a stop, and whether its reach writes module state.
+SemaCoreSealEffects: struct {
+    key: String
+    effects: [String]
+    panic: Bool
+    writes: Bool
+}
+
+// The failure summaries of the Core library's check
+// (sema_core_seal_failure), by callable row (decl_id_index): the keys the
+// solve proves infallible over their own reach (`infallible`, true), the
+// unannotated top-level functions whose joined union may hold a member
+// (`unclean`) and those whose union is the general `Err` (`general`).
+// `keys` lists the inferred ones' keys.
+SemaCoreSealFailure: struct {
+    infallible: [Int:Bool]
+    unclean: [Int:Bool]
+    general: [Int:Bool]
+    keys: [String]
+}
+
+sema_core_seal_failure_none: fn() -> SemaCoreSealFailure Never! {
+    SemaCoreSealFailure{infallible: [Int:Bool]{}, unclean: [Int:Bool]{}, general: [Int:Bool]{}, keys: [String]{}}
+}
+
+// The callable row of `key` in `graph`'s declaration table.
+sema_core_seal_row: fn(graph: SemaRegistrationGraph, key: String) -> Int? Never! {
+    id: decl_table_find(graph.decls, key) ?? return None
+    Val(decl_id_index(id))
+}
+
+// The failure summaries of every checked body in `modules` but the entry
+// module's (the Core check's scratch entry, which no Core code calls), read
+// before the solve's projections change any declaration
+// (sema_finalize_program). The solve is sema_failure_solve's with no
+// function taken as a value, so each key's verdict depends on its own reach
+// alone; the union rows are sema_failure_union_infer's, joined over their
+// edges.
+sema_core_seal_failure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaCoreSealFailure Never! {
+    seal := sema_core_seal_failure_none()
+    entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
+    // The solve's candidates, each with its edges' rows (-1: no callable).
+    rows := [Int]{}
+    edges := [[Int]]{}
+    loop module_result in modules {
+        source_index: sema_registration_module_index(graph, module_result.module_identity) ?? next
+        if source_index == entry_index -> next
+        loop facts in module_result.failure_facts {
+            if facts.direct -> next
+            callable: sema_registration_callable_row(graph, facts.function_key) ?? next
+            if !sema_failure_row_in_module(graph, callable, source_index) || !sema_failure_row_candidate(graph, callable) -> next
+            row: sema_core_seal_row(graph, facts.function_key) ?? next
+            if seal.infallible.get(row) == None -> seal.keys.push(facts.function_key)
+            seal.infallible[row] = true
+            rows.push(row)
+            edges.push(loop edge in facts.edges -> sema_core_seal_row(graph, edge) ?? -1)
+        }
+    }
+    // A per-callable `#Import(c)` declaration's body is empty: a candidate
+    // with no edge, as sema_failure_solve has it.
+    loop module_index in 0..<graph.modules.len() {
+        if module_index == entry_index -> next
+        loop function_index in 0..<graph.modules[module_index].functions.len() {
+            declaration: graph.modules[module_index].functions[function_index].declaration
+            if !sema_function_is_guest_import(declaration) || !sema_failure_inference_candidate(declaration) -> next
+            key: symbol_table_key(graph.symbols, graph.modules[module_index].functions[function_index].symbol.id)
+            row: sema_core_seal_row(graph, key) ?? next
+            if seal.infallible.get(row) != None -> next
+            seal.infallible[row] = true
+            seal.keys.push(key)
+            rows.push(row)
+            edges.push([Int]{})
+        }
+    }
+    sema_core_seal_fixpoint(seal.infallible, rows, edges)
+    inferred := [String]{}
+    loop key in seal.keys {
+        row: sema_core_seal_row(graph, key) ?? next
+        if seal.infallible.get(row) ?? false -> inferred.push(key)
+    }
+    seal.keys = inferred.move()
+    sema_core_seal_unions(graph, modules, seal)
+    seal
+}
+
+// sema_failure_fixpoint over callable rows: each candidate of `rows` starts
+// inferred in `inferred`; one with an edge to a row that is not, or is no
+// longer, falls, and its fall reaches every candidate with an edge to it.
+sema_core_seal_fixpoint: fn(inferred: &[Int:Bool], rows: [Int], edges: [[Int]]) Never! {
+    slots := [Int:Int]{}
+    dependents := [[Int]]{}
+    fallen := [Int]{}
+    loop at in 0..<rows.len() {
+        loop edge in edges[at] {
+            if !(inferred.get(edge) ?? false) {
+                if inferred.get(rows[at]) ?? false {
+                    inferred[rows[at]] = false
+                    fallen.push(rows[at])
+                }
+                next
+            }
+            slot := slots.get(edge) ?? -1
+            if slot < 0 {
+                slot = dependents.len()
+                slots[edge] = slot
+                dependents.push([Int]{})
+            }
+            dependents[slot].push(at)
+        }
+    }
+    loop fallen.len() > 0 {
+        row: fallen.pop() ?? break
+        slot: slots.get(row) ?? next
+        loop at in dependents[slot] {
+            if inferred.get(rows[at]) ?? false {
+                inferred[rows[at]] = false
+                fallen.push(rows[at])
+            }
+        }
+    }
+}
+
+// The union rows of sema_failure_union_infer (the unannotated top-level
+// functions, but the entry module's `run`), joined over their edges: a row
+// is unclean when it, or a row it reaches, holds a member or mints a case,
+// and general when it is, or an edge leaves the rows or reaches a general
+// one.
+sema_core_seal_unions: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], seal: &SemaCoreSealFailure) Never! {
+    entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
+    rows := [Int]{}
+    edges := [[Int]]{}
+    loop module_result in modules {
+        module_index: sema_registration_module_index(graph, module_result.module_identity) ?? next
+        loop facts in module_result.failure_facts {
+            function_row: sema_failure_function_row(graph, module_index, facts.function_key)
+            if function_row < 0 || !sema_failure_inference_candidate(graph.modules[module_index].functions[function_row].declaration) -> next
+            if module_index == entry_index && graph.modules[module_index].functions[function_row].declaration.name == "run" -> next
+            row: sema_core_seal_row(graph, facts.function_key) ?? next
+            unclean: facts.union_members.len() > 0 || facts.union_cases.len() > 0
+            seal.unclean[row] = (seal.unclean.get(row) ?? false) || unclean
+            seal.general[row] = (seal.general.get(row) ?? false) || facts.union_general
+            rows.push(row)
+            edges.push(loop edge in facts.union_edges -> sema_core_seal_row(graph, edge) ?? -1)
+        }
+    }
+    changed := true
+    loop changed {
+        changed = false
+        loop at in 0..<rows.len() {
+            row: rows[at]
+            loop edge in edges[at] {
+                if edge == row -> next
+                reached_unclean: seal.unclean.get(edge) ?? false
+                reached_general: if seal.general.get(edge) == .Val(general) -> general else -> true
+                if reached_unclean && !(seal.unclean.get(row) ?? false) {
+                    seal.unclean[row] = true
+                    changed = true
+                }
+                if reached_general && !(seal.general.get(row) ?? false) {
+                    seal.general[row] = true
+                    changed = true
+                }
+            }
+        }
+    }
+}
+
+// The seal lines (above) of the Core library's check: a stand-in line for
+// each Core function `effects` summarizes whose union row, if it has one,
+// is clean, and an I line for each other inferred-infallible key; sorted.
+sema_core_seal_lines: fn(graph: SemaRegistrationGraph, failure: SemaCoreSealFailure, effects: [SemaCoreSealEffects]) -> [String] Never! {
+    lines := [String]{}
+    stood := [Int:Bool]{}
+    loop summary in effects {
+        row: sema_core_seal_row(graph, summary.key) ?? next
+        if failure.unclean.get(row) ?? false -> next
+        flags := SEMA_CORE_SEAL_STAND_IN
+        if summary.panic -> flags = "{flags}{SEMA_CORE_SEAL_PANIC}"
+        if summary.writes -> flags = "{flags}{SEMA_CORE_SEAL_WRITES}"
+        if failure.infallible.get(row) ?? false -> flags = "{flags}{SEMA_CORE_SEAL_INFALLIBLE}"
+        if failure.general.get(row) ?? false -> flags = "{flags}{SEMA_CORE_SEAL_GENERAL}"
+        line := "{summary.key}\t{flags}"
+        loop name in summary.effects -> line = "{line}\t{name}"
+        lines.push(line)
+        stood[row] = true
+    }
+    loop key in failure.keys {
+        row: sema_core_seal_row(graph, key) ?? next
+        if stood.get(row) != None -> next
+        lines.push("{key}\t{SEMA_CORE_SEAL_INFALLIBLE}")
+    }
+    lines.sort()
+    lines
+}
+
+// A seal as a program reads it (sema_core_seal_read): each line's flags and
+// effects at its position, found by its key's callable row in the
+// program's declaration table (a key the program does not register is
+// left out).
+SemaCoreSeal: struct {
+    rows: [Int:Int]
+    flags: [String]
+    effects: [[String]]
+}
+
+sema_core_seal_empty: fn() -> SemaCoreSeal Never! {
+    SemaCoreSeal{rows: [Int:Int]{}, flags: [String]{}, effects: [[String]]{}}
+}
+
+// The seal `text` (the lines of sema_core_seal_lines, joined by newlines)
+// over `graph`'s callables; a line
+// that is not `key<TAB>flags[<TAB>effect]...` is skipped.
+sema_core_seal_read: fn(text: String, graph: SemaRegistrationGraph) -> SemaCoreSeal Never! {
+    seal := sema_core_seal_empty()
+    loop line in text.split("\n") {
+        columns: line.split("\t").to_list()
+        if columns.len() < 2 || columns[1] == "" -> next
+        row: sema_core_seal_row(graph, columns[0]) ?? next
+        seal.rows[row] = seal.flags.len()
+        seal.flags.push(columns[1])
+        seal.effects.push(loop at in 2..<columns.len() -> columns[at])
+    }
+    seal
+}
+
+// The position of `key`'s line in `seal` when it is a stand-in line.
+sema_core_seal_stand_in: fn(seal: SemaCoreSeal, graph: SemaRegistrationGraph, key: String) -> Int? Never! {
+    row: sema_core_seal_row(graph, key) ?? return None
+    at: seal.rows.get(row) ?? return None
+    if !seal.flags[at].contains(SEMA_CORE_SEAL_STAND_IN) -> return None
+    Val(at)
+}
+
+// Whether a program that takes `key` as a value changes what a stand-in of
+// `seal` may assume: a stand-in itself, or an inferred-infallible key one
+// may reach.
+sema_core_seal_valued: fn(seal: SemaCoreSeal, graph: SemaRegistrationGraph, key: String) -> Bool Never! {
+    row: sema_core_seal_row(graph, key) ?? return false
+    at: seal.rows.get(row) ?? return false
+    seal.flags[at].contains(SEMA_CORE_SEAL_STAND_IN) || seal.flags[at].contains(SEMA_CORE_SEAL_INFALLIBLE)
+}
+
+// The effect facts of the stand-in at line `at` of `seal`, whose source is
+// `span`: its effects as its direct row, the stop edge when it reaches one,
+// and one write when its reach writes module state, named by `key`. The
+// effect graph solves it to the library's row (sema_effect_solve), and the
+// driver's walks find the same direct effects as along the bodies it
+// stands for (JetDriver Pipeline.jet jet_driver_required_effects).
+sema_core_seal_stand_in_effects: fn(seal: SemaCoreSeal, at: Int, key: String, span: Span) -> TEffectFacts Never! {
+    edges := [String]{}
+    if seal.flags[at].contains(SEMA_CORE_SEAL_PANIC) -> edges.push(SEMA_CORE_SEAL_PANIC_EDGE)
+    writes := [TEffectSpan]{}
+    if seal.flags[at].contains(SEMA_CORE_SEAL_WRITES) -> writes.push(TEffectSpan{name: key, span: span})
+    spans: loop name in seal.effects[at] -> TEffectSpan{name: name, span: span}
+    TEffectFacts{direct: seal.effects[at], solved: [String]{}, call_edges: edges, maximal: false, direct_spans: spans, module_writes: writes}
+}
+
+// The failure facts of the stand-in at line `at` of `seal` for `key`: a
+// failure source of its own unless the solve proved it infallible, no
+// edge, and an empty union row, general as the library joined it.
+sema_core_seal_stand_in_failure: fn(seal: SemaCoreSeal, at: Int, key: String) -> SemaFunctionFailureFacts Never! {
+    SemaFunctionFailureFacts{
+        function_key: key,
+        direct: !seal.flags[at].contains(SEMA_CORE_SEAL_INFALLIBLE),
+        edges: [String]{},
+        union_general: seal.flags[at].contains(SEMA_CORE_SEAL_GENERAL),
+    }
+}
