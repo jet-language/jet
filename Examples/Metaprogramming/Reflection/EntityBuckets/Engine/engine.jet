@@ -1,0 +1,53 @@
+// An entity library in plain Jet, after the Jai entity-bucket demo. A program
+// marks each entity type `#Engine.Entity` and calls `engine.add_world` from
+// its build. The library reads every use of the marker and derives from them
+// the entity count, the sorted names, a `World` with one `Rows<T>` bucket per
+// entity type, and a `spawn_<name>` that adds a default-built entity to its
+// bucket. It keeps no list of entity types: a new marked struct, a generated
+// one included, joins every table.
+Entity: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+// One entity type's storage: its entities in spawn order.
+Rows: struct<T> {
+    items: [T]
+
+    add: fn(&self, item: &&T) -> Int {
+        self.items.push(item)
+        self.items.len() - 1
+    }
+
+    len: fn(self) -> Int { self.items.len() }
+}
+
+// Every `#Engine.Entity` use in the program, in module and source order.
+ENTITIES: #run Entity.reflect().uses
+
+ENTITY_COUNT: #run Entity.reflect().uses.len()
+
+count: fn() -> Int { ENTITY_COUNT }
+
+// The entity type names, sorted.
+names: fn() -> [String] {
+    names := [String]{}
+    loop entry in ENTITIES -> names.push(entry.site.name)
+    names.sort()
+    names
+}
+
+// Writes `World` into the program `meta` builds: a `<name>_rows` bucket and
+// a `spawn_<name>` for each entity type, each bucket starting empty.
+add_world: fn(meta: Compiler) {
+    fields := [String]{}
+    spawns := [String]{}
+    loop entry in ENTITIES {
+        name: entry.site.name
+        rows: "{name.lower()}_rows"
+        fields.push("    {rows}: engine.Rows<{name}>{{engine.Rows<{name}>{{items: [{name}]{{}}}}}}")
+        spawns.push("    spawn_{name.lower()}: fn(&self) -> Int {{ self.{rows}.add({name}{{}}) }}")
+    }
+    meta.add("use engine\n\nWorld: struct {{\n{fields.join("\n")}\n\n{spawns.join("\n\n")}\n}}\n", scope: "world")
+}

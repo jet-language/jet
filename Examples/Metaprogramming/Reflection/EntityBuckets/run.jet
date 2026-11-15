@@ -1,0 +1,59 @@
+// An engine-style library derives entity storage from its own marker's uses:
+// marking a struct `#Engine.Entity` is the only edit that gives it a place in
+// the count and the sorted names, a `Rows<T>` bucket in `World` and a spawn
+// function that default-builds it. `LaserShot` is written by `#Armory`, not
+// by hand, and joins the same way. `World` is the module `build: fn` adds,
+// so the program runs from `jet build`.
+use engine
+
+#Engine.Entity
+Player: struct {
+    hp: Int{100}
+    name: String{"hero"}
+}
+
+#Engine.Entity
+Enemy: struct {
+    hp: Int{30}
+}
+
+// A generator of the program's own: `#Armory` on a weapon writes the
+// weapon's shot, which is an entity.
+Armory: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            shot: "{target.name}Shot"
+            #Engine.Entity
+            #{shot}: struct {
+                speed: Int{9}
+            }
+        }
+    }
+}
+
+#Armory
+Laser: struct {
+    power: Int{3}
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("entity_buckets", ["run.jet"], [])
+    engine.add_world(b.compiler(app))
+    b.default(app)
+}
+
+run: fn() {
+    print("entities: {engine.count()}")
+    print("names: {engine.names().join(", ")}")
+    world := World{}
+    first: world.spawn_player()
+    second: world.spawn_player()
+    _ := world.spawn_enemy()
+    _ := world.spawn_lasershot()
+    print("players {world.player_rows.len()} (rows {first} and {second}), enemies {world.enemy_rows.len()}, shots {world.lasershot_rows.len()}")
+    hero: world.player_rows.items[first]
+    print("player {hero.hp} {hero.name}; enemy {world.enemy_rows.items[0].hp}; shot speed {world.lasershot_rows.items[0].speed}")
+    print("laser power {Laser{}.power}")
+}

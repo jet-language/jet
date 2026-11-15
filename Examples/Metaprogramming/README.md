@@ -73,6 +73,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [CommentsAndDocs](Reflection/CommentsAndDocs/) — Comments, documentation and marker arguments stay apart: each declaration's reflection lists its `///` documentation, a module's ModuleInfo lists every comment in its file, and a `//` inside a marker argument stays text.
 - [ConsoleRegistry](Reflection/ConsoleRegistry/) — A command registry derived from metadata.
 - [DeclarationFacts](Reflection/DeclarationFacts/) — Every declaration has a typed reflection record: `definitions()` gives each one's DeclarationKind, path and scope, and the path finds its TypeInfo, FunctionInfo, MethodInfo, TraitInfo or ConstantInfo.
+- [EntityBuckets](Reflection/EntityBuckets/) — An engine-style library derives entity storage from its own marker's uses: marking a struct `#Engine.Entity` is the only edit that gives it a place in the count and the sorted names, a `Rows<T>` bucket in `World` and a spawn function that default-builds it. `LaserShot` is written by `#Armory`, not by hand, and joins the same way.
 - [FactPlane](Reflection/FactPlane.jet) — One folded program reads the registered build fact plane.
 - [FactReads](Reflection/FactReads.jet) — Every compiler-held plane uses one typed `@` read.
 - [FactSigil](Reflection/FactSigil.jet) — The fact sigil: compiler facts carry `$`.

@@ -673,6 +673,14 @@ Entity.reflect().uses.len() }`. Only the package that declares `M` reads its
 uses; any other package's read is E1136. A use whose marker argument has no
 compile-time value is E0302. See
 [`MarkerUses`](../../../Examples/Metaprogramming/Reflection/MarkerUses.jet).
+A use on a struct a template writes is listed too.
+[`EntityBuckets`](../../../Examples/Metaprogramming/Reflection/EntityBuckets/run.jet)
+is an engine library that keeps no list of entity types: from the uses of its
+own `#Engine.Entity` it derives the entity count and sorted names, and its
+`add_world(meta)`, which the program's `build: fn` calls, adds a `World`
+with a `Rows<T>` bucket and a default-building `spawn_<name>` per entity.
+Marking one more struct, or generating one marked struct, is the only edit
+that adds an entity. `World` exists in the program `jet build` compiles.
 
 The fact plane is deliberately typed and closed. The feature examples read
 range, dimension, state, effect, sendability, movedness, attribution, origin,
