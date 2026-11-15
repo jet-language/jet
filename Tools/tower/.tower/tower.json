@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6925,
-    "rev": 104650,
+    "rev": 104656,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40267,13 +40267,12 @@
         "memory-model",
         "soundness",
         "needs-owner",
-        "batch-jetc-sema",
-        "wayfinder:map"
+        "batch-jetc-sema"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:46:54.243Z",
-      "updated": "2026-11-15T04:31:59.193Z",
+      "updated": "2026-11-15T04:32:42.463Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -48703,6 +48702,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15 by TowerKeeper-1: the precut-audit notes on c6-c10 named UI rows that are no longer on dev; each criterion now names its own proof."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "c5 ruling (Main, 2026-11-13): a public function !Mem.* denial and its bound are part of its API row, like its effect row. Removing a denial or loosening a bound is semver-breaking (major), and adding or tightening one is minor. jet inspect expand --facts memory shows the denial and its bound. The MemoryPolicies example and its ui rows already pass on o0, o1 and o2; the inspect and API/semver parts remain (G9Web-1-2)."
@@ -48915,7 +48919,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-15T04:32:14.602Z",
+      "updated": "2026-11-15T04:32:40.767Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -54149,6 +54153,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15 by TowerKeeper-1: debris stripped and proofs added; c7 completed from folded #5939's body."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "c11 scope ruling (Main, 2026-11-13): E0642 refuses a try_alloc ?? fallback only when the payload holds a resource or cannot be cloned, which is exactly the set the JetIR refusal covered and that ICEd with exit 101 at run time. A plain-value fallback on an Int payload stays accepted. This matches the merged card title (closeable try_alloc); refusing every non-view fallback would ban safe code and serves no safety purpose. G9Web-5014-try-alloc-fallback-e0642 moves the refusal into sema and deletes the IR one (I2, I3)."
@@ -54396,12 +54405,12 @@
         },
         {
           "n": 17,
-          "text": "(was #5988) (was #4959) Soundness: checker accepts a borrowed loop row read after the collection is cleared through &mut",
+          "text": "The checker refuses a borrowed loop row read after the collection is cleared through a write borrow, with a registered error. Proof: `jet test Compiler --profile ui --filter loop_row_read_after_clear`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:45:06.513Z"
+          "at": "2026-11-15T04:32:37.369Z"
         },
         {
           "n": 18,
@@ -54423,22 +54432,20 @@
         },
         {
           "n": 20,
-          "text": "Found 2026-11-13 (G10Safe-1, probe s15k, $JET_SCRATCH_ROOT/lanes/G10Safe): sema accepts a view items[0..2] held across a call to a lambda that writes items (a push may reallocate under the live view). This is an I1 hole. Sema refuses the call while the view is live, with a registered diagnostic and a UI snapshot, or the program is proven safe at O0, O1 and O2. A case covers view-then-lambda-push, view-then-lambda-read (accepted) and a view that ends before the call (accepted).",
+          "text": "Found 2026-11-13 (G10Safe-1, probe s15k, $JET_SCRATCH_ROOT/lanes/G10Safe): sema accepts a view items[0..2] held across a call to a lambda that writes items (a push may reallocate under the live view). This is an I1 hole. Sema refuses the call while the view is live, with a registered diagnostic and a UI snapshot, or the program is proven safe at O0, O1 and O2. A case covers view-then-lambda-push, view-then-lambda-read (accepted) and a view that ends before the call (accepted). Proof: `jet test Compiler --profile cases --filter views/view_across_lambda_` (push refused, read accepted, ended view accepted), and `jet test Compiler --profile ui --filter view_across_lambda_push`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T05:38:07.824Z"
+          "at": "2026-11-15T04:32:38.472Z"
         }
       ],
       "refs": [],
-      "tags": [
-        "wayfinder:map"
-      ],
+      "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T07:36:29.780Z",
-      "updated": "2026-11-15T04:32:36.111Z",
+      "updated": "2026-11-15T04:32:44.282Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -214256,6 +214263,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:32:44.283Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0mj3ijb",
+      "note": "removeTags,tags"
+    },
+    {
+      "at": "2026-11-15T04:32:42.463Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0tgtjtu",
+      "note": "removeTags,tags"
+    },
+    {
+      "at": "2026-11-15T04:32:40.767Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c00rqc09",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:32:39.535Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0mj3ijb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:32:38.472Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0mj3ijb",
+      "note": "#20: proof; was: Found 2026-11-13 (G10Safe-1, probe s15k, $JET_SCRATCH_ROOT/lanes/G10Safe): sema accepts a view items[0..2] held across a call to a lambda that writes items (a push may reallocate under the live view)."
+    },
+    {
+      "at": "2026-11-15T04:32:37.369Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0mj3ijb",
+      "note": "#17: strip debris; proof; was: (was #5988) (was #4959) Soundness: checker accepts a borrowed loop row read after the collection is cleared through &mut"
+    },
     {
       "at": "2026-11-15T04:32:36.111Z",
       "by": "TowerKeeper-1",
