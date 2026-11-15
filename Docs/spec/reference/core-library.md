@@ -5446,7 +5446,11 @@ encoded arguments tell bindings of one source apart (an argument type without
 previous one is not a change, so readers wake only when the value changed.
 A re-run that an invalidation overtakes (a write committed after the re-run
 read) stores its result but leaves the binding stale, so the next read runs
-the source again and an older value is never kept as current.
+the source again and an older value is never kept as current. Under writes
+that keep overtaking it, a binding settles instead of running on every read:
+from its second overtaken run in a row, reads serve its stale result for a
+hold as long as that run took, and at least 100 ms, and the first read after
+the hold runs the source again.
 `Live<T, E>` is an identity, not a snapshot: reads, invalidation and
 statistics always use the one registry. A full registry evicts its oldest
 binding. A signature names the type after `use app.[Live]`. The registry

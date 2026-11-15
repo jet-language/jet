@@ -373,8 +373,10 @@ Live: struct<T, E> {
 // One registry binding, named by its source's wire name and its encoded
 // argument list. `value` is the last result, `ok:` or `err:` then its JSON,
 // and empty before the first run; `generation` counts the invalidations that
-// reached the binding; `every_ns` is the poll interval (0: none) and `ran_ns`
-// the monotonic time of the last run.
+// reached the binding; `overtaken` counts its runs in a row that an
+// invalidation overtook, and `held_ns` is the monotonic time until which a
+// stale binding serves its stored result (0: none); `every_ns` is the poll
+// interval (0: none) and `ran_ns` the monotonic time of the last run.
 LiveRecord: struct {
     id: Int
     source: String
@@ -382,6 +384,8 @@ LiveRecord: struct {
     value: String
     dirty: Bool
     generation: Int
+    overtaken: Int
+    held_ns: Int
     every_ns: Int
     ran_ns: Int
 }
@@ -413,7 +417,10 @@ LiveRegistry: struct {
 // result yet, was invalidated, or its poll interval has passed; the stored
 // result changes only when the re-run's encoding differs. A re-run that an
 // invalidation overtook stores its result but leaves the binding stale, since
-// what it read may predate that write.
+// what it read may predate that write. Under writes that keep overtaking it, a
+// binding settles: from its second overtaken run in a row, its stale result
+// is served for a hold (live_store) instead of running the source on every
+// read.
 state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! {
     now: rt.clock_mono_ns()
     seen: live_current(binding.id, now)
@@ -492,6 +499,15 @@ LIVE_MAX_QUERIES: 1024
 
 LIVE_MAX_PAYLOAD: 4194304
 
+// A binding whose runs this many times in a row were overtaken serves its
+// stale result for a hold before it runs again.
+LIVE_HOLD_AFTER: 2
+
+// The shortest hold, in nanoseconds; a run that took longer holds as long as
+// it took, so a binding over a busy table spends at most half its time
+// running.
+LIVE_HOLD_MIN_NS: 100000000
+
 // The registry source of sync's session records: a session keeps its
 // generation and document as the record's value.
 LIVE_SYNC_SOURCE: "app.sync"
@@ -558,20 +574,21 @@ live_register: fn(source: String, key: String, every_ns: Int) -> Int {
                 registry.evictions += 1
             }
             // copy: a lost race retries with the same source and key
-            registry.records.push(LiveRecord{id: found, source: source.copy(), key: key.copy(), value: "", dirty: false, generation: 0, every_ns: every_ns, ran_ns: 0})
+            registry.records.push(LiveRecord{id: found, source: source.copy(), key: key.copy(), value: "", dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: every_ns, ran_ns: 0})
         }
         if live_cell_replace(seen, live_encode(registry)) -> return found
     }
 }
 
-// The stored result of binding `id` when it is current at `now` (None when
-// the binding must re-run), and its generation.
+// The stored result of binding `id` when it is current at `now`, or stale
+// but held (None when the binding must re-run), and its generation.
 live_current: fn(id: Int, now: Int) -> LiveCurrent {
     registry: live_decode(live_cell_load()) ?? return LiveCurrent{value: None, generation: 0}
     index: live_index(registry, id) ?? return LiveCurrent{value: None, generation: 0}
     record: registry.records[index]
-    if record.value == "" || record.dirty -> return LiveCurrent{value: None, generation: record.generation}
-    if record.every_ns > 0 && now - record.ran_ns >= record.every_ns -> return LiveCurrent{value: None, generation: record.generation}
+    if record.value == "" -> return LiveCurrent{value: None, generation: record.generation}
+    if record.dirty && now >= record.held_ns -> return LiveCurrent{value: None, generation: record.generation}
+    if !record.dirty && record.every_ns > 0 && now - record.ran_ns >= record.every_ns -> return LiveCurrent{value: None, generation: record.generation}
     LiveCurrent{value: Val(record.value.copy()), generation: record.generation}  // copy: the registry snapshot is dropped here
 }
 
@@ -589,8 +606,12 @@ live_value_state: fn<T: [Encode, Decode], E: [Encode, Decode]>(text: String) -> 
 // stored one counts as a change. The binding becomes clean unless `started`,
 // its generation when the run began, is older than its generation now: an
 // invalidation that arrived during the run keeps it stale, so the next read
-// runs it again. A push (`started` None) is current as stored. `now` < 0
-// keeps the last run time.
+// runs it again. From the LIVE_HOLD_AFTER-th such run in a row, the stale
+// result is held: reads serve it until the hold ends (as long as the run took,
+// at least LIVE_HOLD_MIN_NS), and the first read after that runs the source
+// again, so the binding never keeps an older value as current and never runs
+// on every read. A push (`started` None) is current as stored. `now`, the
+// time the run began, < 0 keeps the last run time.
 live_store: fn(id: Int, value: String, now: Int, started: Int?) {
     if value.len() > LIVE_MAX_PAYLOAD {
         return
@@ -605,7 +626,18 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
         }
         overtaken := false
         if started == .Val(generation) && registry.records[index].generation != generation -> overtaken = true
-        if !overtaken -> registry.records[index].dirty = false
+        if overtaken {
+            registry.records[index].overtaken += 1
+            if registry.records[index].overtaken >= LIVE_HOLD_AFTER && now >= 0 {
+                ended: rt.clock_mono_ns()
+                took: ended - now
+                registry.records[index].held_ns = ended + if took > LIVE_HOLD_MIN_NS -> took else -> LIVE_HOLD_MIN_NS
+            }
+        } else {
+            registry.records[index].dirty = false
+            registry.records[index].overtaken = 0
+            registry.records[index].held_ns = 0
+        }
         if now >= 0 -> registry.records[index].ran_ns = now
         if live_cell_replace(seen, live_encode(registry)) {
             return
@@ -652,7 +684,7 @@ live_index: fn(registry: LiveRegistry, id: Int) -> Int? {
 }
 
 // The cell holds the registry as length-prefixed fields: next id,
-// invalidations, changes, evictions, WebSocket pushes, then eight fields per
+// invalidations, changes, evictions, WebSocket pushes, then ten fields per
 // binding.
 live_encode: fn(registry: LiveRegistry) -> [U8] {
     out := [U8]{}
@@ -668,6 +700,8 @@ live_encode: fn(registry: LiveRegistry) -> [U8] {
         live_put(out, record.value)
         live_put(out, if record.dirty -> "1" else -> "0")
         live_put(out, "{record.generation}")
+        live_put(out, "{record.overtaken}")
+        live_put(out, "{record.held_ns}")
         live_put(out, "{record.every_ns}")
         live_put(out, "{record.ran_ns}")
     }
@@ -685,7 +719,7 @@ live_decode: fn(raw: [U8]) -> LiveRegistry? {
         return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, ws_pushes: 0, records: [LiveRecord]{}})
     }
     fields: live_fields(raw) ?? return None
-    if fields.len() < 5 || (fields.len() - 5) % 8 != 0 -> return None
+    if fields.len() < 5 || (fields.len() - 5) % 10 != 0 -> return None
     next_id: Int.parse(fields[0]) ?? return None
     invalidations: Int.parse(fields[1]) ?? return None
     changes: Int.parse(fields[2]) ?? return None
@@ -696,10 +730,12 @@ live_decode: fn(raw: [U8]) -> LiveRegistry? {
     loop at < fields.len() {
         id: Int.parse(fields[at]) ?? return None
         generation: Int.parse(fields[at + 5]) ?? return None
-        every_ns: Int.parse(fields[at + 6]) ?? return None
-        ran_ns: Int.parse(fields[at + 7]) ?? return None
-        records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", generation: generation, every_ns: every_ns, ran_ns: ran_ns})
-        at += 8
+        overtaken: Int.parse(fields[at + 6]) ?? return None
+        held_ns: Int.parse(fields[at + 7]) ?? return None
+        every_ns: Int.parse(fields[at + 8]) ?? return None
+        ran_ns: Int.parse(fields[at + 9]) ?? return None
+        records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", generation: generation, overtaken: overtaken, held_ns: held_ns, every_ns: every_ns, ran_ns: ran_ns})
+        at += 10
     }
     Val(LiveRegistry{next_id: next_id, invalidations: invalidations, changes: changes, evictions: evictions, ws_pushes: ws_pushes, records: records})
 }
@@ -775,7 +811,7 @@ sync: fn(doc_show: String, over: String) -> String Never! {
         if found >= 0 -> registry.records[found].value = value else {
             id: registry.next_id + 1
             registry.next_id = id
-            registry.records.push(LiveRecord{id: id, source: LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, generation: 0, every_ns: 0, ran_ns: 0})
+            registry.records.push(LiveRecord{id: id, source: LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: 0, ran_ns: 0})
         }
         if live_cell_replace(seen, live_encode(registry)) -> return receipt
     }
