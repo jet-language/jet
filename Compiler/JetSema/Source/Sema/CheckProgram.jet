@@ -10134,29 +10134,38 @@ sema_comptime_stage_imports: fn(program: SemaProgramTables) -> [SemaRegistration
     panic("the declaration pass lost its registration graph")
 }
 
-// Declaration-only modules against the staging run's existing program owner.
-sema_comptime_modules_with_values: fn(program: SemaProgramTables, values: [SemaComptimeItemValue]) -> [SemaGraphModuleResult] {
-    module_count: if program.registration_graph == {
-        .Val(registered) -> registered.modules.len()
-        .None -> 0
-    }
+// Every module of the staging run's graph checked for its declarations under
+// `values` (sema_check_declaration_module), in graph order, on up to
+// `threads` compiler threads. The run's program tables move out of their
+// one-row slot `programs` into the threads' shared state and back. The checks
+// share one environment that publishes `values` to comptime bodies; none
+// reads its entered module.
+sema_comptime_modules_with_values: fn(programs: &[SemaProgramTables], values: [SemaComptimeItemValue], threads: CompilerThreads) -> [SemaGraphModuleResult] {
+    module_count: sema_comptime_staged_module_count(programs[0]) ?? panic("the staging run's program tables lost their registration graph")
     environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
     environment.comptime_body_publication = sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), None, false)
+    program := programs.pop() ?? panic("the staging run's program tables left their slot")
+    module_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
+    // A declaration check reads no memory plan.
+    sema_check_shared_fill(module_state, environment, program, sema_function_memory_plan_new())
+    every_module := [Int]{}
+    loop module_index in 0..<module_count -> every_module.push(module_index)
+    checks := sema_check_declaration_modules(module_state, every_module, values, true, threads)
+    programs.push(sema_check_shared_take_program(module_state))
     modules := [SemaGraphModuleResult]{}
-    loop module_index in 0..<module_count {
-        scopes := sema_scope_init(sema_check_registered_module_identity(environment, program, module_index))
-        checked := sema_check_registration_module_start(environment, program, module_index, values, scopes)
-        // copy: a handle copy (Shared facts plus length and frontier ints): each module result
-        // keeps the publication it was checked against, while the environment's publication
-        // advances.
-        body_values := environment.comptime_body_publication.copy()
-        sema_scope_environment_enter_module(environment, program, module_index, body_values)
-        items_scanned := 0
-        sema_check_registration_module_program(environment, program, module_index, checked, false, items_scanned)
-        sema_check_registration_module_foreign(environment, program, module_index, checked)
-        modules.push(checked)
+    checks.reverse()
+    loop checks.len() > 0 {
+        check := checks.pop() ?? break
+        modules.push(check.module_result.move())
     }
-    modules.move()
+    modules
+}
+
+// The number of modules of `program`'s registration graph, or None when it
+// has none.
+sema_comptime_staged_module_count: fn(program: SemaProgramTables) -> Int? {
+    if program.registration_graph == .Val(registered) -> return Val(registered.modules.len())
+    None
 }
 
 // A compiler thread is admitted for at least this many bytes of module item
