@@ -269,8 +269,21 @@ rt_text_capacity_stop: fn() {
     jet_rt_string_drop(message)
 }
 
+// The bytes the heap block serving a `bytes`-byte text buffer holds: its
+// size class's block less the block's header (alloc_bytes), or `bytes`
+// itself for a buffer mapped directly past the largest class.
+rt_text_buffer_fill: fn(bytes: I64) -> I64 {
+    block: alloc_class(bytes, I64{1}, ALLOC_CLASS_LIMIT)
+    if (block == I64{0}) -> bytes else -> block - alloc_header(I64{1})
+}
+
 // Shared growth keeps byte append and registered-report word append exact:
 // a word contains UTF-8 bytes, not scalar values to encode a second time.
+// Inline bytes grow to the buffer `needed` takes, a separate buffer to at
+// least twice its capacity, and either fills the size class serving it
+// (rt_text_buffer_fill): a power-of-two capacity plus the block header
+// would take the next class and leave about half of that block unused, so
+// a finished text keeps the smallest block its length needs.
 rt_text_reserve_extra: fn(target: I64, old: I64, used: I64, extra: I64) -> I64 {
     if !rt_text_writable(target) -> return I64{0}
     if (extra > I64{9223372036854775807} - used) {
@@ -280,10 +293,10 @@ rt_text_reserve_extra: fn(target: I64, old: I64, used: I64, extra: I64) -> I64 {
     needed: used + extra
     cap: rt_text_word(wrapping(target + I64{16}))
     if (needed <= cap) -> return old
-    grown: if (cap <= I64{4611686018427387903}) -> cap * I64{2} else -> needed
-    capacity: if (needed > grown) -> needed else -> grown
     // The inline bytes stay with the block; a separate buffer is released.
     separate: !rt_text_inline(target, old)
+    grown: if (separate && cap <= I64{4611686018427387903}) -> cap * I64{2} else -> needed
+    capacity: rt_text_buffer_fill(if (needed > grown) -> needed else -> grown)
     // A direct-mapped buffer grows by mremap: no second buffer, no copy.
     if separate {
         moved: alloc_grow_large(old, cap, capacity)
