@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6851,
-    "rev": 102825,
+    "rev": 102846,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27058,8 +27058,8 @@
     {
       "id": "c0xb6zik",
       "num": 3132,
-      "title": "Offer one typed catalog of payload-free enum values",
-      "body": "Offer one typed catalog of payload-free enum values.\n\nPayload-free case iteration is not a finite traversal of arbitrary payload values. Choose an explicit typed value surface and its stock Core iterator integration.\n\nRoute D-ENUM-CASEVALUES1. It chooses a compiler-generated payload-free T.cases() -> Iter<T> versus explicit lists. It includes ordering, sparse-code behavior, allocation and payload rejection rules, and is explicitly a stock compiler/Core-Iter addition, not an optional enum package. General metadata is separately gated by F21.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-enum-f03-finite-case-values. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.",
+      "title": "Enums: the value catalog, checked from_int, case constructors as values and repairable diagnostics",
+      "body": "Destination: payload-free enums have one typed value catalog (`T.$values`, D-ENUM-CASEVALUES1=A, D-COMPILER-NS1=A), numbered enums convert from numbers through a generated checked `from_int` (D-ENUM-INGRESS1=A), payload cases pass as callable values (D-ENUM-CONSTRUCTORCALL1=A), and enum mistakes carry structured repairs. Why: enums are the most common closed data in Jet programs; every manual case list or parser is a place for drift.\n\nThe value catalog is built (Examples/Types/EnumValues.jet, criteria 1-8 met). Spec: Docs/spec/spec.md (enums); the research for each item is in Docs/research/mine-for-jet-2026-09-12.md and Docs/research/evidence-2026-09-29/.\n\nCriteria 9-14 carry the enum surface items absorbed from #3140, #3146, #3159, #3161 and #3389, restated 2026-11-14.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
@@ -27073,6 +27073,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: retitled to the enum surface it now holds; c9-c14 restated from their absorbed-card pointers to full outcomes with one proof each. c15's case landed on dev 510ae6b7e8 but fails on the gate-p136 jet (E0108); proof queued for Main on a newer jet."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -27285,7 +27290,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:35.846Z",
-      "updated": "2026-11-15T02:10:54.635Z",
+      "updated": "2026-11-15T02:12:08.193Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 128,
       "goals": [
@@ -27474,8 +27479,8 @@
     {
       "id": "c0w7t4qu",
       "num": 3147,
-      "title": "Choose general enum case metadata in the existing reflection model",
-      "body": "Choose general enum case metadata in the existing reflection model.\n\nThe complete captured TypeInfo/reflect inventory exposes fields and the Rust-side core enum catalog, not a public typed enum case/payload metadata iterator. This is separate from constructing every payload-free value.\n\nRoute D-ENUM-CASEMETA1 for one checked enum case model: TypeInfo.cases descriptors and the active runtime Value.case() projection. Keep type-only metadata erased and payload values typed. Extend existing reflection, not an enum-only library.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-enum-f21-case-metadata-api. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nExtend the existing type and enum reflection owner rather than open a competing enum card. Project every Jet type form, canonical nominal/generic identity, fields, defaults, visibility, typed markers, trait/associated-type contracts, enum cases/payloads/groups/discriminants, layout/alignment/offsets and target ABI facts. Use typed references instead of requiring consumers to parse type-name strings. Preserve the complete-or-refused capture and active-case contract of D-ENUM-CASEMETA1.\n\n## Owned paths and integration\n\n- crates/jet-foundation/src/Reflection.rs\n- crates/jet-foundation/src/AST/types.rs\n- crates/jet-comptime/src/Comptime/Reflect.rs\n- crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs\n- crates/jet-codegen/src/Codegen/TIR\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\nExtend tests/reflect.rs and the existing enum reflection witnesses. Add a golden type-catalog example covering every AST Type family and enum case shape. Exercise declared and instantiated types, same-layout distinct nominals, field visibility, target layout and generic identity. Compare selected target facts to the target dossier, not host sizeof.",
+      "title": "Enum case metadata in the typed reflection path (D-ENUM-CASEMETA1)",
+      "body": "Destination: a program reads an enum's cases, their names, payload fields and markers, and a value's active case, through the same typed reflection records as every other type, with zero cost for programs that do not reflect. Why: codecs, UI builders and tests all need case metadata, and a second path would drift.\n\nGoverning decisions: D-ENUM-CASEMETA1=A, D-NAME-REFLECT1=A, D-ONE-SHAPE1=A, D-META-REFLECT2=A. The general typed reflection records are built on the reflection card (see the 2026-11-14 log). Spec: Docs/spec/reference/metaprogramming.md.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
@@ -27487,7 +27492,7 @@
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-enum-f21-case-metadata-api. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [
-        "c0yfcz0w"
+        "c0apk7x9"
       ],
       "assignee": null,
       "log": [
@@ -27697,10 +27702,10 @@
         "batch-jetc-sema",
         "wayfinder:decision"
       ],
-      "parentId": "c0yfcz0w",
+      "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-15T02:11:02.470Z",
+      "updated": "2026-11-15T02:11:59.414Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 171,
       "goals": [
@@ -33290,6 +33295,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed 2026-11-14 by TowerKeeper-1 (board rebuild). The 24 met criteria stay as history. The 11 open criteria went to focused cards: 9 to #6845 (typed reflection: callables #6845 c1, declarations #6845 c2, run-time views #6845 c3, field facts #6845 c4, TypeId #6845 c7, entity buckets #6845 c8 absorbing c28, meta_suite #6845 c11), c11 to #6846 c2, and the hook items c21 and c22 to #5009 (#5009 c5, #5009 c6). The decisions in this card's 2026-11-11 logs (PreparedValue cases, TypeId identity, SourceSpan file, the Build setting origin) are carried in #6845's body."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "dev 68077a2e01 (G5DevX-reflect-effects): golden Examples/Metaprogramming/Reflection/CallableCatalog is green again, PASS 3 at o0, o1 and o2 (it was a release-gate red). The example read send.reflect().effects at run time, but fact reads have been compile-time only since 4328d5ff94, so it now uses #run; the .out line numbers moved by one after 8583926027. c12 stays open: the shared typed contract (captures, specialization identity, invalidation) is not proven by this example fix."
@@ -33782,7 +33792,7 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-15T02:11:15.473Z",
+      "updated": "2026-11-15T02:12:00.473Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
@@ -33810,6 +33820,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed 2026-11-14 by TowerKeeper-1 (board rebuild). 26 criteria were met. The 2 open criteria moved to #6846: c1 to #6846 c1, c17 to #6846 c4. Ratified D-ADDSTRUCT-TYPE1=A (2026-11-13) had no build criterion; it is #6846 c3. The org-policy decision and sizing notes are carried in #6846's body."
+        },
         {
           "at": "2026-11-13",
           "by": "Main",
@@ -34167,7 +34182,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:51.106Z",
-      "updated": "2026-11-15T02:11:17.465Z",
+      "updated": "2026-11-15T02:12:01.795Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
@@ -39867,6 +39882,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed 2026-11-14 by TowerKeeper-1 (board rebuild). 5 criteria were met; the last open one, c6, was split: package markers named through their module to #6849 c10, and the route-marker jokes API to #6552 (#6552 c34), since route exposure is decided (D-HTTP-ROUTE-EXPOSE1=A, D-ROUTE-ONE1=A)."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Owner deconfliction 2026-11-06: retired @ and prefix type-mark spellings get no teaching diagnostic (owner order)."
@@ -39986,11 +40006,12 @@
         {
           "n": 6,
           "text": "[#3707] Package-declared markers resolve through their module (`#web.Get`) per D-MARKER-MODULE1, with UI snapshots for unknown, private and ambiguous names. Golden modules/qualified_marker passes. **[OWNER]** A second ballot on HTTP route exposure must be ratified before any route-marker or route-collection surface is built. If route markers are chosen: a jokes API with GET and POST serves identically on every level, `web.openapi` renders both routes, and a bad path parameter is a compile error with a snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:24:09.250Z"
+          "evidence": "Moved to #6849 c10: package markers named through their module; the HTTP route part is decided (D-HTTP-ROUTE-EXPOSE1=A, D-ROUTE-ONE1=A) and moved to #6552 as a separate criterion",
+          "at": "2026-11-15T02:11:51.179Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [
@@ -40011,8 +40032,8 @@
       "parentId": "c0s8gang",
       "needsAcceptance": false,
       "created": "2026-09-28T10:50:31.711Z",
-      "updated": "2026-11-14T23:10:50.917Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:12:05.548Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ]
@@ -44617,6 +44638,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed 2026-11-14 by TowerKeeper-1 (board rebuild). 44 criteria were met before; c94 (D-META-SPELL1) met today on dev 702efd0e4c with cases d_meta_spell1_forms. The 25 other open criteria went to focused cards: 7 to #6846 (generation rounds, rollback, schedule, helpers, promises, cancellation; c30 merged as the proof of c29), 9 to #6847 (compile-time evaluation), 6 to #6848 (registry, query, flow joins, gate ledger, user rows, prover wall), 2 merged into #6849 (c76 fact declarations and c77 tags, restated to D-DECL-TYPES1 and D-TAG-MARKER1), and c4 to #6850."
+        },
+        {
           "at": "2026-11-14",
           "by": "Main",
           "text": "c33 recheck on p64 (dev 99aa698189, GoalsA-1): cases --filter comptime_diff -> PASS 152 / FAIL 0 / KNOWN-FAILING 3 / UNEXPECTED-PASS 0. Not met: the 3 KF rows (sequential_comptime_reads_advance_the_shared_reader E0956 Reader; comptime_loadable_matches_runtime; loadable_incompatible_defaults_stop_before_rustc, stale loadable E0904) are disagreements carried by #5454, so c33 waits on #5454."
@@ -45375,7 +45401,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-10-02T18:25:10.781Z",
-      "updated": "2026-11-15T02:11:41.958Z",
+      "updated": "2026-11-15T02:12:02.824Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
@@ -45391,7 +45417,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. Rust freeze: do not change Source/, crates/ Rust implementations or add Rust tests. Implement in the Jet compiler, Jet-hosted tooling and owning Jet packages. Core/, Docs/ and canonical Prelude/*.jet are shared inputs to the frozen reference: coordinate owner timing before editing them. Regenerate generated Compiler registries; never hand-edit DiagnosticRows.jet, CoreCallRows.jet or CoreSources.jet. Historical Rust file:line witnesses diagnose the gap; they do not authorize a Rust repair.\n2. Implement only the missing consumer boundary identified by each cited gap witness, preserving working behavior; reuse the owning source, checker, registry and provider seam rather than introduce a parallel mechanism.\n3. [D-DEFAULT-SHAPE1] The default fuses into the annotation using the same `Type{value}` atom bindings already use. One law, by position: in a binding position `name: Int{3}` declares the value 3; in a slot position (parameter or field) `port: Int{3000}` is the slot's default, which a caller or literal may override; `port: Int` is a slot with no default that the caller must fill. Owning evidence: CONTRADICTED — Rust Parser/Items/type_methods_fields.rs:176-189 rejects retired = with E0385. Jet Parser/Items.jet:1657-1667 still accepts =/ := field defaults without E0385 and does not parse -> computed fields. Current named parameter witness: basics/named_args.jet:34.\n4. [D-MARK-FORM1] A marker, or one bracket group, sits right before its target. Parentheses appear exactly when arguments are written. Owning evidence: PARTIAL — Rust Parser/Items/marker_groups.rs:200-218 performs registry/site/signature validation and records AppliedRuleApplication. Jet Parser/Items.jet:450-466 only parses name/sign/arguments at the corresponding seam; complete registry/site/signature/duplicate-law enforcement and general empty-argument gates were not established. Anonymous groups exist on both sides.\n5. [D-MARK-REPEAT1] Writing one marker twice on one target is an error with a remove-the-repeat fix. Rows where repetition carries meaning are marked repeatable in the registry: Pre, Post, and allow. Owning evidence: PARTIAL — Rust Parser/Items/marker_groups.rs:200-218 performs registry/site/signature validation and records AppliedRuleApplication. Jet Parser/Items.jet:450-466 only parses name/sign/arguments at the corresponding seam; complete registry/site/signature/duplicate-law enforcement and general empty-argument gates were not established. Anonymous groups exist on both sides.\n6. [D-MARKER-NAME-HYGIENE1] Keep the no-collision marker naming law and scheduled #Job. Treat historical #Discriminant as subsequently retired into #Codable(tag:) by D-CODABLE-OPTIONS1, not newly active. Owning evidence: PARTIAL — Shared Prelude names Discriminant and Rename instead of unrelated Tag branding, but Jet Parser/DeclarationMarkers.jet:36 still classifies Tag and Foundation/MIR/MIR.jet:1161 retains Tag alongside RenameAll. Complete active/retired no-alias name hygiene in both consumers is not established; stale internal enum names alone are not asserted as user acceptance.\n7. [D-SPREAD1] Write the prefix, a dot, then the members in brackets. It works in any Jet code, not only config files. Owning evidence: PARTIAL — Rust Foundation/Syntax/core_surface.rs:793-795 specifies bare-member spread. Jet Parser/Expressions.jet:1262-1265,1678-1681 parses prefix.[members]; complete expression flattening and all sema/runtime consumers were not proved here.\n8. [D-SUBJECT-CALL1] Where the expected argument is a one-parameter callable, a bare member chain stands for that lambda, including method calls along the chain. The pipeline drops from 33 tokens to 15. Owning evidence: PARTIAL — Rust Syntax.rs:235-236,267-270 registers shorthand chains. Jet Parser/Expressions.jet:706-709 recognizes lower-case implicit subject heads; complete method-first typed-call lowering and nesting-lint policy behavior were not established.\n9. [D-SUBJECT-COHERE1] A `.method(args)` head chain becomes legal in call slots, matching loops: one rule everywhere the shorthand exists. A new lint, selector `subject_shorthand_nesting`, fires when shorthand appears inside another shorthand scope and shows the named-binding rewrite. Owning evidence: PARTIAL — Rust Syntax.rs:235-236,267-270 registers shorthand chains. Jet Parser/Expressions.jet:706-709 recognizes lower-case implicit subject heads; complete method-first typed-call lowering and nesting-lint policy behavior were not established.\n10. Migrate every affected public caller, example, test and existing doc/changelog section in the same clean cutover. Coordinate overlapping scopes; P23 owns module names, P03 non-Effect enums, #3986 Effect, P12 marker generation, P19 diagnostic templates and P27 fact-query lifetime separation.\n11. D-EXEC1 staging: finish stage zero and semantic/output parity on current engines first; unify the compiled runtime and shared low-level ABI/drop representation next; build Jet O0/O1 x86-64 then aarch64, require whole-example-corpus parity and O0 live function replacement, and only then retire Cranelift/MIREval/--interpret in one cutover. Frozen engine-specific work stays frozen until its step lands. Before retirement retain applicable current-engine proof; after retirement retarget durable tests to O0/O1/O2/web. No early engine deletion or declaration that a surviving old engine is itself a violation.\n12. Deliver the named Jet-side tests/goldens and real consumer receipts in criteria. Main runs verification once on the integrated snapshot; performance/process requirements require their real receipts, not fabricated code.",
       "checkSteps": null,
@@ -45400,6 +45426,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed 2026-11-14 by TowerKeeper-1 (board rebuild). 29 criteria were met; the last open one, c4 (D-MARKER-NAME-HYGIENE1), moved to #6849 c9 restated as one outcome."
+        },
         {
           "at": "2026-11-12",
           "by": "Main",
@@ -45517,11 +45548,12 @@
         {
           "n": 4,
           "text": "{\"decisionId\": \"D-MARKER-NAME-HYGIENE1\", \"text\": \"Keep the no-collision marker naming law and scheduled #Job. Treat historical #Discriminant as subsequently retired into #Codable(tag:) by D-CODABLE-OPTIONS1, not newly active.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_marker_name_hygiene1_contract\", \"suite\": \"tests/ratified/P20.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P20/d_marker_name_hygiene1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"binding name: Int{3}, default slot name: Int{3}, required slot name: Int; defaults override; field =/:= is not Jet syntax (no teaching diagnostic)\", \"single marker/bracket group right before target; parentheses iff args; site/type/signature validation\", \"duplicate marker error/remove-repeat edit; Pre/Post/allow registry-repeatable\", \"marker/trait no-alias naming hygiene reconciles Discriminant history with later Codable tag options and scheduled Job\", \"prefix.[members] ordinary source flattening matches expanded expression\", \"one-parameter callable bare chain/method calls preserves expected type/effects; nested shorthand lint subject_shorthand_nesting and named-binding fix\"]}}",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-02T18:26:05.640Z"
+          "evidence": "Moved to #6849 c9: marker naming law, rewritten from JSON proposal text",
+          "at": "2026-11-15T02:11:50.271Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
@@ -45769,12 +45801,13 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-02T18:26:03.045Z",
-      "updated": "2026-11-14T13:36:44.461Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:13:07.056Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 68
+      "criteriaLastN": 68,
+      "completedAt": "2026-11-15T02:13:07.056Z"
     },
     {
       "id": "c011piog",
@@ -52672,6 +52705,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: added #5009 c5 and #5009 c6, the hook items from #3520 (c21, c22), restated as outcomes."
+        },
+        {
           "at": "2026-10-17",
           "by": "Main",
           "text": "D-COMPILER-EVENT1=A ratified 2026-10-17: one compiler.Event enum in core.compiler (Core/compiler/compiler.jet) lists every public moment (proposal section 2.3). Hooks, Session.stages(), `--json` and the jet.session.v1 wire all use its names and fields. The wire/--json schema is generated from its registry rows, and each new variant is a versioned public change. D-BUILD-UI1's event names become variants (none exist in Jet code today)."
@@ -52754,7 +52792,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:38.986Z",
-      "updated": "2026-11-15T02:10:47.537Z",
+      "updated": "2026-11-15T02:12:07.285Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
@@ -58918,6 +58956,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T01:52:47.257Z"
+        },
+        {
+          "n": 11,
+          "text": "The speed gate decides each phase from the median of 3 or more runs, inside a measured noise band, and times the candidate compiler, not the seed. Found on p138: the same binary spreads 10% on ir.x64, a single run flagged noise as +26.7% ir.x64 and +31.3% ir.object, and gate-p138's main compile ran the p136 seed. Proof: two gate runs on one unchanged binary give no phase verdict, and the gate log names the candidate jet it timed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:13:32.034Z"
         }
       ],
       "refs": [],
@@ -58927,12 +58974,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T02:03:16.428Z",
+      "updated": "2026-11-15T02:13:32.034Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 11
     },
     {
       "id": "c0fo37ov",
@@ -64691,6 +64738,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed 2026-11-14 by TowerKeeper-1 (board rebuild). 20 criteria were met. The 8 open criteria moved: 7 to #6849 (marker structs #6849 c1, effect types #6849 c2, derives and facts #6849 c3, trait-less derives #6849 c4, tags #6849 c5 and #6849 c6, the one-cutover migration #6849 c7, both placements #6849 c8), and c17 to #6845 (#6845 c9, #6845 c10). The 2026-11-11 decisions on wrap and package markers are carried in #6849's body."
+        },
+        {
           "at": "2026-11-11",
           "by": "Main",
           "text": "Ballot NEW-D-MARKER-WRAP1 withdrawn 2026-11-11 after an adversarial rewrite (owner order: confusing or parallel ballots are redone, and questions an existing mechanism answers are decided rather than balloted). Decided: Type wrap with the existing Code value and lower it through root-authorized Compiler events and Meta.Rewrite; implement library combine as already ratified. It extends: D-META-LADDER1=A retains #code and explicitly permits Code paste through #{e}, with rewriting controlled by the root-created, passed Compiler value. It was read together with D-META-HASH1=A and D-DECL-TYPES1=A rules 6 and 11. origin/dev:Core/Compiler/Meta.jet:1-5 and :12-17 defines the shared Rewrite effect. origin/dev:Compiler/JetSema/Source/Sema/Registration/UserTemplates.jet:1-5 shares the typed template engine; :564 onward collects marker bodies. The full record is $JET_SCRATCH_ROOT/lanes/Main/ballots-v4/NEW-D-MARKER-WRAP1/verdict.md. Withdrawal decides the direction; it does not mean the build is done."
@@ -64879,11 +64931,12 @@
         {
           "n": 14,
           "text": "D-DECL-TYPES1 A cutover: one in-repo migration rewrites every marker, effect, fact and derive declaration and reject call in one cutover; no old spelling, alias, reader, teaching diagnostic or jet fix rule remains; the full golden, UI and cases compares lose 0 rows.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T12:27:06.613Z"
+          "evidence": "Moved to #6849 c7: one-cutover migration",
+          "at": "2026-11-15T02:11:47.466Z",
+          "closure": "obsolete"
         },
         {
           "n": 15,
@@ -64907,11 +64960,12 @@
         {
           "n": 17,
           "text": "(amend for criterion 10; reflection proposal B6) `target.marker(T)` works on every site kind, including fields, and on named types as `Rock.reflect().marker(T)`. A non-marker argument is a registered refusal with a UI snapshot. String `has_marker(\"X\")` reads (`Sema/Calls/Reflection.jet:232-255`, `Registration/Derives.jet:245-249`) are retired in one cutover by a one-time in-repo script (no shipped jet fix rule), as D-MARKER-REFLECT1 names.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:55:41.370Z"
+          "evidence": "Moved to #6845 c9: typed marker reads; the has_marker string cutover split to REFL c10",
+          "at": "2026-11-15T02:11:49.334Z",
+          "closure": "obsolete"
         },
         {
           "n": 18,
@@ -64934,11 +64988,12 @@
         {
           "n": 20,
           "text": "D-MARKER-INBODY1 A (ratified on this card; owner 2026-11-04: the lines may be anywhere in the body) is delivered by #6562. This card's cutovers (c10 marker structs, c14 jet fix) move no marker between above and inside. Every converted Prelude marker accepts both placements, and no marker opts in.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T17:31:18.381Z"
+          "evidence": "Moved to #6849 c8: both placements accepted",
+          "at": "2026-11-15T02:11:48.416Z",
+          "closure": "obsolete"
         },
         {
           "n": 22,
@@ -65026,7 +65081,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:04:51.939Z",
-      "updated": "2026-11-15T02:11:46.397Z",
+      "updated": "2026-11-15T02:12:03.711Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
@@ -87171,6 +87226,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: c8 (guard clauses) moved to #6850 c2; c10 split, its fmt half to #6850 c3 and its optimizer half to #6473 (#6473 c3)."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "dev 58395ae622, 6499a91359, adec48bfd0 and 67b6faf1de: c7 parts 1, 2, 4 and 5 (dotted identities). dev 587642cd25, bcd572c2f4, 84dc292dc4, 5332e759bf, 33993c6999 and 363f001506: c2 parts 1-6 (the copy ratchet guard plus copies turned into moves). Left: c7b2 (r4 coming) and c2 cp7-cp10 (cp7 conflicts in Pipeline.jet with c7b2)."
@@ -87263,11 +87323,12 @@
         {
           "n": 8,
           "text": "Guard-clause style is a jet fmt rewrite (never reported) applied across Compiler/, Core and Jetpack in one mechanical change; `jet fmt --check Compiler Core Jetpack` passes and the self-host chain reaches its fixed point.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:09:37.102Z"
+          "evidence": "Moved to #6850 c2: guard-clause rewrite belongs on the formatter card",
+          "at": "2026-11-15T02:11:52.050Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
@@ -87281,11 +87342,12 @@
         {
           "n": 10,
           "text": "Needless temporaries (an immutable binding used once on the next line) are inlined by a jet fmt rewrite that keeps evaluation order (never reported); a fmt case pins an order-sensitive negative. The optimizer inlines single-use literal bindings.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:09:38.408Z"
+          "evidence": "Moved to #6850 c3: temporary inlining in fmt; the optimizer half moved to #6473 as its own criterion",
+          "at": "2026-11-15T02:11:53.113Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
@@ -87386,8 +87448,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:41:10.182Z",
-      "updated": "2026-11-14T08:46:19.438Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:12:06.413Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 20
     },
     {
@@ -204581,6 +204643,153 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:13:32.034Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#11 The speed gate decides each phase from the median of 3 or mo"
+    },
+    {
+      "at": "2026-11-15T02:13:07.057Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c06lr0kz",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T02:12:08.193Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0xb6zik",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:12:07.285Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0gmf0y4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:12:06.413Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c073cvg9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:12:05.548Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0w6dky2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:12:04.608Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c06lr0kz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:12:03.711Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c03pi177",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:12:02.824Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0699zei",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:12:01.796Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02m1p02",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:12:00.473Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0yfcz0w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:11:59.414Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T02:11:57.855Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0xb6zik",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T02:11:55.784Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "blockedBy,parentId"
+    },
+    {
+      "at": "2026-11-15T02:11:53.114Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c073cvg9",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T02:11:52.050Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c073cvg9",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T02:11:51.180Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0w6dky2",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T02:11:50.271Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c06lr0kz",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T02:11:49.334Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03pi177",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-15T02:11:48.416Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03pi177",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T02:11:47.466Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03pi177",
+      "note": "#14"
+    },
     {
       "at": "2026-11-15T02:11:46.397Z",
       "by": "TowerKeeper-1",
