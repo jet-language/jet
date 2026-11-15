@@ -50,7 +50,9 @@ run: fn() IOError! {
         process.exit(0)
     }
     if mode == "nest" {
-        inner: process.run_spec(process.cmd([exe, "child"]).memory_scope(33554432))
+        // Under `jet run` each child compiles this file again, so the caps
+        // of the nested pair leave room for the compiler as well.
+        inner: process.run_spec(process.cmd([exe, "child"]).memory_scope(268435456))
         print("inner scope: {inner.success}, {limit(inner)}")
         process.exit(0)
     }
@@ -58,7 +60,7 @@ run: fn() IOError! {
     print("scoped child: {scoped.success}, {limit(scoped)}, peak recorded: {(scoped.peak_memory_bytes ?? -1) > 0}")
     over: process.run_spec(process.cmd([exe, "hog"]).memory_scope(67108864).stdout(.Capture))
     print("over the cap: {over.success}, output: {over.output.trim().len()} bytes")
-    nested: process.run_spec(process.cmd([exe, "nest"]).memory_scope(268435456).stdout(.Capture))
+    nested: process.run_spec(process.cmd([exe, "nest"]).memory_scope(1073741824).stdout(.Capture))
     print("nested: {nested.output.trim()}")
     plain: process.run_spec(process.cmd([exe, "child"]))
     print("default child: {limit(plain)}")
