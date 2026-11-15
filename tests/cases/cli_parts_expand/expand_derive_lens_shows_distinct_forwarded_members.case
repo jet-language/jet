@@ -1,14 +1,15 @@
 # A distinct type's derive row shows its forwarded members as the Jet source
-# registration generates, and names the traits forwarded natively.
+# registration generates, and names the traits forwarded natively. A distinct
+# type codes as its base with no marker, so its row names no codec trait.
 step: jet inspect expand --facts derive {root}/Examples/Types/DistinctForwarding.jet
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "Score: Comparable, Printable, Encode, Decode" # the distinct's derive row
+stdout: ~ "Score: Comparable, Printable [" # the distinct's derive row: the traits it names
 stdout: ~ "impl Score.Equatable {" # the generated equality impl as source
 stdout: ~ "self.raw() == rhs.raw()" # equality forwards to the base
 stdout: ~ "impl Score.Comparable {" # the generated order impl as source
 stdout: ~ "self.raw() < rhs.raw()" # order forwards to the base
-stdout: ~ "// Printable, Encode, Decode: forwarded natively to `Int`; no generated members" # the native forwards are named, not invented
+stdout: ~ "// Printable: forwarded natively to `Int`; no generated members" # the native forwards are named, not invented
 step: jet inspect expand --facts derive --json {root}/Examples/Types/DistinctForwarding.jet
 env: NO_COLOR=1
 exit: 0
