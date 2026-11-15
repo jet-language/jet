@@ -308,7 +308,9 @@ ir_live: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
 // runtime finds the task's arena), pushes an arena block the same way
 // (jet_ctx_push_arena), which the pop rewinds; an arena the guard made
 // itself goes to the block, which drops it at its end. Another builtin
-// allocator handle has no carrier: its value runs and is released.
+// allocator handle has no carrier: its value runs and is released. Sema
+// admits no other `allocator` value (sema_stmt_context_allocator_type), so
+// any guard that is neither an arena nor a builtin handle is the handler.
 ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyContextGuard], body: [Int]) Never! {
     save := -1
     keys := [String]{}
@@ -332,15 +334,15 @@ ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyCon
             next
         }
         if value < 0 -> return
-        if guard.field == "allocator" && handler < 0 && arena < 0 && ir_ty(p, b, guard.value) == .Fn(_, _, _, _, _, _) {
+        if guard.field == "allocator" && handler < 0 && arena < 0 && ir_context_arena(ir_untag(ir_ty(p, b, guard.value))) {
+            arena = value
+            arena_owned = b.fresh[value]
+            next
+        }
+        if guard.field == "allocator" && handler < 0 && arena < 0 && !ir_context_builtin(ir_untag(ir_ty(p, b, guard.value))) {
             span: ir_body_node(p, b, guard.value).span
             handler = if b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
             if ir_failed(b) -> return
-            next
-        }
-        if guard.field == "allocator" && handler < 0 && arena < 0 && ir_context_arena(ir_ty(p, b, guard.value)) {
-            arena = value
-            arena_owned = b.fresh[value]
             next
         }
         if (guard.field != "deadline_after_ns" && guard.field != "deadline_at_ns") || save >= 0 {
@@ -397,6 +399,13 @@ ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyCon
 // Whether a guard value of type `ty` is a `mem.Arena`.
 ir_context_arena: fn(ty: Type) -> Bool Never! {
     if ty == .Named(name) -> return name == "Arena"
+    false
+}
+
+// Whether a guard value of type `ty` is a builtin allocator handle with no
+// carrier, the other names sema admits (sema_stmt_context_allocator_type).
+ir_context_builtin: fn(ty: Type) -> Bool Never! {
+    if ty == .Named(name) -> return name == "Bump" || name == "Pool" || name == "Fixed"
     false
 }
 
