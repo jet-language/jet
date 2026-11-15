@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6918,
-    "rev": 104258,
+    "nextNum": 6920,
+    "rev": 104275,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77137,12 +77137,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "jet inspect bind, inspect codemod and inspect audit (including audit copies) are built; every cases row that reported E2104 for it passes on the default tier.",
+          "text": "jet inspect bind, inspect codemod and inspect audit (audit copies included) are built. Proof: every tests/known-failing.tsv row on #6418 that reports E2104 for them passes on the default tier, and the rows are removed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:12:00.764Z"
+          "at": "2026-11-15T04:09:26.982Z"
         },
         {
           "n": 2,
@@ -77155,12 +77155,12 @@
         },
         {
           "n": 3,
-          "text": "jet budget is built; every cases row that reported E2104 for it passes on the default tier.",
+          "text": "jet budget is built, including the BenchMeasurement provider (runs #Test(.measure) 20 times) and the RelativeTo baseline history (pooled_samples, history.report_ids). Proof: `jet test Compiler --profile cases --filter cli_parts_core/budget_bench_measurement_bootstraps_then_consumes_compatible_history`, with its known-failing row removed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:12:03.926Z"
+          "at": "2026-11-15T04:09:27.901Z"
         },
         {
           "n": 4,
@@ -77173,21 +77173,21 @@
         },
         {
           "n": 5,
-          "text": "jet explain is built (build facts, syntax dictionary, build settings, web graph); every cases row that reported E2104 for it passes on the default tier.",
+          "text": "jet explain is built for build facts, the syntax dictionary, build settings and the web graph. Proof: every tests/known-failing.tsv row on #6418 that reports E2104 for `jet explain` passes on the default tier, and the rows are removed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:12:06.812Z"
+          "at": "2026-11-15T04:09:28.801Z"
         },
         {
           "n": 6,
-          "text": "jet perf is built; every cases row that reported E2104 for it passes on the default tier.",
+          "text": "jet perf is built. Proof: every tests/known-failing.tsv row on #6418 that reports E2104 for `jet perf` passes on the default tier, and the rows are removed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:12:08.556Z"
+          "at": "2026-11-15T04:09:29.754Z"
         },
         {
           "n": 8,
@@ -78295,6 +78295,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:49:33.427Z"
+        },
+        {
+          "n": 153,
+          "text": "Jetpack/PackageModel/Source/Foreign/C/HeaderBinder.jet emits current Jet syntax, not the Rust-era `Task<I64 ! String>`, and special-cases no name (emit_async, unsubscribe). Proof: Examples/Interop/Polyglot callbacks, PolyglotGo and PolyglotPython pass their goldens on O0, O1 and O2 where their host tool exists, with their known-failing lines removed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:17.593Z"
         }
       ],
       "refs": [],
@@ -78305,9 +78314,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-15T02:49:33.427Z",
+      "updated": "2026-11-15T04:09:29.754Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 152
+      "criteriaLastN": 153
     },
     {
       "id": "c081c9o8",
@@ -93638,12 +93647,12 @@
         },
         {
           "n": 10,
-          "text": "(was #6164) (from #6167 Debugger reads watch expressions and types from the compiler) One watch-expression parser remains, and it is the compiler's. (was #4917 c18)",
+          "text": "Watch expressions are parsed by the compiler's parser, and no second watch-expression parser remains in Compiler/JetDebug. Proof: `jet test Compiler --profile cases --filter debug/watch_expression_uses_compiler_parser`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:26:58.727Z"
+          "at": "2026-11-15T04:09:18.584Z"
         },
         {
           "n": 11,
@@ -93656,21 +93665,21 @@
         },
         {
           "n": 13,
-          "text": "(was #800 c2) Breakpoints, stepping, frames, variables, async tasks, optimized code, errors, and source locations preserve Jet-level meaning across the platform matrix [precut audit: failing on 9c7ddf1359: C:debug/dap_cli_keeps_running_state_transitions_on_the_production_wire KNOWN-FAILING #6386 unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:): stdout ended before recv was satisfied; stdout s (known-failing #6386:…] (was #6386 c44)",
+          "text": "Breakpoints, stepping, frames, variables, async tasks, optimized code, errors and source locations keep their Jet-level meaning across the platform matrix through the production DAP wire. Proof: `jet test Compiler --profile cases --filter debug/dap_cli_` (known-failing on #6730 today).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:27:06.851Z"
+          "at": "2026-11-15T04:09:19.561Z"
         },
         {
           "n": 14,
-          "text": "(was #800 c3, #798 c3) Stale binaries, optimized-away values, process exit, attach denial, signal or exception storms, and disconnect terminate cleanly with an honest state [precut audit: failing on 9c7ddf1359: C:debug/dap_cli_keeps_running_state_transitions_on_the_production_wire KNOWN-FAILING #6386 unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:): stdout ended before recv was satisfied; stdout s (known-failing #6386:…] (was #6386 c45)",
+          "text": "Stale binaries, optimized-away values, process exit, attach denial, signal or exception storms and disconnect each end cleanly with an honest state, including attach, pause, restart and raw-frame refusal over DAP (E2236). Proof: `jet test Compiler --profile cases --filter debug/dap_cli_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:27:09.512Z"
+          "at": "2026-11-15T04:09:20.494Z"
         },
         {
           "n": 15,
@@ -93719,30 +93728,30 @@
         },
         {
           "n": 20,
-          "text": "(was #3064 c1) A rejected unsupported continuation leaves the live session and paused state unchanged; the next valid continuation keeps the same session ID. Source/revision and tier mismatch rejection still fail closed [precut audit: failing on 9c7ddf1359: C:debug/canvas_debug_session_replays_one_source_bound_session FAIL exit 1; expected 0; C:debug/canvas_debug_stop_requires_matching_source_revision_and_tier FAIL exit 1; expected 0] (was #6386 c89)",
+          "text": "A rejected unsupported continuation leaves the live session and paused state unchanged, and the next valid continuation keeps the same session ID; source-revision and tier mismatches are still refused. Proof: `jet test Compiler --profile cases --filter debug/canvas_debug_stop_requires_matching_source_revision_and_tier` and `--filter debug/canvas_debug_session_replays_one_source_bound_session`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:27:27.993Z"
+          "at": "2026-11-15T04:09:21.414Z"
         },
         {
           "n": 21,
-          "text": "(was #3196) [#3116] Breakpoints, frames and values refer to the accepted revision. Inspection never mutates the guest or grants authority. A script plus library_loadable guest matrix runs with lldb present, without skip. (was #4275 c74)",
+          "text": "Breakpoints, frames and values refer to the accepted revision. Inspection never changes the guest or grants authority, and the script and library_loadable guest matrix runs with lldb present, without skip. Proof: `jet test Compiler --profile cases --filter debug/` with lldb on PATH.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:34:28.869Z"
+          "at": "2026-11-15T04:09:22.339Z"
         },
         {
           "n": 23,
-          "text": "`jet debug prog.jet --break file:line` stops there, prints locals with their types, and steps over and into; `jet debug --dap` drives the same session from VS Code (DAP fixture test). (moved from #4720 c9)",
+          "text": "`jet debug prog.jet --break file:line` stops there, prints locals with their types, and steps over and into, and `jet debug --dap` drives the same session from VS Code. Proof: `jet test Compiler --profile cases --filter debug/break_then_continue_stops_at_breakpoint` and `--filter debug/dap_cli_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:46.092Z"
+          "at": "2026-11-15T04:09:23.255Z"
         },
         {
           "n": 24,
@@ -93755,12 +93764,12 @@
         },
         {
           "n": 25,
-          "text": "Compiler/JetDebug checks as a package on the admitted jet (today about 150 parse errors from Rust leftovers: std.io/std.fs imports, ? propagation, positional tuples, ..Default, char literals; log $JET_SCRATCH_ROOT/lanes/CoverPort/out/chk-jetdebug.log), and its DAP tests run; this unblocks #6187 C1 (E2231-E2239 rows with runner-produced snapshots). (moved from #4720 c11)",
+          "text": "Compiler/JetDebug checks clean as a package and its DAP tests run, which unblocks #6187 C1 (E2231-E2239 rows with runner-produced snapshots). Proof: `jet check Compiler/JetDebug` exits 0 with no problems, and `jet test Compiler/JetDebug` runs its DAP tests. On 2026-11-14 the check gave 0 errors with gate-p66 at 7700a065ff; the DAP tests have not run yet.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:49.864Z"
+          "at": "2026-11-15T04:09:24.184Z"
         },
         {
           "n": 26,
@@ -93782,21 +93791,21 @@
         },
         {
           "n": 28,
-          "text": "jet debug's DAP supports conditional breakpoints, logpoints and evaluate (Docs/audits/2026-11-14-debugging-profiling-review.md)",
+          "text": "jet debug's DAP supports conditional breakpoints, logpoints and evaluate (Docs/audits/2026-11-14-debugging-profiling-review.md). Proof: `jet test Compiler --profile cases --filter debug/dap_conditional_breakpoints_logpoints_evaluate`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T20:14:58.375Z"
+          "at": "2026-11-15T04:09:25.106Z"
         },
         {
           "n": 29,
-          "text": "The time to the first stop and per step is measured and recorded against LLDB on the same image (Docs/audits/2026-11-14-debugging-profiling-review.md)",
+          "text": "The time to the first stop and the time per step are measured against lldb on the same image (Docs/audits/2026-11-14-debugging-profiling-review.md). Proof: a committed measurement under Docs/audits naming the image hash, the commands and both timings.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T20:14:59.246Z"
+          "at": "2026-11-15T04:09:26.047Z"
         },
         {
           "n": 30,
@@ -93816,7 +93825,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:15:33.693Z",
-      "updated": "2026-11-15T03:58:32.394Z",
+      "updated": "2026-11-15T04:09:26.047Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 30
     },
@@ -100607,6 +100616,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c11 rawword (CardCloser-3, 2026-11-14 23:25). The Int-to-word conversion for a raw pointer offset is already inline: an add/jo tag test, about 12 B per access, with the call only on the cold big-Int path. OptRange deletes it when it proves the Int inline. rawword paid it because its Op table held Int fields while ref.S holds 4-byte fields; the cell moves to U32 fields so both sides do the same work on the same data. Known general cost: a raw access indexed by an Int that OptRange can't prove inline pays the 12 B tag test."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "OWNER ORDER 2026-11-14 ~21:00, standing overnight and superseding earlier orderings. Agents work ONLY this list, in this order, closing it out: (1) precompiled Core, #6328 c22/c37 and #6759; (2) speed plan steps 1-5 of #5479 exactly as its plan defines them (step 2 = #5479 c6 + #6328 c23; step 3 = #5479 c7 + #5910; step 4 = #5479 c8; step 5 = #5910 c6 + #5479 c2), with no other speed or size work until G11; (3) the memory kernel #6842, including c11; (4) G6; (5) G9; (6) G3; (7) G5; (8) G10; (9) G7. No other cards and no side work. Finished, ready work is never pulled: it lands. The only exceptions are fixes for failures that block the list's own work and owner-requested ballots, and Main decides them. TowerKeeper-1 (temporary, owner-approved) rebuilds the board: frozen cards untouched, nothing obsoleted without a ratified authority, no work lost."
         },
         {
@@ -100753,7 +100767,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T03:40:28.914Z",
+      "updated": "2026-11-15T04:09:05.668Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -107827,6 +107841,200 @@
       "needsAcceptance": false,
       "created": "2026-11-15T04:06:32.867Z",
       "updated": "2026-11-15T04:06:32.867Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0rn7rnu",
+      "num": 6918,
+      "title": "Debug info tells the truth: lldb, gdb and perf show Jet names, real values and inlined frames, and no local before its binding",
+      "body": "Destination: the DWARF and symbol tables the native backend emits let any debugger show what the Jet program holds:\n- Jet function names.\n- Bignum Int, String, struct, list and Decimal locals by value.\n- No local before its binding runs: each location range starts at the binding.\n- Inlined frames and live locals in O2 builds.\n- O2 split debug files found through the debug link.\n\nWhy it matters: release a0_041's `jet debug Examples/Tooling/Debugging/Debug.jet` printed `a = 4262344   s = <unavailable>` at its first stop, which is uninitialized memory shown as a Jet value.\n\nG5DevX-2 found on 2026-11-13, with lldb on PATH: debug/ 13 PASS, 11 KF, 6 FAIL; the debugger stops, but locals read `<Unavailable>`.\n\nSource: #6730 c1, c2, c5, c6, c8, c9, c26, c27 (from #6738, #6739, #6742, #6745, #6271, Docs/audits/2026-11-14-debugging-profiling-review.md).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A bignum Int local shows its value, not its tagged pointer word. Proof: `jet test Compiler --profile cases --filter debug/bignum_local_shows_value` with lldb on PATH.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:15.712Z"
+        },
+        {
+          "n": 2,
+          "text": "String, struct, list and Decimal locals render their values, because the DWARF types them as what they are, not Opaque, Aggregate or void*. Proof: `jet test Compiler --profile cases --filter debug/locals_render_string_struct_list_decimal` with lldb on PATH.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:15.712Z"
+        },
+        {
+          "n": 3,
+          "text": "lldb finds an O2 build's split debug file under .jet/symbols through the binary's debug link. Proof: `jet test Compiler --profile cases --filter debug/o2_split_debug_link_found`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:15.712Z"
+        },
+        {
+          "n": 4,
+          "text": "Bounds stops (E3010) name the faulting function and show its locals, like every other stop report. Proof: `jet test Compiler --profile cases --filter runtime_stops/bounds_stop_names_function_and_locals`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:15.712Z"
+        },
+        {
+          "n": 5,
+          "text": "No local is shown before its binding runs: each local's DWARF range starts at its binding, not at function entry. The stale 'generated Rust' comments in Examples/Tooling/Debugging (Debug.jet, DebugNative.jet, PanicReport.jet) are corrected. Proof: `jet test Compiler --profile cases --filter debug/local_not_shown_before_binding`, and `git grep -n -i 'generated Rust' -- Examples/Tooling/Debugging` prints nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:15.712Z"
+        },
+        {
+          "n": 6,
+          "text": "lldb on an -O2 jet build shows inlined frames and prints at least the live locals of a probe. Proof: `jet test Compiler --profile cases --filter debug/o2_inlined_frames_and_live_locals` (SKIP-HOST without lldb).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:15.712Z"
+        },
+        {
+          "n": 7,
+          "text": "The case gate runs with the dev shell's lldb on PATH, so debug/ rows are not SKIP-HOST, and break_then_continue_stops_at_breakpoint, native_breakpoint_reads_a_jet_local, next_line_takes_a_breakpoint and loop_next_edges_are_line_mapped pass. Proof: `jet test Compiler --profile cases --filter debug/` with lldb on PATH has no FAIL outside named known-failing rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:15.712Z"
+        },
+        {
+          "n": 8,
+          "text": "The symbol table carries Jet names for functions, so lldb, perf and gdb show Jet names. Proof: `jet test Compiler --profile cases --filter debug/symbols_carry_jet_names`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:15.712Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "debug",
+        "dwarf"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:09:15.712Z",
+      "updated": "2026-11-15T04:09:15.712Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c06lmp17",
+      "num": 6919,
+      "title": "jet debug steps backward: record and replay, watch-aware reverse navigation and checked fix-and-continue (D-TIMETRAVEL2)",
+      "body": "Destination: `jet debug --record=r1 prog.jet` and then `jet debug --replay=r1` step backward and answer 'where was this value last set' (D-TIMETRAVEL2). Recorded histories keep per-sequence write transitions; replay navigates indexed retained events without re-executing; and a transactional fix checks its inputs, candidate and checkpoint before installation. Every route (native and DAP) refuses unsupported, stale, empty-history and invalid-watch requests with a source error.\n\nWhy it matters: pdb and the Node inspector cannot step back. Reverse debugging is a headline Jet tool.\n\nRelated: the record index is #6907.\n\nSource: #6730 c15-c19, c24 (from #2463, #4720 c10).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet debug --record=r1 prog.jet` and then `jet debug --replay=r1` step backward and answer 'where was this value last set' with file:line (D-TIMETRAVEL2). Proof: `jet test Compiler --profile cases --filter debug/record_replay_step_back`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:16.616Z"
+        },
+        {
+          "n": 2,
+          "text": "The debugger offers forward and reverse navigation, bounded Jet-path watches and explicit fix commands through the live, native and replay routes. Proof: `jet test Compiler --profile cases --filter debug/navigation_watches_fix_` on the native and DAP routes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:16.616Z"
+        },
+        {
+          "n": 3,
+          "text": "Recorded histories keep per-sequence write transitions and watch-aware forward and reverse navigation, and a live watch change refreshes its baseline. Proof: `jet test Compiler --profile cases --filter debug/recorded_history_watch_navigation`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:16.616Z"
+        },
+        {
+          "n": 4,
+          "text": "Replay navigation uses indexed retained events and never re-executes the program. Proof: `jet test Compiler --profile cases --filter debug/replay_uses_indexed_events`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:16.616Z"
+        },
+        {
+          "n": 5,
+          "text": "A transactional fix checks unchanged inputs, a checked candidate bundle, and the checkpoint's type, layout and authority before it installs. Proof: `jet test Compiler --profile cases --filter debug/transactional_fix_checks_before_install`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:16.616Z"
+        },
+        {
+          "n": 6,
+          "text": "Unsupported, stale, empty-history and invalid-watch requests each get an explicit source error on the native and DAP routes. Proof: `jet test Compiler --profile cases --filter debug/replay_refusals_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:09:16.616Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "debug",
+        "replay"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:09:16.617Z",
+      "updated": "2026-11-15T04:09:16.617Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -213246,6 +213454,125 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:09:29.754Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0hn7w1n",
+      "note": "#6: proof; was: jet perf is built; every cases row that reported E2104 for it passes on the default tier."
+    },
+    {
+      "at": "2026-11-15T04:09:28.801Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0hn7w1n",
+      "note": "#5: proof; was: jet explain is built (build facts, syntax dictionary, build settings, web graph); every cases row that reported E2104 for it passes on the default tier."
+    },
+    {
+      "at": "2026-11-15T04:09:27.901Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0hn7w1n",
+      "note": "#3: proof; scope from the 2026-11-12 log; was: jet budget is built; every cases row that reported E2104 for it passes on the default tier."
+    },
+    {
+      "at": "2026-11-15T04:09:26.982Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0hn7w1n",
+      "note": "#1: proof; was: jet inspect bind, inspect codemod and inspect audit (including audit copies) are built; every cases row that reported E2104 for it passes on the default tier."
+    },
+    {
+      "at": "2026-11-15T04:09:26.047Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06vkd04",
+      "note": "#29: proof; was: The time to the first stop and per step is measured and recorded against LLDB on the same image (Docs/audits/2026-11-14-debugging-profiling-review.md)"
+    },
+    {
+      "at": "2026-11-15T04:09:25.106Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06vkd04",
+      "note": "#28: proof; was: jet debug's DAP supports conditional breakpoints, logpoints and evaluate (Docs/audits/2026-11-14-debugging-profiling-review.md)"
+    },
+    {
+      "at": "2026-11-15T04:09:24.184Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06vkd04",
+      "note": "#25: state and proof; was: Compiler/JetDebug checks as a package on the admitted jet (today about 150 parse errors from Rust leftovers: std.io/std.fs imports, ? propagation, positional tuples, ..Default, char literals; log $JET"
+    },
+    {
+      "at": "2026-11-15T04:09:23.255Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06vkd04",
+      "note": "#23: strip debris; proof; was: `jet debug prog.jet --break file:line` stops there, prints locals with their types, and steps over and into; `jet debug --dap` drives the same session from VS Code (DAP fixture test). (moved from #472"
+    },
+    {
+      "at": "2026-11-15T04:09:22.339Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06vkd04",
+      "note": "#21: strip debris; proof; was: (was #3196) [#3116] Breakpoints, frames and values refer to the accepted revision. Inspection never mutates the guest or grants authority. A script plus library_loadable guest matrix runs with lldb pr"
+    },
+    {
+      "at": "2026-11-15T04:09:21.414Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06vkd04",
+      "note": "#20: strip debris; proof; was: (was #3064 c1) A rejected unsupported continuation leaves the live session and paused state unchanged; the next valid continuation keeps the same session ID. Source/revision and tier mismatch rejectio"
+    },
+    {
+      "at": "2026-11-15T04:09:20.494Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06vkd04",
+      "note": "#14: strip debris; proof; was: (was #800 c3, #798 c3) Stale binaries, optimized-away values, process exit, attach denial, signal or exception storms, and disconnect terminate cleanly with an honest state [precut audit: failing on 9"
+    },
+    {
+      "at": "2026-11-15T04:09:19.561Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06vkd04",
+      "note": "#13: strip debris; proof; was: (was #800 c2) Breakpoints, stepping, frames, variables, async tasks, optimized code, errors, and source locations preserve Jet-level meaning across the platform matrix [precut audit: failing on 9c7ddf"
+    },
+    {
+      "at": "2026-11-15T04:09:18.584Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06vkd04",
+      "note": "#10: strip debris; proof; was: (was #6164) (from #6167 Debugger reads watch expressions and types from the compiler) One watch-expression parser remains, and it is the compiler's. (was #4917 c18)"
+    },
+    {
+      "at": "2026-11-15T04:09:17.593Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0hn7w1n",
+      "note": "#153 Jetpack/PackageModel/Source/Foreign/C/HeaderBinder.jet emits"
+    },
+    {
+      "at": "2026-11-15T04:09:16.617Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c06lmp17",
+      "note": "jet debug steps backward: record and replay, watch-aware reverse navigation and checked fix-and-continue (D-TIMETRAVEL2)"
+    },
+    {
+      "at": "2026-11-15T04:09:15.712Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0rn7rnu",
+      "note": "Debug info tells the truth: lldb, gdb and perf show Jet names, real values and inlined frames, and no local before its binding"
+    },
+    {
+      "at": "2026-11-15T04:09:05.668Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T04:07:23.591Z",
       "by": "TowerKeeper-1",
