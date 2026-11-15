@@ -1,0 +1,10 @@
+# A function's signature names its types as its own module sees them. `shapes` declares `Type`, and its
+# functions take and return it from two modules. The app imports the functions but not `shapes.Type`, and
+# declares a `Type` of its own; every call still passes and returns the package's `Type`.
+fixture: callee_signature_types_resolve_in_the_callee_module.fixture
+env: NO_COLOR=1
+step: jet check app/run.jet
+exit: 0
+step: jet run app/run.jet
+exit: 0
+stdout: = callee_signature_types_resolve_in_the_callee_module.out # each call's argument and result are the package's `Type`

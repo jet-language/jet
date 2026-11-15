@@ -1,12 +1,13 @@
 // Types written with a module alias (`enc.EncodingError`) name their target
 // through the declaring file's import; the alias means nothing in any other
-// module. A bare name a file imports from another package
-// (`use jet_foundation.[Effect]`) is the same: another module resolves it
-// among the types it sees, where a second loaded `Effect` leaves it
-// unresolved. Once imports are bound, each module's declared signatures
-// replace such a name with the target's canonical key, so every copy of a
-// symbol (an import binding, a package name) carries types that resolve in
-// whichever module checks a use of it.
+// module. A bare type name means what the declaring module sees under it: a
+// type it declares, one its package's other modules declare, or one it
+// imports (`use jet_foundation.[Effect]`). Another module resolves the same
+// bare name among its own names, where it can name a different type (its
+// own `Type`, or the prelude's) or none. Once imports are bound, each
+// module's declared signatures replace such a name with the target's
+// canonical key, so every copy of a symbol (an import binding, a package
+// name) carries types that resolve in whichever module checks a use of it.
 use jet_foundation.[
     CompilerThreads,
     Symbol,
@@ -199,10 +200,11 @@ sema_registration_qualified_next: fn(slots: &[Type?]) -> Type? {
     slots.pop() ?? panic("a module's rewritten types ran out before its rows")
 }
 
-// Each alias-qualified or imported type name the module's declarations
-// write, mapped to the type it resolves to in that module (the checker's own
-// resolution). A bare name keys only an import binding of a user package's
-// type: local names and Core types keep their spelling.
+// Each alias-qualified or bare type name the module's declarations write,
+// mapped to the type it resolves to in that module (the checker's own
+// resolution). A bare name keys only a user package's type: Core types keep
+// their spelling, as does a name some generic parameter or associated type
+// of the module spells, which means that parameter where it is written.
 sema_registration_module_qualified_keys: fn(graph: SemaRegistrationGraph, module_index: Int) -> [String:Type] Never! {
     names := [String]{}
     loop function in graph.modules[module_index].functions {
@@ -222,7 +224,7 @@ sema_registration_module_qualified_keys: fn(graph: SemaRegistrationGraph, module
     keys := [String:Type]{}
     identity: graph.modules[module_index].module_identity
     loop name in names {
-        if !name.contains(".") && !sema_registration_imported_user_type(graph, module_index, identity, name) {
+        if !name.contains(".") && (!sema_registration_bare_user_type(graph, module_index, identity, name) || sema_registration_module_spells_parameter(graph.modules[module_index], name)) {
             next
         }
         written: Type.Named{name: name}
@@ -232,12 +234,49 @@ sema_registration_module_qualified_keys: fn(graph: SemaRegistrationGraph, module
     keys
 }
 
-sema_registration_imported_user_type: fn(graph: SemaRegistrationGraph, module_index: Int, identity: ModuleID, name: String) -> Bool Never! {
+// Whether the bare `name` names a declaration of a user package in module
+// row `module_index`: its own, its package's, or an imported one.
+sema_registration_bare_user_type: fn(graph: SemaRegistrationGraph, module_index: Int, identity: ModuleID, name: String) -> Bool Never! {
     found: sema_registration_lookup_name_at(graph, module_index, identity, name) ?? return false
-    if found.place == {
-        .Imported(_, _, _) -> !module_is_core(found.source_module_identity)
-        .Declared(_, _) | .Nominal(_, _) | .Detached(_) -> false
+    !module_is_core(found.source_module_identity)
+}
+
+// Whether one of the module's generic parameters, impl conditions or
+// associated types is spelled `name`.
+sema_registration_module_spells_parameter: fn(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
+    loop function in module_row.functions {
+        if sema_registration_function_spells_parameter(function, name) -> return true
     }
+    loop nominal in module_row.nominals {
+        loop parameter in nominal.generic_params {
+            if parameter.name == name -> return true
+        }
+        loop method in nominal.methods {
+            if sema_registration_function_spells_parameter(method, name) -> return true
+        }
+    }
+    loop implementation in module_row.impls {
+        loop method in implementation.methods {
+            if sema_registration_function_spells_parameter(method, name) -> return true
+        }
+        loop associated in implementation.associated_type_impls {
+            if associated.name == name -> return true
+        }
+        loop associated in implementation.associated_types {
+            if associated.declaration.name == name -> return true
+        }
+    }
+    false
+}
+
+sema_registration_function_spells_parameter: fn(function: SemaRegistrationFunction, name: String) -> Bool Never! {
+    loop parameter in function.generic_params {
+        if parameter.name == name -> return true
+    }
+    loop condition in function.impl_conditions {
+        if condition.name == name -> return true
+    }
+    false
 }
 
 sema_registration_function_qualified_names: fn(function: SemaRegistrationFunction, names: &[String]) Never! {
