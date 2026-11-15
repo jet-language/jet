@@ -8262,11 +8262,16 @@ sema_comptime_module_sources: fn(program: SemaProgramTables, module_index: Int) 
 // registration graph once per pass.
 // Host callbacks are withheld there; a check that wanted one, a checked-text
 // source (its check reads no expression), and every source of a module that
-// cannot be entered or of a wave whose checks admit one thread have no row
-// (None), and the run checks them at their turn. The result has one row per
-// source. The calling thread, which waits for the checking threads, builds
-// the run's function memory plan meanwhile when `memory_plan` has none yet.
-sema_comptime_precheck_items: fn(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], threads: CompilerThreads, memory_plan: &[SemaFunctionMemoryPlan]) -> [SemaComptimeItemCheck?] {
+// cannot be entered have no row (None), and the run checks them at their
+// turn. Without `seed`, neither does a source of a wave whose checks admit
+// one thread. With it, such a wave's checks are made too, on one thread
+// beside the calling one: the run's prefetch walks from the checks the
+// prechecks make (jet_driver_comptime_prefetch), so a pass of small items, as
+// a body pass of local values, still has its closures' functions checked
+// ahead on the threads. The result has one row per source. The calling
+// thread, which waits for the checking threads, builds the run's function
+// memory plan meanwhile when `memory_plan` has none yet.
+sema_comptime_precheck_items: fn(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], threads: CompilerThreads, seed: Bool, memory_plan: &[SemaFunctionMemoryPlan]) -> [SemaComptimeItemCheck?] {
     checks := [SemaComptimeItemCheck?]{}
     loop _ in 0..<sources.len() -> checks.push(None)
     // The expression sources of each module, in order of first appearance;
@@ -8289,7 +8294,7 @@ sema_comptime_precheck_items: fn(environments: &[SemaScopeEnvironment], programs
     loop row in module_positions {
         loop position in row -> total += sources[position].span.end - sources[position].span.start
     }
-    if compiler_threads_admit(threads, sources.len(), total, SEMA_PROBE_MIN_BYTES_PER_THREAD, 0, 0) <= 1 {
+    if !seed && compiler_threads_admit(threads, sources.len(), total, SEMA_PROBE_MIN_BYTES_PER_THREAD, 0, 0) <= 1 {
         return checks
     }
     shared_state: Shared{SemaPrecheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, available: [SemaComptimeAvailableConstants]{available}, sources: [[SemaComptimeItemSource]]{sources}, module_environments: [SemaScopeEnvironment]{}, probes: [SemaScopeProbe]{}}}
@@ -8297,7 +8302,7 @@ sema_comptime_precheck_items: fn(environments: &[SemaScopeEnvironment], programs
     start := 0
     loop start < module_positions.len() {
         end: sema_comptime_precheck_wave_end(shared_state, module_identities, start)
-        sema_comptime_precheck_wave(shared_state, module_identities, module_positions, start, end, sources, available.counted_values, threads, checks, memory_plan)
+        sema_comptime_precheck_wave(shared_state, module_identities, module_positions, start, end, sources, available.counted_values, threads, seed, checks, memory_plan)
         start = end
     }
     permit: shared_state.guard_edit()
@@ -8320,8 +8325,10 @@ sema_comptime_precheck_items: fn(environments: &[SemaScopeEnvironment], programs
 // light copy of that module's scope. A check reads only its module's entered
 // environment, the program tables and the available constants, as a check of
 // a pass of its module alone would. Each check lands in `checks` at its
-// source's position.
-sema_comptime_precheck_wave: fn(shared_state: Shared<SemaPrecheckShared>, module_identities: [ModuleID], module_positions: [[Int]], start: Int, end: Int, sources: [SemaComptimeItemSource], version: Int, threads: CompilerThreads, checks: &[SemaComptimeItemCheck?], memory_plan: &[SemaFunctionMemoryPlan]) {
+// source's position. A wave whose checks admit one thread makes them only to
+// `seed` the run's prefetch (sema_comptime_precheck_items), on one checking
+// thread.
+sema_comptime_precheck_wave: fn(shared_state: Shared<SemaPrecheckShared>, module_identities: [ModuleID], module_positions: [[Int]], start: Int, end: Int, sources: [SemaComptimeItemSource], version: Int, threads: CompilerThreads, seed: Bool, checks: &[SemaComptimeItemCheck?], memory_plan: &[SemaFunctionMemoryPlan]) {
     // Job j checks source positions[j] in entered wave module job_modules[j];
     // firsts[k] is wave module k's first job, its last row the job count.
     positions := [Int]{}
@@ -8352,7 +8359,7 @@ sema_comptime_precheck_wave: fn(shared_state: Shared<SemaPrecheckShared>, module
     }
     firsts.push(positions.len())
     workers: compiler_threads_admit(threads, positions.len(), work, SEMA_PROBE_MIN_BYTES_PER_THREAD, scope_items * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0)
-    if workers > 1 {
+    if positions.len() > 0 && (workers > 1 || seed) {
         order := [Int]{}
         loop wave_module in compiler_threads_heaviest_first(heaviest) {
             first: firsts[wave_module]

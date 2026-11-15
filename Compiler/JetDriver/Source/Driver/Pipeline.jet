@@ -1623,12 +1623,12 @@ jet_driver_comptime_prefetched: fn(index: &JetDriverComptimeRunIndex, node: Int,
 // not checked here: the closure takes those rows as they are. A check that
 // waits on a constant is dropped and not followed, and so is one that splices
 // local values, since a value landing during the pass changes it; the closure
-// checks those at its turn. One compiler thread makes no checks here. The
-// result is the number of checks kept.
+// checks those at its turn. One compiler thread makes no checks here
+// (jet_driver_comptime_prefetches). The result is the number of checks kept.
 jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, index: &JetDriverComptimeRunIndex, memory_plan: &[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], prechecks: [SemaComptimeItemCheck?], threads: CompilerThreads) -> Int {
     index.prefetched = [Int:SemaComptimeFunctionResult]{}
     index.prefetched_refs = [Int:[JetDriverComptimeFunctionRef]]{}
-    if compiler_threads_admit(threads, 2, 2, 1, 0, 0) <= 1 -> return 0
+    if !jet_driver_comptime_prefetches(threads) -> return 0
     seen := [Int:Bool]{}
     frontier := jet_driver_comptime_prefetch_seeds(programs[0], index, prechecks, seen)
     kept := 0
@@ -1645,20 +1645,26 @@ jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs
     kept
 }
 
+// Whether `threads` admit the comptime prefetches, so a pass's items are
+// prechecked to seed them (sema_comptime_precheck_items).
+jet_driver_comptime_prefetches: fn(threads: CompilerThreads) -> Bool {
+    compiler_threads_admit(threads, 2, 2, 1, 0, 0) > 1
+}
+
 // The checks of one breadth-first level of a closure's queue
 // (`queue[start..<end]`, its nodes `queue_nodes[start..<end]`,
 // jet_driver_comptime_function_closure), made on the compiler threads just
 // before the closure checks them one at a time, and kept in
 // `index.prefetched` as a pass's are (jet_driver_comptime_prefetch).
-// A pass's prefetch starts only from items whose prechecks the threads made,
-// so a pass of small items, as a body pass of local values, prefetches
-// nothing, though one of its closures may reach a thousand functions; its
-// levels are checked here. The level's functions the run already checked,
+// A pass's prefetch starts from its items' prechecks and does not follow a
+// check that waits on a constant or splices local values, so a closure may
+// still reach levels of functions nobody checked ahead; they are checked
+// here. The level's functions the run already checked,
 // holds a waiting or prefetched check of, or settled are not checked again,
 // and a level that admits one thread is left to the closure. The next wave
 // the kept checks reach is dropped: the closure queues it as its next level.
 jet_driver_comptime_closure_prefetch: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, available: SemaComptimeAvailableConstants, index: &JetDriverComptimeRunIndex, memory_plan: &[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], queue: [JetDriverComptimeFunctionRef], queue_nodes: [Int], start: Int, end: Int, threads: CompilerThreads) {
-    if end - start < 2 || compiler_threads_admit(threads, 2, 2, 1, 0, 0) <= 1 {
+    if end - start < 2 || !jet_driver_comptime_prefetches(threads) {
         return
     }
     seen := [Int:Bool]{}
@@ -2873,7 +2879,9 @@ jet_driver_comptime_run: fn(
         // (each item's turn applies them first anyway), so the pass's item
         // checks can be made ahead of it on the compiler threads; an item
         // takes its check at its turn when no value it depends on has landed
-        // since (jet_driver_comptime_prechecked).
+        // since (jet_driver_comptime_prechecked). Whenever the threads admit
+        // the prefetch, the checks are made even for a pass too small to
+        // admit threads of its own, since the prefetch walks from them.
         if values.len() > resolved_count {
             if !jet_driver_comptime_apply_landed(environments[0], programs[0], available, staging.sites, values, resolved_count, trail, request.trace_sink) {
                 sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
@@ -2882,7 +2890,7 @@ jet_driver_comptime_run: fn(
             resolved_count = values.len()
         }
         jet_driver_trace_step_begin(request.trace_sink, "comptime.precheck")
-        prechecks := sema_comptime_precheck_items(environments, programs, available, pending, request.compiler_threads, memory_plan)
+        prechecks := sema_comptime_precheck_items(environments, programs, available, pending, request.compiler_threads, jet_driver_comptime_prefetches(request.compiler_threads), memory_plan)
         jet_driver_trace_step_end(request.trace_sink, "comptime.precheck", pending.len())
         jet_driver_trace_step_begin(request.trace_sink, "comptime.prefetch")
         prefetched: jet_driver_comptime_prefetch(environments, programs, available, run_index, memory_plan, values, prechecks, request.compiler_threads)
