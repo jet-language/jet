@@ -1450,7 +1450,9 @@ sema_registration_function: fn(func: Func, raw_protocol_return: Bool, module_id:
     owner_key: if owner == .Val(value) -> symbol_table_key(symbols, value) else -> ""
     symbol_kind: SymbolKind.Function
     symbol_id_value: symbol_mint(symbols, symbol_kind, module_identity, owner_key, func.name)
-    key: symbol_key_text(symbol_kind, module_identity, owner_key, func.name)
+    // The interned key itself: the parameters' owner and the signature share
+    // it, so the run holds one copy of each function key.
+    key: symbol_table_key(symbols, symbol_id_value)
     signature: sema_registration_function_signature(func, raw_protocol_return, key, fallback_source_file, fallback_source_origin, source_segments)
     visibility: sema_registration_visibility(func.is_pub, func.is_package_pub)
     symbol: Symbol{
@@ -1494,8 +1496,9 @@ sema_registration_foreign_visibility: fn(owner: SemaRegistrationForeignOwner) ->
 sema_registration_foreign_function: fn(function: ExternFn, module_id: ModuleID, module_identity: String, owner: SemaRegistrationForeignOwner, symbols: &SymbolTable, foreign_library: String, foreign_library_span: Span) -> SemaRegistrationForeignFunction Never! {
     signature: sema_registration_extern_signature(function, owner)
     // Foreign declarations are module-level: no owner segment in the id.
+    id: symbol_mint(symbols, SymbolKind.Function, module_identity, "", function.name)
     symbol: Symbol{
-        id: symbol_mint(symbols, SymbolKind.Function, module_identity, "", function.name),
+        id: id,
         kind: SymbolKind.Function,
         name: function.name,
         module_identity: module_id,
@@ -1504,7 +1507,7 @@ sema_registration_foreign_function: fn(function: ExternFn, module_id: ModuleID, 
         ty: Val(signature),
         visibility: sema_registration_foreign_visibility(owner),
     }
-    key: symbol_key_text(SymbolKind.Function, module_identity, "", function.name)
+    key: symbol_table_key(symbols, id)
     parameters: sema_registration_extern_parameters(function, module_id, module_identity, key, symbols, signature)
     SemaRegistrationForeignFunction{
         symbol: symbol,
@@ -1997,7 +2000,7 @@ sema_registration_trait_method_signature: fn(method: TraitMethodSig, raw_protoco
 sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: String, owner: Symbol, symbols: &SymbolTable, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> SemaRegistrationTraitMethod {
     owner_key: symbol_table_key(symbols, owner.id)
     id: symbol_mint(symbols, SymbolKind.Function, module_identity, owner_key, method.name)
-    key: symbol_key_text(SymbolKind.Function, module_identity, owner_key, method.name)
+    key: symbol_table_key(symbols, id)
     // A protocol ABI trait's own method signature is raw at dispatch, as in
     // the Rust reference's trait-bound and trait-object method calls.
     signature: sema_registration_trait_method_signature(method, sema_raw_protocol_trait(Val(owner.name)), key, fallback_source_file, fallback_source_origin, source_segments)
