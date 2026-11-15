@@ -391,7 +391,10 @@ literal data, and every read shares the one cell; a mutable
 it. Only an explicit
 `#run { … }` reads build
 inputs. Both globals are visible to functions in the file; only the mutable
-form may be assigned after initialization.
+form may be assigned after initialization. A local value whose call reads a
+mutable global, itself or through any function it calls, is computed when
+the program runs it, never while building, on every tier: the program may
+have assigned the global by then.
 Typed scalar literals such as `I64{0}`, `I64{-1}`, and `F32{1.25}` retain their
 checked scalar type in module storage (D-BIND-BARE1); in a `#Persist` global the
 inner value must still be literal data, not a call or arithmetic expression.

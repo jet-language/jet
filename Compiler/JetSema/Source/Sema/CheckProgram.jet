@@ -8954,8 +8954,11 @@ sema_comptime_callable_memoized: fn(graph: SemaRegistrationGraph, row: SemaRegis
 // program reads its result store (`name.cache()`), so each call must reach the
 // store at run time. So is a body that reads `#phase`: the program's copy
 // reads `.Runtime` there, which a value computed while compiling would turn
-// into `.Preparation`.
-sema_comptime_body_unfoldable: fn(function: FnBody, unsafe_runs: Bool) -> String? Never! {
+// into `.Preparation`. So is a body that reads module state (a `name := …`
+// binding not prepared while building): the program may have changed it by
+// the time the call runs, and a value computed while building would read its
+// initializer instead.
+sema_comptime_body_unfoldable: fn(graph: SemaRegistrationGraph, function: FnBody, unsafe_runs: Bool) -> String? Never! {
     name: "`{sema_effect_comptime_callee_name(function.key)}`"
     loop node in function.tree.nodes {
         if node.kind == .RawOf(_) || node.kind == .RawAddressOf(_) {
@@ -8982,6 +8985,25 @@ sema_comptime_body_unfoldable: fn(function: FnBody, unsafe_runs: Bool) -> String
     }
     if sema_comptime_tree_reads_phase(function.tree) {
         return Val("it calls {name}, which reads `#phase`, the phase of the copy that runs it")
+    }
+    if sema_comptime_tree_module_state(graph, function.tree) == .Val(state) {
+        return Val("it calls {name}, which reads module state `{state}`, which the running program can change")
+    }
+    None
+}
+
+// The first module binding written `name := …` and not prepared while
+// building that checked tree `tree` reads, or None.
+sema_comptime_tree_module_state: fn(graph: SemaRegistrationGraph, tree: BodyTree) -> String? Never! {
+    read := [U32:Bool]{}
+    loop node in tree.nodes {
+        if node.kind == .ConstRef(symbol) -> read[symbol.id] = true
+    }
+    if read.len() == 0 -> return None
+    loop module_row in graph.modules {
+        loop constant in module_row.constants {
+            if constant.declaration.mutable && !constant.declaration.is_comptime && read.get(constant.symbol.id.id) != None -> return Val("{constant.symbol.name}")
+        }
     }
     None
 }
