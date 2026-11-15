@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6967,
-    "rev": 105675,
+    "rev": 105698,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -84114,11 +84114,12 @@
         {
           "n": 9,
           "text": "Build reuse and the jet build binary store are off by default, per the standing caches-off order. Found by G11Speed on 2026-11-11: Executor.jet:324 restores any reusable step unconditionally, BuildExecute.jet:188 always opens the store when a build has steps, and Cli/BuildCache.jet:29 keeps the binary store on by default, with no switch (cli.md:504 documents made-or-reused). Fix (G11Speed-7c): a default build opens no store and puts nothing; opting in uses only an existing switch, or the executor API for tests if none exists, and any new public opt-in spelling goes to a ballot. cli.md and the BuildExecutor action-reuse test are updated in the same cutover. Proof: a test shows a default build opens no store; the opted-in reuse test passes; and cold and warm jet build Compiler are measured n=3 before and after.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T17:36:48.585Z"
+          "evidence": "Moved to #6966 c1: caches-off cutover gathered on one card",
+          "at": "2026-11-15T05:33:58.897Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
@@ -84141,11 +84142,12 @@
         {
           "n": 12,
           "text": "[#2534] No BuildCache, RuntimeCache, RunCache, ReceiptStore, BuildPlanReplay or JET_TIMING/JET_RUN_TRACE/JET_RECEIPT_BYPASS/JET_CACHE_DIR/JET_RUNTIME_CACHE_DIR remains. Every new note and tool error is registered with a UI snapshot. architecture.md, compiler-speed.md and the syntax-decisions ledger describe the graph, store, units and levels as shipped. (moved from #2514 c16)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:52:51.119Z"
+          "evidence": "Moved to #6966 c2: caches-off cutover gathered on one card",
+          "at": "2026-11-15T05:33:59.964Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -84156,7 +84158,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T01:36:04.082Z",
-      "updated": "2026-11-15T05:33:33.386Z",
+      "updated": "2026-11-15T05:33:59.964Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 12
     },
@@ -84639,11 +84641,12 @@
         {
           "n": 1,
           "text": "A profile names the root of the REPL's startup and per-turn cost, and the fix removes it there. Evidence is a receipt with the command, the before and after numbers, and the profile.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-01T13:11:52.757Z"
+          "evidence": "Merged into #6543 c2: c2 requires the root named and removed",
+          "at": "2026-11-15T05:34:03.048Z",
+          "closure": "obsolete"
         },
         {
           "n": 2,
@@ -84672,7 +84675,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T13:11:44.323Z",
-      "updated": "2026-11-15T05:33:35.667Z",
+      "updated": "2026-11-15T05:34:03.048Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
@@ -87042,12 +87045,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Each of the six slow golden programs (concurrency/job_queue, foundations/storage, foundations/text, crypto/file_seal_jetc, game/raylib_indexed, foundations/realtime, or their successors after the Examples cutover) runs in under 5 s per tier on the batch machine, with the root cause of its old time recorded on this card.",
+          "text": "Each of the six slow golden programs (concurrency/job_queue, foundations/storage, foundations/text, crypto/file_seal_jetc, game/raylib_indexed, foundations/realtime, or their successors after the Examples cutover) runs in under 5 s per tier on the batch machine, with the root cause of its old time recorded on this card. Proof: `jet test Compiler --profile golden --filter <each program>` timings in the testkit report.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T19:02:30.892Z"
+          "at": "2026-11-15T05:33:40.825Z"
         },
         {
           "n": 2,
@@ -87060,102 +87063,103 @@
         },
         {
           "n": 3,
-          "text": "Every cases row that took 5 s or more on vb5 (284 rows) runs in under 5 s, or this card records why its work is inherently longer (for example a real network or Nix fetch) and that row moves to a named opt-in profile that the default run does not include.",
+          "text": "Every cases row that took 5 s or more on vb5 (284 rows) runs in under 5 s, or this card records why its work is inherently longer (for example a real network or Nix fetch) and that row moves to a named opt-in profile that the default run does not include. Proof: the testkit report timing table for the cases suite.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T19:02:30.892Z"
+          "at": "2026-11-15T05:33:41.947Z"
         },
         {
           "n": 4,
-          "text": "Per-program cost: a profile of a typical golden row splits its time into Core and Prelude checking, the program's own front end, code generation per tier, link and run. Any work repeated identically for every program (for example re-checking Core) is done once per suite run and shared, and the median golden row drops to 0.1 s or less.",
+          "text": "Per-program cost: a profile of a typical golden row splits its time into Core and Prelude checking, the program's own front end, code generation per tier, link and run. Any work repeated identically for every program (for example re-checking Core) is done once per suite run and shared, and the median golden row drops to 0.1 s or less. Proof: a committed per-phase profile of a typical golden row and the testkit report median.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T19:02:30.892Z"
+          "at": "2026-11-15T05:33:43.121Z"
         },
         {
           "n": 5,
           "text": "On the batch machine the golden suite finishes in under 90 s wall, the cases suite in under 3 minutes and the ui suite in under 30 s, measured on the same commit and recorded with the commit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T19:02:30.892Z"
+          "evidence": "Merged into #6610 c14: c14 holds the tighter owner budget of 2026-11-04 (about 60 s for all three suites)",
+          "at": "2026-11-15T05:34:04.152Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
-          "text": "The two step timeouts set for #6651 c2 are removed and both rows pass on the default 60 s step limit under full-kit load: tests/cases/compiled_workloads/compiled_workload_gate_self_check.case (19 s alone; warm 11.6 s splits into contract 2.2 s, synthetic report 2.1 s, 33 check_report calls with about 63 ms of start-up each, then tier, peer, sample and tier-receipt checks) and tests/cases/comptime_sequence_parity/repl_list_and_fixed_list_sequence_methods_are_exact.case (50 REPL turns at about 0.4 s each).",
+          "text": "The two step timeouts set for #6651 c2 are removed and both rows pass on the default 60 s step limit under full-kit load: tests/cases/compiled_workloads/compiled_workload_gate_self_check.case (19 s alone; warm 11.6 s splits into contract 2.2 s, synthetic report 2.1 s, 33 check_report calls with about 63 ms of start-up each, then tier, peer, sample and tier-receipt checks) and tests/cases/comptime_sequence_parity/repl_list_and_fixed_list_sequence_methods_are_exact.case (50 REPL turns at about 0.4 s each). Proof: both rows pass in `jet test Compiler --profile cases` with no step timeout in their .case files.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T12:03:34.226Z"
+          "at": "2026-11-15T05:33:44.294Z"
         },
         {
           "n": 7,
-          "text": "The packages suite on a fresh clone finishes in under 5 minutes wall: the hosted Jetpack engine build overlaps the package runs (2a5ad087af), and the engine unit's claims, which run serially because they share process state, run in under 1 minute.",
+          "text": "The packages suite on a fresh clone finishes in under 5 minutes wall: the hosted Jetpack engine build overlaps the package runs (2a5ad087af), and the engine unit's claims, which run serially because they share process state, run in under 1 minute. Proof: a timed `jet test Compiler --profile packages` on a fresh clone, committed as a receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:26:50.077Z"
+          "at": "2026-11-15T05:33:45.547Z"
         },
         {
           "n": 8,
-          "text": "Every corpus suite (golden, cases, ui, packages) runs as wide as the machine's cores and memory allow, with no fixed job cap below that.",
+          "text": "Every corpus suite (golden, cases, ui, packages) runs as wide as the machine's cores and memory allow, with no fixed job cap below that. Proof: the job count logged by `jet test Compiler --profile golden` on the batch machine equals its cores-and-memory bound.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:26:51.360Z"
+          "at": "2026-11-15T05:33:46.582Z"
         },
         {
           "n": 9,
-          "text": "Excluding the toolchain fetch, jet test Compiler --profile full on a fresh clone finishes in under 10 minutes on the batch machine. A per-phase timeline is recorded with the commit.",
+          "text": "Excluding the toolchain fetch, jet test Compiler --profile full on a fresh clone finishes in under 10 minutes on the batch machine. A per-phase timeline is recorded with the commit. Proof: a committed per-phase timeline of the fresh-clone run.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:26:52.700Z"
+          "at": "2026-11-15T05:33:47.595Z"
         },
         {
           "n": 10,
-          "text": "The cold toolchain fetch inside that run (#6592) takes 30 s or less, so the whole fresh-clone run finishes in under 11 minutes.",
+          "text": "The cold toolchain fetch inside that run (#6592) takes 30 s or less, so the whole fresh-clone run finishes in under 11 minutes. Proof: the fetch phase in the same timeline.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:26:54.121Z"
+          "at": "2026-11-15T05:33:48.589Z"
         },
         {
           "n": 11,
-          "text": "The fresh-clone full profile's startup (building the test runner and assembling before the first suite row; about 4 minutes on 2026-11-07) is measured by phase and cut to under 30 s.",
+          "text": "The fresh-clone full profile's startup (building the test runner and assembling before the first suite row; about 4 minutes on 2026-11-07) is measured by phase and cut to under 30 s. Proof: the startup phases in the same timeline.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:42:18.521Z"
+          "at": "2026-11-15T05:33:49.568Z"
         },
         {
           "n": 12,
-          "text": "Mutation testing on by default (#6060): The stock jet test run with mutate: changed and generated rows on stays fast enough to be on by default: a paired cell in the perf manifest compares the default jet test rerun against the matched peers (cargo-mutants plus cargo-fuzz, Go's test cache plus go test -fuzz) under the performance gate. (was #6060 c6)",
+          "text": "Mutation testing on by default (#6060): The stock jet test run with mutate: changed and generated rows on stays fast enough to be on by default: a paired cell in the perf manifest compares the default jet test rerun against the matched peers (cargo-mutants plus cargo-fuzz, Go's test cache plus go test -fuzz) under the performance gate. Proof: `node Tools/gauntlet/harness/run.mjs --entry mutation-default` shows no loss.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:41:25.942Z"
+          "at": "2026-11-15T05:33:50.503Z"
         },
         {
           "n": 13,
-          "text": "Closed-list guard run time (#6206): (from #6222 Guard: fail CI on new closed lists, with a kernel ledger and) The run takes under 5 s (4.2 s measured for the census). (was #6206 c16)",
+          "text": "The closed-list guard (#6206) runs in under 5 s (4.2 s measured for the census). Proof: the timed `jet test tests/guards --filter closed_lists`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:51:34.195Z"
+          "at": "2026-11-15T05:33:51.494Z"
         },
         {
           "n": 14,
@@ -87197,7 +87201,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:02:30.892Z",
-      "updated": "2026-11-15T05:29:18.049Z",
+      "updated": "2026-11-15T05:34:04.152Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 16
     },
@@ -90531,12 +90535,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Each wave's cutover is proven by golden examples with identical output on O0, O1, O2 and web where applicable (I9), and passes the AGENTS.md performance gate for its cells: Jet/peer below 1.00 for every matched peer, with the ceiling ratio reported only.",
+          "text": "Each wave's cutover is proven by golden examples with identical output on O0, O1, O2 and web where applicable (I9), and passes the AGENTS.md performance gate for its cells: Jet/peer below 1.00 for every matched peer, with the ceiling ratio reported only. Proof: `jet test Compiler --profile golden` on O0, O1, O2 and web, and `node Tools/gauntlet/harness/run.mjs` for the wave cells.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:01:43.057Z"
+          "at": "2026-11-15T05:33:52.607Z"
         },
         {
           "n": 2,
@@ -90556,8 +90560,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:40:49.512Z",
-      "updated": "2026-11-13T02:01:44.477Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:33:52.607Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
     {
@@ -90951,48 +90955,49 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A matched script cell family (hello, a 50-line text-processing script, a JSON transform, a directory walk, a subprocess pipeline) runs `jet run` against Lua 5.4, LuaJIT, Python 3, Node, Bun, Deno and Perl, measuring exec-to-exit wall time, cycles and peak RSS, Jet compile included, cold and warm reported separately.",
+          "text": "A matched script cell family (hello, a 50-line text-processing script, a JSON transform, a directory walk, a subprocess pipeline) runs `jet run` against Lua 5.4, LuaJIT, Python 3, Node, Bun, Deno and Perl, measuring exec-to-exit wall time, cycles and peak RSS, Jet compile included, cold and warm reported separately. Proof: `node Tools/gauntlet/harness/run.mjs --entry script-cells` records every peer and metric.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:23:25.544Z"
+          "at": "2026-11-15T05:33:53.628Z"
         },
         {
           "n": 2,
-          "text": "End metric: Jet wins every cell and metric against every peer (Jet/peer below 1.00), cold and warm; every loss names its root on a card.",
+          "text": "End metric: Jet wins every cell and metric against every peer (Jet/peer below 1.00), cold and warm; every loss names its root on a card. Proof: `node Tools/gauntlet/harness/run.mjs --entry script-cells` shows no loss.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:23:26.616Z"
+          "at": "2026-11-15T05:33:54.922Z"
         },
         {
           "n": 4,
-          "text": "(moved from #5072 c41 by the owner instruction of 2026-11-10 ~16:10) Peak memory: a small Jet tool's peak RSS is no higher than its original's on every PortBars entry. ScriptAPI-2 measured Jet at about 19-21 MB against bash's 7-12 MB on batch10, integrate10, streamb10 and verify-rows, and the cost is the runtime's baseline, not the twins. The fix goes in the general mechanism (runtime start-up, reserved heap or arena sizing, and eagerly mapped tables), and is proven on a second small program. PortBars shows peak memory PASS on all nine. Part 1 (ScriptAPI-3, image layout locality and the build key; it rides t16) took the warm small-script peak from 15.5 MB to 7.1-7.5 MB, and batch10, integrate10 and streamb10 still lose (11.8 against 10.6 MB, 12.9 against 8.6, 10.6 against 8.6), while verify-rows ties.",
+          "text": "Peak memory: a small Jet tool's peak RSS is no higher than its original's on every PortBars entry. ScriptAPI-2 measured Jet at about 19-21 MB against bash's 7-12 MB on batch10, integrate10, streamb10 and verify-rows, and the cost is the runtime's baseline, not the twins. The fix goes in the general mechanism (runtime start-up, reserved heap or arena sizing, and eagerly mapped tables), and is proven on a second small program. PortBars shows peak memory PASS on all nine. Part 1 (ScriptAPI-3, image layout locality and the build key; it rides t16) took the warm small-script peak from 15.5 MB to 7.1-7.5 MB, and batch10, integrate10 and streamb10 still lose (11.8 against 10.6 MB, 12.9 against 8.6, 10.6 against 8.6), while verify-rows ties. Proof: `jet Tools/gauntlet/PortBars.jet` shows peak memory PASS on all nine entries.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T21:03:26.388Z"
+          "at": "2026-11-15T05:33:56.063Z"
         },
         {
           "n": 5,
-          "text": "An uncached `jet file.jet` (a fresh cache dir: compile from cold, link and run from memory) beats python3 and node on wall time and peak memory, with no script cache, result cache or incremental state serving the run. Measured 2026-11-11 with GNU time on hello world (seed-t21): uncached `jet hello.jet` takes 30 ms and 36-40 MB, a script-cache hit 20-30 ms and 8.7-10.7 MB, the built O1 binary 0 ms and 256 KB, python3 10 ms and 13.1 MB, node 20 ms and 60 MB. Name where the uncached 30 ms and 37 MB go (front end, sema, lowering, emission, link, runtime start), fix them in those general mechanisms toward the 30M lines/s compile target, and prove it on hello world and on a repository tool twin.",
+          "text": "An uncached `jet file.jet` (a fresh cache dir: compile from cold, link and run from memory) beats python3 and node on wall time and peak memory, with no script cache, result cache or incremental state serving the run. Measured 2026-11-11 with GNU time on hello world (seed-t21): uncached `jet hello.jet` takes 30 ms and 36-40 MB, a script-cache hit 20-30 ms and 8.7-10.7 MB, the built O1 binary 0 ms and 256 KB, python3 10 ms and 13.1 MB, node 20 ms and 60 MB. Name where the uncached 30 ms and 37 MB go (front end, sema, lowering, emission, link, runtime start), fix them in those general mechanisms toward the 30M lines/s compile target, and prove it on hello world and on a repository tool twin. Proof: a committed GNU time receipt for hello and a repository tool twin, with the phase breakdown.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T10:55:58.344Z"
+          "at": "2026-11-15T05:33:56.988Z"
         },
         {
           "n": 6,
           "text": "Owner order 2026-11-11: the script cache is off by default. `jet file.jet` and `jet run` compile live every time, and no kept program, result cache or incremental state serves a run unless the user opts in. ScriptCache.jet's default flips. The opt-in spelling goes on a ballot (a flag or an environment variable) and nothing else changes until it is ratified. CLI #Tests prove a second run of unchanged sources compiles again by default (no read or write under the scripts dir). Every in-repository caller, doc and test that assumed a cache hit is migrated in the same patch.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T19:15:29.325Z"
+          "evidence": "Moved to #6966 c3: caches-off cutover gathered on one card",
+          "at": "2026-11-15T05:34:01.051Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
@@ -91006,11 +91011,12 @@
         {
           "n": 8,
           "text": "Child-process-bound workloads (found 2026-11-11 by G1Lead4's runtime-allocator twin: wall 0.92 inconclusive and peak memory 1.03 against node, with the same child processes run in sequence on both sides). Jet's spawn, wait and pipe path and its script start cost no more wall time or peak memory than node's child_process.spawnSync. A paired gauntlet cell that spawns 200 short children in sequence shows Jet below node and python on wall time and peak memory, live and uncached, and a second program that pipes a child's output proves the gain. This is a general runtime fix (process spawn, the runtime baseline), with nothing in the twin.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T11:31:05.341Z"
+          "evidence": "Moved to #6084 c4: the child-process wait card owns the spawn path",
+          "at": "2026-11-15T05:34:02.099Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
@@ -91039,7 +91045,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T03:23:24.506Z",
-      "updated": "2026-11-15T05:19:46.909Z",
+      "updated": "2026-11-15T05:34:02.099Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 10
     },
@@ -91354,12 +91360,12 @@
         },
         {
           "n": 2,
-          "text": "The cost producer is ported: cost facts and the loop-depth collector over BodyTree feed jet lint --cost and jet check; an incomplete reachable projection is E2104 with a UI snapshot; jet explain --cost and the L2510 view-into-owned-slot lint are built; both cost cases PASS on a release kit.",
+          "text": "The cost producer is ported: cost facts and the loop-depth collector over BodyTree feed jet lint --cost and jet check; an incomplete reachable projection is E2104 with a UI snapshot; jet explain --cost and the L2510 view-into-owned-slot lint are built; both cost cases PASS on a release kit. Proof: `jet test Compiler --profile cases --filter cli_parts_surface/cost_cli_` and `jet test Compiler --profile ui --filter E2104`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T06:58:03.916Z"
+          "at": "2026-11-15T05:33:57.937Z"
         }
       ],
       "refs": [],
@@ -91370,8 +91376,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:50:52.522Z",
-      "updated": "2026-11-12T04:20:32.393Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:33:57.937Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
     {
@@ -217513,6 +217519,167 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:34:04.152Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c00ctwqw",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T05:34:03.048Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0wtvbj7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T05:34:02.099Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0g6fxb9",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T05:34:01.052Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0g6fxb9",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T05:33:59.964Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0pjwkhn",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T05:33:58.897Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0pjwkhn",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T05:33:57.937Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0zlsxzv",
+      "note": "#2: proof; was: The cost producer is ported: cost facts and the loop-depth collector over BodyTree feed jet lint --cost and jet check; an incomplete reachable projection is E2104 with a UI snapshot; jet explain --cos"
+    },
+    {
+      "at": "2026-11-15T05:33:56.988Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0g6fxb9",
+      "note": "#5: proof; was: An uncached `jet file.jet` (a fresh cache dir: compile from cold, link and run from memory) beats python3 and node on wall time and peak memory, with no script cache, result cache or incremental state"
+    },
+    {
+      "at": "2026-11-15T05:33:56.063Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0g6fxb9",
+      "note": "#4: strip debris; proof; was: (moved from #5072 c41 by the owner instruction of 2026-11-10 ~16:10) Peak memory: a small Jet tool's peak RSS is no higher than its original's on every PortBars entry. ScriptAPI-2 measured Jet at abou"
+    },
+    {
+      "at": "2026-11-15T05:33:54.922Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0g6fxb9",
+      "note": "#2: proof; was: End metric: Jet wins every cell and metric against every peer (Jet/peer below 1.00), cold and warm; every loss names its root on a card."
+    },
+    {
+      "at": "2026-11-15T05:33:53.628Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0g6fxb9",
+      "note": "#1: proof; was: A matched script cell family (hello, a 50-line text-processing script, a JSON transform, a directory walk, a subprocess pipeline) runs `jet run` against Lua 5.4, LuaJIT, Python 3, Node, Bun, Deno and "
+    },
+    {
+      "at": "2026-11-15T05:33:52.607Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0p9ajji",
+      "note": "#1: proof; was: Each wave's cutover is proven by golden examples with identical output on O0, O1, O2 and web where applicable (I9), and passes the AGENTS.md performance gate for its cells: Jet/peer below 1.00 for eve"
+    },
+    {
+      "at": "2026-11-15T05:33:51.494Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ctwqw",
+      "note": "#13: strip debris; proof; was: Closed-list guard run time (#6206): (from #6222 Guard: fail CI on new closed lists, with a kernel ledger and) The run takes under 5 s (4.2 s measured for the census). (was #6206 c16)"
+    },
+    {
+      "at": "2026-11-15T05:33:50.503Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ctwqw",
+      "note": "#12: strip debris; proof; was: Mutation testing on by default (#6060): The stock jet test run with mutate: changed and generated rows on stays fast enough to be on by default: a paired cell in the perf manifest compares the default"
+    },
+    {
+      "at": "2026-11-15T05:33:49.568Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ctwqw",
+      "note": "#11: proof; was: The fresh-clone full profile's startup (building the test runner and assembling before the first suite row; about 4 minutes on 2026-11-07) is measured by phase and cut to under 30 s."
+    },
+    {
+      "at": "2026-11-15T05:33:48.589Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ctwqw",
+      "note": "#10: proof; was: The cold toolchain fetch inside that run (#6592) takes 30 s or less, so the whole fresh-clone run finishes in under 11 minutes."
+    },
+    {
+      "at": "2026-11-15T05:33:47.595Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ctwqw",
+      "note": "#9: proof; was: Excluding the toolchain fetch, jet test Compiler --profile full on a fresh clone finishes in under 10 minutes on the batch machine. A per-phase timeline is recorded with the commit."
+    },
+    {
+      "at": "2026-11-15T05:33:46.582Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ctwqw",
+      "note": "#8: proof; was: Every corpus suite (golden, cases, ui, packages) runs as wide as the machine's cores and memory allow, with no fixed job cap below that."
+    },
+    {
+      "at": "2026-11-15T05:33:45.547Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ctwqw",
+      "note": "#7: proof; was: The packages suite on a fresh clone finishes in under 5 minutes wall: the hosted Jetpack engine build overlaps the package runs (2a5ad087af), and the engine unit's claims, which run serially because t"
+    },
+    {
+      "at": "2026-11-15T05:33:44.294Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ctwqw",
+      "note": "#6: proof; was: The two step timeouts set for #6651 c2 are removed and both rows pass on the default 60 s step limit under full-kit load: tests/cases/compiled_workloads/compiled_workload_gate_self_check.case (19 s al"
+    },
+    {
+      "at": "2026-11-15T05:33:43.121Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ctwqw",
+      "note": "#4: proof; was: Per-program cost: a profile of a typical golden row splits its time into Core and Prelude checking, the program's own front end, code generation per tier, link and run. Any work repeated identically f"
+    },
+    {
+      "at": "2026-11-15T05:33:41.947Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ctwqw",
+      "note": "#3: proof; was: Every cases row that took 5 s or more on vb5 (284 rows) runs in under 5 s, or this card records why its work is inherently longer (for example a real network or Nix fetch) and that row moves to a name"
+    },
+    {
+      "at": "2026-11-15T05:33:40.825Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00ctwqw",
+      "note": "#1: proof; was: Each of the six slow golden programs (concurrency/job_queue, foundations/storage, foundations/text, crypto/file_seal_jetc, game/raylib_indexed, foundations/realtime, or their successors after the Exam"
+    },
     {
       "at": "2026-11-15T05:33:39.546Z",
       "by": "TowerKeeper-1",
