@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6894,
-    "rev": 103854,
+    "rev": 103875,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39554,6 +39554,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T01:54:23.939Z"
+        },
+        {
+          "n": 18,
+          "text": "D-SH-RUN1=A is built: `Sh{\"git log --oneline {rev}\"}.text()` runs with no shell and returns stdout; a literal `|` word inside `Sh{…}` pipes to the next command natively; a hole containing `|` or `;` stays one argv item; a failed stage fails loudly; the Exec prompt names each program; and the 10 shell tasks in the ballot total fewer characters than their zx and Bun Shell versions (counting script checked in). Proof: `jet test Compiler --profile cases --filter process/sh_literal_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:42:14.699Z"
         }
       ],
       "refs": [
@@ -39571,12 +39580,12 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-15T03:30:33.414Z",
+      "updated": "2026-11-15T03:42:14.699Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 17
+      "criteriaLastN": 18
     },
     {
       "id": "c0692z4s",
@@ -51231,21 +51240,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Admit a module `STORE: Shared{…}` holder construction (a `name: value` declaration, so the handle cannot be reassigned; `#Persist` added only for hot-reload retention) with closed pure non-suspending infallible initializer and Shared crossing checks; handle always present/immutable; once publication under contention without scalar take/set gap; Jet locks/transactions/cleanup; indexed writes fixed under #4751; body/initializer compatible reload retains values, identity/layout/migration reports correct; independent world+descendant providers never clear/use process default; RNG/env overlay/fault/auth/native storage state each has one Jet owner (a Jet runtime cell such as LogicalEnvironment.jet as the process default, or a Core Shared holder), with no Rust or C state left and no second copy; preserve browser semantics.",
+          "text": "A module `STORE: Shared{…}` holder works (D-CORE-GLOBAL-STATE1=A): a `name: value` declaration whose handle is always present and cannot be reassigned (`#Persist` only for hot-reload retention), a closed, pure, non-suspending, infallible initializer checked under the Shared crossing rules, once-only publication under contention with no take/set gap, and the existing Shared lock, transaction and cleanup law; cyclic initialization is refused, not hung. Proof: `jet test Compiler --profile cases --filter globals/shared_holder_` on O0, O1 and O2 and `jet test Compiler --profile ui --filter shared_holder_initializer_not_closed`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T08:02:44.273Z"
+          "at": "2026-11-15T03:42:16.109Z"
         },
         {
           "n": 2,
-          "text": "(was #2966 c1) Scoped deterministic worlds, inherited task/timer lifetimes, clock/RNG providers, bounded virtual advancement and unsupported-effect refusal are implemented across native and Web consumers, proven by tests and goldens on every applicable tier.",
+          "text": "Scoped deterministic worlds, inherited task and timer lifetimes, clock and RNG providers, bounded virtual time advancement and refusal of unsupported effects work on native and web. Proof: `jet test Compiler --profile golden --filter Testing/DeterministicWorld` on O0, O1, O2 and web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:22:04.409Z"
+          "at": "2026-11-15T03:42:17.581Z"
         },
         {
           "n": 3,
@@ -51255,6 +51264,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:03:30.459Z"
+        },
+        {
+          "n": 4,
+          "text": "Hot reload of a module Shared holder whose body and initializer stay compatible keeps its values, and the identity, layout and migration reports are correct. Proof: `jet test Compiler --profile cases --filter globals/shared_holder_reload_keeps_values`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:42:11.224Z"
+        },
+        {
+          "n": 5,
+          "text": "RNG, environment overlay, fault, auth and native storage state each has one Jet owner (a Jet runtime cell such as LogicalEnvironment.jet as the process default, or a Core Shared holder), with no second copy and browser semantics kept; independent worlds and their descendant providers never clear or use the process default. Proof: `jet test Compiler --profile cases --filter globals/one_owner_per_state_kind`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:42:12.262Z"
         }
       ],
       "refs": [
@@ -51268,12 +51295,12 @@
       "parentId": "c0rqi33c",
       "needsAcceptance": false,
       "created": "2026-10-07T21:06:58.270Z",
-      "updated": "2026-11-15T03:03:30.459Z",
+      "updated": "2026-11-15T03:42:17.581Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 3
+      "criteriaLastN": 5
     },
     {
       "id": "c0tdf1ct",
@@ -53118,6 +53145,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Map card distributed 2026-11-15 and closed: c1 to #6628, c3 merged into #6447 c3, c5 merged into #6884 c2, c8 to #3594 (D-SH-RUN1=A). D-NATIVE-GAPS1=A is ratified (2026-10-10), so the interim policy question is settled."
+        },
+        {
           "at": "2026-10-28",
           "by": "CardTrim",
           "text": "Folded #4953 \"Native UDP after Rust removal (packet schema)\" (CardTrim 2026-10-28: single-root task step of map #4954 (Interim native behavior for runtime families without a); 0 criteria, 1 ratified decisions). Body: UDP stays non-native (provisional, 2026-10-10): the legacy JetUDPPacket return ABI has no canonical native schema matching the source Core Packet (data/host/port/original_len/truncated). Six UDP exports were written as groundwork (e9cd09e79), excluded from the pack. Ballot D-NATIVE-UDP1."
@@ -53152,11 +53184,12 @@
         {
           "n": 1,
           "text": "(was #4897) E2: canonical typed identity for the published native runtime pack (consumed by CLI build receipts)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:14:45.216Z"
+          "evidence": "Moved to #6628 c2: runtime pack identity is runtime-pack build work (#6628)",
+          "at": "2026-11-15T03:42:32.845Z",
+          "closure": "obsolete"
         },
         {
           "n": 2,
@@ -53170,29 +53203,32 @@
         {
           "n": 3,
           "text": "(was #4951) Native UI host, browser and Raylib/devtools providers after Rust removal",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:16:31.823Z"
+          "evidence": "Merged into #6447 c3: native ui host, browser and devtools providers are the core.ui.host providers; no raylib (owner 2026-11-08); windows are #6701",
+          "at": "2026-11-15T03:42:34.523Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
           "text": "(was #4953) Native UDP after Rust removal (packet schema)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:16:49.314Z"
+          "evidence": "Merged into #6884 c2: native UDP with its packet schema is the UDP criterion on the sockets card",
+          "at": "2026-11-15T03:42:36.098Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
           "text": "If D-SH-RUN1 = A: `Sh{\"git log --oneline {rev}\"}.text()` runs with no shell and returns stdout; a literal `|` word inside `Sh{…}` pipes to the next command, natively; a hole that contains `|` or `;` stays one argv item; the Exec prompt under #5949 names each program. The 10 shell tasks in the D-SH-RUN1 ballot total fewer characters than their zx and Bun Shell versions (counting script checked in).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T21:06:41.758Z"
+          "evidence": "Moved to #3594 c18: D-SH-RUN1=A is ratified (2026-10-29); process pipelines live on #3594 next to c16",
+          "at": "2026-11-15T03:42:37.735Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -53202,8 +53238,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-10T10:41:20.799Z",
-      "updated": "2026-11-13T02:00:31.173Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:42:40.866Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
@@ -64459,7 +64495,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -64611,12 +64647,13 @@
       "parentId": "c0max8v8",
       "needsAcceptance": false,
       "created": "2026-10-28T11:42:14.354Z",
-      "updated": "2026-11-15T03:40:30.609Z",
+      "updated": "2026-11-15T03:42:39.444Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 12
+      "criteriaLastN": 12,
+      "completedAt": "2026-11-15T03:42:39.444Z"
     },
     {
       "id": "c0kob6cb",
@@ -66540,12 +66577,12 @@
         },
         {
           "n": 3,
-          "text": "[#4183] A counter actor and a supervised worker are built as a Core library over tasks and channels (D-ACTOR1=A) with no new syntax. They run identically on every level. (was #2279 c10)",
+          "text": "A counter actor and a supervised worker are a Core library over tasks and channels with no new syntax (D-ACTOR1=A), and run the same on every tier. Proof: `jet test Compiler --profile golden --filter Concurrency/Actors` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:02:32.569Z"
+          "at": "2026-11-15T03:42:19.156Z"
         }
       ],
       "refs": [],
@@ -66556,8 +66593,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-13T21:22:47.762Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:42:19.157Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
@@ -72651,21 +72688,21 @@
         },
         {
           "n": 4,
-          "text": "impl Celsius -> Float no longer gives the self-contradicting E0113 naming the internal errconv_Celsius_to_Float; after ratification the declaration follows the D-CONVERT-TRAIT1 outcome with a user-facing diagnostic and a UI snapshot.",
+          "text": "`impl Celsius -> Float` no longer gives the self-contradicting E0113 naming the internal errconv_Celsius_to_Float; the declaration follows D-CONVERT-TRAIT1=A (`impl Float.From(Celsius)`) and the old form is an ordinary parse error. Proof: `jet test Compiler --profile ui --filter impl_arrow_conversion`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T16:26:48.012Z"
+          "at": "2026-11-15T03:42:20.670Z"
         },
         {
           "n": 5,
-          "text": "D-FLOAT-INT1 = A is built. Int{f} converts a whole, finite, in-range Float, and otherwise stops with a registered error that names math.trunc, floor, ceil, round and round_even. A literal body is checked at compile time. Ties-to-even rounding to an integer is Int{math.round_even(f)} (round_even returns the same type, per D-ROUND-EVEN1, c6). checked(Int{f}) gives None where Int{f} would stop. saturating(Int{f}) truncates, clamps and maps NaN to 0, on every integer head (Int, I64, U8, I16, ...). No from_float or saturating_from method exists. math.round and round_even stop on NaN, infinity and out of range. Every in-repository caller is migrated, and each form has a UI snapshot and a golden example on O0, O1, O2 and web. (was #6151 c51)",
+          "text": "D-FLOAT-INT1=A is built: Int{f} converts a whole, finite, in-range Float and otherwise stops with a registered error naming math.trunc, floor, ceil, round and round_even; a literal body is checked at compile time; saturating(Int{f}) truncates, clamps and maps NaN to 0 on every integer head; no from_float or saturating_from method exists. Proof: `jet test Compiler --profile cases --filter convert/int_from_float_` on O0, O1, O2 and web, and `jet test Compiler --profile ui --filter int_from_float_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:24:19.000Z"
+          "at": "2026-11-15T03:42:22.138Z"
         },
         {
           "n": 6,
@@ -72694,8 +72731,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:14.611Z",
-      "updated": "2026-11-13T15:24:19.000Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:42:22.138Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 7
     },
     {
@@ -78147,12 +78184,12 @@
         },
         {
           "n": 7,
-          "text": "(was #6095) The chosen reader loads a Parquet file and an Arrow IPC file into a typed frame, with an example and golden output on O0, O1 and O2, and beats pyarrow and polars on the read cell.",
+          "text": "The chosen reader loads a Parquet file and an Arrow IPC file into a typed frame, with an example golden on O0, O1 and O2, and beats pyarrow and polars on the read cell. Proof: `jet test Compiler --profile golden --filter Data/ParquetArrowRead`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:24:38.970Z"
+          "at": "2026-11-15T03:42:23.614Z"
         },
         {
           "n": 8,
@@ -78165,12 +78202,12 @@
         },
         {
           "n": 9,
-          "text": "(was #6412) On a Linux host with a Vulkan loader and device, on_device(F32, Vulkan) uploads and runs through a Jet-runtime Vulkan provider, and tooling/compute_vulkan_webgpu matches its golden. On a host without one, the row is host-gated (SKIP-HOST) rather than wrong, and the rejection path reports the typed capability error.",
+          "text": "On a Linux host with a Vulkan loader and device, on_device(F32, Vulkan) uploads and runs through a Jet-runtime Vulkan provider and compute_vulkan_webgpu matches its golden; without one the row is SKIP-HOST and the refusal reports the typed capability error. Proof: `jet test Compiler --profile golden --filter Compute/ComputeVulkanWebgpu`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:24:48.369Z"
+          "at": "2026-11-15T03:42:25.139Z"
         },
         {
           "n": 10,
@@ -78526,8 +78563,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:12:20.739Z",
-      "updated": "2026-11-07T04:05:22.435Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:42:25.140Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 52
     },
     {
@@ -79761,39 +79798,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "core.ui (other than core.ui.host) is gone from Core; ui examples and tests import the `ui` package and their goldens pass on O0/O1/O2; `use core.ui` fails as an ordinary unknown module, with no teaching error, snapshot or jet fix rule (owner 2026-11-06).",
+          "text": "core.ui (other than core.ui.host) is gone from Core; ui examples and tests import the `ui` package and their goldens pass on O0, O1 and O2; `use core.ui` fails as an ordinary unknown module, with no teaching error, snapshot or jet fix rule (owner 2026-11-06). Proof: `git ls-files Core/Ui | grep -v -i host` prints nothing and `jet test Compiler --profile golden --filter Ui/` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T14:11:10.256Z"
+          "at": "2026-11-15T03:42:26.692Z"
         },
         {
           "n": 3,
-          "text": "(was #2792 c1) Canonical host-service and UI source implements dialogs, clipboard, IME, drag/drop, shortcuts and accessibility, with deterministic headless adapters, proven by executable and screenshot tests on every applicable tier.",
+          "text": "core.ui.host implements dialogs, clipboard, IME, drag and drop, shortcuts and accessibility in Jet, with native and browser providers and deterministic headless adapters, and no Rust provider. Proof: `jet test Compiler --profile golden --filter Ui/HostServices` on O0, O1, O2 and web, with screenshot checks.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:22:43.676Z"
+          "at": "2026-11-15T03:42:28.198Z"
         },
         {
           "n": 4,
-          "text": "(was #2792 c2) The font-shaping source and GUI example cover Arabic/emoji positioned runs through the shared shaping path, proven by cross-tier glyph-output tests on every applicable tier.",
+          "text": "Font shaping covers Arabic and emoji positioned runs through the one shaping path, with the same glyph output on every tier. Proof: `jet test Compiler --profile golden --filter Ui/ShapingRuns`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:22:44.678Z"
+          "at": "2026-11-15T03:42:29.652Z"
         },
         {
           "n": 5,
-          "text": "(was #2792 c3) Service capability metadata and registered denial source remain canonical, proven by missing-capability snapshot execution tests on every applicable tier.",
+          "text": "A missing host-service capability gives the registered denial from canonical capability metadata. Proof: `jet test Compiler --profile ui --filter ui_host_capability_missing`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:22:45.698Z"
+          "at": "2026-11-15T03:42:31.254Z"
         }
       ],
       "refs": [],
@@ -79804,8 +79841,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-10-31T14:11:09.409Z",
-      "updated": "2026-11-14T03:27:17.308Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:42:31.254Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 6
     },
     {
@@ -87631,6 +87668,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T01:04:00.127Z"
+        },
+        {
+          "n": 2,
+          "text": "The published native runtime pack has one canonical typed identity, and CLI build receipts record it. Proof: `jet test Compiler --profile cases --filter cli/build_receipt_runtime_pack_identity`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:42:13.432Z"
         }
       ],
       "refs": [],
@@ -87641,8 +87687,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T01:03:58.839Z",
-      "updated": "2026-11-07T04:02:26.380Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T03:42:13.432Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 2
     },
     {
       "id": "c0ycgz3f",
@@ -210490,6 +210537,153 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:42:40.866Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c086hhzb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:42:39.444Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0j8ez91",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T03:42:37.735Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c086hhzb",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T03:42:36.098Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c086hhzb",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T03:42:34.523Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c086hhzb",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T03:42:32.845Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c086hhzb",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T03:42:31.254Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02t52c5",
+      "note": "#5: strip debris; proof; was: (was #2792 c3) Service capability metadata and registered denial source remain canonical, proven by missing-capability snapshot execution tests on every applicable tier."
+    },
+    {
+      "at": "2026-11-15T03:42:29.652Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02t52c5",
+      "note": "#4: strip debris; proof; was: (was #2792 c2) The font-shaping source and GUI example cover Arabic/emoji positioned runs through the shared shaping path, proven by cross-tier glyph-output tests on every applicable tier."
+    },
+    {
+      "at": "2026-11-15T03:42:28.198Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02t52c5",
+      "note": "#3: strip debris; absorbs #4954 c3; was: (was #2792 c1) Canonical host-service and UI source implements dialogs, clipboard, IME, drag/drop, shortcuts and accessibility, with deterministic headless adapters, proven by executable and screensho"
+    },
+    {
+      "at": "2026-11-15T03:42:26.692Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02t52c5",
+      "note": "#1: add proof; was: core.ui (other than core.ui.host) is gone from Core; ui examples and tests import the `ui` package and their goldens pass on O0/O1/O2; `use core.ui` fails as an ordinary unknown module, with no teachi"
+    },
+    {
+      "at": "2026-11-15T03:42:25.140Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c081c9o8",
+      "note": "#9: strip debris; proof; was: (was #6412) On a Linux host with a Vulkan loader and device, on_device(F32, Vulkan) uploads and runs through a Jet-runtime Vulkan provider, and tooling/compute_vulkan_webgpu matches its golden. On a h"
+    },
+    {
+      "at": "2026-11-15T03:42:23.614Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c081c9o8",
+      "note": "#7: strip debris; proof; was: (was #6095) The chosen reader loads a Parquet file and an Arrow IPC file into a typed frame, with an example and golden output on O0, O1 and O2, and beats pyarrow and polars on the read cell."
+    },
+    {
+      "at": "2026-11-15T03:42:22.138Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vhdiiv",
+      "note": "#5: strip debris; checked() and the rounding stops are c7's; was: D-FLOAT-INT1 = A is built. Int{f} converts a whole, finite, in-range Float, and otherwise stops with a registered error that names math.trunc, floor, ceil, round and round_even. A literal body is chec"
+    },
+    {
+      "at": "2026-11-15T03:42:20.670Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vhdiiv",
+      "note": "#4: ballot is ratified; proof; was: impl Celsius -> Float no longer gives the self-contradicting E0113 naming the internal errconv_Celsius_to_Float; after ratification the declaration follows the D-CONVERT-TRAIT1 outcome with a user-fac"
+    },
+    {
+      "at": "2026-11-15T03:42:19.157Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0mhdm27",
+      "note": "#3: strip debris; proof; was: [#4183] A counter actor and a supervised worker are built as a Core library over tasks and channels (D-ACTOR1=A) with no new syntax. They run identically on every level. (was #2279 c10)"
+    },
+    {
+      "at": "2026-11-15T03:42:17.581Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0tr523z",
+      "note": "#2: strip debris; proof; was: (was #2966 c1) Scoped deterministic worlds, inherited task/timer lifetimes, clock/RNG providers, bounded virtual advancement and unsupported-effect refusal are implemented across native and Web consum"
+    },
+    {
+      "at": "2026-11-15T03:42:16.109Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0tr523z",
+      "note": "#1: split the multi-outcome criterion: reload and state ownership to new criteria; was: Admit a module `STORE: Shared{…}` holder construction (a `name: value` declaration, so the handle cannot be reassigned; `#Persist` added only for hot-reload retention) with closed pure non-suspending "
+    },
+    {
+      "at": "2026-11-15T03:42:14.699Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0ufrhm0",
+      "note": "#18 D-SH-RUN1=A is built: `Sh{\"git log --oneline {rev}\"}.text()`"
+    },
+    {
+      "at": "2026-11-15T03:42:13.432Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0bcerww",
+      "note": "#2 The published native runtime pack has one canonical typed id"
+    },
+    {
+      "at": "2026-11-15T03:42:12.262Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0tr523z",
+      "note": "#5 RNG, environment overlay, fault, auth and native storage sta"
+    },
+    {
+      "at": "2026-11-15T03:42:11.224Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0tr523z",
+      "note": "#4 Hot reload of a module Shared holder whose body and initiali"
+    },
     {
       "at": "2026-11-15T03:41:10.880Z",
       "by": "TowerKeeper-1",
