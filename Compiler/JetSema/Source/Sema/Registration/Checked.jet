@@ -3241,27 +3241,29 @@ sema_checked_validate_impl: fn(graph: SemaRegistrationGraph, module_row: SemaReg
         .None -> {}
     }
     forwards: implementation.declaration.delegation_field != None || implementation.declaration.is_generated_serde
-    sema_checked_validate_trait_contract(graph, module_row, implementation.target_type, trait_name, implementation.methods, implementation.associated_type_impls, forwards, implementation.declaration.type_span, diagnostics)
+    rows: loop row in 0..<implementation.methods.len() -> row
+    sema_checked_validate_trait_contract(graph, module_row, implementation.target_type, trait_name, implementation.methods, rows, implementation.associated_type_impls, forwards, implementation.declaration.type_span, diagnostics)
 }
 
 // The trait contract an `impl Trait` block in a struct or enum body meets,
 // checked as sema_checked_validate_impl checks a top-level impl. The block's
 // methods registered on the nominal; they are the rows at the block's
-// method spans.
+// method spans, read in place.
 sema_checked_validate_nested_impl: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, nominal: SemaRegistrationNominal, block: TraitImplBlock, diagnostics: &[Diagnostic]) {
-    methods := [SemaRegistrationFunction]{}
+    rows := [Int]{}
     loop method in block.methods {
-        loop registered in nominal.methods {
-            if registered.declaration.name_span == method.name_span && registered.declaration.name == method.name {
-                methods.push(registered.copy())
+        loop row in 0..<nominal.methods.len() {
+            if nominal.methods[row].declaration.name_span == method.name_span && nominal.methods[row].declaration.name == method.name {
+                rows.push(row)
                 break
             }
         }
     }
-    sema_checked_validate_trait_contract(graph, module_row, nominal.ty, block.trait_name, methods, block.assoc_type_impls, block.delegation_field != None || block.compiler_generated, block.trait_span, diagnostics)
+    sema_checked_validate_trait_contract(graph, module_row, nominal.ty, block.trait_name, nominal.methods, rows, block.assoc_type_impls, block.delegation_field != None || block.compiler_generated, block.trait_span, diagnostics)
 }
 
-sema_checked_validate_trait_contract: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, target_type: Type, trait_name: String, methods: [SemaRegistrationFunction], associated_type_impls: [NamedType], forwards: Bool, span: Span, diagnostics: &[Diagnostic]) {
+// The impl's methods are the rows `rows` of `methods`.
+sema_checked_validate_trait_contract: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, target_type: Type, trait_name: String, methods: [SemaRegistrationFunction], rows: [Int], associated_type_impls: [NamedType], forwards: Bool, span: Span, diagnostics: &[Diagnostic]) {
     trait_ref: sema_checked_trait_nominal_row(graph, module_row.module_identity, trait_name) ?? return
     // Rust `validate_trait_impl` (E0906): every trait method without a default
     // body appears in the impl. A `using` delegation forwards them instead, and
@@ -3274,8 +3276,8 @@ sema_checked_validate_trait_contract: fn(graph: SemaRegistrationGraph, module_ro
             }
             required_name: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[required_index].declaration.name
             provided := false
-            loop actual in methods {
-                if actual.declaration.name == required_name {
+            loop row in rows {
+                if methods[row].declaration.name == required_name {
                     provided = true
                     break
                 }
@@ -3317,14 +3319,15 @@ sema_checked_validate_trait_contract: fn(graph: SemaRegistrationGraph, module_ro
     associated_names.push("Self")
     associated_types.push(target_type.copy())
     loop expected_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
-        found := SemaRegistrationFunction?{None}
-        loop actual in methods {
-            if actual.declaration.name == graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].declaration.name {
-                found = Val(actual)
+        found := -1
+        loop row in rows {
+            if methods[row].declaration.name == graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].declaration.name {
+                found = row
                 break
             }
         }
-        actual: found ?? next
+        if found < 0 -> next
+        actual: methods[found]
         declared_signature: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].signature
         expected_signature: sema_inference_substitute_type(declared_signature, associated_names, associated_types)
         compatible: sema_type_assignable_in_graph(graph, expected_signature, sema_checked_impl_signature(expected_signature, actual.signature), module_row.module_identity)

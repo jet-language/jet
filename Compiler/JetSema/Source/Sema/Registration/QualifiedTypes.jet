@@ -134,9 +134,11 @@ sema_registration_qualified_symbol_type: fn(symbol: Symbol, jobs: SemaQualifiedJ
 }
 
 // Moves a module's rewritten types (sema_registration_qualified_types) into
-// its rows, slot by slot in the same order.
+// its rows, slot by slot in the same order. A module with no rewritten type
+// keeps its rows untouched, so rows another holder shares are not copied.
 sema_registration_qualified_apply: fn(graph: &SemaRegistrationGraph, module_index: Int, types: &&[Type?]) {
     slots := types.move()
+    if !sema_registration_qualified_rewrites(slots) -> return
     slots.reverse()
     sema_registration_qualified_apply_functions(graph.modules[module_index].functions, slots)
     loop nominal in 0..<graph.modules[module_index].nominals.len() -> sema_registration_qualified_apply_functions(graph.modules[module_index].nominals[nominal].methods, slots)
@@ -145,6 +147,14 @@ sema_registration_qualified_apply: fn(graph: &SemaRegistrationGraph, module_inde
     loop import_index in 0..<graph.modules[module_index].imports.len() {
         loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() -> sema_registration_qualified_apply_symbol(graph.modules[module_index].imports[import_index].bindings[binding].symbol, slots)
     }
+}
+
+// Whether one of a module's slots holds a rewritten type.
+sema_registration_qualified_rewrites: fn(slots: [Type?]) -> Bool Never! {
+    loop slot in slots {
+        if slot != None -> return true
+    }
+    false
 }
 
 sema_registration_qualified_apply_functions: fn(functions: &[SemaRegistrationFunction], slots: &[Type?]) {
