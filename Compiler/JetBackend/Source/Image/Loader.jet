@@ -1767,7 +1767,9 @@ loader_exec_block: fn(path: String, argv: [String], env: [String]?) -> LoaderExe
     loop text in texts -> bytes += text.bytes().len() + 1
     size: os_page_round(bytes)
     block: os_map(size, OS_PROT_READ + OS_PROT_WRITE)
-    if os_failed(block) -> return loader_exec_failed("mapping execve's arguments failed (errno {-block})")
+    if os_failed(block) {
+        return loader_exec_failed("mapping execve's arguments failed (errno {-block})")
+    }
     at := block + size
     env_start := 0
     addresses := [Int]{}
@@ -1916,8 +1918,12 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String) -> X64Trace {
 x64_trace_wait: fn(trace: X64Trace) -> Int {
     result := -OS_EINTR
     #Unsafe("wait4 writes one int status to the trace's scratch word") {
-        loop result == -OS_EINTR -> result = os_syscall(OS_SYS_WAIT4, trace.pid, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL, 0, 0, 0)
-        if result == trace.pid -> result = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})}.bit_and(0xffffffff)
+        loop result == -OS_EINTR {
+            result = os_syscall(OS_SYS_WAIT4, trace.pid, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL, 0, 0, 0)
+        }
+        if result == trace.pid {
+            result = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})}.bit_and(0xffffffff)
+        }
     }
     result
 }
@@ -1978,7 +1984,9 @@ x64_trace_read: fn(trace: X64Trace, address: Int, count: Int) -> [U8]? {
             os_store_word(iov + 16, address + bytes.len())
             os_store_word(iov + 24, want)
             got = os_syscall(OS_SYS_PROCESS_VM_READV, trace.pid, iov, 1, iov + 16, 1, 0)
-            if got > 0 && !mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(trace.scratch + LOADER_TRACE_BYTES), got) -> got = 0
+            if got > 0 && !mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(trace.scratch + LOADER_TRACE_BYTES), got) {
+                got = 0
+            }
         }
         if got <= 0 -> break
         if got < want -> break

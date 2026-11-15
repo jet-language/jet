@@ -3,6 +3,7 @@
 # Compiler/JetDevserver, evidence, does not parse). A failure lists each source to
 # format; `jet Tools/agent/FmtCorpus.jet --write` formats them and moves their line pins.
 # The checker finds its checkout from its own path, so no cwd override.
+requires: probe git -C {root} rev-parse --git-dir # the corpus is the checkout's tracked files, so a tree with no git checkout skips
 env: JET={jet}
 step: jet {root}/Tools/agent/FmtCorpus.jet --check
 timeout: 900s

@@ -829,11 +829,12 @@ jfmt_fmt_block_marker: fn(f: &JetFmt, marker: JetFmtBlockMarker, source_start: I
     jfmt_write(f, " {{")
 }
 
-// A marked block's body after its ` {`. One written `{}` stays `{}`, where
-// jfmt_fmt_body would open it onto a blank line.
-jfmt_fmt_marked_body: fn(f: &JetFmt, body: [Stmt], span: Span) {
-    if body.len() == 0 && jfmt_empty_body_inline(f, span) {
-        jfmt_write(f, "}}")
+// The body after the ` {` of a block statement whose source ends at `end`:
+// an empty one stays `{}` (jfmt_fmt_empty_block), where jfmt_fmt_body would
+// open it onto a blank line.
+jfmt_fmt_block_body: fn(f: &JetFmt, body: [Stmt], end: Int) {
+    if body.len() == 0 && jfmt_empty_block_before(f, end) == .Val(braces) {
+        jfmt_fmt_empty_block(f, braces)
         return
     }
     jfmt_fmt_body(f, body)
@@ -944,7 +945,7 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             jfmt_fmt_loop_label(f, label)
             jfmt_write(f, "loop ")
             jfmt_fmt_cond(f, cond)
-            jfmt_fmt_effect_loop_body(f, body, expr_span(cond).end, arrow_body)
+            jfmt_fmt_effect_loop_body(f, body, expr_span(cond).end, arrow_body, expr_span(cond).end)
         }
         .For(var, var_span, var2, kind, body, span, arrow_body, label, _) -> {
             jfmt_fmt_for_stmt(f, var, var_span, var2, kind, body, span, arrow_body, label)
@@ -1009,21 +1010,21 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             }
             if wrap && step == None -> jfmt_write(f, ",")
             header_end: if step == .Val(step_stmt) -> jfmt_stmt_span(step_stmt).end else -> expr_span(cond).end
-            jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body)
+            jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body, header_end)
         }
-        .Loop(inner, _, arrow_body, label) -> {
+        .Loop(inner, span, arrow_body, label) -> {
             jfmt_fmt_loop_label(f, label)
             jfmt_write(f, "loop")
-            jfmt_fmt_effect_loop_body(f, inner, 0, arrow_body)
+            jfmt_fmt_effect_loop_body(f, inner, 0, arrow_body, span.start)
         }
-        .Unsafe(_, _, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
+        .Unsafe(_, _, body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         // `#Impure("reason") { … }` round-trips verbatim.
-        .Impure(_, _, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
+        .Impure(_, _, body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         .Switched(marker, body, _) -> { jfmt_fmt_statement_switch_attr(f, marker, body) }
         // `#Reactive { … }` round-trips verbatim.
-        .Reactive(body, span) -> { jfmt_fmt_marked_body(f, body, span) }
+        .Reactive(body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         // `#Shield { … }` round-trips verbatim.
-        .Shield(body, span) -> { jfmt_fmt_marked_body(f, body, span) }
+        .Shield(body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         // `defer statement` stays one line; a braced or longer body keeps its braces.
         .Defer(body, span) -> {
             if body.len() == 1 && !jfmt_defer_braced(f, span) {
@@ -1031,12 +1032,12 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
                 jfmt_fmt_stmt(f, body[0])
             } else {
                 jfmt_write(f, "defer {{")
-                jfmt_fmt_body(f, body)
+                jfmt_fmt_block_body(f, body, span.end)
             }
         }
         // `#Region(r) { … }`.
-        .Region(_, _, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
-        .Policy(_, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
+        .Region(_, _, body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
+        .Policy(_, body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         // `task.group g(limit: n, stack: bytes) { … }`.
         .TaskGroup(name, _, args, body, _) -> {
             jfmt_write(f, "task.group {name}")
@@ -1081,7 +1082,7 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             if multiline && resugared.len() > 0 -> jfmt_write(f, "}}") else -> jfmt_end_block(f)
         }
         // `#FX(Net, DB) { … }` effect-restriction region.
-        .AuthorityScope(_, _, _, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
+        .AuthorityScope(_, _, _, body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         // `#run { … }` shared-preparation block.
         .ComptimeBlock(body, is_template_loop, _) -> {
             // A template loop prints as `#loop …`.
@@ -1128,13 +1129,13 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             jfmt_fmt_dispatch(f, subject, arms, else_body, true, span)
         }
         // `#Context(field: value, …) { … }`.
-        .ContextBlock(_, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
+        .ContextBlock(_, body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         // `#Live { … }`.
-        .Live(body, span) -> { jfmt_fmt_marked_body(f, body, span) }
+        .Live(body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         // `#Nondeterministic("reason") { … }`.
-        .AssumeDet(_, _, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
+        .AssumeDet(_, _, body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         // – `#Transact(name) { … }` (the handle is optional).
-        .Transact(_, _, body, _, span) -> { jfmt_fmt_marked_body(f, body, span) }
+        .Transact(_, _, body, _, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         // A scope-member statement `.name { … }` /
         // `.name(args) { … }`, or a declared `#Name { … }` block.
         .ScopeMember(name, _, args, args_span, body, dsl, _, _) -> {
@@ -1183,7 +1184,7 @@ jfmt_defer_braced: fn(f: JetFmt, span: Span) -> Bool Never! {
 
 jfmt_fmt_for_stmt: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?) {
     header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, span, label)
-    jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body)
+    jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body, header_end)
 }
 
 // A template loop's body is template text, kept as written: a braced body
@@ -1193,12 +1194,12 @@ jfmt_fmt_template_loop_stmt: fn(f: &JetFmt, stmt: Stmt) {
     if stmt == .For(var, var_span, var2, kind, body, span, arrow_body, label, _) {
         header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, span, label)
         if {
-            arrow_body -> jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body)
+            arrow_body -> jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body, header_end)
             jfmt_source_span_multiline(f, Span{start: header_end, end: span.end}) -> {
                 jfmt_write(f, " {{")
                 jfmt_fmt_body_expanded(f, body)
             }
-            else -> jfmt_fmt_control_body_after_header(f, body, true)
+            else -> jfmt_fmt_control_body_after_header(f, body, true, header_end)
         }
         return
     }
@@ -1320,7 +1321,8 @@ jfmt_value_block_inlineable: fn(f: JetFmt, stmts: [Stmt], value: Expr) -> Bool {
     true
 }
 
-jfmt_fmt_effect_loop_body: fn(f: &JetFmt, body: [Stmt], header_end: Int, arrow_body: Bool) {
+// `open_from` is a source position at or before the body's `{`.
+jfmt_fmt_effect_loop_body: fn(f: &JetFmt, body: [Stmt], header_end: Int, arrow_body: Bool, open_from: Int) {
     if arrow_body && body.len() == 1 {
         mark: jfmt_mark(f)
         jfmt_write(f, " ")
@@ -1355,7 +1357,7 @@ jfmt_fmt_effect_loop_body: fn(f: &JetFmt, body: [Stmt], header_end: Int, arrow_b
     explicit_drop: single_expr && !at_value_tail && jfmt_is_explicit_drop(body[0])
     preserve_braced_expr: !arrow_body && single_expr && !explicit_drop && jfmt_single_stmt_braces(f, body[0]) != None
     force_braces: preserve_braced_expr || (!arrow_body && body.len() == 1 && jfmt_is_loop_exit_stmt(body[0]))
-    jfmt_fmt_control_body_after_header(f, body, force_braces)
+    jfmt_fmt_control_body_after_header(f, body, force_braces, open_from)
 }
 
 jfmt_is_explicit_drop: fn(stmt: Stmt) -> Bool {
@@ -1641,14 +1643,28 @@ jfmt_fmt_classic_switch: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?, s
             .Paren(_, _, _) -> true
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
         }
-        jfmt_fmt_control_body_after_header(f, arm.body, paren_cond || preserve_loop_exit_braces || after_braces || tail_braces)
+        jfmt_fmt_control_body_after_header(f, arm.body, paren_cond || preserve_loop_exit_braces || after_braces || tail_braces, expr_span(arm.cond).end)
     }
     if else_body == .Val(body) {
         then_used_braces: jfmt_out_trimmed_ends_with_close(f)
         jfmt_write(f, " else")
         braced_exit: jfmt_authored_braced_loop_exit(f, body)
-        jfmt_fmt_control_body_after_header(f, body, then_used_braces || braced_exit)
+        else_from: jfmt_classic_else_from(f, expr_span(arms[arms.len() - 1].cond).end)
+        jfmt_fmt_control_body_after_header(f, body, then_used_braces || braced_exit, else_from)
     }
+}
+
+// Where the `else` block of a classic `if` begins: the end of the last arm's
+// braced block, the first `{` after that arm's condition (a call's span ends
+// at its name). -1 when that arm was written as an arrow.
+jfmt_classic_else_from: fn(f: JetFmt, last_cond_end: Int) -> Int Never! {
+    open := jfmt_first_token_at(f, last_cond_end)
+    loop open < f.source_toks.len() && f.source_toks[open].kind != TOKEN_LBRACE {
+        if f.source_toks[open].kind == TOKEN_UNIFIED_ARROW -> return -1
+        open += 1
+    }
+    if open >= f.brace_closes.len() || f.brace_closes[open] < 0 -> return -1
+    f.source_toks[f.brace_closes[open]].span.end
 }
 
 jfmt_authored_braced_loop_exit: fn(f: JetFmt, body: [Stmt]) -> Bool {
@@ -1781,7 +1797,14 @@ jfmt_stmt_is_direct_exit: fn(statement: Stmt) -> Bool Never! {
 // One simple effect-control
 // statement uses `->` when it fits. Braces remain the canonical shape for
 // multiple statements, scoped blocks, comments, and marked controls.
-jfmt_fmt_control_body_after_header: fn(f: &JetFmt, body: [Stmt], force_braces: Bool) {
+// `open_from` is a source position at or before the body's `{`, or -1 when
+// unknown; an empty body found there stays `{}` (jfmt_fmt_empty_block).
+jfmt_fmt_control_body_after_header: fn(f: &JetFmt, body: [Stmt], force_braces: Bool, open_from: Int) {
+    if body.len() == 0 && open_from >= 0 && jfmt_empty_block_after(f, open_from) == .Val(braces) {
+        jfmt_write(f, " {{")
+        jfmt_fmt_empty_block(f, braces)
+        return
+    }
     if force_braces || f.force_control_braces {
         jfmt_write(f, " {{")
         jfmt_fmt_control_body(f, body)

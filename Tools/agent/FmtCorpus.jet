@@ -27,8 +27,9 @@
 //
 // The corpus leaves out, by rule:
 // - generated: a `//` line among a source's first five says a tool generates
-//   it, or it is an FFI adaptation's `after.jet` facade; its generator
-//   writes it;
+//   it, it is an FFI adaptation's `after.jet` facade, or `jet build Compiler`
+//   copies a Prelude text into it (a `target:` of PRELUDE_COPIES); its
+//   generator writes it;
 // - formatter input: tests/cases/fmt*/, and the fixtures and named sources of
 //   any case that runs `jet fmt`, `jet fix` or a codemod, whose unformatted
 //   bytes are the test (the rewritten file it pins echoes them);
@@ -37,6 +38,11 @@
 //   its receipts stay as run, so their pins don't move; and the agent
 //   workload corpus (tests/agent_workloads/ and the copies its cases run),
 //   whose recorded baselines and SHA256SUMS pin its bytes by digest;
+// - parse lesson: a tests/ui fixture whose snapshot shows an error the
+//   parser reports (a Compiler/Prelude/Diagnostics.jet row whose `stage:`
+//   names `.Parse`), such as a function with no body, or a checker error
+//   `jet fmt` repairs (FMT_REPAIRED_ERRORS); `jet fmt` repairs some of those
+//   on purpose, and the fixture's bytes are the lesson;
 // - does not parse: a negative fixture `jet fmt` refuses, found while it runs.
 //
 // One bad source never stalls a run: each formatter run has a time limit
@@ -87,6 +93,31 @@ RULE_DEVSERVER: "Compiler/JetDevserver (#5931)"
 RULE_EVIDENCE: "evidence"
 
 RULE_UNPARSED: "does not parse"
+
+RULE_PARSE_LESSON: "parse lesson"
+
+// The diagnostic rows, whose `stage:` says which ones the parser reports.
+DIAGNOSTIC_ROWS: "Compiler/Prelude/Diagnostics.jet"
+
+// The checker errors whose source `jet fmt` rewrites into the repaired
+// program: an arm head that repeats the `if`'s comparison loses it.
+FMT_REPAIRED_ERRORS: [String]{"RedundantArmComparison"}
+
+// The Prelude texts `jet build Compiler` copies into compiler sources: each
+// `target:` names a source under Compiler/ that the build writes.
+PRELUDE_COPIES: "Compiler/Toolchain/PreludeSources.jet"
+
+PRELUDE_COPY_TARGET: Regex{"target: \"[^\"]+\""}
+
+PRELUDE_COPY_OPEN: "target: \""
+
+UI_TREE: "tests/ui"
+
+// A ui fixture's snapshot: `x.stderr` beside `x.jet`, or `stderr` in a
+// fixture folder.
+UI_SNAPSHOT_SUFFIX: ".stderr"
+
+UI_FOLDER_SNAPSHOT: "stderr"
 
 // Trees the corpus leaves out whole, with their rule.
 EXCLUDED_TREES: [String]{"tests/cases/fmt", "Compiler/JetDevserver/", "tests/agent_workloads/", "tests/cases/agent_workloads/"}
@@ -323,7 +354,9 @@ case_fixtures: fn(path: String, text: String) -> [String] Never! {
 rewrites_sources: fn(text: String) -> Bool Never! {
     loop line in text.lines() {
         if !line.starts_with("step:") -> next
-        if line.contains("jet fmt") || line.contains("jet fix") || line.contains("jet inspect codemod") -> return true
+        if line.contains("jet fmt") || line.contains("jet fix") || line.contains("jet inspect codemod") {
+            return true
+        }
     }
     false
 }
@@ -336,6 +369,36 @@ add_fmt_case_inputs: fn(path: String, text: String, out: &Exclusions) {
     }
     loop fixture in case_fixtures(path, text) -> note(out.trees, fixture, RULE_FORMATTER_INPUT)
     loop found in ROOTED_SOURCE.find_all(text) -> note(out.exact, found, RULE_FORMATTER_INPUT)
+}
+
+// The diagnostic types `rows` (DIAGNOSTIC_ROWS) says the parser reports: each
+// `Name: struct {` whose `stage:` names `.Parse`.
+parse_diagnostic_types: fn(rows: String) -> [String] Never! {
+    found := [String]{}
+    name := ""
+    loop line in rows.lines() {
+        if !line.starts_with(" ") && line.ends_with(": struct {{") {
+            name = line.removesuffix(": struct {{")
+            next
+        }
+        if name != "" && line.trim().starts_with("stage: [") && line.contains(".Parse") {
+            found.push(name.copy())
+            name = ""
+        }
+    }
+    found
+}
+
+// Keeps out the ui fixture whose snapshot at `path` shows a parse error: the
+// `.jet` beside an `x.stderr`, or the whole folder of a folder's `stderr`.
+note_parse_lesson: fn(path: String, out: &Exclusions) {
+    if base_name(path) == UI_FOLDER_SNAPSHOT {
+        note(out.trees, parent(path), RULE_PARSE_LESSON)
+        return
+    }
+    if path.ends_with(UI_SNAPSHOT_SUFFIX) {
+        note(out.exact, "{path.removesuffix(UI_SNAPSHOT_SUFFIX)}.jet", RULE_PARSE_LESSON)
+    }
 }
 
 // The folders a case's relative source names mean: its fixtures, then its own folder.
@@ -392,9 +455,22 @@ exclusions: fn(root: String) -[Exec, FS.Read, Time.Wait]> Exclusions CorpusError
             note(out.exact, path, RULE_GENERATED)
         }
     }
+    loop found in PRELUDE_COPY_TARGET.find_all(read_tracked(root, PRELUDE_COPIES) ?? return Err(err)) {
+        target: found.removeprefix(PRELUDE_COPY_OPEN).removesuffix("\"")
+        note(out.exact, "Compiler/{target}", RULE_GENERATED)
+    }
     loop path in grep_roots(root, [String]{}, FMT_STEP_GREP) ?? return Err(err) {
         if path.ends_with(".case") {
             add_fmt_case_inputs(path, read_tracked(root, path) ?? return Err(err), out)
+        }
+    }
+    types := parse_diagnostic_types(read_tracked(root, DIAGNOSTIC_ROWS) ?? return Err(err))
+    loop name in FMT_REPAIRED_ERRORS -> types.push(name.copy())
+    if types.len() > 0 {
+        lesson_grep: "^Error \\[jet\\.({types.join("|")})\\]"
+        argv: [String]{"git", "grep", "-l", "-I", "-E", "-e", lesson_grep, "--", UI_TREE}
+        loop path in git_lines(root, argv, [Int]{0, 1}) ?? return Err(err) {
+            note_parse_lesson(path, out)
         }
     }
     Ok(out)
@@ -1214,6 +1290,18 @@ run: fn() {
     assert_eq(exclusion_rule("Examples/Basics/Hello.jet", out), RULE_FORMATTER_INPUT)
     assert_eq(exclusion_rule("tests/cases/cli/fixtures/g/main.jet", out), "")
     assert_eq(rule_counts([String]{"b", "a", "b"}).join("|"), "2\tb|1\ta")
+}
+
+#Test("a ui fixture whose snapshot shows a parse error is a parse lesson") {
+    rows: "MissingFunctionBody: struct {{\n    name: String\n\n    impl Diagnostic {{\n        code: \"E0081\"\n        stage: [.Parse]\n    }}\n}}\n\nTypeMismatch: struct {{\n    impl Diagnostic {{\n        stage: [.Sema]\n    }}\n}}\n\nBareCasePattern: struct {{\n    impl Diagnostic {{\n        stage: [.Parse, .Sema]\n    }}\n}}\n"
+    assert_eq(parse_diagnostic_types(rows).join("|"), "MissingFunctionBody|BareCasePattern")
+    out := no_exclusions()
+    note_parse_lesson("tests/ui/e0081_fn_without_body.stderr", out)
+    note_parse_lesson("tests/ui/E0367_bare_case/stderr", out)
+    note_parse_lesson("tests/ui/e0081_fn_without_body.jet", out)
+    assert_eq(exclusion_rule("tests/ui/e0081_fn_without_body.jet", out), RULE_PARSE_LESSON)
+    assert_eq(exclusion_rule("tests/ui/E0367_bare_case/main.jet", out), RULE_PARSE_LESSON)
+    assert_eq(exclusion_rule("tests/ui/bare_error_mark_is_not_a_contract.jet", out), "")
 }
 
 #Test("a meaning change is the internal error that names the source") {

@@ -1613,6 +1613,54 @@ jfmt_fmt_control_body: fn(f: &JetFmt, body: [Stmt]) {
     jfmt_fmt_body_expanded(f, body)
 }
 
+// The braces of a block with no statements whose `{` is the first one at or
+// after `from`; None when that block holds code. Only comments and the `;`
+// a line ends with may sit between its braces.
+jfmt_empty_block_after: fn(f: JetFmt, from: Int) -> JetFmtBraces? Never! {
+    open := jfmt_first_token_at(f, from)
+    loop open < f.source_toks.len() && f.source_toks[open].kind != TOKEN_LBRACE -> open += 1
+    if open >= f.brace_closes.len() || f.brace_closes[open] < 0 -> return None
+    close: f.brace_closes[open]
+    loop index in open + 1..<close {
+        if !jfmt_close_comment_trivia(f.source_toks[index].kind) -> return None
+    }
+    Val(JetFmtBraces{open: f.source_toks[open].span.start, close: f.source_toks[close].span.start})
+}
+
+// The braces of a block with no statements whose `}` is the last token
+// before `end`; None when that block holds code or `end` closes no block.
+jfmt_empty_block_before: fn(f: JetFmt, end: Int) -> JetFmtBraces? Never! {
+    close: jfmt_first_token_at(f, end) - 1
+    if close < 0 || f.source_toks[close].kind != TOKEN_RBRACE -> return None
+    open := close - 1
+    loop open >= 0 && jfmt_close_comment_trivia(f.source_toks[open].kind) -> open -= 1
+    if open < 0 || open >= f.brace_closes.len() || f.brace_closes[open] != close -> return None
+    Val(JetFmtBraces{open: f.source_toks[open].span.start, close: f.source_toks[close].span.start})
+}
+
+// An empty block after the caller's ` {`: `{}` when written on one line, or
+// the comments it holds one per line inside the braces, so no comment leaves
+// the block. One written over several lines without a comment keeps the
+// expanded form.
+jfmt_fmt_empty_block: fn(f: &JetFmt, braces: JetFmtBraces) {
+    one_line: jfmt_written_on_one_line(f, Span{start: braces.open, end: braces.close})
+    if one_line {
+        jfmt_write(f, "}}")
+        return
+    }
+    if !jfmt_span_has_comment(f, braces.open, braces.close) {
+        jfmt_fmt_body_expanded(f, [Stmt]{})
+        return
+    }
+    f.indent += 1
+    // On a fresh line inside the braces, so a comment written after `{` is not
+    // taken for a trailing comment of the line before.
+    jfmt_newline(f)
+    jfmt_emit_leading(f, braces.close)
+    f.indent -= 1
+    jfmt_write(f, "}}")
+}
+
 // A table is a control form: a lone table value keeps its body expanded, as a
 // table statement does, even when the table itself fits on one line.
 jfmt_is_table_value_stmt: fn(f: JetFmt, stmt: Stmt) -> Bool Never! {

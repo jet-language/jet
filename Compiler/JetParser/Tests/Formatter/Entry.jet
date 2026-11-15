@@ -423,6 +423,41 @@ SUM: #run { count() + 1 }
     assert_eq(fmt_core_stable(source), source)
 }
 
+#Test("an empty if, else, loop or defer block stays {{}}") {
+    source: `run: fn() {
+    if ready() {}
+    if ready() {} else {}
+    loop i in 0..<3 {}
+    loop ready() {}
+    loop {}
+    defer {}
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+}
+
+#Test("a comment in an empty block stays inside the block") {
+    source: `run: fn() {
+    #Unsafe("audit") {
+        // a note
+    }
+    if ready() {
+        // nothing yet
+    } else {
+        // nor here
+    }
+    loop i in 0..<3 {
+        // skipped
+    }
+    defer {
+        // cleanup later
+    }
+    done()
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+}
+
 // `if r == .Val(n) -> A else -> B` is one pattern test, so fmt keeps it as
 // written when an arm's value is a table of its own; the table's `{` is not
 // the test's. As a table, its `else` would stand for `.None` (E0641).
