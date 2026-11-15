@@ -99,6 +99,21 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
     }
     ir_x64_relax_fuse(code, r, targets)
     ir_x64_relax_shrink(r)
+    // Starts, lengths, heads and targets stay put from here on, so which
+    // branches and heads lie before each branch's end and each target is
+    // found once; each pass then reads the shrinking and the no-ops so far
+    // at those counts instead of searching for them again.
+    end_branches := [Int]{}
+    end_heads := [Int]{}
+    target_branches := [Int]{}
+    target_heads := [Int]{}
+    loop index in 0..<r.sites.len() {
+        end: r.starts[index] + r.lengths[index]
+        end_branches.push(ir_x64_relax_branches_to(r, end))
+        end_heads.push(ir_x64_relax_heads_to(r, end, false))
+        target_branches.push(ir_x64_relax_branches_to(r, targets[index]))
+        target_heads.push(ir_x64_relax_heads_to(r, targets[index], true))
+    }
     changed := true
     loop changed {
         changed = false
@@ -107,7 +122,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
         loop index in 0..<r.sites.len() {
             if !r.short[index] -> next
             end: r.starts[index] + r.lengths[index]
-            reach: ir_x64_relaxed_at(r, targets[index]) - ir_x64_relaxed_end(r, end)
+            reach: ir_x64_relax_moved(r, targets[index], target_branches[index], target_heads[index]) - ir_x64_relax_moved(r, end, end_branches[index], end_heads[index])
             if reach < -128 || reach > 127 {
                 r.short[index] = false
                 r.stays_long[index] = true
@@ -125,8 +140,8 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
             saving: r.lengths[index] - 2
             // Where this branch would end, and its target would be, were it
             // short too.
-            from: ir_x64_relaxed_end(r, end) - saving
-            to: ir_x64_relaxed_at(r, targets[index]) - (if targets[index] >= end -> saving else -> 0)
+            from: ir_x64_relax_moved(r, end, end_branches[index], end_heads[index]) - saving
+            to: ir_x64_relax_moved(r, targets[index], target_branches[index], target_heads[index]) - (if targets[index] >= end -> saving else -> 0)
             reach: to - from
             if reach >= -128 && reach <= 127 -> shorten.push(index)
         }
@@ -158,7 +173,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
             copied = end
             next
         }
-        target: ir_x64_relaxed_at(r, targets[index])
+        target: ir_x64_relax_moved(r, targets[index], target_branches[index], target_heads[index])
         jump: r.lengths[index] == 5
         if r.short[index] {
             out.push(if jump -> (U8{0xeb}) else -> (U8{0x70 + (Int{code[start + 1]} - 0x80)}))
@@ -251,18 +266,69 @@ ir_x64_rel32_at: fn(code: [U8], at: Int) -> Int Never! {
 // and the no-ops of every head at or before it moved it down (a head's
 // own instruction starts after them).
 ir_x64_relaxed_at: fn(r: IRX64Relax, at: Int) -> Int Never! {
-    at - ir_x64_relax_shrunk(r, at) + ir_x64_relax_padded(r, at, true)
+    ir_x64_relax_moved(r, at, ir_x64_relax_branches_to(r, at), ir_x64_relax_heads_to(r, at, true))
 }
 
-// Where an instruction that ends at offset `at` of the old layout ends in
-// the relaxed code: before the no-ops of a head at `at`.
-ir_x64_relaxed_end: fn(r: IRX64Relax, at: Int) -> Int Never! {
-    at - ir_x64_relax_shrunk(r, at) + ir_x64_relax_padded(r, at, false)
+// A place in the old layout (IRX64Relax) to map offsets from, for a run of
+// offsets in mostly rising order: the branches that end at or before the
+// last offset mapped, and the heads at or before it.
+IRX64RelaxWalk: struct {
+    branches: Int
+    heads: Int
+}
+
+ir_x64_relax_walk: fn() -> IRX64RelaxWalk Never! {
+    IRX64RelaxWalk{branches: 0, heads: 0}
+}
+
+// ir_x64_relaxed_at of `at`, found from where `walk` stood, which moves to
+// `at`: an offset a little after the last one steps over the few branches
+// and heads between them; any other searches for its place.
+ir_x64_relaxed_next: fn(r: IRX64Relax, walk: &IRX64RelaxWalk, at: Int) -> Int Never! {
+    branches := walk.branches
+    if branches > r.sites.len() || (branches > 0 && r.starts[branches - 1] + r.lengths[branches - 1] > at) {
+        branches = ir_x64_relax_branches_to(r, at)
+    } else {
+        steps := 0
+        loop branches < r.sites.len() && r.starts[branches] + r.lengths[branches] <= at {
+            if steps == IR_X64_RELAX_WALK_STEPS {
+                branches = ir_x64_relax_branches_to(r, at)
+                break
+            }
+            branches += 1
+            steps += 1
+        }
+    }
+    heads := walk.heads
+    if heads > r.heads.len() || (heads > 0 && r.heads[heads - 1] > at) {
+        heads = ir_x64_relax_heads_to(r, at, true)
+    } else {
+        loop heads < r.heads.len() && r.heads[heads] <= at -> heads += 1
+    }
+    walk.branches = branches
+    walk.heads = heads
+    ir_x64_relax_moved(r, at, branches, heads)
+}
+
+// How far ir_x64_relaxed_next steps before it searches instead.
+IR_X64_RELAX_WALK_STEPS: 8
+
+// Offset `at` of the old layout in the relaxed code, given how many
+// branches end at or before it and how many heads come before it.
+ir_x64_relax_moved: fn(r: IRX64Relax, at: Int, branches: Int, heads: Int) -> Int Never! {
+    shrunk: if branches == 0 -> 0 else -> r.shrunk[branches - 1]
+    padded: if heads == 0 -> 0 else -> r.padded[heads - 1]
+    at - shrunk + padded
 }
 
 // How many bytes the short branches ending at or before `at` shrank by.
 ir_x64_relax_shrunk: fn(r: IRX64Relax, at: Int) -> Int Never! {
-    // The last branch ending at or before `at`.
+    branches: ir_x64_relax_branches_to(r, at)
+    if branches == 0 -> 0 else -> r.shrunk[branches - 1]
+}
+
+// How many branches end at or before `at`.
+ir_x64_relax_branches_to: fn(r: IRX64Relax, at: Int) -> Int Never! {
     low := 0
     high := r.sites.len()
     loop low < high {
@@ -273,11 +339,11 @@ ir_x64_relax_shrunk: fn(r: IRX64Relax, at: Int) -> Int Never! {
             high = middle
         }
     }
-    if low == 0 -> 0 else -> r.shrunk[low - 1]
+    low
 }
 
-// The no-op bytes of the heads before `at` (and at it, when `inclusive`).
-ir_x64_relax_padded: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
+// How many heads lie before `at` (and at it, when `inclusive`).
+ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
     low := 0
     high := r.heads.len()
     loop low < high {
@@ -288,7 +354,7 @@ ir_x64_relax_padded: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
             high = middle
         }
     }
-    if low == 0 -> 0 else -> r.padded[low - 1]
+    low
 }
 
 // A forward jmp over three filler bytes and a loop of 20 bytes and a jmp
@@ -310,6 +376,30 @@ ir_x64_relax_padded: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
     assert_eq(Int{code[52]}, 0xeb)
     assert_eq(Int{code[53]}, 256 - 22)
     loop at in 32..<52 -> assert_eq(Int{code[at]}, 0x90)
+}
+
+// Twenty jmps, each over three filler bytes, and a loop head among them:
+// offsets walked in rising order, in falling order and in strides map as
+// ir_x64_relaxed_at maps each one alone.
+#Test("A walk maps offsets in any order as the search does") {
+    code := [U8]{}
+    sites := [Int]{}
+    loop _ in 0..<20 {
+        start: code.len()
+        code.push(U8{0xe9})
+        loop _ in 0..<4 -> code.push(U8{0})
+        x64_patch_rel32(code, start + 1, start + 8)
+        sites.push(start + 1)
+        loop _ in 0..<3 -> code.push(U8{0x90})
+    }
+    length: code.len()
+    r: ir_x64_relax(code, sites, [Int]{80}, [Int]{120})
+    offsets := [Int]{}
+    loop at in 0..<(length + 1) -> offsets.push(at)
+    loop at in 0..<(length + 1) -> offsets.push(length - at)
+    loop k in 0..<(length + 1) -> offsets.push(k * 37 % (length + 1))
+    walk := ir_x64_relax_walk()
+    loop at in offsets -> assert_eq(ir_x64_relaxed_next(r, walk, at), ir_x64_relaxed_at(r, at))
 }
 
 // A forward jmp over 117 filler bytes and a one-byte loop: short, it would

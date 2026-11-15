@@ -4617,10 +4617,16 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: In
         }
     }
     relax: ir_x64_relax(e.code.bytes, e.branches, heads, head_ends)
-    loop k in 0..<e.relocs.len() -> e.relocs[k].at = ir_x64_relaxed_at(relax, e.relocs[k].at)
-    loop k in 0..<lines.len() -> lines[k].at = ir_x64_relaxed_at(relax, lines[k].at)
-    loop k in 0..<positions.len() -> positions[k] = ir_x64_relaxed_at(relax, positions[k])
-    loop k in 0..<e.tails.len() -> e.tails[k] = ir_x64_relaxed_at(relax, e.tails[k])
+    // Each run is mostly in code order: a walk maps it without a search per
+    // offset.
+    walk := ir_x64_relax_walk()
+    loop k in 0..<e.relocs.len() -> e.relocs[k].at = ir_x64_relaxed_next(relax, walk, e.relocs[k].at)
+    walk = ir_x64_relax_walk()
+    loop k in 0..<lines.len() -> lines[k].at = ir_x64_relaxed_next(relax, walk, lines[k].at)
+    walk = ir_x64_relax_walk()
+    loop k in 0..<positions.len() -> positions[k] = ir_x64_relaxed_next(relax, walk, positions[k])
+    walk = ir_x64_relax_walk()
+    loop k in 0..<e.tails.len() -> e.tails[k] = ir_x64_relaxed_next(relax, walk, e.tails[k])
     ret_at: ir_x64_relaxed_at(relax, ret)
     ends: ir_x64_relaxed_at(relax, epilogue)
     body_at: ir_x64_relaxed_at(relax, body)
