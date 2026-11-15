@@ -7001,7 +7001,7 @@ sema_check_expression_inner: fn(expr: Expr, expected: Type?, environment: SemaSc
         .Err(value, span, _) -> sema_expr_check_err_literal(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .CompareChain(operands, ops, hooks, span, _) -> sema_expression_compare_chain(operands, ops, hooks, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .OrFallback(value, fallback, _, span, _) -> sema_expression_or_fallback(value, fallback, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .Try(value, span, conversion, note, _) -> sema_expression_try(value, span, conversion, note, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .Try(value, span, conversion, note, try_id) -> sema_expression_try(value, span, conversion, note, try_id, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .If(condition, then_body, then_value, else_body, else_value, span, _) -> sema_expression_if(condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Lambda(lambda, _) -> sema_expression_lambda(lambda, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .PatternTest(subject, pattern, span, _) -> sema_expr_check_pattern_test(subject, pattern, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -7083,7 +7083,7 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
         }
         .CompareChain(operands, ops, hooks, span, _) -> sema_expression_compare_chain(operands, ops, hooks, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .OrFallback(value, fallback, _, span, _) -> sema_expression_or_fallback(value, fallback, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .Try(value, span, conversion, note, _) -> sema_expression_try(value, span, conversion, note, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .Try(value, span, conversion, note, try_id) -> sema_expression_try(value, span, conversion, note, try_id, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .If(condition, then_body, then_value, else_body, else_value, span, _) -> sema_expression_if(condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Lambda(lambda, _) -> sema_expression_lambda(lambda, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Todo(span, _, _) -> sema_expression_todo(expected, span, sema_source_line_at(environment.source_segments, span) ?? 0, context)
@@ -7756,10 +7756,13 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
     if !grouping -> context.failure_carrier_root = false
     propagates: !grouping && !carrier_root && sema_expression_propagating_call(expr, scopes)
     previous_success_view: context.failure_success_view
+    previous_mark_receiver: context.failure_mark_receiver
     context.failure_success_view = propagates
+    if scopes.failures_explicit -> context.failure_mark_receiver = sema_failure_marks_receiver(expr)
     checked := sema_check_expression_inner(expr, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     sema_leave_source_nesting(context)
     context.failure_success_view = previous_success_view
+    context.failure_mark_receiver = previous_mark_receiver
     if propagates && checked != None {
         taken_checked := checked.move()
         checked = None

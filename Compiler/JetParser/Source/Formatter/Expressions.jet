@@ -1670,16 +1670,15 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_fmt_expr(f, inner, JFMT_PREC_OR_FALLBACK)
             jfmt_write(f, ")")
         }
-        // A value's bare `x?` (only before a `)`) and the context frame
-        // `x?(note)`. A call propagates by itself, so its bare mark (the
-        // retired `call()?`) is left out.
+        // A value's bare `x?` (only before a `)`), a call's mark `call()?`
+        // and the context frame `x?(note)`.
         .Try(inner, _, _, note, _) -> {
             jfmt_fmt_expr(f, inner, JFMT_PREC_POSTFIX)
             if note == .Val(context) {
                 jfmt_write(f, "?(")
                 jfmt_fmt_expr(f, context, JFMT_PREC_POSTFIX)
                 jfmt_write(f, ")")
-            } else if !parser_expression_is_call(inner) {
+            } else {
                 jfmt_write(f, "?")
             }
         }

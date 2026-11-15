@@ -1318,7 +1318,9 @@ sema_expression_auto_propagate: fn(expr: Expr, value: &&TExpr, expected: Type?, 
     // and conversion reads finish before its owner enters the replacement.
     if !sema_expression_auto_propagates(value.ty, expected, context) -> return Val(value.move())
     span: expr_span(expr)
-    conversion: sema_expression_propagation_conversion(value.ty, Val(expr), sema_failure_method_callee(value, program, context), span, true, environment, program, scopes, context, diagnostics) ?? return None
+    method_callee: sema_failure_method_callee(value, program, context)
+    conversion: sema_expression_propagation_conversion(value.ty, Val(expr), method_callee, span, true, environment, program, scopes, context, diagnostics) ?? return None
+    if scopes.failures_explicit -> sema_failure_marks_require(expr, conversion, sema_failure_callee_of(Val(expr), method_callee, environment, program, scopes), environment, program, context, diagnostics)
     payload: sema_expression_carrier_payload(value.ty) ?? return None
     location: sema_expression_panic_location(environment, program, scopes, span)
     propagated: sema_tree_node(payload, TExprKind.TryWithContext{inner: value.move(), note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
@@ -1354,7 +1356,8 @@ sema_expression_rejected_call_propagation: fn(result_type: Type, source: Expr?, 
     sema_link_reports_to_first_error(diagnostics, root_mark, mark)
 }
 
-sema_expression_try: fn(value: Expr, span: Span, conversion: TryConvert, context_expr: Expr?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_expression_try: fn(value: Expr, span: Span, conversion: TryConvert, context_expr: Expr?, try_id: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_failure_marks_written(value, conversion, context_expr, try_id) -> return sema_failure_marks_check_written(value, span, expected, environment, program, scopes, state, tail_store, check_context, diagnostics)
     // Explicit `?` owns its operand's carrier: the call root must not
     // propagate a second time before this check sees it.
     inner: sema_check_expression_carrier(value, None, environment, program, scopes, state, tail_store, check_context, diagnostics) ?? return None

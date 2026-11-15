@@ -1251,6 +1251,10 @@ These are not `--simplify` rewrites.
 `--explicit-copies` checks each file, then writes `.copy()` at every implicit copy
 site: the Safe `.copy()` edits sema gives the same source under
 `#Policy(copies: .Explicit)`; calls that would not parse report E0122.
+`--explicit-failures` checks each file the same way, then writes `?` after
+every call that can pass a failure up: the Safe E0434 edits sema gives the
+same source under `#Policy(failures: .Explicit)`, so a call used as a receiver
+becomes `(call()?)`.
 With `--json`, a clean `--check` emits the `fmt` status envelope; dirty
 checks emit `status: "dirty"` with paths, or path/diff objects with `--diff`.
 Read and parse failures stay on stderr in machine form, and no file is

@@ -755,6 +755,11 @@ SemaCheckContext: struct {
     // being checked that its expectation describes the success value.
     failure_carrier_root: Bool
     failure_success_view: Bool
+    // Under `failures: .Explicit` (FailureMarks.jet): the node of the call a
+    // written `?` marks, and the node of the call the expression being
+    // checked reads a member of, which its mark must wrap in parentheses.
+    failure_mark_written: Int{-1}
+    failure_mark_receiver: Int{-1}
     // An open callback (no written or expected return) adopts the carrier of
     // its first propagated call, as the Rust reference's callback inference.
     failure_inference: Bool
@@ -930,6 +935,7 @@ SemaScopeModulePolicy: struct {
     unit_explicit_units: Bool
     copies_explicit: Bool
     writes_explicit: Bool
+    failures_explicit: Bool
     // Split the exact span key into scalar indexes, without formatting it.
     function_unit_starts: [Int:Int]
     function_unit_ends: [[Int:Bool]]
@@ -966,6 +972,9 @@ SemaScopeTable: struct {
     // `writes: .Explicit` is active: every call writes the `&`/`&&` mark its
     // signature implies (Ownership/CallMarks.jet).
     writes_explicit: Bool{false}
+    // `failures: .Explicit` is active: every call that can fail is written
+    // with `?` (FailureMarks.jet).
+    failures_explicit: Bool{false}
     // The innermost `#Context` block: 0 outside one, 1 inside one without an
     // `allocator:` field, 2 when an enclosing block names an allocator.
     context_allocation: Int{0}
@@ -1849,6 +1858,7 @@ sema_scope_snapshot: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
         writes_explicit: source.writes_explicit,
+        failures_explicit: source.failures_explicit,
         context_allocation: source.context_allocation,
         binding_undo: source.binding_undo.copy(),
         open_marks: source.open_marks,
@@ -1890,6 +1900,7 @@ sema_scope_mark: fn(table: &SemaScopeTable) -> SemaScopeMark Never! {
             unit_explicit_units: table.unit_explicit_units,
             copies_explicit: table.copies_explicit,
             writes_explicit: table.writes_explicit,
+            failures_explicit: table.failures_explicit,
             context_allocation: table.context_allocation,
             open_marks: table.open_marks,
             deep_check: table.deep_check,
@@ -1932,6 +1943,7 @@ sema_scope_rollback: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     table.unit_explicit_units = saved.unit_explicit_units
     table.copies_explicit = saved.copies_explicit
     table.writes_explicit = saved.writes_explicit
+    table.failures_explicit = saved.failures_explicit
     table.context_allocation = saved.context_allocation
     table.deep_check = saved.deep_check
     // Exact even when a nested mark was abandoned by an early return.
@@ -2202,6 +2214,7 @@ sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGrap
         unit_explicit_units: false,
         copies_explicit: false,
         writes_explicit: false,
+        failures_explicit: false,
         function_unit_starts: [Int:Int]{},
         function_unit_ends: [[Int:Bool]]{},
     }
@@ -2225,6 +2238,7 @@ sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGrap
                 if declaration.key == PolicyKey.ExplicitUnits -> policy.unit_explicit_units = true
                 if sema_string_view_copies_declaration(declaration) -> policy.copies_explicit = true
                 if sema_call_marks_writes_declaration(declaration) -> policy.writes_explicit = true
+                if sema_failure_marks_declaration(declaration) -> policy.failures_explicit = true
             }
         }
     }
@@ -2494,6 +2508,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
         writes_explicit: source.writes_explicit,
+        failures_explicit: source.failures_explicit,
         context_allocation: source.context_allocation,
         policy_modules: source.policy_modules.copy(),
         policy_rows: source.policy_rows.copy(),

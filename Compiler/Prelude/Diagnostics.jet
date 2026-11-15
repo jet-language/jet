@@ -6726,9 +6726,9 @@ BareQuestionMark: struct {
     impl Diagnostic {
         code: "E-ERR-PROPAGATE"
         safety_class: .Opinion
-        safety_reason: "Fallible calls already propagate, so the bare `?` changes nothing, and Jet refuses it so every `?` adds context."
-        stage: [.Parse]
-        meaning: "A bare `?` after a fallible call"
+        safety_reason: "Fallible calls already propagate, so the bare `?` changes nothing, and outside `#Policy(failures: .Explicit)` Jet refuses it so every `?` adds context."
+        stage: [.Parse, .Sema]
+        meaning: "A bare `?` after a fallible call outside `#Policy(failures: .Explicit)`"
         detail: true
         structured_fix: .Remove{text: "?"}
         no_fix: None
@@ -6737,7 +6737,7 @@ BareQuestionMark: struct {
         what: fn(self) -> String { "A bare `?` has no meaning." }
 
         why: fn(self) -> String {
-            "Fallible calls propagate automatically; `?(text)` adds one failure-context frame."
+            "Fallible calls propagate automatically; `?(text)` adds one failure-context frame, and a bare `?` marks a call only under `#Policy(failures: .Explicit)`."
         }
 
         fix: fn(self) -> String {
@@ -7261,6 +7261,31 @@ ValueThrownAway: struct {
 
         fix: fn(self) -> String {
             "For a pure call, use the result or bind it with `result: {self.call}`; for a last line, write `-> T` after the parameter list if the function should return it; write `.drop(\"reason\")` to discard on purpose"
+        }
+    }
+}
+
+FailureMarkRequired: struct {
+    impl Diagnostic {
+        code: "E0434"
+        safety_class: .Opinion
+        safety_reason: "The call passes its failure up with or without the mark, and the program's own policy asks for it written."
+        meaning: "Under `#Policy(failures: .Explicit)`, a call that can pass a failure up is written without `?`"
+        detail: true
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+
+        what: fn(self) -> String {
+            "A call under `#Policy(failures: .Explicit)` can pass a failure up to its caller and is written without `?` or `?(text)`."
+        }
+
+        why: fn(self) -> String {
+            "A call that can fail passes its failure up by itself. The policy asks that the text show each such call, so a reader sees every point where the function can stop early."
+        }
+
+        fix: fn(self) -> String {
+            "Write `?` after the call, or `?(text)` to add a context frame; a call read as a receiver is written `(call()?)`. `jet fmt --explicit-failures` writes every mark."
         }
     }
 }

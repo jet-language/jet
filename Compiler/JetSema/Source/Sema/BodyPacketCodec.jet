@@ -4993,12 +4993,13 @@ body_codec_put_policykey: fn(out: &BodyCodecOut, value: PolicyKey) Never! {
         .Copies -> { body_codec_put_tag(out, 18) }
         .Sentries -> { body_codec_put_tag(out, 19) }
         .Arithmetic -> { body_codec_put_tag(out, 20) }
-        .Writes -> body_codec_put_tag(out, 21)
+        .Writes -> { body_codec_put_tag(out, 21) }
+        .Failures -> body_codec_put_tag(out, 22)
     }
 }
 
 body_codec_get_policykey: fn(bytes: [U8], input: &BodyCodecIn) -> PolicyKey Never! {
-    position: body_codec_get_tag(bytes, input, 22, 0)
+    position: body_codec_get_tag(bytes, input, 23, 0)
     if position == {
         1 -> PolicyKey.Impure
         2 -> PolicyKey.Nondeterministic
@@ -5021,6 +5022,7 @@ body_codec_get_policykey: fn(bytes: [U8], input: &BodyCodecIn) -> PolicyKey Neve
         19 -> PolicyKey.Sentries
         20 -> PolicyKey.Arithmetic
         21 -> PolicyKey.Writes
+        22 -> PolicyKey.Failures
         else -> PolicyKey.Unsafe
     }
 }

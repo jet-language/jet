@@ -1,0 +1,25 @@
+#Policy(failures: .Explicit)
+
+Table: struct {
+    rows: Int
+}
+
+parse: fn(text: String) -> Int {
+    if text == "" -> return Err("empty")
+    text.count_bytes()
+}
+
+load: fn(path: String) -> Table {
+    rows: parse(path)
+    Table{rows: rows}
+}
+
+total: fn(path: String) -> Int {
+    first: parse(path)?
+    second: parse(path)?("reading {path} again")
+    first + second + load(path).rows
+}
+
+run: fn() {
+    print(total("ab") ?? 0)
+}

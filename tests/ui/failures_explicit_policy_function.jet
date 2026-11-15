@@ -1,0 +1,20 @@
+// The function's own `#Policy(failures: .Explicit)` asks for the mark in its
+// body only; the unmarked call in `loose` stays as written.
+parse: fn(text: String) -> Int {
+    if text == "" -> return Err("empty")
+    text.count_bytes()
+}
+
+#Policy(failures: .Explicit)
+strict: fn(text: String) -> Int {
+    parse(text) + 1
+}
+
+loose: fn(text: String) -> Int {
+    parse(text) + 1
+}
+
+run: fn() {
+    print(strict("ab") ?? 0)
+    print(loose("ab") ?? 0)
+}
