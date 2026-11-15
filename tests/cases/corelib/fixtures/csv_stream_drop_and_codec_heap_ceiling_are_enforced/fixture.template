@@ -9,8 +9,8 @@ write_unfinished: fn(path: String) {
     output: files.create(path) ?? panic("create partial")
     writer := csv.writer(output) ?? panic("writer")
     writer.write(["alpha", "beta"]) ?? panic("record")
-    writer.flush() ?? panic("flush")
-    // no finish — Drop must leave the record CRLF unwritten (incomplete wire)
+    // No flush, no finish: a flush writes the held record CRLF, and Drop
+    // must leave it unwritten (incomplete wire).
 }
 
 run: fn() {

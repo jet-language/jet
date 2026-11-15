@@ -9,8 +9,8 @@ write_unfinished: fn(path: String) {
     output: files.create(path) ?? panic("create partial")
     writer := jsonl.writer(output) ?? panic("writer")
     writer.write(Dyn.Text("alpha")) ?? panic("record")
-    writer.flush() ?? panic("flush")
-    // no finish — Drop must leave the record LF unwritten (incomplete wire)
+    // No flush, no finish: a flush writes the held record LF, and Drop must
+    // leave it unwritten (incomplete wire).
 }
 
 run: fn() {

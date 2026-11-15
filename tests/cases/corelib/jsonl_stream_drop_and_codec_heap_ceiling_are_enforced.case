@@ -1,6 +1,7 @@
 # Port of tests/corelib_parts/encoding_streams.rs::jsonl_stream_drop_and_codec_heap_ceiling_are_enforced; guest source unchanged.
 # ORACLE-LITERAL: tests/corelib_parts/encoding_streams.rs:1195.
 # The guest's original `count++` is written `count += 1`, because `++` is retired.
+# The guest's `writer.flush()` before Drop is gone: a codec flush now writes the held record LF.
 fixture: fixtures/jsonl_stream_drop_and_codec_heap_ceiling_are_enforced
 write: guest.jet fixtures/jsonl_stream_drop_and_codec_heap_ceiling_are_enforced/fixture.template
 step aot: jet build --allow=FS.Read,FS.Write guest.jet
