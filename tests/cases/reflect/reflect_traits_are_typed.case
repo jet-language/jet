@@ -1,0 +1,17 @@
+# A type's implemented traits read as its TypeInfo's typed `traits` list, the
+# same in a marker body, a `#run` value, ordinary code and fn build, on both
+# tiers. A TypeInfo has no string `implements("X")` query.
+fixture: reflect_traits_are_typed.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = reflect_traits_are_typed.stdout.expected
+stderr: empty
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = reflect_traits_are_typed.stdout.expected
+stderr: empty
+step refused: jet check refused/main.jet
+exit: nonzero
+stderr: ~ "`TypeInfo` has no method `implements`" # the typed list is the one read
