@@ -102,9 +102,9 @@ sema_http_route_find_struct: fn(environment: SemaScopeEnvironment, program: Sema
 
 // `request_ty` (a mux route: its handler is `fn(HTTPRequest)`) types a
 // lambda's one unannotated parameter as the request.
-sema_http_route_shape: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?, request_ty: Type?) -> SemaHTTPRouteShape? {
+sema_http_route_shape: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, request_ty: Type?) -> SemaHTTPRouteShape? {
     if expression == {
-        .Paren(inner, _, _) -> return sema_http_route_shape(inner, environment, program, scopes, host_hooks, request_ty)
+        .Paren(inner, _, _) -> return sema_http_route_shape(inner, environment, program, scopes, request_ty)
         .Lambda(lambda, _) -> {
             if lambda.meta.http_route_source == .Val(source) {
                 if program.registration_graph == .Val(graph) {
@@ -149,9 +149,6 @@ sema_http_route_shape: fn(expression: Expr, environment: SemaScopeEnvironment, p
                 resolved := sema_type_resolve_declared(graph, parameter.ty, function.symbol.module_identity)
                 params.push(SemaHTTPRouteParameter{name: parameter.name, ty: resolved})
             }
-            // Named-handler metadata reads another raw body, not merely
-            // its callable header. The accepted logical query must recompute.
-            sema_body_check_mark_foreign_raw_body(host_hooks)
             return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: function.declaration.body}, module_identity: function.symbol.module_identity})
             } else {
                 return None
@@ -1166,7 +1163,7 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
         path_fields: sema_http_route_path_fields(pattern) ?? [SemaHTTPRoutePathField]{}
         mux_request := Type?{None}
         if app -> mux_request = Val(sema_call_resolved_type(Type.Named{name: "HTTPRequest"}, environment, program))
-        handler_shape: sema_http_route_shape(updated_args[1].expr, environment, program, scopes, context.host_hooks, mux_request) ?? {
+        handler_shape: sema_http_route_shape(updated_args[1].expr, environment, program, scopes, mux_request) ?? {
             diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler must be a lambda or named function with explicit typed parameters", "route binding needs source parameter names and types before it can define transport inputs", "write `fn(id: Int, req: HTTPRequest) {{ ... }}` or pass a named function"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }

@@ -279,7 +279,7 @@ jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerCon
     }
     // copy: the check takes the request; a failed check's records name its file.
     checked_file: request.authorized_sources.entry_path.copy()
-    result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed.copy(), request: request, sema_session: None, retain_projection: false}) ?? return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", "the check query failed before returning its diagnostics", "report this compiler bug")}
+    result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed.copy(), request: request, retain_projection: false}) ?? return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", "the check query failed before returning its diagnostics", "report this compiler bug")}
     if result.internal_problem == .Val(problem) -> return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", problem, "report this compiler bug")}
     if result.product == {
         .CheckedCompilerValue(checked) -> JetEvalBuildReply.Value{value: TComptimeValue.Present{value: checked.value}}

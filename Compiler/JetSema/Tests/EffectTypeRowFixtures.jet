@@ -96,7 +96,7 @@ effect_type_row_run: fn() {
     declared := stage.graph.move()
     stage.graph = None
     graph = declared.move() ?? panic("EffectTypeRowFixtures: the declaration pass lost its registration graph")
-    checked := sema_finalize_registration_graph(graph.copy(), None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None, None)
+    checked := sema_finalize_registration_graph(graph.copy(), None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None)
     if !checked.complete -> panic("EffectTypeRowFixtures: the body and effect check failed {checked.diagnostics:Debug}")
     rows: sema_effect_graph_type_rows(graph, checked.modules)
     // A method's solved row.

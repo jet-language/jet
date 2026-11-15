@@ -1,10 +1,10 @@
-// Speculate using one invocation's real incremental service; keep enters the
+// Speculate on one invocation's documents with a fresh check; keep enters the
 // existing held SourceTransaction writer only after a verdict.
 use {
     jet_driver.[
-        JetDriverCompilerQueries, JetDriverCompilerCheckResult, JetDriverCompilerQueryStats,
+        JetDriverCompilerQueries, JetDriverCompilerCheckResult,
         JetDriverCompileMode, jet_driver_compiler_queries_new, jet_driver_compiler_queries_set_document,
-        jet_driver_compiler_queries_documents, jet_driver_compiler_queries_stats,
+        jet_driver_compiler_queries_documents,
         jet_driver_compiler_queries_check_disk, jet_driver_compiler_queries_check_text,
         jet_driver_apply_edits, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput,
         jet_driver_inline_package, jet_driver_mask_inline_package, JetDriverIceRow, jet_driver_ice_record,
@@ -27,7 +27,7 @@ JetCLITryAction: enum {
     Edits(edits: [JetCLITryEdit])
 }
 JetCLITryPlan: struct { name: String, entry: String, action: JetCLITryAction }
-JetCLITryVerdict: struct { diagnostics: [Diagnostic], claims_rechecked: Int, claims_reused: Int }
+JetCLITryVerdict: struct { diagnostics: [Diagnostic] }
 JetCLITryFileEdits: struct { path: String, edits: [TextEdit] }
 JetCLITryChecked: struct {
     checked: JetDriverCompilerCheckResult
@@ -297,28 +297,17 @@ jet_cli_try_check: fn(queries: &JetDriverCompilerQueries, entry: String, disk: B
         }
     }
 }
-jet_cli_try_counter_delta: fn(before: Int, after: Int) -> Int JetCLITryError! {
-    if after < before -> return Err(jet_cli_try_ice("counters", "incremental body counters decreased within one try invocation"))
-    Ok(after - before)
-}
-jet_cli_try_verdict: fn(queries: &JetDriverCompilerQueries, before: JetDriverCompilerQueryStats, entry: String, changes: [JetCLISourceChange], entry_source: String) -> JetCLITryVerdict JetCLITryError! {
+jet_cli_try_verdict: fn(queries: &JetDriverCompilerQueries, entry: String, changes: [JetCLISourceChange], entry_source: String) -> JetCLITryVerdict JetCLITryError! {
     loop change in changes {
         text: String.from_bytes(change.after) ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("try overlay contains non-UTF-8 source")})
         jet_driver_compiler_queries_set_document(queries, change.path, text)
     }
     jet_driver_compiler_queries_set_document(queries, jet_cli_try_canonical(entry), entry_source)
     checked: jet_cli_try_check(queries, entry, false)
-    after: jet_driver_compiler_queries_stats(queries)
-    rechecked: jet_cli_try_counter_delta(before.item_recomputes, after.item_recomputes)
-    reused: jet_cli_try_counter_delta(before.item_hits, after.item_hits)
-    Ok(JetCLITryVerdict{diagnostics: checked.checked.diagnostics, claims_rechecked: rechecked, claims_reused: reused})
+    Ok(JetCLITryVerdict{diagnostics: checked.checked.diagnostics})
 }
-jet_cli_try_receipt: fn(name: String, changes: [JetCLISourceChange], verdict: JetCLITryVerdict) -> String Never! {
+jet_cli_try_receipt: fn(name: String, changes: [JetCLISourceChange]) -> String Never! {
     bytes := name.bytes()
-    counts: [Int]{verdict.claims_rechecked, verdict.claims_reused}
-    loop count in counts {
-        loop offset in 0..<8 -> bytes.push(U8{(count >> (offset * 8)).bit_and(255)})
-    }
     loop change in changes {
         bytes.extend(change.path.bytes())
         bytes.extend(change.before)
@@ -337,18 +326,17 @@ jet_cli_try_output: fn(plan: JetCLITryPlan, verdict: JetCLITryVerdict, receipt: 
         return JetDriverVerbOutput{stdout: "", stderr: "try `{plan.name}`: verdict failed; rolled back\n{diagnostic_render_all(plan.entry, entry_source, verdict.diagnostics, false)}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if json {
-        fields: [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(plan.name)), jet_cli_status_field("kept", jet_cli_status_bool(keep)), jet_cli_status_field("claims_rechecked", jet_cli_status_int(verdict.claims_rechecked)), jet_cli_status_field("claims_reused", jet_cli_status_int(verdict.claims_reused)), jet_cli_status_field("receipt_id", jet_cli_status_text(receipt))}
+        fields: [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(plan.name)), jet_cli_status_field("kept", jet_cli_status_bool(keep)), jet_cli_status_field("receipt_id", jet_cli_status_text(receipt))}
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("try", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     kept: if keep -> "  kept: working tree now contains the staged bytes\n" else -> "  rolled back (default): working tree is byte-identical\n"
-    JetDriverVerbOutput{stdout: "try `{plan.name}`: verdict clean\n  claims re-checked: {verdict.claims_rechecked} · claims reused: {verdict.claims_reused}\n  receipt: {receipt}\n{kept}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "try `{plan.name}`: verdict clean\n  receipt: {receipt}\n{kept}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 jet_cli_try_run: fn(raw: String, keep: Bool, json: Bool) -> JetDriverVerbOutput {
     path: jet_cli_try_absolute(raw) ?? return jet_cli_try_fail(err.message)
     plan: jet_cli_try_read_plan(path) ?? return jet_cli_try_fail(err.message)
     queries := jet_driver_compiler_queries_new()
     baseline := jet_cli_try_check(queries, plan.entry, true) ?? return jet_cli_try_error_output(err)
-    before: jet_driver_compiler_queries_stats(queries)
     changes: jet_cli_try_stage(plan, baseline) ?? return jet_cli_try_error_output(err)
     if changes.len() == 0 -> return jet_cli_try_fail("try plan produced no edit")
     entry_source := String?{None}
@@ -363,8 +351,8 @@ jet_cli_try_run: fn(raw: String, keep: Bool, json: Bool) -> JetDriverVerbOutput 
     if plan.action == .Edits(_) {
         loop change in changes -> operations.extend(jet_cli_fix_rewrite(change.before, change.after))
     }
-    verdict: jet_cli_try_verdict(queries, before, plan.entry, changes, source) ?? return jet_cli_try_error_output(err)
-    receipt: jet_cli_try_receipt(plan.name, changes, verdict)
+    verdict: jet_cli_try_verdict(queries, plan.entry, changes, source) ?? return jet_cli_try_error_output(err)
+    receipt: jet_cli_try_receipt(plan.name, changes)
     if jet_cli_errors(verdict.diagnostics).len() > 0 -> return jet_cli_try_output(plan, verdict, receipt, false, json, source)
     if keep {
         // Revalidate ALL originals before the first publication, as CmdTry does.

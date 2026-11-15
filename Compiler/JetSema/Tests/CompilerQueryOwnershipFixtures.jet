@@ -7,7 +7,7 @@ use {
         JetDriverCompilerQueries, JetDriverCoreSource, JetDriverHostFacts,
         JetDriverStage, jet_driver_compiler_queries_check_disk, jet_driver_compiler_queries_check_text,
         jet_driver_compiler_queries_documents, jet_driver_compiler_queries_new,
-        jet_driver_compiler_queries_stats, jet_driver_compiler_source_input,
+        jet_driver_compiler_source_input,
     ]
     jet_eval.[jet_eval_compiler_services_parse, jet_eval_default_config]
     jet_foundation.[compiler_threads_single]
@@ -48,9 +48,6 @@ query_ownership_case: fn(label: String, source: String, disk: Bool, parse_error:
     } else if documents[0].path != "main.jet" || documents[0].source != source {
         failures.push("{label}: pre-move source read did not retain the exact document bytes")
     }
-    if queries.roots.len() != 1 -> failures.push("{label}: repeated same-root failure replaced the invocation's cache slots")
-    stats: jet_driver_compiler_queries_stats(queries)
-    if stats.item_hits != 0 || stats.item_recomputes != 0 || stats.live_items != 0 || stats.live_item_bytes != 0 -> failures.push("{label}: failed ingress fabricated Sema cache work")
 }
 
 #Test("compiler_query_ownership_fixtures") {

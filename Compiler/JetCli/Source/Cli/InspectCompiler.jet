@@ -93,7 +93,7 @@ jet_cli_inspect_compiler_check: fn(file: String, source: String) -> JetDriverVer
     snapshot: jet_driver_compiler_source_snapshot(cli_files.cwd() ?? ".", source)
     // copy: the check takes the snapshot; a failed check's records name its file.
     checked_file: snapshot.entry_path.copy()
-    result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc), sema_session: None, retain_projection: false}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
+    result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc), retain_projection: false}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     value := JetCLIStatusValue.Null
     if result.product == {

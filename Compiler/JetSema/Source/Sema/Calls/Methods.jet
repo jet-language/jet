@@ -1099,8 +1099,8 @@ sema_app_route_wire_type: fn(ty: Type) -> String Never! {
     }
 }
 
-sema_app_route_binding: fn(method: String, handler: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> String {
-    shape: sema_http_route_shape(handler, environment, program, scopes, host_hooks, None) ?? return ""
+sema_app_route_binding: fn(method: String, handler: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String {
+    shape: sema_http_route_shape(handler, environment, program, scopes, None) ?? return ""
     parts := [String]{}
     loop parameter in shape.params {
         if parameter.name == "data" && method != "loader" {
@@ -1488,7 +1488,7 @@ sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     if method == {
         "route" | "page" | "layout" -> {
             target = "__route"
-            binding: sema_app_route_binding(method, args[1].expr, environment, program, scopes, context.host_hooks)
+            binding: sema_app_route_binding(method, args[1].expr, environment, program, scopes)
             registration = [CallArg]{args[0].copy(), adapter, identity, sema_app_arg(sema_app_text(binding, span), AccessConvention.Read, span)}
         }
         "pending" | "not_found" | "error" -> {

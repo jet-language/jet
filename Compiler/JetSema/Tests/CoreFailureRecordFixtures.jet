@@ -44,7 +44,7 @@ core_failure_record_diagnostics: fn(source: String, module_identity: String) -> 
     declared := stage.graph.move()
     stage.graph = None
     registration := declared.move() ?? panic("the declaration pass lost its registration graph: {source}")
-    checked := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None, None) ?? panic("finalization failed {err}: {source}")
+    checked := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? panic("finalization failed {err}: {source}")
     checked.diagnostics.move()
 }
 

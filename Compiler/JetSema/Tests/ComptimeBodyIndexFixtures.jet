@@ -13,7 +13,7 @@ use {
         sema_comptime_body_destination_key, sema_comptime_body_source_append,
         sema_comptime_body_source_key, sema_comptime_body_sources_truncate,
         sema_comptime_body_value_find, sema_comptime_body_values_append_items,
-        sema_comptime_body_values_debug, sema_comptime_body_values_freeze,
+        sema_comptime_body_values_freeze,
         sema_comptime_body_values_prefix, sema_comptime_body_values_replace,
         sema_comptime_body_values_truncate, sema_comptime_environment, sema_comptime_graph_apply_values, sema_comptime_module_slot,
         sema_comptime_staged_constant_rows, sema_comptime_value_sites,
@@ -51,6 +51,15 @@ use {
 
 body_index_require: fn(ok: Bool, message: String) Never! {
     if !ok -> panic("ComptimeBodyIndexFixtures: {message}")
+}
+
+// The rows a body-value view sees, rendered as the canonical ordered list.
+body_index_values_debug: fn(values: SemaComptimeBodyValues) -> String {
+    if values.length == 0 -> return "{[SemaComptimeBodyValue]{}:Debug}"
+    facts: values.facts ?? return "{[SemaComptimeBodyValue]{}:Debug}"
+    permit: facts.guard_read()
+    if values.length < permit.value.values.len() -> return "{permit.value.values[0..<values.length]:Debug}"
+    "{permit.value.values:Debug}"
 }
 
 // The fixture's module identities, interned in one fixed order: every table
@@ -370,19 +379,19 @@ body_index_publication_lifecycle: fn() {
     context := sema_check_context_init()
     context.comptime_body_values = environment.comptime_body_values.copy()
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod::one"), "function::one", span, site) == None, "the item probe intentionally sees no body values")
-    body_index_require(sema_comptime_body_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{}:Debug}", "an empty selected view fingerprints the original empty ordered row list")
+    body_index_require(body_index_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{}:Debug}", "an empty selected view sees the original empty ordered row list")
     full := environment.comptime_body_publication.copy()
     body_index_require(sema_scope_environment_enter_probe_module(environment, program, body_index_module("mod::one"), full), "the next function restores the publication")
     context.comptime_body_values = environment.comptime_body_values.copy()
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod::one"), "function::one", span, site) == Val((first)), "empty item reset cannot erase a published function value")
-    body_index_require(sema_comptime_body_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first}:Debug}", "a full selected view fingerprints ordered row contents, not the Shared cell")
+    body_index_require(body_index_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first}:Debug}", "a full selected view sees ordered row contents, not the Shared cell")
     prior: environment.comptime_body_publication.copy()
     next_site: Span{start: 30, end: 31}
     second: body_index_value("mod::one", "function::one", span, next_site, 9)
     landed: SemaComptimeItemValue{module_identity: second.module_identity, key: second.key, destination_key: second.destination_key, kind: SemaComptimeItemKind.BodyExpression, value: second.value, ty: second.ty}
     body_index_require(jet_driver_comptime_apply_landed(environment, program, available, sites, [SemaComptimeItemValue]{initial, landed}, 1, trail, None), "the authentic staging producer appends a body-only batch")
     body_index_require(environment.comptime_body_values.length == 1 && environment.comptime_body_publication.length == 2 && prior.length == 1, "append preserves the old selected view and old captured prefix")
-    body_index_require(sema_comptime_body_values_debug(prior) == "{[SemaComptimeBodyValue]{first}:Debug}", "an older prefix memo cannot fingerprint later appended rows")
+    body_index_require(body_index_values_debug(prior) == "{[SemaComptimeBodyValue]{first}:Debug}", "an older prefix cannot see later appended rows")
     if prior.facts == .Val(old_facts) {
         if environment.comptime_body_publication.facts == .Val(new_facts) -> body_index_require(old_facts.same(new_facts), "append retains the single authenticated facts owner")
         else -> panic("append lost its facts owner")
@@ -393,7 +402,7 @@ body_index_publication_lifecycle: fn() {
     body_index_require(sema_scope_environment_enter_probe_module(environment, program, body_index_module("mod::one"), next_full), "the next function selects the new publication")
     context.comptime_body_values = environment.comptime_body_values.copy()
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod::one"), "function::one", span, site) == Val((first)) && sema_comptime_body_value_find(context, body_index_module("mod::one"), "function::one", span, next_site) == Val((second)), "the new function sees the entire ordered updated publication")
-    body_index_require(sema_comptime_body_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first, second}:Debug}", "the next full view fingerprints the newly published row order")
+    body_index_require(body_index_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first, second}:Debug}", "the next full view sees the newly published row order")
     nonbody: body_index_item(second, SemaComptimeItemKind.MarkerArgument)
     body_index_require(jet_driver_comptime_apply_landed(environment, program, available, sites, [SemaComptimeItemValue]{initial, landed, nonbody}, 2, trail, None), "the authentic staging producer advances a nonconstant nonbody batch")
     body_index_require(environment.comptime_body_publication.item_frontier == 3 && environment.comptime_body_publication.length == 2, "a nonbody batch advances the authenticated item frontier without projecting or indexing body rows")
@@ -435,7 +444,7 @@ body_index_append_prefixes: fn() {
         body_index_query(context, "append::module", "append::function", source, site)
         body_index_require(sema_comptime_body_value_find(context, body_index_module("late::module"), "late::function", source, site) == (if index == 3 -> Val(late) else -> None), "a late module and key are invisible to earlier prefixes")
     }
-    body_index_require(sema_comptime_body_values_debug(one) == "{[SemaComptimeBodyValue]{first}:Debug}" && sema_comptime_body_values_debug(two) == "{[SemaComptimeBodyValue]{first, different}:Debug}", "prefix memo bytes match canonical ordered list Debug")
+    body_index_require(body_index_values_debug(one) == "{[SemaComptimeBodyValue]{first}:Debug}" && body_index_values_debug(two) == "{[SemaComptimeBodyValue]{first, different}:Debug}", "prefix rows match the canonical ordered list Debug")
     restored := sema_check_context_init()
     restored.comptime_body_values = publication.copy()
     mark: sema_check_context_mark(restored)
@@ -445,7 +454,7 @@ body_index_append_prefixes: fn() {
     replacement_items: [SemaComptimeItemValue]{body_index_item(late, SemaComptimeItemKind.BodyExpression), body_index_item(first, SemaComptimeItemKind.BodyExpression)}
     sema_comptime_body_values_append_items(replacement, replacement_items, 1)
     body_index_require(replacement.length == 2 && publication.length == 4 && restored.comptime_body_values.length == 1, "append to a replacement generation cannot retarget an older owner or its selected prefix")
-    body_index_require(sema_comptime_body_values_debug(restored.comptime_body_values) == "{[SemaComptimeBodyValue]{late}:Debug}" && sema_comptime_body_values_debug(two) == "{[SemaComptimeBodyValue]{first, different}:Debug}", "replacement append preserves both generations' old canonical memo bytes")
+    body_index_require(body_index_values_debug(restored.comptime_body_values) == "{[SemaComptimeBodyValue]{late}:Debug}" && body_index_values_debug(two) == "{[SemaComptimeBodyValue]{first, different}:Debug}", "replacement append preserves both generations' old rows")
     sema_check_context_rollback(restored, mark.move())
     body_index_require(restored.comptime_body_values.length == 4 && sema_comptime_body_value_find(restored, body_index_module("append::module"), "append::function", source, site) == None, "rollback restores the old generation and duplicate ambiguity")
 }

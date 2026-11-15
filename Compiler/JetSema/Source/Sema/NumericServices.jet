@@ -20,23 +20,16 @@ SemaNumericUnitConversionProof: enum {
 // the owning thread. A check with no access at all (no registration graph) has
 // no callbacks.
 SemaHostHookAccess: enum {
-    Callbacks(hooks: Shared<SemaRegistrationHostHooks>, observed: Shared<SemaBodyCheckReach>?)
-    Withheld(wanted: Shared<SemaHostHookWanted>, observed: Shared<SemaBodyCheckReach>?)
+    Callbacks(hooks: Shared<SemaRegistrationHostHooks>)
+    Withheld(wanted: Shared<SemaHostHookWanted>)
 }
 
 SemaHostHookWanted: struct {
     wanted: Bool
 }
 
-// Sticky for one accepted logical body query, including share-site passes and
-// the owning thread's retry. A cold check has no observer and allocates none.
-SemaBodyCheckReach: struct {
-    host: Bool
-    foreign_raw_body: Bool
-}
-
 sema_host_hook_access: fn(hooks: Shared<SemaRegistrationHostHooks>) -> SemaHostHookAccess? {
-    Val(SemaHostHookAccess.Callbacks{hooks: hooks, observed: None})
+    Val(SemaHostHookAccess.Callbacks{hooks: hooks})
 }
 
 // The callbacks behind `access`, or None. A withheld access records that this
@@ -44,47 +37,14 @@ sema_host_hook_access: fn(hooks: Shared<SemaRegistrationHostHooks>) -> SemaHostH
 sema_host_hook_callbacks: fn(access: SemaHostHookAccess?) -> Shared<SemaRegistrationHostHooks>? {
     row: access ?? return None
     if row == {
-        .Callbacks(hooks, observed) -> {
-            sema_body_check_mark_host(observed)
-            Val(hooks)
-        }
-        .Withheld(wanted, observed) -> {
-            sema_body_check_mark_host(observed)
+        .Callbacks(hooks) -> Val(hooks)
+        .Withheld(wanted) -> {
             cell := wanted
             permit: cell.guard_edit()
             permit.value.wanted = true
             None
         }
     }
-}
-
-sema_body_check_observe: fn(access: SemaHostHookAccess?, observed: Shared<SemaBodyCheckReach>?) -> SemaHostHookAccess? {
-    // copy: the observed access is a new owned Option. With nothing observed it equals `access`,
-    // the caller's host-hook access (a read parameter), which the caller keeps for its other body
-    // checks.
-    if observed == None -> return access.copy()
-    row: access ?? return None
-    Val(if row == {
-        .Callbacks(hooks, _) -> SemaHostHookAccess.Callbacks{hooks: hooks, observed: observed}
-        .Withheld(wanted, _) -> SemaHostHookAccess.Withheld{wanted: wanted, observed: observed}
-    })
-}
-
-sema_body_check_mark_host: fn(observed: Shared<SemaBodyCheckReach>?) {
-    cell: observed ?? return
-    permit: cell.guard_edit()
-    permit.value.host = true
-}
-
-sema_body_check_mark_foreign_raw_body: fn(access: SemaHostHookAccess?) {
-    row: access ?? return
-    observed: if row == {
-        .Callbacks(_, observer) -> observer
-        .Withheld(_, observer) -> observer
-    }
-    cell: observed ?? return
-    permit: cell.guard_edit()
-    permit.value.foreign_raw_body = true
 }
 
 sema_numeric_unit_conversion_exact: fn(access: SemaHostHookAccess?, value: Float, scale: UnitRatio, offset: UnitRatio) -> SemaNumericUnitConversionProof {

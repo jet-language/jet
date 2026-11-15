@@ -4913,7 +4913,7 @@ jet_driver_finalize_program: fn(
     request: JetDriverCompileRequest,
 ) -> SemaGraphResult {
     bodies := sema_finalize_bodies_empty()
-    body_graph: sema_finalize_bodies(graph, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, None, request.trace_sink, bodies)
+    body_graph: sema_finalize_bodies(graph, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
     landing := JetDriverLanding{stopped: false}
     early_graph: jet_driver_land_local_values(body_graph, bodies, SemaLocalSpliceInto.Undemanded, stage, values, functions, trace, request, landing)
     demand_graph := sema_finalize_demand(early_graph, trail, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
