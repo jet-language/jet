@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106407,
+    "rev": 106409,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95956,6 +95956,16 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c10 known gap (Speed-3-2, 2026-11-15): core.rt stays in the system layer. Moving it to the prelude needs Instant (public core.time surface) below core.time, and no D-CORE-LAYERS1 row allows that; changing RealtimeStream.next_deadline() to a raw Int was refused as a public API change. Cost, measured on the p178 seed (median of 5): a core.rt-only jet check takes 108 ms / 86 MB, of which core.time is about 60 ms / 28 MB. Removing it needs a ballot that moves a monotonic clock type to the prelude layer."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Speed-3-2",
+          "text": "c10 known gap (Speed-3-2, 2026-11-15): core.rt stays in the system layer, not the prelude row D-CORE-LAYERS1=A lists it in. Reason: RealtimeStream.next_deadline() returns core.time's Instant (data layer). No D-CORE-LAYERS1 row puts Instant or a monotonic clock type in the prelude layer. The only allowance is that helpers may sit one layer below their natural home, and Instant is public core.time surface, not a helper. Moving Instant down would change its home module and surface, and returning raw Int ns is a public API change (withdrawn c10-rt). Cost, measured on the p178 seed with jet check, median of 5 runs, shared JET_STORE_DIR: a program that imports only core.rt (tests/cases/corelib/fixtures/rt_next_deadline_without_time_import/main.jet) takes 108 ms at 86 MB peak and loads Core/Time/Time.jet (8.2 ms parse CPU). An empty program takes 38 ms at 55.5 MB. A core.time-only program (time.instant()) takes 100 ms at 83 MB. So core.time accounts for about 60 ms and 28 MB of each core.rt-only check. Only programs that import core.rt without core.time pay it. Closing it needs a ballot that either gives the prelude a monotonic instant type or changes next_deadline's result type."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Main 2026-11-15: A2a (6eb1df37a7) regresses the compiler build's load. PrecompiledCore-4's alternating A/B (3 pairs, same tree, fresh store, jet build --profile dev Compiler): load CPU +66 to +73 ms (+8 to 12%), peak_rss_kb median 1,025,644 to 1,055,576 (+2.9%). Small Core-heavy loads get faster (102-126 ms to 73-108 ms). Root: jet_driver_core_restore_bodies re-lexes and re-parses each lazy module's whole text after the head parse, so a mostly reached module costs about 1.1 full parses, and the pass holds every restored source at once. The big load restores 2960 bodies and saves only 774 (9%). Decision (operational): restore parses only the kept bodies' byte ranges recorded by the head parse, frees each module's source after restore, and reports the tokens actually lexed. Proof: the same A/B no higher than without a2a, with the CoreInterface equality tests passing."
         },
         {
@@ -96233,7 +96243,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-15T11:09:26.882Z",
+      "updated": "2026-11-15T12:27:34.970Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -217938,6 +217948,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T12:27:34.971Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T12:27:20.765Z",
+      "by": "Speed-3-2",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T12:26:52.689Z",
       "by": "Main",
