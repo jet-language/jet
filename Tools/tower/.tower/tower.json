@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 106524,
+    "rev": 106525,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -102935,7 +102935,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-15T21:15:19.559Z",
+      "updated": "2026-11-15T21:47:00.157Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -215021,6 +215021,211 @@
       "created": "2026-11-15T10:39:53.392Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-15"
+    },
+    {
+      "id": "D-HTTP-BODY-MAKE1",
+      "cardId": "c0e6znz4",
+      "group": "library",
+      "title": "How a program makes an HTTP body: free functions in core.http, renamed Body constructors, or one name for both a constructor and a reader",
+      "situation": "An HTTP body is the payload of a web request or response: some text, a form or JSON. Today a program can make one in two ways. It can call http.body_text(\"hi\"), or it can call http.Body.text(\"hi\"). The second form reuses the name of the method that reads a body back, body.text(limit). Jet does not let one type have two members with one name, so the compiler checks those Body calls with about 1,000 lines of special code. No library can use that code, which breaks the rule that Core is ordinary Jet. You are asked how a program should make a body. We recommend the free functions that already exist, http.body_text and its family, and removing the Body.* forms.",
+      "gist": "Should HTTP bodies be made with http.body_text(...) and its family, with renamed Body.of_text(...) constructors, or should a type allow a constructor and a method with one name?",
+      "lesson": "One thing should have one name. When making a value and reading it back share a name, either the language needs a special rule or the library needs special compiler help. Neither is needed if the maker has its own name.",
+      "explainer": "Words used here. A body is the payload of an HTTP message. A constructor is a function that makes a new value of a type. A static member is a function written inside a type and called through the type's name, such as Body.text(\"hi\"). An instance member, or method, is called on a value, such as body.text(5), which reads the body back as text of at most 5 bytes.\n\nA free function is one written at module level, called through the module, such as http.body_text(\"hi\").\n\nThe compiler-side checker is code inside the compiler that knows these HTTP calls by name. Any library that wanted the same shape could not have it.",
+      "story": "Ada writes a small client. She builds a JSON body, sends it, and reads the answer as text.\n\nToday she finds two ways in the docs: http.body_text(\"hi\") in the core library table, and http.Body.text(\"hi\") in the HTTP example. Both work. Later she writes her own Message type and tries the same trick, a text constructor next to a text method. Jet stops her with E0105, a duplicate definition. Core could do it only because the compiler helps Core.\n\nUnder A she sees one way: http.body_text, http.body_form and http.body_json. Her own library can use the same pattern with no special help.",
+      "inWild": "// Go net/http: free constructors of readers for bodies.\nreq, _ := http.NewRequest(\"POST\", url, strings.NewReader(\"hi\"))\n\n// Rust reqwest: a Body is made with From, read with methods.\nlet body = reqwest::Body::from(\"hi\");\n\n// Python requests: plain keyword data, no Body type.\nrequests.post(url, json={\"a\": 1})\n\n// Swift: static members and instance members can share a base name\n// because Swift tells them apart by argument labels and by the receiver.\nlet data = Data(\"hi\".utf8)",
+      "detail": "What this ballot decides: one spelling for making an HTTP body, and whether a type may have a static and an instance member with one name.\n\nCurrent code, checked on dev 963b9fbd76. Core/Http/Http.jet declares Body with the reading methods bytes(self, limit), text(self, limit) and json<Target>(self, limit). It also declares the free functions body_empty, body_text and body_bytes. The spec's core library table lists those as the constructors (Docs/spec/reference/core-library.md, line 1614).\n\nThe Body.* forms are not declared on Body at all. They are Body.empty(), Body.bytes(b), Body.text(t), Body.text(t, media_type), Body.form(fields), Body.multipart(fields), Body.json(value) and Body.reader(reader) with an optional length.\n\nCompiler/JetSema/Source/Sema/Calls/Http.jet recognizes them by type and member name. It calls hidden helpers: __body_typed_text, __body_form, __body_json, __body_reader and __body_reader_sized. The same file handles Headers.new and Client.new, which have no name clash and become ordinary static members under every option.\n\nA user type cannot copy this shape: a struct with text(words: String) and text(self) is E0105, a duplicate definition.\n\nCallers of the Body.* forms: 8 code sites, plus 2 rows in the core library table. Seven sites are in Examples/Network/HTTP/HTTPMessageValues.jet and one in tests/ui/print_lazy_iter_view.jet. Callers of the free functions http.body_empty, body_text and body_bytes outside Core/Http: 30 sites in 8 files.\n\nThis ballot leaves out the route checks in Sema/Calls/HttpRouting.jet, which move to library markers in a separate design.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Free functions in core.http: http.body_text, http.body_form, http.body_json and the rest",
+          "gist": "Extend the free functions that already exist and remove the Body.* forms.",
+          "detail": "core.http keeps body_empty, body_text and body_bytes. It adds body_typed_text(text, media_type), body_form(fields), body_multipart(fields) and body_json(value). It also adds body_reader(reader) and body_reader_sized(reader, length). Each one is an ordinary public function with its own declared signature and effects. The Body.* call forms are removed, and the compiler's HTTP body checker is deleted with them.\n\nBeginner path: type http.body_ and the editor lists every way to make a body. The core library table already teaches this spelling.\n\nExpert path: the same functions; a library with its own message type writes the same free-function family with no compiler help.\n\nCost: 8 code sites and 2 table rows change. The 30 existing free-function callers do not change.\n\nEdge cases: a missing Body.text(\"hi\") call gets the ordinary missing-member error, whose fix names http.body_text. Two-argument forms that differed only by count get their own names (body_typed_text, body_reader_sized), because Jet has no overloading.",
+          "technical": "Proposed. Core/Http/Http.jet: the hidden __body_* helpers become public body_typed_text, body_form, body_multipart, body_json<T: Encode>, body_reader and body_reader_sized with today's bodies. Headers.new becomes an ordinary static new on Headers next to headers(), and Client.new an ordinary static new on Client. Sema/Calls/Http.jet's static-constructor path is deleted.\n\nThe missing-member error E0102 gains a fix that names the free function. It applies when the type's module declares a function named for the type in lower case, an underscore and the member. Proof: the HTTP example and a ui case for the fix text.",
+          "code": "use http: core.http\n\nrun: fn() -[Net]> {\n    // Make three bodies, then read each one back.\n    plain: http.body_text(\"hello\")\n    form: http.body_form([\"name\": \"Ada\"])\n    data: http.body_json([1, 2])\n    print(plain.text(5) ?? panic(\"text\"))\n    print(form.text(32) ?? panic(\"form\"))\n    print(data.text(16) ?? panic(\"json\"))\n}"
+        },
+        {
+          "key": "B",
+          "name": "Rename the constructors: Body.of_text, Body.of_json, Body.of_form, Body.of_reader",
+          "gist": "Constructors stay on Body under names that differ from the reading methods.",
+          "detail": "Body declares static members of_empty, of_bytes, of_text, of_typed_text, of_form, of_multipart, of_json, of_reader and of_reader_sized. The compiler's checker is deleted.\n\nBeginner path: type http.Body. and the editor lists the makers next to the readers.\n\nExpert path: the same members.\n\nCost: the 8 Body.* sites and 2 table rows change. The 30 free-function callers must also move to Body.of_*, or the free functions stay as a second spelling of the same thing, which breaks the one-way rule.\n\nEdge cases: none new; of_ is a new naming pattern that no other Core type uses today.",
+          "technical": "Proposed. Body gains nine static members; body_empty, body_text and body_bytes are removed with their 30 callers. Sema/Calls/Http.jet's static-constructor path is deleted.",
+          "code": "use http: core.http\n\nrun: fn() -[Net]> {\n    // Make three bodies, then read each one back.\n    plain: http.Body.of_text(\"hello\")\n    form: http.Body.of_form([\"name\": \"Ada\"])\n    data: http.Body.of_json([1, 2])\n    print(plain.text(5) ?? panic(\"text\"))\n    print(form.text(32) ?? panic(\"form\"))\n    print(data.text(16) ?? panic(\"json\"))\n}"
+        },
+        {
+          "key": "C",
+          "name": "Let a type have a static and an instance member with the same name",
+          "gist": "Body.text(\"hi\") makes a body and body.text(5) reads one, by a new language rule.",
+          "detail": "A type may declare one static member and one instance member with the same name. Resolution rule: a call through the type's name, Body.text(...), picks the static member; a call on a value, body.text(...), picks the instance member. Two static or two instance members with one name stay E0105.\n\nEdge cases. Reading Body.text without parentheses where a function is expected gives the static member, since a method is bound only on a value. A trait that declares both forms must be implemented with both. A generic call T.text(...) on a type parameter picks the static member. A name used with both forms gets a new registered error when one call could match either, such as a future form that passes the receiver explicitly.\n\nBeginner path: today's code keeps working. Expert path: the same.\n\nCost: no caller changes. The free functions stay, so a body still has two spellings unless the 30 free-function sites move too.",
+          "technical": "Proposed. Registration keeps a static slot and an instance slot per member name. Method lookup on a type name reads the static slot; on a value, the instance slot. Body declares its constructors as static members; the free functions either stay or are removed with 30 callers. Sema/Calls/Http.jet's static-constructor path is deleted. One new diagnostic code for an ambiguous call.",
+          "code": "use http: core.http\n\nrun: fn() -[Net]> {\n    // Make three bodies, then read each one back.\n    plain: http.Body.text(\"hello\")\n    form: http.Body.form([\"name\": \"Ada\"])\n    data: http.Body.json([1, 2])\n    print(plain.text(5) ?? panic(\"text\"))\n    print(form.text(32) ?? panic(\"form\"))\n    print(data.text(16) ?? panic(\"json\"))\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go net/http",
+          "note": "Bodies are made with free constructors of readers, such as strings.NewReader, and passed to http.NewRequest; reading is a method on the response body, the shape of A. Source: https://pkg.go.dev/net/http#NewRequest",
+          "code": "req, _ := http.NewRequest(\"POST\", url, strings.NewReader(\"hi\"))"
+        },
+        {
+          "lang": "Rust reqwest",
+          "note": "Body is made through From and read through methods with other names, the shape of B. Source: https://docs.rs/reqwest/latest/reqwest/struct.Body.html",
+          "code": "let body = reqwest::Body::from(\"hi\");"
+        },
+        {
+          "lang": "Swift",
+          "note": "Static and instance members may share a base name, told apart by the receiver and argument labels, the shape of C. Source: https://docs.swift.org/swift-book/documentation/the-swift-programming-language/methods/",
+          "code": "struct Note { static func text(_ s: String) -> Note { ... }; func text() -> String { ... } }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps the spelling the spec already teaches and 30 callers already use, removes the second spelling, and needs no new language rule. B renames 38 call sites to reach one spelling, and C adds a rule for a single type.",
+        "gains": [
+          "One way to make a body, the one the core library table already lists.",
+          "Only 8 code sites and 2 table rows change.",
+          "About 1,000 lines of compiler-only HTTP checking are deleted.",
+          "A user library can copy the pattern with no compiler help."
+        ],
+        "losses": [
+          {
+            "loss": "Typing http.Body. in the editor no longer lists the makers.",
+            "mitigation": "Body's doc comment names the body_ functions, and a call such as Body.text(\"hi\") gets an error whose fix names http.body_text."
+          },
+          {
+            "loss": "Forms that differed only by argument count need two names.",
+            "mitigation": "Each name says what it takes, body_reader and body_reader_sized, as Jet does everywhere it has no overloading."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "To reach one spelling it renames all 38 sites, including the 30 that already use the spelled-out free functions, and it adds an of_ pattern no other Core type uses."
+          },
+          {
+            "key": "C",
+            "reason": "It adds a language rule and an ambiguity error for one library type, and it leaves two spellings for one body unless 30 sites move anyway."
+          }
+        ],
+        "tradeoff": "A gives up listing makers under Body. in exchange for one spelling, no language change and the smallest migration."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Every claim held against code except the caller count, which misses ten fixture templates, so A moves about 18 sites and also rewrites the Body.reader and Body.multipart spec rows."
+      },
+      "checkInstructions": "Code reads only, on dev 963b9fbd76. Read Core/Http/Http.jet: Body (:185) with its reading methods, and body_empty, body_text and body_bytes with the hidden __body_* helpers (:1056-1125). Read Compiler/JetSema/Source/Sema/Calls/Http.jet: sema_call_http_static_known (:143) and sema_call_try_http_static (:233). Count callers with git grep -E '\\bBody\\.(empty|bytes|text|json|form|multipart|reader)\\(' and git grep -E '\\bbody_(empty|text|bytes)\\(' outside Core/Http. Check the duplicate rule by declaring text twice on one struct: E0105.",
+      "surface": {
+        "gist": "Make HTTP bodies with http.body_text and its family, with renamed Body.of_text constructors, or with one shared name?",
+        "lesson": "One thing should have one name. When making a value and reading it back share a name, the language needs a special rule or the compiler needs special help.",
+        "trio": {
+          "current": {
+            "note": "Today both spellings work, and the Body form only works because the compiler special-cases it.",
+            "code": "a: http.body_text(\"hello\")\nb: http.Body.text(\"hello\")\nprint(b.text(5) ?? panic(\"text\"))"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Free functions make bodies; methods read them.",
+            "code": "req, _ := http.NewRequest(\"POST\", url, strings.NewReader(\"hi\"))"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Free functions",
+            "gist": "Keep http.body_text and add body_form, body_json and the rest.",
+            "gains": [
+              "The spelling the spec already teaches",
+              "Only 8 call sites change",
+              "No language change"
+            ],
+            "losses": [
+              "Makers are not listed under Body."
+            ],
+            "proposed": {
+              "code": "plain: http.body_text(\"hello\")\nform: http.body_form([\"name\": \"Ada\"])\ndata: http.body_json([1, 2])\nprint(plain.text(5) ?? panic(\"text\"))"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Renamed constructors",
+            "gist": "Makers stay on Body under of_ names.",
+            "gains": [
+              "Makers listed under Body."
+            ],
+            "losses": [
+              "38 call sites change",
+              "A new of_ naming pattern"
+            ],
+            "proposed": {
+              "code": "plain: http.Body.of_text(\"hello\")\nform: http.Body.of_form([\"name\": \"Ada\"])\ndata: http.Body.of_json([1, 2])\nprint(plain.text(5) ?? panic(\"text\"))"
+            }
+          },
+          {
+            "key": "C",
+            "name": "One name for maker and reader",
+            "gist": "A new rule lets Body.text make and body.text read.",
+            "gains": [
+              "No call site changes"
+            ],
+            "losses": [
+              "A language rule for one type",
+              "Two spellings remain"
+            ],
+            "proposed": {
+              "code": "plain: http.Body.text(\"hello\")\nform: http.Body.form([\"name\": \"Ada\"])\ndata: http.Body.json([1, 2])\nprint(plain.text(5) ?? panic(\"text\"))"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps the spelling the spec teaches, removes the second one, and needs no language change.",
+          "gains": [
+            "One way to make a body",
+            "Only 8 call sites change",
+            "Compiler-only HTTP checks are deleted"
+          ],
+          "losses": [
+            {
+              "loss": "Makers are not listed under Body.",
+              "mitigation": "Body.text(\"hi\") gets an error whose fix names http.body_text."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "38 call sites change to reach one spelling."
+            },
+            {
+              "key": "C",
+              "reason": "A new language rule, and two spellings remain."
+            }
+          ],
+          "tradeoff": "A drops makers under Body. for one spelling and no language change."
+        }
+      },
+      "reports": [
+        {
+          "title": "Go net/http: NewRequest",
+          "url": "https://pkg.go.dev/net/http#NewRequest",
+          "note": "Bodies made by free reader constructors."
+        },
+        {
+          "title": "reqwest: Body",
+          "url": "https://docs.rs/reqwest/latest/reqwest/struct.Body.html",
+          "note": "Body made through From and read through methods."
+        },
+        {
+          "title": "Swift: Methods",
+          "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/methods/",
+          "note": "Type methods and instance methods."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-15T21:47:00.157Z"
     }
   ],
   "questions": [
@@ -218355,6 +218560,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T21:47:00.157Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-HTTP-BODY-MAKE1",
+      "note": "How a program makes an HTTP body: free functions in core.http, renamed Body constructors, or one name for both a constructor and a reader"
+    },
     {
       "at": "2026-11-15T21:45:29.087Z",
       "by": "Main",
