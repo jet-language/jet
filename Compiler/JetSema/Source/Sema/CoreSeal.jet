@@ -289,6 +289,30 @@ sema_core_seal_read: fn(text: String, graph: SemaRegistrationGraph, sealed: [Str
     seal
 }
 
+// The Core seal of a `jet run` bound to the Core image as its host reads
+// it: the seal text and the sealed keys sema_core_seal_read takes.
+SemaCoreSealText: struct {
+    text: String
+    sealed: [String]
+}
+
+// The host's read of the Core seal of a `jet run` that may bind to the Core
+// image (SemaRegistrationHostHooks.core_seal): None when the run's Core is
+// not the image's. The Core demand reads it once, when it first names a
+// deferred Core body (CoreDemand.jet sema_core_stand_in_bind), so a run
+// whose demand names none never decides whether its Core is the image's,
+// nor reads the seal.
+SemaCoreSealSource: trait {
+    read: fn(self) -[FS, Env]> SemaCoreSealText?
+}
+
+// Whether the host hooks behind `access` hold a Core seal not yet read.
+sema_core_seal_offered: fn(access: SemaHostHookAccess?) -> Bool {
+    hooks: sema_host_hook_callbacks(access) ?? return false
+    permit: hooks.guard_read()
+    permit.value.core_seal != None
+}
+
 // The position of `key`'s line in `seal` when it is a stand-in line.
 sema_core_seal_stand_in: fn(seal: SemaCoreSeal, graph: SemaRegistrationGraph, key: String) -> Int? Never! {
     row: sema_core_seal_row(graph, key) ?? return None

@@ -33,6 +33,9 @@
 // (sema_core_stand_in_flush): a key a body names where a stand-in will not
 // do (a function value, a shared global's initializer, an error conversion,
 // a template item; SemaCoreDemandNames.full) is checked in full instead.
+// The run's seal is read when its demand first needs it
+// (sema_core_stand_in_bind): a run that names no deferred Core body never
+// reads it.
 use jet_foundation.[
     BodyCallArg,
     BodyNode,
@@ -262,7 +265,7 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
         wave := [String:Bool]{}
         affected := [Int]{}
         graph.core_stand_in_wave = false
-        sema_core_demand_named(graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected, threads)
+        sema_core_demand_named(graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected, host_hooks, threads)
         if wave.len() == 0 {
             loop id in sema_core_stand_in_flush(graph, tally.names) {
                 wave[graph.decls.rows[id.row].key] = true
@@ -329,7 +332,7 @@ sema_core_demand_pass: fn(owned: &&SemaRegistrationGraph, first_affected: &&[Int
         program.registration_graph = None
         pass_graph := held.move() ?? panic("a Core demand pass lost its registration graph")
         pass_graph.core_stand_in_wave = false
-        sema_core_demand_named(pass_graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected, threads)
+        sema_core_demand_named(pass_graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected, host_hooks, threads)
         size = wave.len()
         pass_graph.core_wave_rows = wave.move()
         program.registration_graph = Val(pass_graph.move())
@@ -661,7 +664,7 @@ sema_check_registered_locate_diagnostics: fn(environment: SemaScopeEnvironment, 
 // threads (sema_core_demand_read), and their names demanded here in module
 // order, each module's functions before its call-site facts, as one thread
 // would.
-sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult], read_functions: &[Int], read_facts: &[Int], names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int], threads: CompilerThreads) {
+sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult], read_functions: &[Int], read_facts: &[Int], names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int], host_hooks: SemaHostHookAccess?, threads: CompilerThreads) {
     loop read_functions.len() < modules.len() -> read_functions.push(0)
     loop read_facts.len() < modules.len() -> read_facts.push(0)
     loop {
@@ -671,6 +674,7 @@ sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphMo
             valued: sema_core_demand_take(names.values)
             full: sema_core_demand_take(names.full)
             keys: sema_core_demand_take(names.keys)
+            sema_core_stand_in_bind(graph, host_hooks, valued, full, keys)
             loop key in valued -> sema_core_stand_in_full(graph, key, true, names)
             loop key in full -> sema_core_stand_in_full(graph, key, false, names)
             loop key in valued -> sema_core_demand_key(graph, key, names, wave, affected)
@@ -855,6 +859,38 @@ sema_core_demand_key: fn(graph: &SemaRegistrationGraph, key: String, names: &Sem
     sema_core_demand_add(graph, key, names, wave, affected)
     template: sema_core_demand_template_key(key)
     if template != key -> sema_core_demand_add(graph, template, names, wave, affected)
+}
+
+// Reads the Core seal of a run that may bind to the Core image
+// (graph.core_seal_pending, from SemaRegistrationHostHooks.core_seal) once
+// the demand names a deferred Core body not yet checked, among the keys
+// named where a stand-in will not do (`full`) or anywhere (`keys`), or
+// names any function as a value (`valued`), whose key
+// sema_core_stand_in_full holds to the seal. No check reads the seal
+// before; it is read at most once.
+sema_core_stand_in_bind: fn(graph: &SemaRegistrationGraph, host_hooks: SemaHostHookAccess?, valued: [String], full: [String], keys: [String]) {
+    if !graph.core_seal_pending -> return
+    if valued.len() == 0 && !sema_core_demand_defers(graph, full) && !sema_core_demand_defers(graph, keys) -> return
+    graph.core_seal_pending = false
+    hooks: sema_host_hook_callbacks(host_hooks) ?? return
+    permit: hooks.guard_edit()
+    read: if permit.value.core_seal == .Val(source) -> source.read() else -> None
+    permit.value.core_seal = None
+    sealed: read ?? return
+    graph.core_stand_ins = Val(sema_core_seal_read(sealed.text, graph, sealed.sealed))
+}
+
+// Whether `keys` names a deferred Core body not yet checked, by its own key
+// or, for a call at type arguments, its generic declaration's
+// (sema_core_demand_key).
+sema_core_demand_defers: fn(graph: SemaRegistrationGraph, keys: [String]) -> Bool Never! {
+    loop key in keys {
+        if graph.core_checked.get(key) == None && graph.core_demand_rows.get(key) != None -> return true
+        if !key.ends_with(">") -> next
+        template: sema_core_demand_template_key(key)
+        if graph.core_checked.get(template) == None && graph.core_demand_rows.get(template) != None -> return true
+    }
+    false
 }
 
 // A deferred body not yet checked joins the wave, or waits as a stand-in

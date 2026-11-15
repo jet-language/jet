@@ -12391,7 +12391,8 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         sema_failure_domain_dedupe(modules[dedupe_index].diagnostics, module_domains)
     }
     // An error a whole-program pass reports from here on may name a call
-    // chain through Core bodies, which stand-ins cut short.
+    // chain through Core bodies, which stand-ins cut short, but for the
+    // effect check's exact ones (SemaEffectGraphResult.exact_errors).
     late_start: diagnostics.len()
     // The `#Inline(Always)` promise (E0917-E0919) needs every body's
     // function-value references first. These read-only checks, the effect
@@ -12665,7 +12666,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     loop module_index in 0..<final_graph.modules.len() {
         sema_lint_allowances(final_graph.modules[module_index].program, final_graph.modules[module_index].source_segments, allowances)
     }
-    if stood_in > 0 && rerun == "" && sema_has_error_since(diagnostics, late_start) -> rerun = "reports"
+    if stood_in > 0 && rerun == "" && sema_error_count_since(diagnostics, late_start) > effects.exact_errors -> rerun = "reports"
     if stood_in > 0 && trace_sink == .Val(sink) {
         sink.progress("counters.sema.core_seal.stand_ins", stood_in, -1)
         if rerun != "" -> sink.progress("counters.sema.core_seal.reruns.{rerun}", 1, -1)

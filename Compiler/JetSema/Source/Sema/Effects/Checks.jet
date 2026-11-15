@@ -198,6 +198,10 @@ SemaEffectGraphResult: struct {
     // does (a memory or stack denial, a kernel, a program function's cap),
     // which a Core stand-in's missing edges would cut short.
     walks: Bool{false}
+    // How many of `diagnostics`' errors read no Core body a stand-in leaves
+    // out: each e3401 on a `-[]>` function outside Core, which reads that
+    // function's own body and the solved rows of what it calls.
+    exact_errors: Int{0}
     // The run's symbol table the check borrowed, handed back to its graph.
     symbols: SymbolTable
 }
@@ -5823,14 +5827,16 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     // e3401 names the first impure call and its chain; the reached row is the
     // report when no single call carries it.
+    exact_errors := 0
     loop (pending, node_index) in pure_nodes {
         pure_diagnostics := [Diagnostic]{}
         pure_diagnostics.push(sema_pure_root_find(nodes[node_index].key, modules, decls, calls.symbols, true) ?? sema_effect_pure_diagnostic(nodes[node_index], pure_rows[pending]))
+        if !module_is_core(nodes[node_index].module_identity) -> exact_errors += 1
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, pure_diagnostics)
     }
     core_seal: if seal -> sema_effect_core_seal_rows(nodes.move(), calls, solved, table) else -> [SemaCoreSealEffects]{}
     complete: !sema_has_error_since(diagnostics, 0)
-    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), core_seal: core_seal, walks: walks, symbols: calls.symbols.move()}
+    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), core_seal: core_seal, walks: walks, exact_errors: exact_errors, symbols: calls.symbols.move()}
 }
 
 // The rows of the effect graph each input module contributes on its own:

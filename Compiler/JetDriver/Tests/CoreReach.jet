@@ -280,7 +280,8 @@ reach_test_sources: fn(dir: String, out: &[String]) {
 
 // The Core module `core.devtools`, whose `lookup` alone names its import,
 // admitted to a reach alone with its import deferred; then reached code
-// spells `reached`, and the reach strips the module.
+// spells `reached`, the load follows the import if reached code wants it,
+// and the reach strips the module.
 reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     owner: "use {{\n    table: __core_devtools_table\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n\nlookup: fn() -> Int Never! {{ table.value() }}\n"
     parsed := jet_driver_parse_one(JetDriverParseJob.Core{text: owner, module_name: "core.devtools", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
@@ -294,6 +295,9 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     jet_driver_reach_global(reach, word)
     jet_driver_reach_drain(reach)
     assert_eq(jet_driver_reach_wants(reach, 0), reached == "lookup")
+    // As the load does (Loader.jet): a wanted import's module loads, and
+    // the import is followed.
+    if jet_driver_reach_wants(reach, 0) -> reach.edges[0].followed = true
     modules := [JetDriverLoadedModule]{JetDriverLoadedModule{source_unit_index: 0, source_identity: "reach:core.devtools", package_identity: "core", module_identity: ModuleID{id: 0}, module_name: "core.devtools", program: parsed.parsed.program.move()}}
     jet_driver_reach_strip(reach, modules)
     modules.pop() ?? panic("the reach strips the one module")

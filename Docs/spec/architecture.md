@@ -230,10 +230,15 @@ Core is the built-in one (no release profile, no `--deep-checks`) checks a
 sealed function with an `S` line by its signature alone, with the line's
 facts, and its Core demand stops there; a function a body names as a value,
 a shared global's initializer, an error conversion or a template item is
-checked in full. When a stand-in can't stand for its body (an error a
-whole-program pass reports, whose call chain may run through Core; a
-memory, stack, kernel or cap check that walks the call graph; autodiff),
-the finalization runs again with every Core body it reaches checked.
+checked in full. The run decides whether its Core is the built-in one, and
+reads the seal, only when its Core demand first names a Core body, so a
+program that names none never compares its tree's Core. When a stand-in
+can't stand for its body (an error a whole-program pass reports, whose call
+chain may run through Core, other than a `-[]>` function's E3401 outside
+Core, which names its own first impure call; a memory, stack, kernel or cap
+check that walks the call graph; autodiff), the finalization runs again
+with every Core body it reaches checked. A function the run evaluates at
+compile time and checks as a stand-in keeps its stand-in check.
 `core.threads` is
 its thread receipt, read over the runtime's receipt, since Core starts
 threads through the runtime. A Core build failure fails the step with

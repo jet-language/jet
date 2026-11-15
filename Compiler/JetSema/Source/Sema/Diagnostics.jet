@@ -157,6 +157,15 @@ sema_has_error_since: fn(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
     false
 }
 
+// How many diagnostics from `start` on are errors.
+sema_error_count_since: fn(diagnostics: [Diagnostic], start: Int) -> Int Never! {
+    count := 0
+    loop index in start..<diagnostics.len() {
+        if diagnostics[index].severity == DIAGNOSTIC_ERROR -> count += 1
+    }
+    count
+}
+
 // Whether the registration graph holds an error that stops checking. An
 // identifier-casing error (E0357) is reported but never changes what a name
 // resolves to, so bodies are still checked beside it, as the Rust reference did.

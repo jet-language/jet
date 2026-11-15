@@ -770,7 +770,10 @@ sema_local_splice_owners: fn(
     // Each such function the earlier checks took as a body is an owner too,
     // so both checks hold it, a generated codec or derived method as any
     // other: the owner checks name it as their wave, and the demand its
-    // result replays is the one its body check records.
+    // result replays is the one its body check records. A Core function
+    // the finalization checked as a stand-in (FnBody.stand_in) is none: its
+    // body is the Core image's, so neither check takes it and its slot
+    // stays as the demand left it.
     earlier_rows: sema_comptime_checked_function_rows(earlier_functions)
     loop result in comptime_functions {
         if earlier_rows.get("{result.module_identity.id}\n{result.function_key}") != None || owners.get(result.function_key) != None -> next
@@ -780,7 +783,8 @@ sema_local_splice_owners: fn(
                 module_slots[module_index] = sema_local_splice_slots(modules[module_index].functions)
                 slots_built[module_index] = true
             }
-            if (module_slots[module_index].get(result.function_key) ?? -1) < 0 -> next
+            slot: module_slots[module_index].get(result.function_key) ?? -1
+            if slot < 0 || modules[module_index].functions[slot].stand_in -> next
             owners[result.function_key] = true
             owner_module[module_index] = true
         }

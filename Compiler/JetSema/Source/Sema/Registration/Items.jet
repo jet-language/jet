@@ -755,11 +755,15 @@ SemaRegistrationImportBindingRef: struct {
 // cross a compiler thread, so they stay out of the registration graph (which
 // compiler threads share): the driver hands them to each check pass, and a
 // check reaches them through its context (SemaHostHookAccess).
-// Pure compiler services the host installs. Each declares its empty effect
-// row: an unbounded function value is the maximal row which would
-// make every checker path that consults a hook reach every effect.
+// Compiler services the host installs. Each declares its effect row (a pure
+// one its empty row): an unbounded function value is the maximal row which
+// would make every checker path that consults a hook reach every effect.
 SemaRegistrationHostHooks: struct {
     numeric_unit_conversion_exact: (fn(Float, String, String, String, String) -[]> Float?)?
+    // A `jet run` that may bind to the Core image: the host's read of the
+    // seal it would carry (CoreSeal.jet), which its Core demand makes once
+    // (CoreDemand.jet sema_core_stand_in_bind) and leaves None after.
+    core_seal: SemaCoreSealSource?{None}
 }
 
 // The folded build snapshot the driver
@@ -995,12 +999,15 @@ SemaRegistrationGraph: struct {
     // finalization summarizes the Core functions for a bound program
     // (CoreSeal.jet) into SemaGraphResult.core_seal.
     core_seal: Bool{false}
-    // A `jet run` bound to the Core image (driver
-    // JetDriverCompileRequest.core_stand_in_seal): the Core seal it carries,
-    // whose stand-in Core functions the Core demand checks by signature only
-    // (CoreDemand.jet sema_core_stand_in_wait); None checks every demanded
-    // body. `core_stand_in_wave`: the current demand wave is such a stand-in
-    // wave.
+    // A `jet run` that may bind to the Core image: `core_seal_pending`, its
+    // Core seal is in the host hooks (SemaRegistrationHostHooks.core_seal)
+    // and not yet read, which the Core demand does once it first names a
+    // deferred Core body (CoreDemand.jet sema_core_stand_in_bind).
+    // `core_stand_ins`: the seal so read, whose stand-in Core functions the
+    // Core demand checks by signature only (sema_core_stand_in_wait); None
+    // checks every demanded body. `core_stand_in_wave`: the current demand
+    // wave is such a stand-in wave.
+    core_seal_pending: Bool{false}
     core_stand_ins: SemaCoreSeal?{None}
     core_stand_in_wave: Bool{false}
     // This rule demand (sema_serde_index_codec_methods): every generated
