@@ -14,6 +14,8 @@ use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, Nam
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
+// `params` holds a `#Export(wasm)` signature's parameter types, the only
+// ones checked; any other function's is empty.
 SemaWebMeta: struct {
     key: String
     name: String
@@ -49,6 +51,10 @@ sema_web_type_id: fn(types: &SemaWebTypes, name: String) -> Int Never! {
 }
 
 sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
+    // Only the checks of a program that opts in read the declarations for the
+    // ABI rule, the `#Export(wasm)` signatures and the bucket reasons, so a
+    // program that doesn't collects none of them.
+    active: sema_web_partition_active(graph)
     metas := [SemaWebMeta]{}
     types := SemaWebTypes{names: name_table_sized(64), struct_at: [Int]{-1}, enum_at: [Int]{-1}, structs: [StructDef]{}, enums: [EnumDef]{}}
     loop module_index in 0..<modules.len() {
@@ -57,19 +63,18 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
         is_entry: graph.modules[registration].module_identity == graph.entry_module_identity
         file_prefix: if is_entry -> String?{None} else -> Val(graph.modules[registration].module_name)
         spans: sema_web_rows(modules[module_index].functions)
-        sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, spans, metas, types)
+        sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, spans, metas, types, abi_types: active)
     }
     if metas.len() == 0 -> return
-    active: sema_web_partition_active(graph)
     buckets := [WebBucket]{}
     reasons := [String]{}
     any_js := false
     loop meta in metas {
-        solved: sema_web_solved(modules, meta)
-        bucket: sema_web_bucket(meta, solved)
+        browser: sema_web_uses_browser(modules, meta)
+        bucket: sema_web_bucket(meta, browser: browser)
         if bucket == .JS -> any_js = true
         buckets.push(bucket)
-        reasons.push(sema_web_bucket_reason(meta, solved))
+        if active -> reasons.push(sema_web_bucket_reason(meta, browser: browser))
     }
     // The metas by function key (a later one of a key wins), and each
     // caller's call edges as metas, resolved once for the closure and the
@@ -105,11 +110,11 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
                 callee: callees[edge]
                 if buckets[caller] == .Wasm && buckets[callee] == .JS && metas[caller].marker == None && metas[caller].ceiling == None {
                     buckets[caller] = WebBucket.JS
-                    reasons[caller] = "calls `{metas[callee].name}`, which runs in JS"
+                    if active -> reasons[caller] = "calls `{metas[callee].name}`, which runs in JS"
                     changed = true
                 } else if buckets[caller] == .JS && buckets[callee] == .Wasm && metas[callee].marker == None && metas[callee].ceiling == None {
                     buckets[callee] = WebBucket.JS
-                    reasons[callee] = "called by `{metas[caller].name}`, which runs in JS"
+                    if active -> reasons[callee] = "called by `{metas[caller].name}`, which runs in JS"
                     changed = true
                 }
             }
@@ -132,7 +137,7 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
                 if !sema_web_abi_safe(ret, types) -> found.push(sema_web_abi_type(ret, "as a `#Export(wasm)` return type", meta.name_span))
             }
         }
-        uses_browser: buckets[at] == .Wasm && sema_web_has_root(sema_web_solved(modules, meta), "Browser")
+        uses_browser: buckets[at] == .Wasm && sema_web_uses_browser(modules, meta)
         if uses_browser {
             found.push(sema_error("E-WEB-TARGET-BROWSER", meta.name_span, "`{meta.name}` is pinned to Wasm but uses the `Browser` effect", "the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly", "remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls"))
         }
@@ -145,7 +150,7 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
             // pin is the E-WEB-TARGET-BROWSER above, and a Core helper that
             // uses no `Browser` serves both sides, whichever caller pulled
             // its bucket (Rust partitioned user functions only).
-            if module_is_core(graph.modules[metas[callee].registration].module_identity) && (uses_browser || !sema_web_has_root(sema_web_solved(modules, metas[callee]), "Browser")) -> next
+            if module_is_core(graph.modules[metas[callee].registration].module_identity) && (uses_browser || !sema_web_uses_browser(modules, metas[callee])) -> next
             found.push(sema_error("E-WEB-CROSS-PARTITION", meta.name_span, "`{meta.key}` is compiled to {sema_web_bucket_name(buckets[at])} but calls `{metas[callee].name}`, which lives in {sema_web_bucket_name(buckets[callee])}", "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet", "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers"))
         }
         if found.len() == 0 -> next
@@ -205,15 +210,19 @@ sema_web_methods_marked: fn(methods: [Func]) -> Bool Never! {
     false
 }
 
-sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta], types: &SemaWebTypes) Never! {
+// Each function in `items` as a meta, and with `abi_types`, the first
+// declaration of each struct and enum name for the `#Codable` ABI rule.
+sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta], types: &SemaWebTypes, abi_types: Bool{false}) Never! {
     loop item in items {
         if item == {
             .Func(function) -> sema_web_push(function, None, file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
             .Struct(structure) -> {
-                type_id: sema_web_type_id(types, structure.name)
-                if types.struct_at[type_id] < 0 {
-                    types.struct_at[type_id] = types.structs.len()
-                    types.structs.push(structure.copy()) // copy: the program's items keep the declaration
+                if abi_types {
+                    type_id: sema_web_type_id(types, structure.name)
+                    if types.struct_at[type_id] < 0 {
+                        types.struct_at[type_id] = types.structs.len()
+                        types.structs.push(structure.copy()) // copy: the program's items keep the declaration
+                    }
                 }
                 loop method in structure.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
                 loop implementation in structure.trait_impls {
@@ -221,10 +230,12 @@ sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: We
                 }
             }
             .Enum(enumeration) -> {
-                type_id: sema_web_type_id(types, enumeration.name)
-                if types.enum_at[type_id] < 0 {
-                    types.enum_at[type_id] = types.enums.len()
-                    types.enums.push(enumeration.copy()) // copy: the program's items keep the declaration
+                if abi_types {
+                    type_id: sema_web_type_id(types, enumeration.name)
+                    if types.enum_at[type_id] < 0 {
+                        types.enum_at[type_id] = types.enums.len()
+                        types.enums.push(enumeration.copy()) // copy: the program's items keep the declaration
+                    }
                 }
                 loop method in enumeration.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
                 loop implementation in enumeration.trait_impls {
@@ -237,7 +248,7 @@ sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: We
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) {
                     inner: sema_web_ceiling_or(code_module.web_target, sema_web_ceiling_or(module_ceiling, file_ceiling))
-                    sema_web_collect(body, file_ceiling, inner, Val(code_module.name), file_prefix, module_index, registration, spans, metas, types)
+                    sema_web_collect(body, file_ceiling, inner, Val(code_module.name), file_prefix, module_index, registration, spans, metas, types, abi_types: abi_types)
                 }
             }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -292,8 +303,11 @@ sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, modu
         key = "{alias}::{name}"
     }
     row: sema_web_row(spans, function.span)
+    // Only a `#Export(wasm)` signature is checked for ABI safety.
     params := [Type]{}
-    loop param in function.params -> params.push(param.ty)
+    if function.web_marker == .Val(.WasmExport) {
+        loop param in function.params -> params.push(param.ty)
+    }
     ceiling: sema_web_ceiling_or(module_ceiling, file_ceiling)
     metas.push(SemaWebMeta{key: key, name: name, name_span: function.name_span, marker: function.web_marker, ceiling: ceiling, params: params, ret: function.return_type, slot: module_index, row: row, registration: registration})
 }
@@ -303,19 +317,20 @@ sema_web_ceiling_or: fn(first: WebBucket?, second: WebBucket?) -> WebBucket? Nev
     second.copy()
 }
 
-sema_web_solved: fn(modules: [SemaGraphModuleResult], meta: SemaWebMeta) -> [String] Never! {
-    if meta.row < 0 -> return [String]{}
-    modules[meta.slot].functions[meta.row].effects.solved
+// Whether `meta`'s checked body uses the `Browser` effect.
+sema_web_uses_browser: fn(modules: [SemaGraphModuleResult], meta: SemaWebMeta) -> Bool Never! {
+    if meta.row < 0 -> return false
+    sema_web_has_root(modules[meta.slot].functions[meta.row].effects.solved, "Browser")
 }
 
 // Rust `checked_web_bucket`: the marker, the `Browser` effect, the ceiling,
 // a `Stream` result (a JS generator), then Wasm.
-sema_web_bucket: fn(meta: SemaWebMeta, solved: [String]) -> WebBucket Never! {
+sema_web_bucket: fn(meta: SemaWebMeta, browser: Bool{false}) -> WebBucket Never! {
     if meta.marker == .Val(marker) {
         if marker == .JS -> return WebBucket.JS
         return WebBucket.Wasm
     }
-    if sema_web_has_root(solved, "Browser") -> return WebBucket.JS
+    if browser -> return WebBucket.JS
     if meta.ceiling == .Val(ceiling) -> return ceiling
     if meta.ret == .Val(ret) {
         if ret == .Apply(name, args) {
@@ -326,7 +341,7 @@ sema_web_bucket: fn(meta: SemaWebMeta, solved: [String]) -> WebBucket Never! {
 }
 
 // Why sema_web_bucket chose its bucket, by the same precedence.
-sema_web_bucket_reason: fn(meta: SemaWebMeta, solved: [String]) -> String Never! {
+sema_web_bucket_reason: fn(meta: SemaWebMeta, browser: Bool{false}) -> String Never! {
     if meta.marker == .Val(marker) {
         pin: if marker == {
             .JS -> "#Target(JS)"
@@ -335,7 +350,7 @@ sema_web_bucket_reason: fn(meta: SemaWebMeta, solved: [String]) -> String Never!
         }
         return "pinned by `{pin}`"
     }
-    if sema_web_has_root(solved, "Browser") -> return "uses the `Browser` effect"
+    if browser -> return "uses the `Browser` effect"
     if meta.ceiling == .Val(ceiling) -> return "its module's `#Target({sema_web_bucket_name(ceiling)})` ceiling"
     if meta.ret == .Val(ret) {
         if ret == .Apply(name, args) {

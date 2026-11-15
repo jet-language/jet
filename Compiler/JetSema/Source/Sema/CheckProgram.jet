@@ -10492,25 +10492,32 @@ sema_failure_settle_obligations: fn(diagnostics: &[Diagnostic], solved: [String:
         }
     } ?? false
     if !pending -> return false
-    // The findings leave or change in place, from the back, so the rest are
-    // never copied.
+    // One pass moves each finding out and back in order (popped twice, so
+    // none is copied): a discharged one stays out, a surviving one comes
+    // back without the mark. Removing each discharged one in place would
+    // shift every finding after it, once per discharge.
+    held := [Diagnostic]{}
+    loop diagnostics.len() > 0 {
+        diagnostic: diagnostics.pop() ?? break
+        held.push(diagnostic)
+    }
     survived := false
-    index := diagnostics.len()
-    loop index > 0 {
-        index -= 1
-        detail: diagnostics[index].detail ?? ""
-        if !detail.starts_with(mark) -> next
-        lines: detail.split("\n").to_list()
-        callee: lines[0].replace(mark, "")
-        if solved.get(callee) != None {
-            _ := diagnostics.remove(index, .Slot)
+    loop held.len() > 0 {
+        diagnostic := held.pop() ?? break
+        detail: diagnostic.detail ?? ""
+        if !detail.starts_with(mark) {
+            diagnostics.push(diagnostic)
             next
         }
+        lines: detail.split("\n").to_list()
+        callee: lines[0].replace(mark, "")
+        if solved.get(callee) != None -> next
         remainder := [String]{}
         loop line_index in 1..<lines.len() -> remainder.push(lines[line_index])
         rest: remainder.join("\n")
-        diagnostics[index].detail = None
-        if rest != "" -> diagnostics[index].detail = Val(rest)
+        diagnostic.detail = None
+        if rest != "" -> diagnostic.detail = Val(rest)
+        diagnostics.push(diagnostic)
         survived = true
     }
     survived

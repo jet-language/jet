@@ -4979,7 +4979,7 @@ sema_effect_stack_seal: fn(frames: &SemaStackFrames, nodes: [SemaEffectNode], ar
     loop (row, lambda) in values.lambdas -> lambdas_at[lambda.node].push(row)
     wrappers_at := (loop _ in nodes -> [Int]{})
     loop wrapper in values.wrappers -> wrappers_at[wrapper.node].push(wrapper.target)
-    seal := SemaStackSeal{reached: (loop _ in nodes -> false), pending: [Int]{}, taken: (loop _ in nodes -> false), takens: [Int]{}, lambdas: [Int]{}, calls: [Int]{}, names: (loop _ in nodes -> [String]{})}
+    seal := SemaStackSeal{reached: (loop _ in nodes -> false), pending: [Int]{}, taken: (loop _ in nodes -> false), takens: [Int]{}, lambdas: [Int]{}, calls: [Int]{}, names: (loop _ in nodes -> [Int]{})}
     loop (index, node) in nodes {
         if !module_is_core(node.module_identity) -> sema_effect_stack_reach(seal, index)
     }
@@ -4989,26 +4989,26 @@ sema_effect_stack_seal: fn(frames: &SemaStackFrames, nodes: [SemaEffectNode], ar
         loop at in 0..<sema_effect_node_value_count(nodes[index]) {
             target: sema_effect_node_value_target(nodes[index], at)
             if target < 0 -> next
-            sema_effect_stack_take(seal, frames, nodes, arity, values, target)
+            sema_effect_stack_take(seal, frames, arity, values, target)
         }
-        loop target in wrappers_at[index] -> sema_effect_stack_take(seal, frames, nodes, arity, values, target)
+        loop target in wrappers_at[index] -> sema_effect_stack_take(seal, frames, arity, values, target)
         loop row in lambdas_at[index] {
             seal.lambdas.push(row)
-            loop call_row in seal.calls -> sema_effect_stack_run_lambda(seal, frames, nodes, values.calls[call_row], values.lambdas[row])
+            loop call_row in seal.calls -> sema_effect_stack_run_lambda(seal, frames, values.calls[call_row], values.lambdas[row])
         }
         loop row in calls_at[index] {
             seal.calls.push(row)
-            loop target in seal.takens -> sema_effect_stack_run_taken(seal, frames, nodes, arity, values.calls[row], target)
-            loop lambda_row in seal.lambdas -> sema_effect_stack_run_lambda(seal, frames, nodes, values.calls[row], values.lambdas[lambda_row])
+            loop target in seal.takens -> sema_effect_stack_run_taken(seal, frames, arity, values.calls[row], target)
+            loop lambda_row in seal.lambdas -> sema_effect_stack_run_lambda(seal, frames, values.calls[row], values.lambdas[lambda_row])
         }
     }
     loop dispatch in values.dispatches {
-        loop target in dispatch.targets -> sema_effect_stack_name_add(seal.names[dispatch.node], "`{nodes[target].display_key}`")
+        loop target in dispatch.targets -> sema_effect_stack_name_add(seal.names[dispatch.node], sema_effect_stack_named(target))
     }
     loop index in 0..<nodes.len() {
         if !seal.reached[index] -> next
         if seal.names[index].len() == 0 && frames.dynamic_calls[index].len() == 0 -> next
-        frames.sealed[index] = if seal.names[index].len() == 0 -> "nothing" else -> seal.names[index].join(", ")
+        frames.sealed[index] = if seal.names[index].len() == 0 -> "nothing" else -> sema_effect_stack_names_text(nodes, seal.names[index])
     }
     loop call in values.calls {
         if !seal.reached[call.node] -> frames.open[call.node] = "a call through a function value in {nodes[call.node].display_key}, which no code outside Core reaches, so its targets are not sealed"
@@ -5026,7 +5026,7 @@ sema_effect_stack_seal: fn(frames: &SemaStackFrames, nodes: [SemaEffectNode], ar
 // The walk that seals calls through values: the nodes reached so far and
 // those still to read, the functions taken as values, the rows of the
 // lambdas and calls through values in reached code, and each node's sealed
-// target names.
+// targets as distinct name ids in order (sema_effect_stack_name_add).
 SemaStackSeal: struct {
     reached: [Bool]
     pending: [Int]
@@ -5034,7 +5034,7 @@ SemaStackSeal: struct {
     takens: [Int]
     lambdas: [Int]
     calls: [Int]
-    names: [[String]]
+    names: [[Int]]
 }
 
 sema_effect_stack_reach: fn(seal: &SemaStackSeal, index: Int) Never! {
@@ -5045,29 +5045,29 @@ sema_effect_stack_reach: fn(seal: &SemaStackSeal, index: Int) Never! {
 
 // `target` is taken as a value by reached code: every reached call through
 // a function value may run it.
-sema_effect_stack_take: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, nodes: [SemaEffectNode], arity: [Int], values: SemaStackValues, target: Int) Never! {
+sema_effect_stack_take: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, arity: [Int], values: SemaStackValues, target: Int) Never! {
     sema_effect_stack_reach(seal, target)
     if seal.taken[target] -> return
     seal.taken[target] = true
     seal.takens.push(target)
-    loop row in seal.calls -> sema_effect_stack_run_taken(seal, frames, nodes, arity, values.calls[row], target)
+    loop row in seal.calls -> sema_effect_stack_run_taken(seal, frames, arity, values.calls[row], target)
 }
 
-sema_effect_stack_run_taken: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, nodes: [SemaEffectNode], arity: [Int], call: SemaStackDynamicCall, target: Int) Never! {
+sema_effect_stack_run_taken: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, arity: [Int], call: SemaStackDynamicCall, target: Int) Never! {
     if call.arity < 0 -> return
     if arity[target] != call.arity && arity[target] + 1 != call.arity -> return
     sema_effect_stack_add_edge(frames.edges[call.node], target)
-    sema_effect_stack_name_add(seal.names[call.node], "`{nodes[target].display_key}`")
+    sema_effect_stack_name_add(seal.names[call.node], sema_effect_stack_named(target))
     sema_effect_stack_reach(seal, target)
 }
 
-sema_effect_stack_run_lambda: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, nodes: [SemaEffectNode], call: SemaStackDynamicCall, lambda: SemaStackLambda) Never! {
+sema_effect_stack_run_lambda: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, call: SemaStackDynamicCall, lambda: SemaStackLambda) Never! {
     if lambda.arity != call.arity -> return
     loop target in lambda.edges {
         sema_effect_stack_add_edge(frames.edges[call.node], target)
         sema_effect_stack_reach(seal, target)
     }
-    sema_effect_stack_name_add(seal.names[call.node], "a lambda in {nodes[lambda.node].display_key}")
+    sema_effect_stack_name_add(seal.names[call.node], sema_effect_stack_named_lambda(lambda.node))
     writer: frames.own[lambda.node]
     if frames.carrier[call.node] >= 0 && frames.carried[call.node] < 0 -> return
     if writer < 0 || writer > frames.carried[call.node] {
@@ -5076,24 +5076,51 @@ sema_effect_stack_run_lambda: fn(seal: &SemaStackSeal, frames: &SemaStackFrames,
     }
 }
 
-// Adds `value` once to a node's sealed target names, kept in text order. A
-// name is quoted or `a lambda in …`, so no name's root is an effect root
-// and the effect-row order (sema_effect_set_add) of the names is their text
-// order: a binary search finds the slot, where the row insertion re-ranked
-// every name it passed.
-sema_effect_stack_name_add: fn(names: &[String], value: &&String) Never! {
+// The name id of the function `node` taken as a value, named "`key`".
+sema_effect_stack_named: fn(node: Int) -> Int Never! {
+    2 * node
+}
+
+// The name id of a lambda written in `node`, named "a lambda in key".
+sema_effect_stack_named_lambda: fn(node: Int) -> Int Never! {
+    2 * node + 1
+}
+
+// Adds the name id `id` once to a node's sealed target ids, kept in order:
+// a binary search finds the slot. An id is an integer, so a pair of a call
+// and a value spells no name and compares no text; only the distinct ids
+// are spelled, once (sema_effect_stack_names_text).
+sema_effect_stack_name_add: fn(ids: &[Int], id: Int) Never! {
     low := 0
-    high := names.len()
+    high := ids.len()
     loop low < high {
         middle: (low + high) /% 2
-        if names[middle] == value -> return
-        if names[middle] < value {
-            low = middle + 1
-        } else {
-            high = middle
+        if ids[middle] == id -> return
+        if {
+            ids[middle] < id -> low = middle + 1
+            else -> high = middle
         }
     }
-    names.insert(low, value)
+    ids.insert(low, id)
+}
+
+// A node's sealed target names, each once in text order, from its distinct
+// name ids (two nodes may share a display key). A name is quoted or `a
+// lambda in …`, so no name's root is an effect root and the effect-row
+// order (sema_effect_set_add) of the names is their text order.
+sema_effect_stack_names_text: fn(nodes: [SemaEffectNode], ids: [Int]) -> String Never! {
+    names := [String]{}
+    loop id in ids {
+        node: id /% 2
+        names.push(if id % 2 == 0 -> "`{nodes[node].display_key}`" else -> "a lambda in {nodes[node].display_key}")
+    }
+    names.sort()
+    distinct := [String]{}
+    loop name in names {
+        if distinct.len() > 0 && distinct[distinct.len() - 1] == name -> next
+        distinct.push(name)
+    }
+    distinct.join(", ")
 }
 
 sema_effect_stack_add_edge: fn(edges: &[Int], target: Int) Never! {
