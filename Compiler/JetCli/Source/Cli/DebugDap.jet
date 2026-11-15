@@ -20,8 +20,8 @@ use {
     dap_files: core.files
     dap_json: core.encoding.json
     dap_term: core.term
-    jet_debug.[NativeDebugError, NativeLocal, NativeSession, NativeStop, NativeStopKind, debug_parse_expression, debug_parse_message, native_debug_hit_breakpoint, native_debug_jet_frame]
-    jet_foundation.[Expr, foundation_json_integer, foundation_json_quote]
+    jet_debug.[DebugExpression, NativeDebugError, NativeLocal, NativeSession, NativeStop, NativeStopKind, debug_parse_expression, debug_parse_message, native_debug_hit_breakpoint, native_debug_jet_frame]
+    jet_foundation.[ast_expr, foundation_json_integer, foundation_json_quote]
 }
 
 // One `setBreakpoints` entry: its line, and its condition and log message
@@ -34,8 +34,8 @@ JetCLIDapBreakpoint: struct {
 
 // A placed breakpoint's condition and log message, parsed.
 JetCLIDapRule: struct {
-    condition: Expr?
-    log: Expr?
+    condition: DebugExpression?
+    log: DebugExpression?
 }
 
 // Where a run stopped, and the breakpoint the stop reports (None for the end
@@ -283,7 +283,7 @@ JetCLIDap: struct {
             }
         }
         if rule.log == .Val(message) {
-            text: if jet_cli_dap_eval(message, locals) == {
+            text: if jet_cli_dap_eval(message.tables, message.root, locals) == {
                 .Ok(value) -> jet_cli_dap_text(value)
                 .Err(failure) -> "<{failure.message}>"
             }
@@ -485,8 +485,8 @@ jet_cli_dap_string: fn(members: [(key: String, value: Dyn)], name: String) -> St
 // neither.
 jet_cli_dap_rule: fn(spec: JetCLIDapBreakpoint) -> JetCLIDapRule? JetCLIDapEvalError! {
     if spec.condition.trim() == "" && spec.log == "" -> return Ok(None)
-    condition: if spec.condition.trim() == "" -> Expr?{None} else -> Val(debug_parse_expression(spec.condition) ?? return Err(jet_cli_dap_eval_error(err.message)))
-    log: if spec.log == "" -> Expr?{None} else -> Val(debug_parse_message(spec.log) ?? return Err(jet_cli_dap_eval_error(err.message)))
+    condition: if spec.condition.trim() == "" -> DebugExpression?{None} else -> Val(debug_parse_expression(spec.condition) ?? return Err(jet_cli_dap_eval_error(err.message)))
+    log: if spec.log == "" -> DebugExpression?{None} else -> Val(debug_parse_message(spec.log) ?? return Err(jet_cli_dap_eval_error(err.message)))
     Ok(Val(JetCLIDapRule{condition: condition, log: log}))
 }
 
@@ -543,13 +543,13 @@ jet_cli_dap_evaluate: fn(session: &NativeSession, text: String, frame: Int) -> S
     expr: debug_parse_expression(text) ?? return Err(jet_cli_dap_eval_error(err.message))
     locals: jet_cli_dap_frame_locals(session, if frame > 0 -> frame else -> 0) ?? return Err(jet_cli_dap_eval_error(err.detail))
     shown := (text: "", type_name: "")
-    if expr == .Ident(name, _, _) {
+    if ast_expr(expr.tables, expr.root) == .Ident(name, _, _) {
         loop local in locals {
             if local.name == name -> shown = (text: local.value, type_name: local.type_name)
         }
     }
     if shown.type_name == "" {
-        value: jet_cli_dap_eval(expr, locals) ?? return Err(err)
+        value: jet_cli_dap_eval(expr.tables, expr.root, locals) ?? return Err(err)
         shown = jet_cli_dap_shown(value)
     }
     Ok("{{\"result\":{foundation_json_quote(shown.text)},\"type\":{foundation_json_quote(shown.type_name)},\"variablesReference\":0}}")

@@ -25,15 +25,18 @@ use {
         jet_driver_present_diagnostics,
     ]
     jet_foundation.[
+        ASTTables,
         AccessConvention,
         BuildOptions,
         CallArg,
         DeepChecks,
         Diagnostic,
-        Expr,
+        ExprNode,
         Item,
-        Stmt,
+        StmtNode,
         Type,
+        ast_expr,
+        ast_stmt,
         build_options_stock,
         deep_checks_malformed,
         deep_checks_read,
@@ -617,48 +620,50 @@ jet_cli_repl_binding_index: fn(bindings: [JetCLIReplBinding], name: String) -> I
 }
 
 // A session binding of a non-scalar type named by `expr` moves.
-jet_cli_repl_move_ident: fn(session: JetCLIReplSession, expr: Expr, moved: &[String]) {
-    if expr == .Ident(name, _, _) {
+jet_cli_repl_move_ident: fn(session: JetCLIReplSession, tables: ASTTables, expr: ExprNode, moved: &[String]) {
+    if ast_expr(tables, expr) == .Ident(name, _, _) {
         index: jet_cli_repl_binding_index(session.bindings, name) ?? return
         scalar: if session.bindings[index].ty == .Val(ty) -> jet_cli_repl_scalar(ty) else -> false
         if !scalar && !moved.contains(name) -> moved.push(name.copy())
     }
 }
 
-jet_cli_repl_moves_in_args: fn(session: JetCLIReplSession, args: [CallArg], moved: &[String]) {
+jet_cli_repl_moves_in_args: fn(session: JetCLIReplSession, tables: ASTTables, args: [CallArg], moved: &[String]) {
     loop arg in args {
         if arg.convention == AccessConvention.Move {
-            jet_cli_repl_move_ident(session, arg.expr, moved)
+            jet_cli_repl_move_ident(session, tables, arg.expr, moved)
         }
-        jet_cli_repl_moves_in_expr(session, arg.expr, moved)
+        jet_cli_repl_moves_in_expr(session, tables, arg.expr, moved)
     }
 }
 
-jet_cli_repl_moves_in_expr: fn(session: JetCLIReplSession, expr: Expr, moved: &[String]) {
-    if expr == {
-        .Call(call, _) -> { jet_cli_repl_moves_in_args(session, call.args, moved) }
+jet_cli_repl_moves_in_expr: fn(session: JetCLIReplSession, tables: ASTTables, expr: ExprNode, moved: &[String]) {
+    if ast_expr(tables, expr) == {
+        .Call(call, _) -> { jet_cli_repl_moves_in_args(session, tables, call.args, moved) }
         .MethodCall(receiver, _, _, _, _, args, _) -> {
-            jet_cli_repl_moves_in_expr(session, receiver, moved)
-            jet_cli_repl_moves_in_args(session, args, moved)
+            jet_cli_repl_moves_in_expr(session, tables, receiver, moved)
+            jet_cli_repl_moves_in_args(session, tables, args, moved)
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 
-jet_cli_repl_moves: fn(session: JetCLIReplSession, body: [Stmt]) -> [String] {
+jet_cli_repl_moves: fn(session: JetCLIReplSession, tables: ASTTables, body: [StmtNode]) -> [String] {
     moved := [String]{}
     loop stmt in body {
-        if stmt == {
+        if ast_stmt(tables, stmt) == {
             .Val(binding) -> {
-                if binding.init == .Ident(_, _, _) {
-                    jet_cli_repl_move_ident(session, binding.init, moved)
-                } else { jet_cli_repl_moves_in_expr(session, binding.init, moved) }
+                if ast_expr(tables, binding.init) == .Ident(_, _, _) {
+                    jet_cli_repl_move_ident(session, tables, binding.init, moved)
+                } else { jet_cli_repl_moves_in_expr(session, tables, binding.init, moved) }
             }
-            .Assign(_, _, _, value) -> { jet_cli_repl_moves_in_expr(session, value, moved) }
-            .Expr(expr) -> { jet_cli_repl_moves_in_expr(session, expr, moved) }
-            .DeferClose(close, _) -> { jet_cli_repl_moves_in_expr(session, close, moved) }
+            .Assign(_, _, _, value) -> { jet_cli_repl_moves_in_expr(session, tables, value, moved) }
+            .Expr(expr) -> { jet_cli_repl_moves_in_expr(session, tables, expr, moved) }
+            .DeferClose(close, _) -> { jet_cli_repl_moves_in_expr(session, tables, close, moved) }
             .Return(value, _) -> {
-                if value == .Val(returned) -> jet_cli_repl_moves_in_expr(session, returned, moved)
+                if value == .Val(returned) {
+                    jet_cli_repl_moves_in_expr(session, tables, returned, moved)
+                }
             }
             .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) -> {}
         }
@@ -856,17 +861,17 @@ jet_cli_repl_is_string: fn(ty: Type?) -> Bool Never! {
 // `run_stmts_turn`: compile the statements after the replayed ones, with the
 // lines that show this turn's values, in one program; run it and keep what
 // the statements bind.
-jet_cli_repl_stmts: fn(session: &JetCLIReplSession, body: [Stmt], suppress: Bool, echo: Bool, check_source: String) -> JetCLIReplTurnResult {
+jet_cli_repl_stmts: fn(session: &JetCLIReplSession, tables: ASTTables, body: [StmtNode], suppress: Bool, echo: Bool, check_source: String) -> JetCLIReplTurnResult {
     echo_name: "jet_repl_echo_{session.nonce}_{session.step}"
     plain: jet_cli_repl_trim_semicolons(check_source)
     prefix: if echo -> "{echo_name}: " else -> ""
     statement: "{prefix}{plain}"
-    moved: jet_cli_repl_moves(session, body)
+    moved: jet_cli_repl_moves(session, tables, body)
     // This turn's new bindings, the last of a name winning; the compile gives
     // their types.
     fresh := [JetCLIReplReport]{}
     loop stmt in body {
-        if stmt == .Val(binding) {
+        if ast_stmt(tables, stmt) == .Val(binding) {
             if binding.name == "__repl_echo__" || moved.contains(binding.name) -> next
             kept := [JetCLIReplReport]{}
             loop earlier in fresh {
@@ -1020,15 +1025,15 @@ jet_cli_repl_line: fn(session: &JetCLIReplSession, text: String) -> Bool {
                 .Meta(command, argument) -> return jet_cli_repl_meta(session, command, argument)
                 .Item(source) -> jet_cli_repl_item(session, text, source)
                 .Import(source) -> jet_cli_repl_import(session, text, source)
-                .Stmts(body, suppress, echo, check_source) -> jet_cli_repl_turn(session, text, body, suppress, echo, check_source)
+                .Stmts(tables, body, suppress, echo, check_source) -> jet_cli_repl_turn(session, text, tables, body, suppress, echo, check_source)
             }
         }
     }
     true
 }
 
-jet_cli_repl_turn: fn(session: &JetCLIReplSession, text: String, body: [Stmt], suppress: Bool, echo: Bool, check_source: String) {
-    result: jet_cli_repl_stmts(session, body, suppress, echo, check_source)
+jet_cli_repl_turn: fn(session: &JetCLIReplSession, text: String, tables: ASTTables, body: [StmtNode], suppress: Bool, echo: Bool, check_source: String) {
+    result: jet_cli_repl_stmts(session, tables, body, suppress, echo, check_source)
     if result == {
         .Interrupted -> {
             jet_cli_repl_err("{JET_CLI_REPL_INTERRUPTED}\n")
@@ -1422,8 +1427,8 @@ jet_cli_eval_expression: fn(source: String, color: Bool, json: Bool) -> JetDrive
             failure = Val(JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: diagnostics, report: ""})
         }
         .Accepted(input) -> {
-            if input == .Stmts(body, suppress, echo, check_source) {
-                result: jet_cli_repl_stmts(session, body, suppress, echo, check_source)
+            if input == .Stmts(tables, body, suppress, echo, check_source) {
+                result: jet_cli_repl_stmts(session, tables, body, suppress, echo, check_source)
                 if result == {
                     .Done(stdout, stderr, echo_report, shown) -> {
                         output.stdout = stdout

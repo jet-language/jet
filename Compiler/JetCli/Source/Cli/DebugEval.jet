@@ -7,8 +7,8 @@
 // `-`, `+ - *` on Ints and on Floats, comparisons (chained too), and `&&`
 // and `||`. Nothing runs in the program.
 use {
-    jet_debug.[NATIVE_DEBUG_UNAVAILABLE, NativeLocal, debug_parse_expression, debug_parse_message, debug_unquote_text, native_debug_text_literal]
-    jet_foundation.[BinOp, Expr]
+    jet_debug.[NATIVE_DEBUG_UNAVAILABLE, DebugExpression, NativeLocal, debug_parse_expression, debug_parse_message, debug_unquote_text, native_debug_text_literal]
+    jet_foundation.[ASTTables, BinOp, ExprNode, ast_expr]
 }
 
 // A value an expression has is a debugger value row, as a local is: its Jet
@@ -77,15 +77,15 @@ jet_cli_dap_eval_error: fn(message: String) -> JetCLIDapEvalError Never! {
 }
 
 // A breakpoint condition's truth over `locals`.
-jet_cli_dap_condition: fn(expr: Expr, locals: [NativeLocal]) -> Bool JetCLIDapEvalError! {
-    value: jet_cli_dap_eval(expr, locals) ?? return Err(err)
+jet_cli_dap_condition: fn(condition: DebugExpression, locals: [NativeLocal]) -> Bool JetCLIDapEvalError! {
+    value: jet_cli_dap_eval(condition.tables, condition.root, locals) ?? return Err(err)
     if jet_cli_dap_as_bool(value) == .Val(flag) -> return Ok(flag)
     Err(jet_cli_dap_eval_error("the condition is a {value.type_name}, not a Bool"))
 }
 
-// The value of `expr` over `locals`.
-jet_cli_dap_eval: fn(expr: Expr, locals: [NativeLocal]) -> NativeLocal JetCLIDapEvalError! {
-    if expr == {
+// The value of `expr`, a node of `tables`, over `locals`.
+jet_cli_dap_eval: fn(tables: ASTTables, expr: ExprNode, locals: [NativeLocal]) -> NativeLocal JetCLIDapEvalError! {
+    if ast_expr(tables, expr) == {
         .Ident(name, _, _) -> {
             loop local in locals {
                 if local.name == name -> return jet_cli_dap_local(local)
@@ -101,7 +101,7 @@ jet_cli_dap_eval: fn(expr: Expr, locals: [NativeLocal]) -> NativeLocal JetCLIDap
                 if part == {
                     .Lit(literal) -> text = "{text}{literal}"
                     .Interp(inner, _) -> {
-                        value: jet_cli_dap_eval(inner, locals) ?? return Err(err)
+                        value: jet_cli_dap_eval(tables, inner, locals) ?? return Err(err)
                         text = "{text}{jet_cli_dap_text(value)}"
                     }
                     .Byte(_) -> return Err(jet_cli_dap_eval_error("a byte escape is not evaluated"))
@@ -109,9 +109,9 @@ jet_cli_dap_eval: fn(expr: Expr, locals: [NativeLocal]) -> NativeLocal JetCLIDap
             }
             Ok(jet_cli_dap_of_string(text))
         }
-        .Paren(inner, _, _) -> jet_cli_dap_eval(inner, locals)
+        .Paren(inner, _, _) -> jet_cli_dap_eval(tables, inner, locals)
         .Unary(op, operand, _, _) -> {
-            value: jet_cli_dap_eval(operand, locals) ?? return Err(err)
+            value: jet_cli_dap_eval(tables, operand, locals) ?? return Err(err)
             if op == {
                 .Not -> if jet_cli_dap_as_bool(value) == .Val(flag) -> Ok(jet_cli_dap_of_bool(!flag)) else -> Err(jet_cli_dap_eval_error("`!` needs a Bool"))
                 .Neg -> {
@@ -126,26 +126,26 @@ jet_cli_dap_eval: fn(expr: Expr, locals: [NativeLocal]) -> NativeLocal JetCLIDap
             }
         }
         .Binary(op, left, right, _, _) -> {
-            first: jet_cli_dap_eval(left, locals) ?? return Err(err)
+            first: jet_cli_dap_eval(tables, left, locals) ?? return Err(err)
             if op == .And || op == .Or {
                 flag: jet_cli_dap_as_bool(first) ?? return Err(jet_cli_dap_eval_error("`&&` and `||` need Bools"))
                 if flag == (op == .Or) -> return Ok(jet_cli_dap_of_bool(flag))
-                second: jet_cli_dap_eval(right, locals) ?? return Err(err)
+                second: jet_cli_dap_eval(tables, right, locals) ?? return Err(err)
                 if jet_cli_dap_as_bool(second) == .Val(found) {
                     return Ok(jet_cli_dap_of_bool(found))
                 }
                 return Err(jet_cli_dap_eval_error("`&&` and `||` need Bools"))
             }
-            second: jet_cli_dap_eval(right, locals) ?? return Err(err)
+            second: jet_cli_dap_eval(tables, right, locals) ?? return Err(err)
             jet_cli_dap_binary(op, first, second)
         }
         .CompareChain(operands, ops, _, _, _) -> {
             if operands.len() != ops.len() + 1 {
                 return Err(jet_cli_dap_eval_error("a comparison chain is malformed"))
             }
-            previous := jet_cli_dap_eval(operands[0], locals) ?? return Err(err)
+            previous := jet_cli_dap_eval(tables, operands[0], locals) ?? return Err(err)
             loop (k, op) in ops {
-                next_value: jet_cli_dap_eval(operands[k + 1], locals) ?? return Err(err)
+                next_value: jet_cli_dap_eval(tables, operands[k + 1], locals) ?? return Err(err)
                 held: jet_cli_dap_binary(op, previous, next_value) ?? return Err(err)
                 if jet_cli_dap_as_bool(held) == .Val(flag) && !flag -> return Ok(held)
                 previous = next_value
@@ -244,7 +244,7 @@ jet_cli_dap_test_locals: fn() -> [NativeLocal] Never! {
 // `error: <why>`.
 jet_cli_dap_test_eval: fn(text: String) -> String Never! {
     expr: debug_parse_expression(text) ?? return "error: {err.message}"
-    value: jet_cli_dap_eval(expr, jet_cli_dap_test_locals()) ?? return "error: {err.message}"
+    value: jet_cli_dap_eval(expr.tables, expr.root, jet_cli_dap_test_locals()) ?? return "error: {err.message}"
     jet_cli_dap_text(value)
 }
 
@@ -268,6 +268,6 @@ jet_cli_dap_test_eval: fn(text: String) -> String Never! {
 
 #Test("A logpoint message fills in its expressions") {
     message: debug_parse_message("i is {{i}}, twice {{i * 2}}, \"{{name}}\"") ?? panic(err.message)
-    value: jet_cli_dap_eval(message, jet_cli_dap_test_locals()) ?? panic(err.message)
+    value: jet_cli_dap_eval(message.tables, message.root, jet_cli_dap_test_locals()) ?? panic(err.message)
     assert_eq(jet_cli_dap_text(value), "i is 3, twice 6, \"ab\"")
 }

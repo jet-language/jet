@@ -1,7 +1,7 @@
 // `print_explanation` and `run_explain`. Diagnostic essays reuse the existing
 // Foundation registry/renderer.
 use {
-    jet_foundation.[DiagnosticExplanation, Func, TraitImplBlock, diagnostic_explanation, diagnostic_explanation_render, foundation_byte_text]
+    jet_foundation.[ASTTables, DiagnosticExplanation, Func, TraitImplBlock, ast_expr, ast_stmt, diagnostic_explanation, diagnostic_explanation_render, foundation_byte_text]
     jet_driver.[JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverSourceQueryResult, jet_driver_explain_code]
 }
 
@@ -86,8 +86,9 @@ jet_cli_explain_loaded_diagnostic_type: fn(name: String, loaded: JetDriverSource
                 methods = jet_cli_nested_diagnostic_methods(definition.trait_impls)
             }
             if methods == .Val(found) {
-                what: jet_cli_diagnostic_type_literal(source_module.source, found, "what")
-                explanation: DiagnosticExplanation{code: name, stage: "library", meaning: what ?? "", what: what, why: jet_cli_diagnostic_type_literal(source_module.source, found, "why"), fix: jet_cli_diagnostic_type_literal(source_module.source, found, "fix"), example: None}
+                tables: source_module.program.tables
+                what: jet_cli_diagnostic_type_literal(tables, source_module.source, found, "what")
+                explanation: DiagnosticExplanation{code: name, stage: "library", meaning: what ?? "", what: what, why: jet_cli_diagnostic_type_literal(tables, source_module.source, found, "why"), fix: jet_cli_diagnostic_type_literal(tables, source_module.source, found, "fix"), example: None}
                 return jet_cli_explanation_output(explanation, color, json)
             }
         }
@@ -103,12 +104,13 @@ jet_cli_nested_diagnostic_methods: fn(blocks: [TraitImplBlock]) -> [Func]? Never
     None
 }
 
-// One `Diagnostic` text method's literal as written, without its quotes.
-jet_cli_diagnostic_type_literal: fn(source: String, methods: [Func], name: String) -> String? Never! {
+// One `Diagnostic` text method's literal as written, without its quotes;
+// the methods' bodies are nodes of `tables`.
+jet_cli_diagnostic_type_literal: fn(tables: ASTTables, source: String, methods: [Func], name: String) -> String? Never! {
     loop method in methods {
         if method.name != name || method.body.len() != 1 -> next
-        if method.body[0] == .Expr(literal) {
-            if literal == .Str(_, span, _) {
+        if ast_stmt(tables, method.body[0]) == .Expr(literal) {
+            if ast_expr(tables, literal) == .Str(_, span, _) {
                 bytes: source.bytes()
                 if span.start + 1 > span.end - 1 || span.end > bytes.len() -> return None
                 return Val(foundation_byte_text(bytes, span.start + 1, span.end - 1))

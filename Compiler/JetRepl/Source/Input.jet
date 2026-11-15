@@ -3,14 +3,14 @@
 // the parser accepts is checked by the compiler on the shared path (`jet repl`,
 // JetCli Repl.jet); nothing here refuses a feature by name.
 use {
-    jet_foundation.[BLOCK_COMMENT_OPEN, COMMENT_PREFIX, Diagnostic, DiagnosticLabel, Item, ParseResult, Span, Stmt, TextEdit]
+    jet_foundation.[ASTTables, BLOCK_COMMENT_OPEN, COMMENT_PREFIX, Diagnostic, DiagnosticLabel, Item, ParseResult, Span, StmtNode, TextEdit]
     jet_lexer.[lex]
     jet_parser.[parse_generated_source, parse_source]
 }
 
 ReplInput: enum {
     Meta(command: String, argument: String?)
-    Stmts(body: [Stmt], suppress_echo: Bool, echo: Bool, check_source: String)
+    Stmts(tables: ASTTables, body: [StmtNode], suppress_echo: Bool, echo: Bool, check_source: String)
     Item(source: String)
     Import(source: String)
     Empty
@@ -162,7 +162,7 @@ repl_starts_with_stmt_keyword: fn(text: String) -> Bool Never! {
     repl_top_level_colon(text) != None || text.contains(":=") || text.starts_with("return ") || text.starts_with("return") || text.starts_with("if ") || text.starts_with("loop ") || text.starts_with("break") || text.starts_with("continue") || text.starts_with("print(") || text.starts_with("eprint(")
 }
 
-repl_first_function_body: fn(items: [Item]) -> [Stmt]? Never! {
+repl_first_function_body: fn(items: [Item]) -> [StmtNode]? Never! {
     if items.len() == 0 -> return None
     if items[0] == .Func(function) -> return Val(function.body)
     None
@@ -219,7 +219,7 @@ repl_classify: fn(source: String, step: Int) -> ReplInputParse {
         parsed: parse_generated_source(plain_source.bytes())
         if parsed.diagnostics.len() == 0 && repl_first_function_body(parsed.program.items) == .Val(body) {
             if body.len() > 0 {
-                return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}
+                return ReplInputParse.Accepted{input: ReplInput.Stmts{tables: parsed.program.tables, body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}
             }
         }
         plain_attempt = Val(parsed)
@@ -229,13 +229,13 @@ repl_classify: fn(source: String, step: Int) -> ReplInputParse {
     echo: parse_generated_source(echo_source.bytes())
     if echo.diagnostics.len() == 0 && repl_first_function_body(echo.program.items) == .Val(body) {
         if body.len() > 0 {
-            return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, echo: true, check_source: plain_input}}
+            return ReplInputParse.Accepted{input: ReplInput.Stmts{tables: echo.program.tables, body: body, suppress_echo: suppress, echo: true, check_source: plain_input}}
         }
     }
     plain: plain_attempt ?? parse_generated_source(plain_source.bytes())
     if plain.diagnostics.len() > 0 -> return repl_rejected(plain.diagnostics, wrapper.len())
     if repl_first_function_body(plain.program.items) == .Val(body) {
-        return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}
+        return ReplInputParse.Accepted{input: ReplInput.Stmts{tables: plain.program.tables, body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}
     }
     ReplInputParse.Accepted{input: ReplInput.Empty}
 }

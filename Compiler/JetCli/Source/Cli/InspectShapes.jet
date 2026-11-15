@@ -9,12 +9,14 @@ use {
         JET_DRIVER_EXIT_USER_ERROR,
     ]
     jet_foundation.[
+        ASTTables,
         CtValue,
         Field,
         Marker,
         MarkerCallArg,
         StructDef,
         Type,
+        ast_expr,
         diagnostic_from_registry,
         type_name,
     ]
@@ -164,10 +166,10 @@ jet_cli_shape_marker: fn(markers: [Marker], name: String) -> Marker? Never! {
     None
 }
 
-// The first literal part of a string expression.
-jet_cli_shape_static_string: fn(argument: MarkerCallArg) -> String? Never! {
+// The first literal part of a string expression of `tables`.
+jet_cli_shape_static_string: fn(tables: ASTTables, argument: MarkerCallArg) -> String? Never! {
     if argument == .Expr(expression) {
-        if expression == .Str(parts, _, _) {
+        if ast_expr(tables, expression) == .Str(parts, _, _) {
             if parts.len() > 0 {
                 if parts[0] == .Lit(text) -> return Val(text)
             }
@@ -177,40 +179,43 @@ jet_cli_shape_static_string: fn(argument: MarkerCallArg) -> String? Never! {
 }
 
 // `shape_marker_string`: the first argument, or the argument labeled `label`.
-jet_cli_shape_marker_string: fn(marker: Marker, label: String?) -> String? Never! {
+jet_cli_shape_marker_string: fn(tables: ASTTables, marker: Marker, label: String?) -> String? Never! {
     wanted: label ?? {
         if marker.args.len() == 0 -> return None
-        return jet_cli_shape_static_string(marker.args[0])
+        return jet_cli_shape_static_string(tables, marker.args[0])
     }
     loop index in 0..<marker.arg_labels.len() {
         if marker.arg_labels[index] == .Val(written) {
             if written.name == wanted {
                 if index >= marker.args.len() -> return None
-                return jet_cli_shape_static_string(marker.args[index])
+                return jet_cli_shape_static_string(tables, marker.args[index])
             }
         }
     }
     None
 }
 
-// `shape_field_names` over `ShapeFieldNames::from_source`.
-jet_cli_shape_field_names: fn(structure: StructDef, field: Field) -> JetCLIShapeNames Never! {
+// `shape_field_names` over `ShapeFieldNames::from_source`; the markers'
+// arguments are nodes of `tables`.
+jet_cli_shape_field_names: fn(tables: ASTTables, structure: StructDef, field: Field) -> JetCLIShapeNames Never! {
     rename: jet_cli_shape_marker(field.serde_markers, "Rename")
     shared := String?{None}
-    if rename == .Val(marker) -> shared = jet_cli_shape_marker_string(marker, None)
+    if rename == .Val(marker) -> shared = jet_cli_shape_marker_string(tables, marker, None)
     text: shared ?? sema_checked_wire_case(sema_checked_rename_case(structure.serde_markers), field.name)
     names := JetCLIShapeNames{text: text, json: None, cbor: None, csv: None, toml: None, yaml: None, xml: None, args: text.replace("_", "-"), env: jet_cli_shape_env_name(text), db: None, layout: None}
     if rename == .Val(marker) {
-        names.json = jet_cli_shape_marker_string(marker, Val("json"))
-        names.cbor = jet_cli_shape_marker_string(marker, Val("cbor"))
-        names.csv = jet_cli_shape_marker_string(marker, Val("csv"))
-        names.toml = jet_cli_shape_marker_string(marker, Val("toml"))
-        names.yaml = jet_cli_shape_marker_string(marker, Val("yaml"))
-        names.xml = jet_cli_shape_marker_string(marker, Val("xml"))
-        if jet_cli_shape_marker_string(marker, Val("args")) == .Val(args) -> names.args = args
-        if jet_cli_shape_marker_string(marker, Val("env")) == .Val(env) -> names.env = env
-        names.db = jet_cli_shape_marker_string(marker, Val("db"))
-        names.layout = jet_cli_shape_marker_string(marker, Val("layout"))
+        names.json = jet_cli_shape_marker_string(tables, marker, Val("json"))
+        names.cbor = jet_cli_shape_marker_string(tables, marker, Val("cbor"))
+        names.csv = jet_cli_shape_marker_string(tables, marker, Val("csv"))
+        names.toml = jet_cli_shape_marker_string(tables, marker, Val("toml"))
+        names.yaml = jet_cli_shape_marker_string(tables, marker, Val("yaml"))
+        names.xml = jet_cli_shape_marker_string(tables, marker, Val("xml"))
+        if jet_cli_shape_marker_string(tables, marker, Val("args")) == .Val(args) {
+            names.args = args
+        }
+        if jet_cli_shape_marker_string(tables, marker, Val("env")) == .Val(env) -> names.env = env
+        names.db = jet_cli_shape_marker_string(tables, marker, Val("db"))
+        names.layout = jet_cli_shape_marker_string(tables, marker, Val("layout"))
     }
     if sema_registration_cli_arg_text(field.serde_markers, "env") == .Val(env) -> names.env = env
     names
@@ -264,14 +269,14 @@ jet_cli_shape_bad_slot: fn(names: JetCLIShapeNames) -> String? Never! {
 
 // `shape_fact_from_struct`, with the checks of `ShapeFact::new` and
 // `with_layout` a declared record can fail.
-jet_cli_shape_fact: fn(source: String, structure: StructDef) -> JetCLIShapeBuild Never! {
+jet_cli_shape_fact: fn(tables: ASTTables, source: String, structure: StructDef) -> JetCLIShapeBuild Never! {
     fields := [JetCLIShapeField]{}
     loop (order, field) in structure.fields {
         ty: jet_cli_shape_type(source, field.ty)
         default: if field.default_ct == .Val(value) -> jet_cli_shape_default(value) else -> None
         short: sema_registration_cli_arg_text(field.serde_markers, "short")
         skip: field.computed != None || sema_serde_items_skips(field)
-        fields.push(JetCLIShapeField{name: field.name, ty: ty, order: order, names: jet_cli_shape_field_names(structure, field), encoding: jet_cli_shape_encoding(ty), default: default, skip: skip, short: short})
+        fields.push(JetCLIShapeField{name: field.name, ty: ty, order: order, names: jet_cli_shape_field_names(tables, structure, field), encoding: jet_cli_shape_encoding(ty), default: default, skip: skip, short: short})
     }
     seen := [String]{}
     loop field in fields {
@@ -469,7 +474,7 @@ jet_cli_inspect_shapes: fn(modules: [JetDriverDocModule], json: Bool, color: Boo
         source: checked.path
         loop item in checked.items {
             if item == .Struct(structure) {
-                if jet_cli_shape_fact(source, structure) == {
+                if jet_cli_shape_fact(checked.tables, source, structure) == {
                     .Fact(fact) -> { facts.push(fact) }
                     .Invalid(error) -> {
                         what: "could not project shape `{structure.name}` from `{source}`: {error}"

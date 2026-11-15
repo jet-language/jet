@@ -4,7 +4,7 @@
 // callback.
 use {
     debug_snapshot_math: core.math
-    jet_foundation.[sha256_hex, Record, Variant]
+    jet_foundation.[ast_expr, sha256_hex, Record, Variant]
 }
 
 // Rust ValueSnapshot: one value captured at a real paused source statement.
@@ -125,9 +125,9 @@ evaluate_snapshot: fn(snapshot: DebugSnapshot, expression: String) -> DebugEvalu
     trimmed: expression.trim()
     refused: "only bounded read-only Jet local paths can be evaluated"
     parsed: debug_parse_expression(trimmed) ?? return Err(debug_evaluation_error(refused))
-    if !debug_is_place(parsed) -> return Err(debug_evaluation_error(refused))
+    if !debug_is_place(parsed.tables, parsed.root) -> return Err(debug_evaluation_error(refused))
     root: if {
-        parsed == .Ident(name, _, _) -> name
+        ast_expr(parsed.tables, parsed.root) == .Ident(name, _, _) -> name
         else -> {
             return Err(debug_evaluation_error("nested debugger evaluation is unavailable until the paused backend publishes child facts"))
         }

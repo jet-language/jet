@@ -4,8 +4,8 @@
 // as written; no user code runs and no source text is searched.
 use {
     jet_driver.[JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK]
-    jet_foundation.[ASTTables, AppRouteRoot, CallArg, Expr, ExprNode, Field, Func, Item, Marker, Span, StructDef, Type, UnOp, WebPartitionMarker]
-    jet_foundation.[app_entry_run_fn, app_route_file_address, ast_expr, ast_visit_body, diagnostic_column_at, diagnostic_line_at, failure_contract_of_function, owned_trait_codec_marker, sha256_bytes, sha256_hex, type_name]
+    jet_foundation.[ASTTables, AppRouteRoot, CallArg, ExprNode, Field, Func, Item, Marker, Span, StructDef, Type, UnOp, WebPartitionMarker]
+    jet_foundation.[app_entry_run_fn, app_route_file_address, ast_expr, ast_stmt, ast_visit_body, diagnostic_column_at, diagnostic_line_at, failure_contract_of_function, owned_trait_codec_marker, sha256_bytes, sha256_hex, type_name]
     jet_sema.[sema_app_canonical_route_path, sema_app_route_parts, sema_app_route_static_parts, sema_app_routes_overlap]
     jet_semindex.[semindex_function_key, semindex_sorted_unique]
 }
@@ -203,13 +203,13 @@ JetCLIWebWalk: struct {
 
 // ---- builder argument readers ----
 
-jet_cli_web_const_text: fn(args: [CallArg], index: Int) -> String? {
+jet_cli_web_const_text: fn(tables: ASTTables, args: [CallArg], index: Int) -> String? {
     if index >= args.len() -> return None
-    jet_cli_web_literal(args[index].expr)
+    jet_cli_web_literal(tables, args[index].expr)
 }
 
-jet_cli_web_literal: fn(expression: Expr) -> String? {
-    if expression == .Str(parts, _, _) {
+jet_cli_web_literal: fn(tables: ASTTables, expression: ExprNode) -> String? {
+    if ast_expr(tables, expression) == .Str(parts, _, _) {
         text := ""
         loop part in parts {
             if part == .Lit(value) -> text = "{text}{value}" else -> return None
@@ -220,54 +220,57 @@ jet_cli_web_literal: fn(expression: Expr) -> String? {
 }
 
 // The text a constant default or literal argument spells on the wire.
-jet_cli_web_wire_text: fn(expression: Expr?) -> String? {
+jet_cli_web_wire_text: fn(tables: ASTTables, expression: ExprNode?) -> String? {
     value: expression ?? return None
-    if value == .Int(number, _, _, _, _) -> return Val("{number}")
-    if value == .Float(number, _, _, _, _) -> return Val("{number}")
-    if value == .Bool(flag, _, _) -> return Val(if flag -> "true" else -> "false")
-    if value == .Char(text, _, _) -> return Val(text)
-    jet_cli_web_literal(value)
+    view: ast_expr(tables, value)
+    if view == .Int(number, _, _, _, _) -> return Val("{number}")
+    if view == .Float(number, _, _, _, _) -> return Val("{number}")
+    if view == .Bool(flag, _, _) -> return Val(if flag -> "true" else -> "false")
+    if view == .Char(text, _, _) -> return Val(text)
+    jet_cli_web_literal(tables, value)
 }
 
-jet_cli_web_const_int: fn(expression: Expr) -> Int? {
-    if expression == .Int(number, _, _, _, _) -> return Val(number)
-    if expression == .Paren(inner, _, _) -> return jet_cli_web_const_int(inner)
-    if expression == .Present(inner, _, _) -> return jet_cli_web_const_int(inner)
-    if expression == .Unary(op, inner, _, _) && op == UnOp.Neg {
-        number: jet_cli_web_const_int(inner) ?? return None
+jet_cli_web_const_int: fn(tables: ASTTables, expression: ExprNode) -> Int? {
+    view: ast_expr(tables, expression)
+    if view == .Int(number, _, _, _, _) -> return Val(number)
+    if view == .Paren(inner, _, _) -> return jet_cli_web_const_int(tables, inner)
+    if view == .Present(inner, _, _) -> return jet_cli_web_const_int(tables, inner)
+    if view == .Unary(op, inner, _, _) && op == UnOp.Neg {
+        number: jet_cli_web_const_int(tables, inner) ?? return None
         return Val(0 - number)
     }
     None
 }
 
-jet_cli_web_handler: fn(args: [CallArg], index: Int) -> String? {
+jet_cli_web_handler: fn(tables: ASTTables, args: [CallArg], index: Int) -> String? {
     if index >= args.len() -> return None
-    if args[index].expr == .Ident(name, _, _) -> return Val(name)
-    if args[index].expr == .Field(_, member, _, _) -> return Val(member)
+    view: ast_expr(tables, args[index].expr)
+    if view == .Ident(name, _, _) -> return Val(name)
+    if view == .Field(_, member, _, _) -> return Val(member)
     None
 }
 
-jet_cli_web_labeled_text: fn(args: [CallArg], label: String) -> String? {
+jet_cli_web_labeled_text: fn(tables: ASTTables, args: [CallArg], label: String) -> String? {
     loop argument in args {
         if argument.label == .Val(given) && given.name == label {
-            return jet_cli_web_literal(argument.expr)
+            return jet_cli_web_literal(tables, argument.expr)
         }
     }
     None
 }
 
 // A labeled boolean, else the last unlabeled boolean argument.
-jet_cli_web_labeled_bool: fn(args: [CallArg], label: String) -> Bool {
+jet_cli_web_labeled_bool: fn(tables: ASTTables, args: [CallArg], label: String) -> Bool {
     loop argument in args {
         if argument.label == .Val(given) && given.name == label {
-            if argument.expr == .Bool(flag, _, _) -> return flag
+            if ast_expr(tables, argument.expr) == .Bool(flag, _, _) -> return flag
             return false
         }
     }
     loop index in 0..<args.len() {
         argument: args[args.len() - 1 - index]
         if argument.label != None -> next
-        if argument.expr == .Bool(flag, _, _) -> return flag
+        if ast_expr(tables, argument.expr) == .Bool(flag, _, _) -> return flag
         return false
     }
     false
@@ -405,6 +408,25 @@ jet_cli_web_function: fn(functions: [Func], name: String) -> Func? {
     None
 }
 
+// A user function with the AST tables of the module that declares it.
+JetCLIWebFunction: struct {
+    tables: ASTTables
+    function: Func
+}
+
+// The user function `name`, found in jet_cli_web_user_functions order.
+jet_cli_web_module_function: fn(modules: [JetDriverDocModule], name: String) -> JetCLIWebFunction? {
+    loop doc_module in modules {
+        if doc_module.alias != "" -> next
+        declared := [Func]{}
+        jet_cli_web_collect_functions(doc_module.items, declared)
+        if jet_cli_web_function(declared, name) == .Val(function) {
+            return Val(JetCLIWebFunction{tables: doc_module.tables, function: function})
+        }
+    }
+    None
+}
+
 jet_cli_web_find_struct: fn(items: [Item], name: String) -> StructDef? {
     loop item in items {
         if item == {
@@ -422,10 +444,18 @@ jet_cli_web_find_struct: fn(items: [Item], name: String) -> StructDef? {
     None
 }
 
-jet_cli_web_struct: fn(modules: [JetDriverDocModule], name: String) -> StructDef? {
+// A user struct with the AST tables of the module that declares it.
+JetCLIWebRecord: struct {
+    tables: ASTTables
+    definition: StructDef
+}
+
+jet_cli_web_struct: fn(modules: [JetDriverDocModule], name: String) -> JetCLIWebRecord? {
     loop doc_module in modules {
         if doc_module.alias != "" -> next
-        if jet_cli_web_find_struct(doc_module.items, name) == .Val(found) -> return Val(found)
+        if jet_cli_web_find_struct(doc_module.items, name) == .Val(found) {
+            return Val(JetCLIWebRecord{tables: doc_module.tables, definition: found})
+        }
     }
     None
 }
@@ -552,29 +582,31 @@ jet_cli_web_function_effects: fn(modules: [JetDriverDocModule], entry_identity: 
 
 // ---- the builder walk ----
 
-jet_cli_web_is_app_receiver: fn(expression: Expr) -> Bool {
-    if expression == .Ident(name, _, _) -> return name == "web" || name == "core.web"
-    if expression == .Field(base, member, _, _) && member == "web" {
-        if base == .Ident(name, _, _) -> return name == "core"
+jet_cli_web_is_app_receiver: fn(tables: ASTTables, expression: ExprNode) -> Bool {
+    view: ast_expr(tables, expression)
+    if view == .Ident(name, _, _) -> return name == "web" || name == "core.web"
+    if view == .Field(base, member, _, _) && member == "web" {
+        if ast_expr(tables, base) == .Ident(name, _, _) -> return name == "core"
     }
     false
 }
 
 // Whether `expression` is the App: a `web.app()` chain or a `run` binding
 // that holds one.
-jet_cli_web_on_app: fn(expression: Expr, app_names: [String]) -> Bool {
-    if expression == .MethodCall(receiver, method, _, _, _, args, _) {
-        if method == "app" && args.len() == 0 && jet_cli_web_is_app_receiver(receiver) {
+jet_cli_web_on_app: fn(tables: ASTTables, expression: ExprNode, app_names: [String]) -> Bool {
+    view: ast_expr(tables, expression)
+    if view == .MethodCall(receiver, method, _, _, _, args, _) {
+        if method == "app" && args.len() == 0 && jet_cli_web_is_app_receiver(tables, receiver) {
             return true
         }
-        return jet_cli_web_on_app(receiver, app_names)
+        return jet_cli_web_on_app(tables, receiver, app_names)
     }
-    if expression == .Call(call, _) {
+    if view == .Call(call, _) {
         return (call.name == "app" || call.name == "web.app" || call.name == "core.web.app") && call.args.len() == 0
     }
-    if expression == .Ident(name, _, _) -> return app_names.contains(name)
-    if expression == .Copy(inner, _, _) -> return jet_cli_web_on_app(inner, app_names)
-    if expression == .Paren(inner, _, _) -> return jet_cli_web_on_app(inner, app_names)
+    if view == .Ident(name, _, _) -> return app_names.contains(name)
+    if view == .Copy(inner, _, _) -> return jet_cli_web_on_app(tables, inner, app_names)
+    if view == .Paren(inner, _, _) -> return jet_cli_web_on_app(tables, inner, app_names)
     false
 }
 
@@ -598,9 +630,9 @@ jet_cli_web_trim_slashes: fn(text: String) -> String {
 // `mount(value)` and `mount(prefix, value)` mount a struct's marked methods;
 // `mount(prefix, handler, ...)` mounts a handler function. The struct's name
 // when the value spells it, else "".
-jet_cli_web_struct_mount: fn(args: [CallArg], functions: [Func]) -> String? {
+jet_cli_web_struct_mount: fn(tables: ASTTables, args: [CallArg], functions: [Func]) -> String? {
     if args.len() == 0 || args.len() > 2 -> return None
-    value: args[args.len() - 1].expr
+    value: ast_expr(tables, args[args.len() - 1].expr)
     if value == .StructLit(type_name, _, _, _, _, _, _, _) -> return Val(type_name)
     // `Orders{}` parses as a literal headed by its type.
     if value == .TypedLit(head, _, _, _) {
@@ -617,27 +649,27 @@ jet_cli_web_row: fn(verb: String, address: String, target: String, form: String,
     JetCLIWebRow{verb: verb, address: address, target: target, form: form, file: "", span: span}
 }
 
-jet_cli_web_walk: fn(expression: Expr, walk: &JetCLIWebWalk, functions: [Func]) {
-    if expression == {
+jet_cli_web_walk: fn(tables: ASTTables, expression: ExprNode, walk: &JetCLIWebWalk, functions: [Func]) {
+    if ast_expr(tables, expression) == {
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
-            if method == "app" && args.len() == 0 && jet_cli_web_is_app_receiver(receiver) {
+            if method == "app" && args.len() == 0 && jet_cli_web_is_app_receiver(tables, receiver) {
                 walk.found_app = true
                 return
             }
-            on_app: jet_cli_web_on_app(receiver, walk.app_names)
-            jet_cli_web_walk(receiver, walk, functions)
-            jet_cli_web_apply(method, args, method_span, on_app, walk, functions)
+            on_app: jet_cli_web_on_app(tables, receiver, walk.app_names)
+            jet_cli_web_walk(tables, receiver, walk, functions)
+            jet_cli_web_apply(tables, method, args, method_span, on_app, walk, functions)
         }
         .Copy(inner, _, _) | .Paren(inner, _, _) | .Ok(inner, _, _) -> {
-            jet_cli_web_walk(inner, walk, functions)
+            jet_cli_web_walk(tables, inner, walk, functions)
         }
-        .Place(inner, _, _, _) -> { jet_cli_web_walk(inner, walk, functions) }
+        .Place(inner, _, _, _) -> { jet_cli_web_walk(tables, inner, walk, functions) }
         .Call(call, _) -> {
             if (call.name == "app" || call.name == "web.app" || call.name == "core.web.app") && call.args.len() == 0 {
                 walk.found_app = true
                 return
             }
-            loop argument in call.args -> jet_cli_web_walk(argument.expr, walk, functions)
+            loop argument in call.args -> jet_cli_web_walk(tables, argument.expr, walk, functions)
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
@@ -645,10 +677,10 @@ jet_cli_web_walk: fn(expression: Expr, walk: &JetCLIWebWalk, functions: [Func]) 
 
 // `on_app` says the receiver is the App, so a name every type may have
 // (`get`, `post`, ...) registers a route.
-jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool, walk: &JetCLIWebWalk, functions: [Func]) {
+jet_cli_web_apply: fn(tables: ASTTables, method: String, args: [CallArg], span: Span, on_app: Bool, walk: &JetCLIWebWalk, functions: [Func]) {
     if method == "route" || method == "page" || method == "layout" {
-        path: sema_app_canonical_route_path(jet_cli_web_const_text(args, 0) ?? "/")
-        handler: jet_cli_web_handler(args, 1) ?? "<dynamic>"
+        path: sema_app_canonical_route_path(jet_cli_web_const_text(tables, args, 0) ?? "/")
+        handler: jet_cli_web_handler(tables, args, 1) ?? "<dynamic>"
         override_mode: walk.next_override
         walk.next_override = None
         render: walk.render.copy()
@@ -657,34 +689,34 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool,
         return
     }
     if on_app && jet_cli_web_verb(method) == .Val(verb) {
-        walk.graph.table.push(jet_cli_web_row(verb, jet_cli_web_const_text(args, 0) ?? "<dynamic>", jet_cli_web_handler(args, 1) ?? "<closure>", "handler", span))
+        walk.graph.table.push(jet_cli_web_row(verb, jet_cli_web_const_text(tables, args, 0) ?? "<dynamic>", jet_cli_web_handler(tables, args, 1) ?? "<closure>", "handler", span))
         return
     }
     if on_app && method == "custom" {
-        walk.graph.table.push(jet_cli_web_row(jet_cli_web_const_text(args, 0) ?? "<dynamic>", jet_cli_web_const_text(args, 1) ?? "<dynamic>", jet_cli_web_handler(args, 2) ?? "<closure>", "handler", span))
+        walk.graph.table.push(jet_cli_web_row(jet_cli_web_const_text(tables, args, 0) ?? "<dynamic>", jet_cli_web_const_text(tables, args, 1) ?? "<dynamic>", jet_cli_web_handler(tables, args, 2) ?? "<closure>", "handler", span))
         return
     }
     if on_app && method == "static_files" {
-        prefix: jet_cli_web_trim_slashes(jet_cli_web_const_text(args, 0) ?? "<dynamic>")
-        walk.graph.table.push(jet_cli_web_row("GET", "{prefix}/*", jet_cli_web_const_text(args, 1) ?? "<dynamic>", "static", span))
+        prefix: jet_cli_web_trim_slashes(jet_cli_web_const_text(tables, args, 0) ?? "<dynamic>")
+        walk.graph.table.push(jet_cli_web_row("GET", "{prefix}/*", jet_cli_web_const_text(tables, args, 1) ?? "<dynamic>", "static", span))
         return
     }
     if method == "action" || method == "form" || method == "data" || method == "loader" {
-        name := jet_cli_web_const_text(args, 0) ?? method
+        name := jet_cli_web_const_text(tables, args, 0) ?? method
         if method == "loader" {
-            name = jet_cli_web_handler(args, 0) ?? jet_cli_web_const_text(args, 0) ?? method
+            name = jet_cli_web_handler(tables, args, 0) ?? jet_cli_web_const_text(tables, args, 0) ?? method
         }
-        handler: jet_cli_web_handler(args, 1) ?? "<dynamic>"
+        handler: jet_cli_web_handler(tables, args, 1) ?? "<dynamic>"
         if method != "loader" {
             walk.graph.table.push(jet_cli_web_row("POST", "/actions/{name}", handler, "action", span))
         }
-        preload: method == "loader" && jet_cli_web_labeled_bool(args, "preload")
+        preload: method == "loader" && jet_cli_web_labeled_bool(tables, args, "preload")
         contract: jet_cli_web_contract(jet_cli_web_function(functions, handler))
         walk.graph.actions.push(JetCLIWebAction{name: name, handler: handler, kind: method, preload: preload, contract: contract, provenance: "builder", span: span})
         return
     }
     if method == "pending" || method == "not_found" || method == "error" {
-        handler: jet_cli_web_handler(args, 0) ?? "<dynamic>"
+        handler: jet_cli_web_handler(tables, args, 0) ?? "<dynamic>"
         last: walk.graph.routes.len() - 1
         if last < 0 {
             return
@@ -697,8 +729,8 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool,
         return
     }
     if method == "mount" {
-        if jet_cli_web_struct_mount(args, functions) == .Val(mounted) {
-            prefix: if args.len() == 2 -> jet_cli_web_const_text(args, 0) ?? "<dynamic>" else -> ""
+        if jet_cli_web_struct_mount(tables, args, functions) == .Val(mounted) {
+            prefix: if args.len() == 2 -> jet_cli_web_const_text(tables, args, 0) ?? "<dynamic>" else -> ""
             target: if mounted == "" -> "<value>" else -> mounted
             row := jet_cli_web_row("", jet_cli_web_trim_slashes(prefix), target, "marked", span)
             row.mounted = mounted
@@ -707,10 +739,10 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool,
         }
         effects := [String]{}
         security := [String]{}
-        if jet_cli_web_const_text(args, 2) == .Val(row) -> effects.push(row)
-        if jet_cli_web_const_text(args, 3) == .Val(rule) -> security.push(rule)
-        prefix: jet_cli_web_const_text(args, 0) ?? "/"
-        handler: jet_cli_web_handler(args, 1) ?? "<mount>"
+        if jet_cli_web_const_text(tables, args, 2) == .Val(row) -> effects.push(row)
+        if jet_cli_web_const_text(tables, args, 3) == .Val(rule) -> security.push(rule)
+        prefix: jet_cli_web_const_text(tables, args, 0) ?? "/"
+        handler: jet_cli_web_handler(tables, args, 1) ?? "<mount>"
         base: jet_cli_web_trim_slashes(prefix)
         walk.graph.table.push(jet_cli_web_row("GET", "{base}/*", handler, "mount", span))
         walk.graph.table.push(jet_cli_web_row("POST", "{base}/*", handler, "mount", span))
@@ -718,7 +750,7 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool,
         return
     }
     if method == "routes" {
-        root: jet_cli_web_labeled_text(args, "from") ?? jet_cli_web_const_text(args, 0) ?? ""
+        root: jet_cli_web_labeled_text(tables, args, "from") ?? jet_cli_web_const_text(tables, args, 0) ?? ""
         if root != "" -> walk.graph.routes_from.push(JetCLIWebRoot{root: root, span: span})
         return
     }
@@ -729,7 +761,7 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool,
         return
     }
     if method == "render" {
-        spelled: jet_cli_web_const_text(args, 0) ?? jet_cli_web_handler(args, 0) ?? return
+        spelled: jet_cli_web_const_text(tables, args, 0) ?? jet_cli_web_handler(tables, args, 0) ?? return
         mode: jet_cli_web_mode_parse(spelled) ?? return
         legacy: jet_cli_web_legacy_mode(mode)
         walk.render = legacy
@@ -745,24 +777,26 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool,
         return
     }
     if method == "cache" {
-        if jet_cli_web_const_text(args, 1) == .Val(policy) {
+        if jet_cli_web_const_text(tables, args, 1) == .Val(policy) {
             last: walk.graph.routes.len() - 1
-            if last >= 0 && jet_cli_web_const_text(args, 0) == .Val(target) && target == walk.graph.routes[last].path {
+            if last >= 0 && jet_cli_web_const_text(tables, args, 0) == .Val(target) && target == walk.graph.routes[last].path {
                 if jet_cli_web_cache_parse(policy) == .Val(cache) {
                     walk.graph.routes[last].cache = cache
                 }
             }
             walk.graph.cache.push(policy)
-        } else if jet_cli_web_const_text(args, 0) == .Val(policy) { walk.graph.cache.push(policy) }
+        } else if jet_cli_web_const_text(tables, args, 0) == .Val(policy) {
+            walk.graph.cache.push(policy)
+        }
         return
     }
     if on_app && method == "images" {
-        jet_cli_web_images_apply(args, walk.graph.image_settings)
+        jet_cli_web_images_apply(tables, args, walk.graph.image_settings)
         return
     }
     if method == "hydration_release" -> walk.graph.hydration = "release-keep-server"
     if method == "hydration_dev" -> walk.graph.hydration = "dev-overlay"
-    value: jet_cli_web_const_text(args, 0) ?? return
+    value: jet_cli_web_const_text(tables, args, 0) ?? return
     if method == "assets" && walk.graph.assets.len() == 0 {
         walk.graph.table.push(jet_cli_web_row("GET", "/assets/*", value, "static", span))
     }
@@ -777,37 +811,39 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool,
 }
 
 // The elements of a list literal, `[T]{...}` or `[...]`.
-jet_cli_web_list_elements: fn(expression: Expr) -> [Expr]? {
-    if expression == .ListLit(elements, _, _) -> return Val(elements)
-    if expression == .Paren(inner, _, _) -> return jet_cli_web_list_elements(inner)
-    if expression == .Present(inner, _, _) -> return jet_cli_web_list_elements(inner)
-    if expression == .TypedLit(_, body, _, _) && body == .Elements(elements) -> return Val(elements)
+jet_cli_web_list_elements: fn(tables: ASTTables, expression: ExprNode) -> [ExprNode]? {
+    view: ast_expr(tables, expression)
+    if view == .ListLit(elements, _, _) -> return Val(elements)
+    if view == .Paren(inner, _, _) -> return jet_cli_web_list_elements(tables, inner)
+    if view == .Present(inner, _, _) -> return jet_cli_web_list_elements(tables, inner)
+    if view == .TypedLit(_, body, _, _) && body == .Elements(elements) -> return Val(elements)
     None
 }
 
 // The variant an enum value spells: `.PNG` or `ImageFormat.PNG`.
-jet_cli_web_variant_name: fn(element: Expr) -> String? {
-    if element == .EnumLit(_, variant, _, args, _, _, _) && args.len() == 0 -> return Val(variant)
-    if element == .Field(_, member, _, _) -> return Val(member)
+jet_cli_web_variant_name: fn(tables: ASTTables, element: ExprNode) -> String? {
+    view: ast_expr(tables, element)
+    if view == .EnumLit(_, variant, _, args, _, _, _) && args.len() == 0 -> return Val(variant)
+    if view == .Field(_, member, _, _) -> return Val(member)
     None
 }
 
 // The variant names a literal list of enum values spells.
-jet_cli_web_variant_names: fn(expression: Expr) -> [String]? {
-    elements: jet_cli_web_list_elements(expression) ?? return None
+jet_cli_web_variant_names: fn(tables: ASTTables, expression: ExprNode) -> [String]? {
+    elements: jet_cli_web_list_elements(tables, expression) ?? return None
     names := [String]{}
     loop element in elements {
-        name: jet_cli_web_variant_name(element) ?? return None
+        name: jet_cli_web_variant_name(tables, element) ?? return None
         names.push(name)
     }
     Val(names)
 }
 
-jet_cli_web_int_list: fn(expression: Expr) -> [Int]? {
-    elements: jet_cli_web_list_elements(expression) ?? return None
+jet_cli_web_int_list: fn(tables: ASTTables, expression: ExprNode) -> [Int]? {
+    elements: jet_cli_web_list_elements(tables, expression) ?? return None
     numbers := [Int]{}
     loop element in elements {
-        number: jet_cli_web_const_int(element) ?? return None
+        number: jet_cli_web_const_int(tables, element) ?? return None
         numbers.push(number)
     }
     Val(numbers)
@@ -816,40 +852,49 @@ jet_cli_web_int_list: fn(expression: Expr) -> [Int]? {
 // `app.images(formats:, widths:, quality:, enabled:)` as written; a later
 // call overrides the settings it names, as it does when the app runs, and
 // `None` keeps a setting.
-jet_cli_web_images_apply: fn(args: [CallArg], settings: &JetCLIWebImageSettings) {
+jet_cli_web_images_apply: fn(tables: ASTTables, args: [CallArg], settings: &JetCLIWebImageSettings) {
     loop argument in args {
         name: if argument.label == .Val(given) -> "{given.name}" else -> ""
         if name == {
-            "formats" -> settings.formats = Val(jet_cli_web_variant_names(argument.expr) ?? next)
-            "widths" -> settings.widths = Val(jet_cli_web_int_list(argument.expr) ?? next)
-            "quality" -> settings.quality = Val(jet_cli_web_const_int(argument.expr) ?? next)
-            "enabled" -> settings.enabled = Val(jet_cli_web_const_bool(argument.expr) ?? next)
+            "formats" -> {
+                settings.formats = Val(jet_cli_web_variant_names(tables, argument.expr) ?? next)
+            }
+            "widths" -> settings.widths = Val(jet_cli_web_int_list(tables, argument.expr) ?? next)
+            "quality" -> {
+                settings.quality = Val(jet_cli_web_const_int(tables, argument.expr) ?? next)
+            }
+            "enabled" -> {
+                settings.enabled = Val(jet_cli_web_const_bool(tables, argument.expr) ?? next)
+            }
             else -> next
         }
     }
 }
 
-jet_cli_web_const_bool: fn(expression: Expr) -> Bool? {
-    if expression == .Bool(flag, _, _) -> return Val(flag)
-    if expression == .Paren(inner, _, _) -> return jet_cli_web_const_bool(inner)
-    if expression == .Present(inner, _, _) -> return jet_cli_web_const_bool(inner)
+jet_cli_web_const_bool: fn(tables: ASTTables, expression: ExprNode) -> Bool? {
+    view: ast_expr(tables, expression)
+    if view == .Bool(flag, _, _) -> return Val(flag)
+    if view == .Paren(inner, _, _) -> return jet_cli_web_const_bool(tables, inner)
+    if view == .Present(inner, _, _) -> return jet_cli_web_const_bool(tables, inner)
     None
 }
 
-jet_cli_web_walk_run: fn(run: Func, walk: &JetCLIWebWalk, functions: [Func]) {
+jet_cli_web_walk_run: fn(tables: ASTTables, run: Func, walk: &JetCLIWebWalk, functions: [Func]) {
     loop statement in run.body {
-        if statement == {
-            .Expr(expression) -> { jet_cli_web_walk(expression, walk, functions) }
+        if ast_stmt(tables, statement) == {
+            .Expr(expression) -> { jet_cli_web_walk(tables, expression, walk, functions) }
             .Return(value, _) -> {
-                if value == .Val(expression) -> jet_cli_web_walk(expression, walk, functions)
+                if value == .Val(expression) {
+                    jet_cli_web_walk(tables, expression, walk, functions)
+                }
             }
             .Val(binding) -> {
-                if jet_cli_web_on_app(binding.init, walk.app_names) {
+                if jet_cli_web_on_app(tables, binding.init, walk.app_names) {
                     walk.app_names.push(binding.name)
                 }
-                jet_cli_web_walk(binding.init, walk, functions)
+                jet_cli_web_walk(tables, binding.init, walk, functions)
             }
-            .Assign(_, _, _, value) -> jet_cli_web_walk(value, walk, functions)
+            .Assign(_, _, _, value) -> jet_cli_web_walk(tables, value, walk, functions)
             .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
         }
     }
@@ -880,16 +925,16 @@ jet_cli_web_expand_roots: fn(walk: &JetCLIWebWalk, roots: [AppRouteRoot]) {
     }
 }
 
-// A `#Server.<Verb>(path)` or `#Server.Custom(token, path)` route marker:
-// its verb and path, else None.
-jet_cli_web_marker_route: fn(marker: Marker) -> [String]? {
+// A `#Server.<Verb>(path)` or `#Server.Custom(token, path)` route marker of
+// a module with AST `tables`: its verb and path, else None.
+jet_cli_web_marker_route: fn(tables: ASTTables, marker: Marker) -> [String]? {
     if marker.negated -> return None
     parts: marker.name.split(".").to_list()
     if parts.len() < 2 -> return None
     verb: parts[parts.len() - 1].lower()
     texts := [String]{}
     loop argument in marker.args {
-        if argument == .Expr(value) -> texts.push(jet_cli_web_literal(value) ?? "<dynamic>")
+        if argument == .Expr(value) -> texts.push(jet_cli_web_literal(tables, value) ?? "<dynamic>")
     }
     if verb == "custom" {
         if texts.len() != 2 -> return None
@@ -915,7 +960,7 @@ jet_cli_web_expand_mounts: fn(modules: [JetDriverDocModule], table: &[JetCLIWebR
             found = true
             loop method in definition.methods {
                 loop marker in method.markers {
-                    route: jet_cli_web_marker_route(marker) ?? next
+                    route: jet_cli_web_marker_route(doc_module.tables, marker) ?? next
                     marked := jet_cli_web_row(route[0], "{row.address}{route[1]}", "{row.mounted}.{method.name}", "marked", marker.span)
                     marked.file = doc_module.path
                     expanded.push(marked)
@@ -954,53 +999,55 @@ jet_cli_web_named: fn(ty: Type) -> String? {
     None
 }
 
-jet_cli_web_route_field: fn(name: String, ty: Type, default: Expr?, required: Bool) -> JetCLIWebField {
-    JetCLIWebField{name: name, ty: type_name(ty), codec: jet_cli_web_route_codec(ty), required: required, default: jet_cli_web_wire_text(default)}
+jet_cli_web_route_field: fn(tables: ASTTables, name: String, ty: Type, default: ExprNode?, required: Bool) -> JetCLIWebField {
+    JetCLIWebField{name: name, ty: type_name(ty), codec: jet_cli_web_route_codec(ty), required: required, default: jet_cli_web_wire_text(tables, default)}
 }
 
 // The handler of a route: the named function, else the `page: fn` of the
 // convention file the route came from.
-jet_cli_web_route_function: fn(modules: [JetDriverDocModule], functions: [Func], route: JetCLIWebRoute) -> Func? {
-    if jet_cli_web_function(functions, route.handler) == .Val(found) -> return Val(found)
+jet_cli_web_route_function: fn(modules: [JetDriverDocModule], route: JetCLIWebRoute) -> JetCLIWebFunction? {
+    if jet_cli_web_module_function(modules, route.handler) == .Val(found) -> return Val(found)
     loop doc_module in modules {
         if doc_module.alias != "" || !doc_module.path.ends_with(route.provenance) -> next
         page := [Func]{}
         jet_cli_web_collect_functions(doc_module.items, page)
-        return jet_cli_web_function(page, "page")
+        function: jet_cli_web_function(page, "page") ?? return None
+        return Val(JetCLIWebFunction{tables: doc_module.tables, function: function})
     }
     None
 }
 
 // Path parameters by name, then one search binding: a struct record (its
 // fields under the JSON codec) or a `search`/`query` input.
-jet_cli_web_route_inputs: fn(modules: [JetDriverDocModule], function: Func, route: &JetCLIWebRoute) {
+jet_cli_web_route_inputs: fn(modules: [JetDriverDocModule], handler: JetCLIWebFunction, route: &JetCLIWebRoute) {
+    function: handler.function
     used := [Int]{}
     loop part in sema_app_route_parts(route.path) {
         if part.kind == 0 -> next
         loop (index, parameter) in function.params {
             if parameter.name != part.name || used.contains(index) -> next
             used.push(index)
-            route.path_params.push(jet_cli_web_route_field(parameter.name, parameter.ty, parameter.default, true))
+            route.path_params.push(jet_cli_web_route_field(handler.tables, parameter.name, parameter.ty, parameter.default, true))
             break
         }
     }
     loop (index, parameter) in function.params {
         if used.contains(index) || parameter.name == "data" -> next
-        record := StructDef?{None}
+        record := JetCLIWebRecord?{None}
         if jet_cli_web_named(parameter.ty) == .Val(name) {
             record = jet_cli_web_struct(modules, name)
         }
         if record == None && parameter.name != "search" && parameter.name != "query" -> next
-        if record == .Val(definition) {
+        if record == .Val(found) {
             fields := [JetCLIWebField]{}
-            loop field in definition.fields {
+            loop field in found.definition.fields {
                 if field.computed != None -> next
-                fields.push(jet_cli_web_route_field(field.name, field.ty, field.default, !jet_cli_web_is_option(field.ty) && field.default == None))
+                fields.push(jet_cli_web_route_field(found.tables, field.name, field.ty, field.default, !jet_cli_web_is_option(field.ty) && field.default == None))
             }
             route.search_params = fields
             route.search_codec = "json"
         } else {
-            route.search_params = [JetCLIWebField]{jet_cli_web_route_field(parameter.name, parameter.ty, parameter.default, !jet_cli_web_is_option(parameter.ty) && parameter.default == None)}
+            route.search_params = [JetCLIWebField]{jet_cli_web_route_field(handler.tables, parameter.name, parameter.ty, parameter.default, !jet_cli_web_is_option(parameter.ty) && parameter.default == None)}
         }
         return
     }
@@ -1024,8 +1071,8 @@ jet_cli_web_route_contracts: fn(modules: [JetDriverDocModule], functions: [Func]
             }
             graph.routes[index].loader = Val(JetCLIWebLoader{handler: action.handler, data_type: data_type, dependency: if action.name == "" -> action.handler else -> action.name, preload: action.preload, cache_identity: graph.routes[index].route_identity})
         }
-        if jet_cli_web_route_function(modules, functions, graph.routes[index]) == .Val(function) {
-            jet_cli_web_route_inputs(modules, function, graph.routes[index])
+        if jet_cli_web_route_function(modules, graph.routes[index]) == .Val(route_handler) {
+            jet_cli_web_route_inputs(modules, route_handler, graph.routes[index])
         }
     }
 }
@@ -1146,15 +1193,18 @@ jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: Stri
 
 // ---- queries, stores and forms over every user function ----
 
-jet_cli_web_is_namespace: fn(expression: Expr, member: String) -> Bool {
-    if expression == .Ident(name, _, _) {
+jet_cli_web_is_namespace: fn(tables: ASTTables, expression: ExprNode, member: String) -> Bool {
+    view: ast_expr(tables, expression)
+    if view == .Ident(name, _, _) {
         return name == member || name == ("web.{member}") || name == ("core.web.{member}")
     }
-    if expression == .Field(base, field, _, _) && field == member {
-        if base == .Ident(name, _, _) -> return name == "web" || name == "core.web"
+    if view == .Field(base, field, _, _) && field == member {
+        if ast_expr(tables, base) == .Ident(name, _, _) {
+            return name == "web" || name == "core.web"
+        }
         return false
     }
-    if expression == .Paren(inner, _, _) -> return jet_cli_web_is_namespace(inner, member)
+    if view == .Paren(inner, _, _) -> return jet_cli_web_is_namespace(tables, inner, member)
     false
 }
 
@@ -1164,8 +1214,9 @@ JetCLIWebNamespaceCall: struct {
     args: [CallArg]
 }
 
-jet_cli_web_namespace_call: fn(expression: Expr, member: String) -> JetCLIWebNamespaceCall? {
-    if expression == .Call(call, _) {
+jet_cli_web_namespace_call: fn(tables: ASTTables, expression: ExprNode, member: String) -> JetCLIWebNamespaceCall? {
+    view: ast_expr(tables, expression)
+    if view == .Call(call, _) {
         name: call.name
         if member == "query" {
             if name == "query.load" || name == "web.query.load" || name == "core.web.query.load" {
@@ -1184,7 +1235,7 @@ jet_cli_web_namespace_call: fn(expression: Expr, member: String) -> JetCLIWebNam
         }
         return None
     }
-    if expression == .MethodCall(receiver, method, _, _, _, args, _) && jet_cli_web_is_namespace(receiver, member) {
+    if view == .MethodCall(receiver, method, _, _, _, args, _) && jet_cli_web_is_namespace(tables, receiver, member) {
         if member == "query" {
             if method == "load" || method == "watch" {
                 return Val(JetCLIWebNamespaceCall{kind: method, args: args})
@@ -1199,13 +1250,13 @@ jet_cli_web_namespace_call: fn(expression: Expr, member: String) -> JetCLIWebNam
     None
 }
 
-jet_cli_web_form_model: fn(expression: Expr) -> String? {
-    if expression == {
+jet_cli_web_form_model: fn(tables: ASTTables, expression: ExprNode) -> String? {
+    if ast_expr(tables, expression) == {
         .Ident(name, _, _) -> Val(name)
-        .Paren(inner, _, _) -> jet_cli_web_form_model(inner)
-        .OrFallback(inner, _, _, _, _) -> jet_cli_web_form_model(inner)
-        .MethodCall(_, method, _, _, _, args, _) -> if method == "input" -> jet_cli_web_const_text(args, 0) else -> None
-        .Call(call, _) -> if call.name == "input" || call.name.ends_with(".input") -> jet_cli_web_const_text(call.args, 0) else -> None
+        .Paren(inner, _, _) -> jet_cli_web_form_model(tables, inner)
+        .OrFallback(inner, _, _, _, _) -> jet_cli_web_form_model(tables, inner)
+        .MethodCall(_, method, _, _, _, args, _) -> if method == "input" -> jet_cli_web_const_text(tables, args, 0) else -> None
+        .Call(call, _) -> if call.name == "input" || call.name.ends_with(".input") -> jet_cli_web_const_text(tables, call.args, 0) else -> None
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
@@ -1219,7 +1270,8 @@ jet_cli_web_form_label: fn(name: String) -> String {
     words.join(" ")
 }
 
-jet_cli_web_form: fn(modules: [JetDriverDocModule], functions: [Func], call_args: [CallArg], source: String) -> JetCLIWebForm? {
+// A `form(model, action)` call read over the AST `tables` of its module.
+jet_cli_web_form: fn(tables: ASTTables, modules: [JetDriverDocModule], functions: [Func], call_args: [CallArg], source: String) -> JetCLIWebForm? {
     if call_args.len() != 2 -> return None
     action_index := 1
     loop (index, argument) in call_args {
@@ -1228,12 +1280,12 @@ jet_cli_web_form: fn(modules: [JetDriverDocModule], functions: [Func], call_args
             break
         }
     }
-    model: jet_cli_web_form_model(call_args[if action_index == 0 -> 1 else -> 0].expr) ?? return None
-    action: jet_cli_web_const_text(call_args, action_index) ?? jet_cli_web_handler(call_args, action_index) ?? return None
+    model: jet_cli_web_form_model(tables, call_args[if action_index == 0 -> 1 else -> 0].expr) ?? return None
+    action: jet_cli_web_const_text(tables, call_args, action_index) ?? jet_cli_web_handler(tables, call_args, action_index) ?? return None
     if model == "" || action == "" -> return None
     record: jet_cli_web_struct(modules, model) ?? return None
     fields := [JetCLIWebFormField]{}
-    loop field in record.fields {
+    loop field in record.definition.fields {
         if field.computed != None -> next
         base: if field.ty == .Option(inner) -> inner else -> field.ty
         ty := type_name(base)
@@ -1254,19 +1306,19 @@ jet_cli_web_form: fn(modules: [JetDriverDocModule], functions: [Func], call_args
             .String -> ty = "String"
             .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
         }
-        fields.push(JetCLIWebFormField{name: field.name, ty: ty, required: !jet_cli_web_is_option(field.ty) && field.default == None, default: jet_cli_web_wire_text(field.default), label: jet_cli_web_form_label(field.name), control: control})
+        fields.push(JetCLIWebFormField{name: field.name, ty: ty, required: !jet_cli_web_is_option(field.ty) && field.default == None, default: jet_cli_web_wire_text(record.tables, field.default), label: jet_cli_web_form_label(field.name), control: control})
     }
     Val(JetCLIWebForm{model: model, action: action, contract: jet_cli_web_contract(jet_cli_web_function(functions, action)), fields: fields, provenance: source})
 }
 
-jet_cli_web_query: fn(expression: Expr, source: String) -> JetCLIWebQuery? {
-    found: jet_cli_web_namespace_call(expression, "query") ?? return None
+jet_cli_web_query: fn(tables: ASTTables, expression: ExprNode, source: String) -> JetCLIWebQuery? {
+    found: jet_cli_web_namespace_call(tables, expression, "query") ?? return None
     key := ""
     footprint := ""
     if found.kind == "load" {
-        key = jet_cli_web_const_text(found.args, 0) ?? ""
-        footprint = jet_cli_web_const_text(found.args, 1) ?? ""
-    } else if jet_cli_web_const_text(found.args, 0) == .Val(named) {
+        key = jet_cli_web_const_text(tables, found.args, 0) ?? ""
+        footprint = jet_cli_web_const_text(tables, found.args, 1) ?? ""
+    } else if jet_cli_web_const_text(tables, found.args, 0) == .Val(named) {
         key = named
         footprint = "ext:{named}"
     }
@@ -1274,14 +1326,14 @@ jet_cli_web_query: fn(expression: Expr, source: String) -> JetCLIWebQuery? {
     Val(JetCLIWebQuery{key: key, footprint: footprint, source: source, kind: found.kind})
 }
 
-jet_cli_web_store: fn(expression: Expr, source: String) -> JetCLIWebStore? {
-    found: jet_cli_web_namespace_call(expression, "store") ?? return None
-    name: jet_cli_web_const_text(found.args, 0) ?? return None
+jet_cli_web_store: fn(tables: ASTTables, expression: ExprNode, source: String) -> JetCLIWebStore? {
+    found: jet_cli_web_namespace_call(tables, expression, "store") ?? return None
+    name: jet_cli_web_const_text(tables, found.args, 0) ?? return None
     if name.trim() == "" -> return None
     limit := "default"
     if found.kind == "with_history" {
         limit = "<dynamic>"
-        if found.args.len() > 2 && jet_cli_web_const_int(found.args[2].expr) == .Val(count) {
+        if found.args.len() > 2 && jet_cli_web_const_int(tables, found.args[2].expr) == .Val(count) {
             limit = "{count}"
         }
     }
@@ -1299,22 +1351,22 @@ JetCLIWebUses: struct {
 
 jet_cli_web_note_use: fn(tables: ASTTables, uses: &JetCLIWebUses, node: ExprNode, modules: [JetDriverDocModule], functions: [Func], source: String) {
     expression: ast_expr(tables, node)
-    if jet_cli_web_query(expression, source) == .Val(fact) -> uses.queries.push(fact)
-    if jet_cli_web_store(expression, source) == .Val(fact) -> uses.stores.push(fact)
+    if jet_cli_web_query(tables, node, source) == .Val(fact) -> uses.queries.push(fact)
+    if jet_cli_web_store(tables, node, source) == .Val(fact) -> uses.stores.push(fact)
     if expression == .Call(call, _) && (call.name == "form" || call.name == "web.form" || call.name == "core.web.form") {
-        if jet_cli_web_form(modules, functions, call.args, source) == .Val(fact) {
+        if jet_cli_web_form(tables, modules, functions, call.args, source) == .Val(fact) {
             uses.forms.push(fact)
         }
     }
     // `web.image(…)` on the module alias is a method call; a written-out
     // qualified name is a plain call.
-    if expression == .MethodCall(receiver, method, method_span, _, _, args, _) && method == "image" && jet_cli_web_is_app_receiver(receiver) {
-        if jet_cli_web_const_text(args, 0) == .Val(path) {
+    if expression == .MethodCall(receiver, method, method_span, _, _, args, _) && method == "image" && jet_cli_web_is_app_receiver(tables, receiver) {
+        if jet_cli_web_const_text(tables, args, 0) == .Val(path) {
             uses.images.push(JetCLIWebImage{source: path, provenance: source, span: method_span})
         }
     }
     if expression == .Call(call, _) && (call.name == "web.image" || call.name == "core.web.image") {
-        if jet_cli_web_const_text(call.args, 0) == .Val(path) {
+        if jet_cli_web_const_text(tables, call.args, 0) == .Val(path) {
             uses.images.push(JetCLIWebImage{source: path, provenance: source, span: call.name_span})
         }
     }
@@ -1387,13 +1439,15 @@ jet_cli_web_graph: fn(modules: [JetDriverDocModule], entry_identity: String) -> 
     entry: modules[entry_index]
     functions: jet_cli_web_user_functions(modules)
     walk := JetCLIWebWalk{graph: JetCLIWebGraph{entry: entry.path}}
-    if app_entry_run_fn(entry.items) == .Val(run) -> jet_cli_web_walk_run(run, walk, functions) else {
+    if app_entry_run_fn(entry.items) == .Val(run) {
+        jet_cli_web_walk_run(entry.tables, run, walk, functions)
+    } else {
         // A `run: fn` written without its `App` return is an app entry when its
         // chain starts at `app()`.
         entry_functions := [Func]{}
         jet_cli_web_collect_functions(entry.items, entry_functions)
         run: jet_cli_web_function(entry_functions, "run") ?? return None
-        jet_cli_web_walk_run(run, walk, functions)
+        jet_cli_web_walk_run(entry.tables, run, walk, functions)
         if !walk.found_app -> return None
     }
     jet_cli_web_expand_roots(walk, entry.app_route_roots)
