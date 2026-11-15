@@ -2886,12 +2886,14 @@ ir_x64_access: fn(m: IRModule, f: IRFunction, at: Int) -> IRX64Access? Never! {
 // access's own displacement on top): `base + index * scale`, scale 1, 2, 4
 // or 8, or `base + disp` for a constant `disp` (`index` -1). `base` is -1
 // when the access takes its address as it is; `scaled`: a product made
-// `index * scale` (else the scale is 1 and only the sum is folded).
+// `index * scale` (else the scale is 1 and only the sum is folded);
+// `through`: the access reads the sum through a pointer Copy of it.
 IRX64Indexed: struct {
     base: Int
     index: Int
     scale: Int
     scaled: Bool
+    through: Bool
     disp: Int
 }
 
@@ -2899,42 +2901,57 @@ IRX64Indexed: struct {
 // a temporary that only the access reads and that the instruction right
 // before computes as a wrapping 64-bit Add of two General slots in
 // registers or homes, or of one and a constant that, with the access's
-// displacement, fits a displacement. When one of those is in turn a
-// temporary that only that Add reads and that the instruction before it
-// computes as a wrapping 64-bit Mul by a constant 1, 2, 4 or 8, the Add's
-// operands are the base and that product's other operand scaled. The
-// folded Add and Mul select nothing (ir_x64_folded); a Float value keeps
-// the plain address.
+// displacement, fits a displacement. The address may instead be a pointer
+// that the instruction right before copies from such a sum, which only that
+// Copy reads (a pointer step: core.mem `offset` adds words and makes the sum
+// a pointer). When one of the Add's operands is in turn a temporary that
+// only that Add reads and that the instruction before it computes as a
+// wrapping 64-bit Mul by a constant 1, 2, 4 or 8, the Add's operands are the
+// base and that product's other operand scaled. The folded Copy, Add and Mul
+// select nothing (ir_x64_folded); a Float value keeps the plain address.
 ir_x64_indexed: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> IRX64Indexed Never! {
-    none: IRX64Indexed{base: -1, index: -1, scale: 1, scaled: false, disp: 0}
+    none: IRX64Indexed{base: -1, index: -1, scale: 1, scaled: false, through: false, disp: 0}
     if at < 1 -> return none
     access: ir_x64_access(m, f, at) ?? return none
     value: access.value
-    if value < 0 || al.xmms[value] >= 0 -> return none
-    address: access.address
-    sum: at - 1
-    if value == address || !ir_x64_wrapping_word(m, f, sum, .Add) || f.dst[sum] != address || !ir_x64_passing(f, al, address, sum, at) -> return none
+    if value < 0 || al.xmms[value] >= 0 || value == access.address -> return none
+    step: at - 1
+    through: f.dst[step] == access.address && ir_x64_pointer_copy(m, f, step) && ir_x64_passing(f, al, access.address, step, at)
+    address: if through -> f.a[step] else -> access.address
+    sum: if through -> at - 2 else -> at - 1
+    reader: if through -> step else -> at
+    if sum < 0 || value == address || !ir_x64_wrapping_word(m, f, sum, .Add) || f.dst[sum] != address || !ir_x64_passing(f, al, address, sum, reader) -> return none
     left: f.a[sum]
     right: f.b[sum]
     if al.consts[left] != al.consts[right] {
         held: if al.consts[right] -> left else -> right
         disp: if al.consts[right] -> al.values[right] else -> al.values[left]
         if !ir_x64_index_part(m, f, al, held) || !x64_fits_i32(disp) || !x64_fits_i32(access.disp + disp) -> return none
-        return IRX64Indexed{base: held, index: -1, scale: 1, scaled: false, disp: disp}
+        return IRX64Indexed{base: held, index: -1, scale: 1, scaled: false, through: through, disp: disp}
     }
     if left == right || !ir_x64_index_part(m, f, al, left) || !ir_x64_index_part(m, f, al, right) -> return none
-    product: at - 2
+    product: sum - 1
     if product >= 0 && ir_x64_wrapping_word(m, f, product, .Mul) {
         scaled: f.dst[product]
         if (scaled == left || scaled == right) && ir_x64_passing(f, al, scaled, product, sum) {
             base: if scaled == left -> right else -> left
             by_right: ir_x64_scale(al, f.b[product])
-            if by_right > 0 && ir_x64_index_part(m, f, al, f.a[product]) -> return IRX64Indexed{base: base, index: f.a[product], scale: by_right, scaled: true, disp: 0}
+            if by_right > 0 && ir_x64_index_part(m, f, al, f.a[product]) -> return IRX64Indexed{base: base, index: f.a[product], scale: by_right, scaled: true, through: through, disp: 0}
             by_left: ir_x64_scale(al, f.a[product])
-            if by_left > 0 && ir_x64_index_part(m, f, al, f.b[product]) -> return IRX64Indexed{base: base, index: f.b[product], scale: by_left, scaled: true, disp: 0}
+            if by_left > 0 && ir_x64_index_part(m, f, al, f.b[product]) -> return IRX64Indexed{base: base, index: f.b[product], scale: by_left, scaled: true, through: through, disp: 0}
         }
     }
-    IRX64Indexed{base: left, index: right, scale: 1, scaled: false, disp: 0}
+    IRX64Indexed{base: left, index: right, scale: 1, scaled: false, through: through, disp: 0}
+}
+
+// Whether instruction `at` copies a 64-bit word into a Pointer temporary
+// with no drop: the same bits under a pointer's type, as a pointer step
+// (core.mem `offset`) makes its result.
+ir_x64_pointer_copy: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    pointer: f.dst[at]
+    if f.op[at] != .Copy || pointer < f.param_count || f.slot_kind[pointer] != .Temp || m.types[f.slot_type[pointer]].drop != "" || ir_x64_type(m, f, pointer).kind != .Pointer -> return false
+    word: ir_x64_type(m, f, f.a[at])
+    word.kind == .Word && ir_x64_bits(word) == 64
 }
 
 // Whether instruction `at` is a wrapping 64-bit `op` (Add or Mul) of words.
@@ -2964,11 +2981,26 @@ ir_x64_scale: fn(al: IRX64Allocation, slot: Int) -> Int Never! {
     0
 }
 
-// Whether instruction `at` is an Add or Mul folded into the access after it
-// (ir_x64_indexed), which selects it.
+// Whether instruction `at` is an Add, Mul or pointer Copy folded into the
+// access after it (ir_x64_indexed), which selects it.
 ir_x64_folded: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> Bool Never! {
-    if f.op[at] == .Add && at + 1 < f.op.len() -> return ir_x64_indexed(m, f, al, at + 1).base >= 0
-    if f.op[at] == .Mul && at + 2 < f.op.len() -> return ir_x64_indexed(m, f, al, at + 2).scaled
+    count: f.op.len()
+    if f.op[at] == .Copy && at + 1 < count -> return ir_x64_indexed(m, f, al, at + 1).through
+    if f.op[at] == .Add {
+        if at + 1 < count && ir_x64_indexed(m, f, al, at + 1).base >= 0 -> return true
+        if at + 2 >= count -> return false
+        folded: ir_x64_indexed(m, f, al, at + 2)
+        return folded.through && folded.base >= 0
+    }
+    if f.op[at] == .Mul {
+        if at + 2 < count {
+            folded: ir_x64_indexed(m, f, al, at + 2)
+            if folded.scaled && !folded.through -> return true
+        }
+        if at + 3 >= count -> return false
+        through: ir_x64_indexed(m, f, al, at + 3)
+        return through.through && through.scaled
+    }
     false
 }
 
@@ -4737,6 +4769,57 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: In
     folded: ir_x64_indexed(m, m.functions[0], al, 3)
     assert(folded.base == data && folded.index == i && folded.scale == 8 && folded.scaled)
     assert(ir_x64_folded(m, m.functions[0], al, 1) && ir_x64_folded(m, m.functions[0], al, 2))
+    code: ir_x64_compile_function(m, ir_x64_tables(m), 0).function.code
+    wanted := x64_code()
+    base: if al.regs[data] >= 0 -> al.regs[data] else -> X64_R10
+    index: if al.regs[i] >= 0 -> al.regs[i] else -> X64_R11
+    x64_load_indexed(wanted, ir_x64_home_reg(m, m.functions[0], al, value, X64_RAX), base, index, 8, 0, 8)
+    want: wanted.bytes
+    found := false
+    loop start in 0..<(code.len() - want.len() + 1) {
+        same := true
+        loop k in 0..<want.len() {
+            if code[start + k] != want[k] {
+                same = false
+                break
+            }
+        }
+        if same {
+            found = true
+            break
+        }
+    }
+    assert(found)
+}
+
+// load(data, i) reads the word at the pointer step data + i * 8, which a
+// Copy makes a pointer: the product, the sum and the Copy are one
+// scaled-index load, as the plain element address is.
+#Test("A pointer step folds into the Load that reads it") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    pointer_row: ir_pointer_row(m)
+    f := ir_function_new("load", "test:step.jet::load", "", "step.jet", 1)
+    data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
+    i: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "i"), 1)
+    f.result = word
+    eight: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    scaled: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    address: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    pointer: ir_slot(f, pointer_row, IRSlotKind.Temp, -1, 0)
+    value: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, eight, 8, -1, -1, 2)
+    _ := ir_emit(f, IROp.Mul, scaled, i, eight, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(f, IROp.Add, address, data, scaled, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(f, IROp.Copy, pointer, address, -1, -1, 2)
+    _ := ir_emit(f, IROp.Load, value, pointer, 0, -1, 2)
+    _ := ir_emit(f, IROp.Return, -1, value, -1, -1, 2)
+    m.functions.push(f)
+    al: ir_x64_allocate(m, m.functions[0])
+    assert(ir_x64_pointer_copy(m, m.functions[0], 3) && !ir_x64_pointer_copy(m, m.functions[0], 2))
+    folded: ir_x64_indexed(m, m.functions[0], al, 4)
+    assert(folded.base == data && folded.index == i && folded.scale == 8 && folded.scaled && folded.through)
+    assert(ir_x64_folded(m, m.functions[0], al, 1) && ir_x64_folded(m, m.functions[0], al, 2) && ir_x64_folded(m, m.functions[0], al, 3))
     code: ir_x64_compile_function(m, ir_x64_tables(m), 0).function.code
     wanted := x64_code()
     base: if al.regs[data] >= 0 -> al.regs[data] else -> X64_R10
