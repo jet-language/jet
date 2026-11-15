@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6844,
-    "rev": 102642,
+    "rev": 102646,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58486,6 +58486,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Main 2026-11-14: c4 (one file index per tests/guards run, handed to every #Test) needs a once-per-run test fixture. No such mechanism exists: no runner fixture, no once-per-run global, and Shared<T> is barred in tests. A fixture is new public test-runner API, so it goes to a ballot (D-TEST-FIXTURE1, being drafted by Speed-3). c4 waits on it, and Speed-3 moves to c6."
+        },
+        {
           "at": "2026-11-14",
           "by": "Main",
           "text": "Owner order 2026-11-14 ~18:20: goal closure order is G6, G9, G5, G3, G10, G7, G11, G13. One agent stays on precompiled Core until it shows a solid measured win over no precompiled Core, and one stays on #5479 plan steps 1-5 until they are done; only then do those two move to goal closure in that order. One agent each on G6 and G9, and one burning down lowest-hanging fruit."
@@ -58781,11 +58786,11 @@
         {
           "n": 5,
           "text": "Plan step 0, stop the bleeding: every train records its compiler build's CPU-s and per-phase seconds against the previous seed and fails past +10% (the train speed gate). The 2026-11-11 regression (sema.bodies 5.0 -> 52.1 s, comptime.precheck 0.3 -> 19.2 s between a0.0.43 and seed-t22) is bisected to its commits and fixed at the root, and the #6527 slide from a0_021 (53.6K lines/s, 54 CPU-s) is undone. Gate: at least 55K lines/s and at most 60 µs of CPU per line. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T12:18:42.013Z"
+          "evidence": "dev bb39234060: Throughput.jet --batch judges each batch build against the previous batch's build on CPU, traced CPU and each process's phase CPU, failing past +10%. jet test Tools/perf/compile-throughput/Throughput.jet: 11 passed; --batch gate-p132c to p134 PASS and p134 to p136 PASS (traced CPU -49.7%, par 3.6 to 4.1). The lander's batch build now runs it after every build.",
+          "at": "2026-11-15T01:27:29.751Z"
         },
         {
           "n": 6,
@@ -58840,7 +58845,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-14T22:59:43.714Z",
+      "updated": "2026-11-15T01:27:30.614Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -205626,24 +205631,6 @@
       "created": "2026-10-02T13:58:51.141Z"
     },
     {
-      "id": "b2son8gl",
-      "text": "Saving a function to a variable/const should require () on both sides so it’s clear that the lhs is a function not just a var",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-10-03T03:06:49.914Z"
-    },
-    {
-      "id": "b210cj2h",
-      "text": "Harvest logs from mine for Jet feedback in chat ballots and cards, see how we can improve the skill to make it look for more of the right things less of the wrong things, more extensive mining and elegant results",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-10-05T01:27:34.180Z"
-    },
-    {
       "id": "b0hjda05",
       "text": "Was ballot D-SPEED-PGO1 on #5479. The owner deleted the ballot on 2026-11-13: no decision now, but not ruled out. The ballot asked whether to build the record-reading feature now and use it for every compiler release, with a fresh record of a fixed, broad set of runs. Its full text is kept at $JET_SCRATCH_ROOT/lanes/Main/D-SPEED-PGO1.backup.json and in board history; revisit after the speed program steps on #5479 land.",
       "note": "",
@@ -205657,6 +205644,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T01:27:30.615Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T01:27:29.751Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c031o59x",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T01:26:35.695Z",
+      "by": "owner",
+      "action": "idea.delete",
+      "ref": "b2son8gl",
+      "note": ""
+    },
+    {
+      "at": "2026-11-15T01:26:19.984Z",
+      "by": "owner",
+      "action": "idea.delete",
+      "ref": "b210cj2h",
+      "note": ""
+    },
     {
       "at": "2026-11-15T01:23:17.832Z",
       "by": "Main",
