@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6953,
-    "rev": 105175,
+    "rev": 105184,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21546,20 +21546,21 @@
         {
           "n": 1,
           "text": "A documented stable location under the owned domain serves the Jet public signing key with its key id, algorithm and validity",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T18:38:01.748Z"
+          "evidence": "dev 6fc6f3862f added Docs/site/dist/keys/README.md (current at dev 7a671c88ff): lines 9-14 fix https://keys.jet-lang.dev/nix-index-v1.ed25519.pub, the one-line key-id:base64-public-key format, the ed25519 algorithm and the issued_unix/expires_unix validity window; lines 45-49 the rotation procedure. Proof: `git show 7a671c88ff:Docs/site/dist/keys/README.md` lines 9-14.",
+          "at": "2026-11-15T05:04:02.838Z"
         },
         {
           "n": 2,
           "text": "The served format is exactly what the existing client reads, proven by pointing a client at it and verifying a signature",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:59:26.900Z"
+          "evidence": "Merged into #2199 c7: c7 is the exact proof that the served format is what the client reads",
+          "at": "2026-11-15T05:04:03.861Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
@@ -21590,12 +21591,12 @@
         },
         {
           "n": 6,
-          "text": "After the external gates complete, the owner-controlled endpoint serves the exact client format at https://keys.jet-lang.dev/nix-index-v1.ed25519.pub; the client verifies against its existing local pin and never trusts a host-returned replacement.",
+          "text": "After the owner-controlled key ceremony, https://keys.jet-lang.dev/nix-index-v1.ed25519.pub serves the exact client format, and the client verifies against its existing local pin and never trusts a host-returned replacement. Proof: a committed receipt of fetching the URL and verifying a signed index against the local pin.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-11T02:23:30.616Z"
+          "at": "2026-11-15T05:03:59.848Z"
         },
         {
           "n": 7,
@@ -21608,30 +21609,31 @@
         },
         {
           "n": 8,
-          "text": "[#2200] The signed package index and content-addressed binary cache are served as static content under the owned domain. An official endpoint is never the default until it verifies. The keyless local tier is unchanged.",
+          "text": "The signed package index and the content-addressed binary cache are served as static content under the owned domain; an official endpoint is never the default until it verifies, and the keyless local tier is unchanged. Proof: `jet test Compiler --profile packages --filter PkgIntegrationTrustRoot/official_endpoint_not_default_until_verified` and a committed receipt of the served index verifying.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:01.285Z"
+          "at": "2026-11-15T05:04:00.775Z"
         },
         {
           "n": 9,
           "text": "[#2201] A published toolchain channel lists per-platform releases with digests. `jet self` resolves, verifies, installs beside the running binary and swaps. A corrupt or mismatched release is refused with a registered diagnostic. The keyless tier needs an explicit override.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:25:02.283Z"
+          "evidence": "Moved to #5950 c14: toolchain self-update belongs with installing Jet on #5950",
+          "at": "2026-11-15T05:04:04.828Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
-          "text": "[#1349] **[OWNER]** First release and LTS dates are scheduled (D-ADOPT-LTS1). Per-tier playbooks, a compliance bundle (SBOM, SLSA provenance, air-gap runbook) and case studies link to measured evidence.",
+          "text": "The first release and LTS dates are scheduled under D-ADOPT-LTS1=A and recorded in the release documentation. Proof: git grep finds the dates in Docs/spec (owner-gated: the dates are the owner's choice; see owner-gates.tsv).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:03.316Z"
+          "at": "2026-11-15T05:04:01.716Z"
         },
         {
           "n": 11,
@@ -21663,11 +21665,12 @@
         {
           "n": 24,
           "text": "`jet test Compiler --profile packages --filter ReleaseTrust` passes with Trust/Tests/ReleaseTrust.jet claims for scope match, scope-change miss, new-origin approval and noninteractive refusal.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:52:44.302Z"
+          "evidence": "Merged into #6941 c12: the same direct-source grant scope, scope change, new origin and noninteractive refusal claims",
+          "at": "2026-11-15T05:04:05.823Z",
+          "closure": "obsolete"
         },
         {
           "n": 25,
@@ -21697,7 +21700,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-08-25T19:59:25.500Z",
-      "updated": "2026-11-15T05:03:58.741Z",
+      "updated": "2026-11-15T05:04:05.823Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 1,
       "probe": null,
@@ -84359,6 +84362,11 @@
       "log": [
         {
           "at": "2026-11-15",
+          "by": "Main",
+          "text": "core.reactive over-notifies and glitches; this blocks c37 (found by GoalsB-5 while measuring reactive_observable, 2026-11-15). An autorun reading n, doubled(n) and plus_one(doubled) re-runs 3 times per n.set(5), and 3 times for n.set(1) when n is already 1 (no same-value suppression). In a diamond (left = a+1, right = a*10, sum = left+right) the effect sees the glitch value 13 before settling. Solid, Vue and Preact signals run once, with no glitch. Fix: a topological or height-ordered propagation, plus same-value suppression in core.reactive. Full notes: the GoalsB-5-16 SUB message."
+        },
+        {
+          "at": "2026-11-15",
           "by": "TowerKeeper-1",
           "text": "Cleaned: this card keeps the parity audit (c1, c2, c4, c6, c31), the one-runtime suite (c7) and the one-app and server-call proofs (c35, c36). Routes went to #6864, endpoints to #6865, browser tests to #6866, forms and tables to #6821 (#6821 c3, #6821 c4, #6821 c5)."
         },
@@ -84674,6 +84682,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:19:54.219Z"
+        },
+        {
+          "n": 39,
+          "text": "Examples/Apps/UI/AsyncCommand proves the same output on web once task groups run there (#5201 c7): jet test Compiler --profile golden --filter UI/AsyncCommand includes the web tier and passes. Depends on #5201 c7; O0/O1/O2 are covered by c38.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:04:07.947Z"
         }
       ],
       "refs": [],
@@ -84688,9 +84705,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T00:55:19.476Z",
-      "updated": "2026-11-15T03:19:54.219Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 38
+      "updated": "2026-11-15T05:04:09.364Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 39
     },
     {
       "id": "c00ii3d5",
@@ -215971,6 +215988,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:04:09.364Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vxf4u0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T05:04:07.947Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vxf4u0",
+      "note": "#39 Examples/Apps/UI/AsyncCommand proves the same output on web "
+    },
+    {
+      "at": "2026-11-15T05:04:05.823Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0nctuf1",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-15T05:04:04.828Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0nctuf1",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T05:04:03.861Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0nctuf1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T05:04:02.839Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0nctuf1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T05:04:01.716Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0nctuf1",
+      "note": "#10: strip debris; split into c10, c25 and c26; was: [#1349] **[OWNER]** First release and LTS dates are scheduled (D-ADOPT-LTS1). Per-tier playbooks, a compliance bundle (SBOM, SLSA provenance, air-gap runbook) and case studies link to measured evidenc"
+    },
+    {
+      "at": "2026-11-15T05:04:00.775Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0nctuf1",
+      "note": "#8: strip debris; proof; was: [#2200] The signed package index and content-addressed binary cache are served as static content under the owned domain. An official endpoint is never the default until it verifies. The keyless local "
+    },
+    {
+      "at": "2026-11-15T05:03:59.848Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0nctuf1",
+      "note": "#6: proof; was: After the external gates complete, the owner-controlled endpoint serves the exact client format at https://keys.jet-lang.dev/nix-index-v1.ed25519.pub; the client verifies against its existing local pi"
+    },
     {
       "at": "2026-11-15T05:03:58.741Z",
       "by": "TowerKeeper-1",
