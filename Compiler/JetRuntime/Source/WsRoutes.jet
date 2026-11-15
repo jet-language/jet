@@ -533,6 +533,26 @@ ws_hub_join: fn(conn: I64) {
     sync_mutex_unlock(root)
 }
 
+// jet_web_live_watch: joined `conn` receives `topic`'s latest event. Every
+// joined connection already receives each event published after it joined.
+// A connection that has not joined (a client connection) or an empty or
+// oversized topic receives nothing.
+#Export(c) jet_web_live_watch: fn(conn: I64, topic: I64) {
+    root: ws_hub_root
+    if (root == I64{0}) -> return
+    if (rt_text_len(topic) == I64{0} || rt_text_len(topic) > WS_HUB_MAX_TOPIC) -> return
+    sync_mutex_lock(root)
+    if (net_word(conn, WS_CONN_HUB) != I64{0}) {
+        topics: net_word(root, WS_HUB_TOPICS)
+        at := I64{0}
+        loop at < net_word(root, WS_HUB_TOPIC_COUNT) {
+            if jet_rt_string_eq(net_word(topics, at * I64{16}), topic) -> ws_hub_send(conn, net_word(topics, at * I64{16} + I64{8}))
+            at += I64{1}
+        }
+    }
+    sync_mutex_unlock(root)
+}
+
 ws_hub_leave: fn(conn: I64) {
     if (net_word(conn, WS_CONN_HUB) == I64{0}) -> return
     root: ws_hub_root
