@@ -1,11 +1,16 @@
 // Canonical SHA-256 for compiler-owned identity bytes.
 //
-// The implementation follows Foundation's SHA256 utility: input is borrowed,
-// full blocks are read in place, and only the final partial block is padded
-// with the standard big-endian bit length. Compression runs on `U32`
-// words with wrapping addition; identity helpers emit lowercase hexadecimal.
-// The round constants stay `Int` tables and are
-// widened to `U32` once per digest.
+// A text's digest (sha256_hex) is Core's (core.crypto sha256), which runs
+// on the host's SHA extensions where they exist. A byte window's
+// (sha256_bytes) is computed here, reading the borrowed window in place:
+// full blocks are read where they lie, and only the final partial block is
+// padded with the standard big-endian bit length. Compression runs on `U32`
+// words with wrapping addition; identity helpers emit lowercase
+// hexadecimal. The round constants stay `Int` tables and are widened to
+// `U32` once per digest.
+use {
+    hash_crypto: core.crypto
+}
 
 SHA256_LENGTH_MASK: 0xffffffffffffffff
 
@@ -195,7 +200,7 @@ sha256_hex_bytes: fn(bytes: [U8]) -> String Never! {
     String.from_bytes(digits) ?? panic("hex digits are ASCII")
 }
 
-sha256_hex: fn(value: String) -> String Never! {
-    bytes: value.bytes()
-    sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
-}
+// The lowercase hex SHA-256 of `value`'s UTF-8 bytes: Core's digest, which
+// runs on the host's SHA extensions where they exist. A text owns its bytes,
+// so nothing is copied for it.
+sha256_hex: fn(value: String) -> String Never! { hash_crypto.sha256(value).hex() }
