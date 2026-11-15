@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6920,
-    "rev": 104300,
+    "rev": 104306,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93537,8 +93537,8 @@
     {
       "id": "c06vkd04",
       "num": 6730,
-      "title": "jet debug: right locals, debug info for optimized builds, and the debugger contract on the self-hosted toolchain",
-      "body": "Release a0_041, jet debug Examples/Tooling/Debugging/Debug.jet: the first stop at Debug.jet:24 ('a: 5 <- here') prints 'locals:  a = 4262344   s = <unavailable>'. The local's stack slot is read before the binding runs, so uninitialized memory is shown as a Jet value. A local whose binding hasn't run must show as not yet bound (or be omitted), at every tier; the DWARF location ranges should start after the store. Also: the comments in Examples/Tooling/Debugging/Debug.jet and DebugNative.jet still talk about 'the generated Rust' and 'raw Rust file:line', which is stale since the native backend.",
+      "title": "jet debug's contract on the self-hosted toolchain: the DAP wire, honest session states, accepted revisions and one watch parser",
+      "body": "Destination: `jet debug` keeps a Jet-level contract on the self-hosted toolchain. `--break` and `--dap` drive one session. Attach, pause, restart and raw frames work over the production DAP wire, or are refused with E2236. Every end state is honest. Breakpoints and values refer to the accepted revision, and inspection never changes the guest. Watches parse with the compiler's parser. DAP has conditional breakpoints, logpoints and evaluate, and its speed is measured against lldb.\n\nThe tests/cases/debug/dap_cli_* rows in tests/known-failing.tsv belong to this card.\n\nRelated cards (2026-11-15 split): debug info and values #6918, record and replay #6919.",
       "kind": "bug",
       "track": "epoch",
       "epoch": "e5",
@@ -93552,6 +93552,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Split 2026-11-15. Debug info and values (c1, c2, c5, c6, c8, c9, c26, c27) went to #6918, and record and replay (c15-c19, c24) to #6919. This card keeps the DAP and session contract, which is where the dap_cli_* known-failing rows point."
+        },
         {
           "at": "2026-11-14",
           "by": "Main",
@@ -93720,20 +93725,22 @@
         {
           "n": 18,
           "text": "(was #2463 c4) Transactional fix source checks unchanged inputs, checked candidate bundle and checkpoint type/layout/authority before installation Proof: a tests/cases debug row on the native and DAP routes (precut audit 2026-11: unproven at 9c7ddf1359). (was #6386 c78)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:27:21.370Z"
+          "evidence": "Moved to #6919 c5: record and replay have their own card",
+          "at": "2026-11-15T04:09:58.758Z",
+          "closure": "obsolete"
         },
         {
           "n": 19,
           "text": "(was #2463 c5) Unsupported, stale, empty-history and invalid-watch cases have explicit source diagnostics, proven by tests/cases debug rows on the native and DAP routes. (was #6386 c79)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:27:24.473Z"
+          "evidence": "Moved to #6919 c6: record and replay have their own card",
+          "at": "2026-11-15T04:09:59.898Z",
+          "closure": "obsolete"
         },
         {
           "n": 20,
@@ -93837,7 +93844,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:15:33.693Z",
-      "updated": "2026-11-15T04:09:57.629Z",
+      "updated": "2026-11-15T04:10:11.647Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 30
     },
@@ -213466,6 +213473,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:10:11.647Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c06vkd04",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T04:10:04.586Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c06vkd04",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T04:10:02.754Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c06vkd04",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:10:01.782Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c06vkd04",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T04:09:59.898Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c06vkd04",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-15T04:09:58.758Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c06vkd04",
+      "note": "#18"
+    },
     {
       "at": "2026-11-15T04:09:57.629Z",
       "by": "TowerKeeper-1",
