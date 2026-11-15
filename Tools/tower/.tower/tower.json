@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6967,
-    "rev": 105700,
+    "nextNum": 6968,
+    "rev": 105725,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -91975,21 +91975,21 @@
         },
         {
           "n": 2,
-          "text": "The web bundles of hello, counter and todo are at or below their WebBundleCheck baseline (729,206 / 798,637 / 729,395 bytes total), measured by the gate with every file web.manifest.json names counted, and the gate passes on its unchanged byte budgets.",
+          "text": "The web bundles of hello, counter and todo are at or below their WebBundleCheck baseline (729,206 / 798,637 / 729,395 bytes total), measured by the gate with every file web.manifest.json names counted, and the gate passes on its unchanged byte budgets. Proof: `jet Tools/perf/WebBundleCheck.jet` passes on its unchanged budgets, with the root named in a committed size breakdown by section and runtime module.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T19:26:13.956Z"
+          "at": "2026-11-15T05:35:09.165Z"
         },
         {
           "n": 3,
-          "text": "The web tier keeps one meaning (I9): the same examples' goldens pass on web after the size fix.",
+          "text": "The web tier keeps one meaning (I9): the same examples' goldens pass on web after the size fix. Proof: `jet test Compiler --profile golden --filter web/` passes on the web tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T19:26:14.998Z"
+          "at": "2026-11-15T05:35:10.249Z"
         }
       ],
       "refs": [],
@@ -92000,8 +92000,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T19:26:02.798Z",
-      "updated": "2026-11-13T02:06:02.799Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:35:10.249Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
     {
@@ -92056,30 +92056,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A build's parallel width follows free cores while it runs, instead of being fixed by the load at start.",
+          "text": "A build's parallel width follows free cores while it runs, instead of being fixed by the load at start. Proof: `jet test Compiler --profile cases --filter cli/threads_follow_free_cores`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:26:34.705Z"
+          "at": "2026-11-15T05:35:11.289Z"
         },
         {
           "n": 2,
-          "text": "The hosted Jetpack engine build started beside 8 concurrent package runs finishes within 1.5x of its quiet-host wall time, measured on the batch machine and recorded with the commit.",
+          "text": "The hosted Jetpack engine build started beside 8 concurrent package runs finishes within 1.5x of its quiet-host wall time, measured on the batch machine and recorded with the commit. Proof: a committed batch-machine receipt, quiet and loaded.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:26:34.705Z"
+          "at": "2026-11-15T05:35:12.355Z"
         },
         {
           "n": 3,
-          "text": "The quiet-host self-build wall time does not regress (compared on the same machine and commit range as #6527).",
+          "text": "The quiet-host self-build wall time does not regress (compared on the same machine and commit range as #6527). Proof: the #6527 c1 self-build cell receipt for the same commit range.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:26:34.705Z"
+          "at": "2026-11-15T05:35:13.274Z"
         }
       ],
       "refs": [],
@@ -92090,8 +92090,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:26:34.705Z",
-      "updated": "2026-11-08T01:26:34.705Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:35:13.274Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0nsxbj2",
@@ -92125,39 +92125,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "An asm-parity cell under Tools/perf/asm-parity is the SHA-256 ceiling reference: SHA-NI where the CPU reports it, and the best scalar code otherwise.",
+          "text": "An asm-parity cell under Tools/perf/asm-parity is the SHA-256 ceiling reference: SHA-NI where the CPU reports it, and the best scalar code otherwise. Proof: `git ls-files Tools/perf/asm-parity/sha256` names the cell and its ref.S.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:26:36.572Z"
+          "at": "2026-11-15T05:35:14.185Z"
         },
         {
           "n": 2,
-          "text": "core.crypto SHA-256 at O1 and O2 meets that ceiling (Jet/ceiling at most 1.00 in cycles and bytes) on both paths, and beats every gauntlet peer.",
+          "text": "core.crypto SHA-256 at O1 and O2 meets that ceiling (Jet/ceiling at most 1.00 in cycles and bytes) on both paths, and beats every gauntlet peer. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate --cells sha256` and `node Tools/gauntlet/harness/run.mjs --entry sha256`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:26:36.572Z"
+          "at": "2026-11-15T05:35:15.087Z"
         },
         {
           "n": 3,
-          "text": "The digest is identical on every tier (O0, O1, O2 and web), held by the existing SHA-256 conformance vectors.",
+          "text": "The digest is identical on every tier (O0, O1, O2 and web), held by the existing SHA-256 conformance vectors. Proof: `jet test Compiler --profile golden --filter crypto/sha256` on O0, O1, O2 and web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:26:36.572Z"
+          "at": "2026-11-15T05:35:15.977Z"
         },
         {
           "n": 4,
-          "text": "Core crypto expert hashes (#3548): [#3870] SHA-512, BLAKE2b and Argon2id in Core/crypto/expert.jet run on U64 words, with no bigint spill and no per-block list allocation. Hash goldens are unchanged, with a perf receipt for password_hash. (was #3548 c13)",
+          "text": "Core crypto expert hashes (#3548): SHA-512, BLAKE2b and Argon2id in Core/crypto/expert.jet run on U64 words with no bigint spill and no per-block list allocation, with hash goldens unchanged and a perf receipt for password_hash. Proof: `jet test Compiler --profile golden --filter crypto/` and the committed password_hash receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:41:12.180Z"
+          "at": "2026-11-15T05:35:16.862Z"
         }
       ],
       "refs": [],
@@ -92168,8 +92168,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:26:36.572Z",
-      "updated": "2026-11-11T12:45:45.250Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:35:16.862Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 4
     },
     {
@@ -92264,30 +92264,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "One build function declares jet, the runtime pack, jetpack, the docs site and the release package as targets, so `jet build` builds them concurrently from one graph and the packages suite reuses that jetpack instead of building its own.",
+          "text": "One build function declares jet, the runtime pack, jetpack, the docs site and the release package as targets, so `jet build` builds them concurrently from one graph and the packages suite reuses that jetpack instead of building its own. Proof: `jet test Compiler --profile cases --filter compiler_build/declares_all_targets`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:30:57.119Z"
+          "at": "2026-11-15T05:35:17.742Z"
         },
         {
           "n": 2,
-          "text": "Every generated registry table (CoreEnumRows, CoreStructureRows and the rest) comes from `b.generate` over its source registry, so it cannot be stale, and the precommit generator checks for those tables are deleted.",
+          "text": "Every generated registry table (CoreEnumRows, CoreStructureRows and the rest) comes from `b.generate` over its source registry, so it cannot be stale, and the precommit generator checks for those tables are deleted. Proof: `jet test tests/guards --filter generated_tables_from_build` and no precommit generator check for those tables remains.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:30:57.119Z"
+          "at": "2026-11-15T05:35:18.664Z"
         },
         {
           "n": 3,
-          "text": "build.jet declares no C compiler, musl, ar or nm (#6693, #6687 c2). Every tool it still needs is declared with b.toolchain and b.probe, JET_PACK_MUSL_LIB and the other toolchain environment variables stay deleted, and a missing tool fails at once with a registered error.",
+          "text": "build.jet declares no C compiler, musl, ar or nm (#6693, #6687 c2). Every tool it still needs is declared with b.toolchain and b.probe, JET_PACK_MUSL_LIB and the other toolchain environment variables stay deleted, and a missing tool fails at once with a registered error. Proof: `git grep -n -w -E \"JET_PACK_MUSL_LIB|musl|ar|nm|cc\" -- Compiler/build.jet` prints nothing and `jet test Compiler --profile ui --filter build_missing_tool`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T17:55:25.795Z"
+          "at": "2026-11-15T05:35:19.615Z"
         },
         {
           "n": 4,
@@ -92309,12 +92309,12 @@
         },
         {
           "n": 6,
-          "text": "Build profiles give a fast `dev` profile for targeted testing and a `ship` profile for release stages.",
+          "text": "Build profiles give a fast `dev` profile for targeted testing and a `ship` profile for release stages. Proof: `jet test Compiler --profile cases --filter compiler_build/dev_and_ship_profiles`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:30:57.119Z"
+          "at": "2026-11-15T05:35:20.594Z"
         },
         {
           "n": 7,
@@ -92361,8 +92361,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:30:57.119Z",
-      "updated": "2026-11-13T02:20:30.986Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:35:20.595Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 10
     },
     {
@@ -92466,21 +92466,21 @@
         },
         {
           "n": 2,
-          "text": "The root cause is fixed in the compiler or in Jetpack's assembly, and the hosted engine build on a quiet batch host takes at most 30 s, measured and recorded with the commit.",
+          "text": "The root cause is fixed in the compiler or in Jetpack's assembly, and the hosted engine build on a quiet batch host takes at most 30 s, measured and recorded with the commit. Proof: a committed quiet-batch-host receipt of the hosted engine build.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:42:16.015Z"
+          "at": "2026-11-15T05:35:21.547Z"
         },
         {
           "n": 3,
-          "text": "The built engine is byte-for-byte the same program as before the fix, or every packages-suite engine claim still passes.",
+          "text": "The built engine is byte-for-byte the same program as before the fix, or every packages-suite engine claim still passes. Proof: `jet test Compiler --profile packages` passes every engine claim.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:42:16.015Z"
+          "at": "2026-11-15T05:35:22.541Z"
         }
       ],
       "refs": [],
@@ -92491,8 +92491,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:42:16.015Z",
-      "updated": "2026-11-08T02:43:04.359Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:35:22.541Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0slc5oo",
@@ -92521,30 +92521,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The wall time of the engine unit's compile and its serial claim run are measured on the batch host and recorded with the commit.",
+          "text": "The wall time of the engine unit's compile and its serial claim run are measured on the batch host and recorded with the commit. Proof: a committed batch-host receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:42:17.232Z"
+          "at": "2026-11-15T05:35:23.448Z"
         },
         {
           "n": 2,
-          "text": "Claims that share process state are isolated (each owns its state, or the shared state is per-claim), so the unit runs without --serial and every claim still passes.",
+          "text": "Claims that share process state are isolated (each owns its state, or the shared state is per-claim), so the unit runs without --serial and every claim still passes. Proof: `jet test Compiler --profile packages` passes with the engine unit run without the serial flag in Compiler/test.jet.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:42:17.232Z"
+          "at": "2026-11-15T05:35:24.336Z"
         },
         {
           "n": 3,
-          "text": "The engine unit's claims finish in under 1 minute wall.",
+          "text": "The engine unit's claims finish in under 1 minute wall. Proof: the engine-unit wall time in the packages suite receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T01:42:17.232Z"
+          "at": "2026-11-15T05:35:25.234Z"
         }
       ],
       "refs": [],
@@ -92555,8 +92555,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:42:17.232Z",
-      "updated": "2026-11-08T03:19:25.836Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:35:25.234Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0bnp1zw",
@@ -93728,39 +93728,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A same-program comparison table, recorded with its commit and commands, covers Jet and each alternative on: presented-interval p50/p99 and missed frames at the display's refresh (idle and under a full-machine load), input-to-photon latency, CPU time per frame and wakeups per second, time to first presented frame, RSS and binary size.",
+          "text": "A same-program comparison table, recorded with its commit and commands, covers Jet and each alternative on: presented-interval p50/p99 and missed frames at the display's refresh (idle and under a full-machine load), input-to-photon latency, CPU time per frame and wakeups per second, time to first presented frame, RSS and binary size. Proof: `git ls-files \"Docs/audits/*wayland-stack*\"` names the committed table.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T21:10:33.514Z"
+          "at": "2026-11-15T05:35:26.124Z"
         },
         {
           "n": 2,
-          "text": "Jet is at or better than every alternative on every metric of that table, and within the hand-written C ceiling, or each remaining loss has its own card naming its root.",
+          "text": "Jet is at or better than every alternative on every metric of that table, and within the hand-written C ceiling, or each remaining loss has its own card naming its root. Proof: the same committed table, with a card named for each loss.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T21:10:33.514Z"
+          "at": "2026-11-15T05:35:27.033Z"
         },
         {
           "n": 3,
-          "text": "Live resize, fractional scale (125% and 150%), cursor shape, clipboard and multi-window are compared the same way: no stretched or blank frames during resize and crisp output at fractional scale, with the same metrics as criterion 1 where they apply.",
+          "text": "Live resize, fractional scale (125% and 150%), cursor shape, clipboard and multi-window are compared the same way: no stretched or blank frames during resize and crisp output at fractional scale, with the same metrics as criterion 1 where they apply. Proof: the same committed table, resize and fractional-scale rows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T21:10:33.514Z"
+          "at": "2026-11-15T05:35:27.971Z"
         },
         {
           "n": 4,
-          "text": "The Jet xkb keymap matches libxkbcommon on the oracle and beats it on keymap compile time (compositor keymap fd to ready Keymap), per-key cost and memory, or each loss has its own card.",
+          "text": "The Jet xkb keymap matches libxkbcommon on the oracle and beats it on keymap compile time (compositor keymap fd to ready Keymap), per-key cost and memory, or each loss has its own card. Proof: `jet test Compiler --profile cases --filter xkb/oracle_matches_libxkbcommon` and the timing rows of the committed table.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T21:10:33.514Z"
+          "at": "2026-11-15T05:35:28.955Z"
         }
       ],
       "refs": [],
@@ -93771,8 +93771,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T21:10:33.514Z",
-      "updated": "2026-11-11T12:45:46.417Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:35:28.955Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0vwlomv",
@@ -94282,21 +94282,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A fresh release admit of a dev commit with no reuse of candidate rows from an earlier admit, on this workstation, runs from the preflight to publish in at most 10 minutes of wall-clock time, with its timestamped log as evidence.",
+          "text": "A fresh release admit of a dev commit with no reuse of candidate rows from an earlier admit, on this workstation, runs from the preflight to publish in at most 10 minutes of wall-clock time, with its timestamped log as evidence. Proof: the committed timestamped admit log.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T12:32:46.671Z"
+          "at": "2026-11-15T05:35:29.860Z"
         },
         {
           "n": 2,
-          "text": "The gate keeps its strength. Nothing is cached or reused between runs and nothing is built incrementally (owner 2026-11-09): every run starts from source. Within ONE run, each test worker may parse and check Core once and share that checked Core in memory across the rows it runs (owner 2026-11-09, the vitest model); each row still compiles and runs its own fresh native program on the candidate. A proof run shows the shared-Core verdicts are byte-identical to per-row cold compiles on every row. OWNER 2026-11-09 (later): the release (previous seed) column runs only on the rows that fail on the candidate, the release's known-failing rows, and rows whose files changed since the baseline commit, with gains and losses judged exactly as before; every candidate row still runs. There are no new skips and no dropped tiers, and the compiler front end itself also gets at least 2x faster cold (owner: both).",
+          "text": "The gate keeps its strength. Nothing is cached or reused between runs and nothing is built incrementally (owner 2026-11-09): every run starts from source. Within ONE run, each test worker may parse and check Core once and share that checked Core in memory across the rows it runs (owner 2026-11-09, the vitest model); each row still compiles and runs its own fresh native program on the candidate. A proof run shows the shared-Core verdicts are byte-identical to per-row cold compiles on every row. OWNER 2026-11-09 (later): the release (previous seed) column runs only on the rows that fail on the candidate, the release's known-failing rows, and rows whose files changed since the baseline commit, with gains and losses judged exactly as before; every candidate row still runs. There are no new skips and no dropped tiers, and the compiler front end itself also gets at least 2x faster cold (owner: both). Proof: the committed diff of shared-Core verdicts against per-row cold compiles is empty, and the admit log shows every candidate row run.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T17:13:54.007Z"
+          "at": "2026-11-15T05:35:30.822Z"
         },
         {
           "n": 3,
@@ -94316,8 +94316,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T12:32:41.154Z",
-      "updated": "2026-11-09T23:41:52.389Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:35:30.822Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
     {
@@ -113694,6 +113694,67 @@
       "needsAcceptance": false,
       "created": "2026-11-15T05:33:26.136Z",
       "updated": "2026-11-15T05:33:26.136Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0r1ln6j",
+      "num": 6967,
+      "title": "The build graph runs deterministically and shows its work: ordered scheduling, the ratified pools, alias-safe step outputs and the build board",
+      "body": "Destination: `jet build` schedules a graph deterministically (longest remaining path, then key; only the ratified pools cpu, memory, linker, console and gpu; a failure cancels only its dependents), refuses a step output reached through an aliased read folder, and shows its work on a TTY board of at most 8 lines with one final receipt line, plus `--json` NDJSON and `--trace` Chrome trace output.\n\nWhy: a build users can trust gives the same order and diagnostics every run and shows progress without flooding the terminal.\n\nDecisions: D-BUILD-UI1=A (what jet build shows while it works). The board look needs owner acceptance (owner-gates row).\n\nSource: #6682 c8, c9 and c10 (from #2514 c10 and c11, #2526 and #2527), moved 2026-11-15 because they are build-executor behavior, not the project build function.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The step-output-in-read-folder rule (Graph.jet and Jetpack Validation.jet, spec.md:5050, E3502) compares resolved real folders, not spelled paths. A dependency bound at .jet/deps (or any other alias) that resolves to a folder holding a step output is refused. The project root and each dependency root are threaded into both validators and resolved through the host. Proof: `jet test Compiler --profile cases --filter build_graph/step_output_alias_refused`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:35:08.120Z"
+        },
+        {
+          "n": 2,
+          "text": "Scheduling is deterministic: identical start logs across runs of a 40-node graph, and stable diagnostics under randomized delays. Only the ratified pools exist (cpu, memory, linker, console, gpu), with a RAM-derived cpu cap. Ready nodes are ordered by longest remaining path, then by key. A failure cancels only its dependents, and keep-going continues the rest. Proof: `jet test Compiler --profile cases --filter build_graph/deterministic_scheduling`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:35:08.120Z"
+        },
+        {
+          "n": 3,
+          "text": "A TTY board of at most 8 lines redraws in place, with one final receipt line. UI snapshots cover building, success, no-change, failure, notes, piped and NO_COLOR. `--json` emits schema-valid NDJSON and `--trace` emits Chrome trace JSON. SIGTSTP/SIGCONT and resize restore the terminal, and TERM=dumb falls back. Old BuildProgress strings are deleted. The owner accepts the look (owner-gates row). Proof: `jet test Compiler --profile ui --filter build_board`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:35:08.120Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "build",
+        "cli"
+      ],
+      "goals": [
+        "G7"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T05:35:08.120Z",
+      "updated": "2026-11-15T05:35:08.120Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -217529,6 +217590,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:35:30.823Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0qyk2os",
+      "note": "#2: proof; was: The gate keeps its strength. Nothing is cached or reused between runs and nothing is built incrementally (owner 2026-11-09): every run starts from source. Within ONE run, each test worker may parse an"
+    },
+    {
+      "at": "2026-11-15T05:35:29.860Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0qyk2os",
+      "note": "#1: proof; was: A fresh release admit of a dev commit with no reuse of candidate rows from an earlier admit, on this workstation, runs from the preflight to publish in at most 10 minutes of wall-clock time, with its "
+    },
+    {
+      "at": "2026-11-15T05:35:28.955Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ky4017",
+      "note": "#4: proof; was: The Jet xkb keymap matches libxkbcommon on the oracle and beats it on keymap compile time (compositor keymap fd to ready Keymap), per-key cost and memory, or each loss has its own card."
+    },
+    {
+      "at": "2026-11-15T05:35:27.971Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ky4017",
+      "note": "#3: proof; was: Live resize, fractional scale (125% and 150%), cursor shape, clipboard and multi-window are compared the same way: no stretched or blank frames during resize and crisp output at fractional scale, with"
+    },
+    {
+      "at": "2026-11-15T05:35:27.033Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ky4017",
+      "note": "#2: proof; was: Jet is at or better than every alternative on every metric of that table, and within the hand-written C ceiling, or each remaining loss has its own card naming its root."
+    },
+    {
+      "at": "2026-11-15T05:35:26.124Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ky4017",
+      "note": "#1: proof; was: A same-program comparison table, recorded with its commit and commands, covers Jet and each alternative on: presented-interval p50/p99 and missed frames at the display's refresh (idle and under a full"
+    },
+    {
+      "at": "2026-11-15T05:35:25.234Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0slc5oo",
+      "note": "#3: proof; was: The engine unit's claims finish in under 1 minute wall."
+    },
+    {
+      "at": "2026-11-15T05:35:24.336Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0slc5oo",
+      "note": "#2: proof; was: Claims that share process state are isolated (each owns its state, or the shared state is per-claim), so the unit runs without --serial and every claim still passes."
+    },
+    {
+      "at": "2026-11-15T05:35:23.448Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0slc5oo",
+      "note": "#1: proof; was: The wall time of the engine unit's compile and its serial claim run are measured on the batch host and recorded with the commit."
+    },
+    {
+      "at": "2026-11-15T05:35:22.541Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08h4xjb",
+      "note": "#3: proof; was: The built engine is byte-for-byte the same program as before the fix, or every packages-suite engine claim still passes."
+    },
+    {
+      "at": "2026-11-15T05:35:21.547Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08h4xjb",
+      "note": "#2: proof; was: The root cause is fixed in the compiler or in Jetpack's assembly, and the hosted engine build on a quiet batch host takes at most 30 s, measured and recorded with the commit."
+    },
+    {
+      "at": "2026-11-15T05:35:20.595Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0crz3ra",
+      "note": "#6: proof; was: Build profiles give a fast `dev` profile for targeted testing and a `ship` profile for release stages."
+    },
+    {
+      "at": "2026-11-15T05:35:19.615Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0crz3ra",
+      "note": "#3: proof; was: build.jet declares no C compiler, musl, ar or nm (#6693, #6687 c2). Every tool it still needs is declared with b.toolchain and b.probe, JET_PACK_MUSL_LIB and the other toolchain environment variables "
+    },
+    {
+      "at": "2026-11-15T05:35:18.664Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0crz3ra",
+      "note": "#2: proof; was: Every generated registry table (CoreEnumRows, CoreStructureRows and the rest) comes from `b.generate` over its source registry, so it cannot be stale, and the precommit generator checks for those tabl"
+    },
+    {
+      "at": "2026-11-15T05:35:17.742Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0crz3ra",
+      "note": "#1: proof; was: One build function declares jet, the runtime pack, jetpack, the docs site and the release package as targets, so `jet build` builds them concurrently from one graph and the packages suite reuses that "
+    },
+    {
+      "at": "2026-11-15T05:35:16.862Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0nsxbj2",
+      "note": "#4: strip debris; proof; was: Core crypto expert hashes (#3548): [#3870] SHA-512, BLAKE2b and Argon2id in Core/crypto/expert.jet run on U64 words, with no bigint spill and no per-block list allocation. Hash goldens are unchanged, "
+    },
+    {
+      "at": "2026-11-15T05:35:15.977Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0nsxbj2",
+      "note": "#3: proof; was: The digest is identical on every tier (O0, O1, O2 and web), held by the existing SHA-256 conformance vectors."
+    },
+    {
+      "at": "2026-11-15T05:35:15.087Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0nsxbj2",
+      "note": "#2: proof; was: core.crypto SHA-256 at O1 and O2 meets that ceiling (Jet/ceiling at most 1.00 in cycles and bytes) on both paths, and beats every gauntlet peer."
+    },
+    {
+      "at": "2026-11-15T05:35:14.185Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0nsxbj2",
+      "note": "#1: proof; was: An asm-parity cell under Tools/perf/asm-parity is the SHA-256 ceiling reference: SHA-NI where the CPU reports it, and the best scalar code otherwise."
+    },
+    {
+      "at": "2026-11-15T05:35:13.274Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0sxi78p",
+      "note": "#3: proof; was: The quiet-host self-build wall time does not regress (compared on the same machine and commit range as #6527)."
+    },
+    {
+      "at": "2026-11-15T05:35:12.355Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0sxi78p",
+      "note": "#2: proof; was: The hosted Jetpack engine build started beside 8 concurrent package runs finishes within 1.5x of its quiet-host wall time, measured on the batch machine and recorded with the commit."
+    },
+    {
+      "at": "2026-11-15T05:35:11.289Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0sxi78p",
+      "note": "#1: proof; was: A build's parallel width follows free cores while it runs, instead of being fixed by the load at start."
+    },
+    {
+      "at": "2026-11-15T05:35:10.249Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08qqzef",
+      "note": "#3: proof; was: The web tier keeps one meaning (I9): the same examples' goldens pass on web after the size fix."
+    },
+    {
+      "at": "2026-11-15T05:35:09.165Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08qqzef",
+      "note": "#2: absorbs c1; proof; was: The web bundles of hello, counter and todo are at or below their WebBundleCheck baseline (729,206 / 798,637 / 729,395 bytes total), measured by the gate with every file web.manifest.json names counted"
+    },
+    {
+      "at": "2026-11-15T05:35:08.120Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0r1ln6j",
+      "note": "The build graph runs deterministically and shows its work: ordered scheduling, the ratified pools, alias-safe step outputs and the build board"
+    },
     {
       "at": "2026-11-15T05:34:49.048Z",
       "by": "Main",
