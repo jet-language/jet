@@ -24,6 +24,9 @@ shown: fn(line: String) -> String Never! {
 }
 
 run: fn() {
+    // The sink appends, and the case's steps share one directory: each run
+    // starts the file empty, so it holds only this run's records.
+    files.write("events.jsonl", "") ?? panic("the sink file cannot be emptied")
     log.otlp_file("events.jsonl")
     log.info("main started")
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
