@@ -158,10 +158,12 @@ alternate which compiler goes first. Every compile runs under
 user-mode instructions and the process CPU of each top-level phase of at least
 0.5 s, never wall time or lines per second, which load moves. A quantity fails
 when its median per-round ratio is over +10% within a 10-point spread, or when
-every round is over +10%. A wider spread, a single round, or a missing count
-is `INCONCLUSIVE`, never a pass. It prints `speed gate: PASS`, `FAIL` or
-`INCONCLUSIVE` and exits 0, 1 or 3; `--out` records every compile in the
-throughput ledger.
+every round is over +10%. A wider spread, fewer than three rounds (one binary
+spreads about 10% on a phase from run to run, so one round's ratio is noise) or
+a missing count is `INCONCLUSIVE`, never a pass. The log names the candidate
+and seed jets it times, with their identities. It prints `speed gate: PASS`,
+`FAIL` or `INCONCLUSIVE` and exits 0, 1 or 3; `--out` records every compile in
+the throughput ledger.
 
 Every release admit (`jet run Tools/release/Main.jet -- admit`) runs the gate:
 its new compiler against the seed that built it, three rounds at the default
@@ -175,13 +177,15 @@ compiles nothing: it reads two batch builds of `jet build --profile dev
 Compiler`, each a directory with the build's trace (`trace.txt`) and GNU
 `time -v`'s report (`time.txt`). It judges CPU, traced CPU (every process's
 top-level phases, the build step children included, which `time -v` leaves
-out) and each process's top-level phases of at least 0.5 s, shown as
-`<process>/<phase>`. One build a side gives one ratio: a quantity over +10%
-fails, a phase only when it also rose by 0.5 s or more. A phase only one
-build ran is `new` or `gone`, work moved between processes that the totals
-judge. It prints `batch speed gate: PASS` or `FAIL` and exits 0 or 1, or 3
-when a build's files are missing or the build failed; `--out` records every
-quantity.
+out) and the own-thread CPU of each process's top-level phases of at least
+0.5 s, shown as `<process>/<phase>`. A phase is judged on its own thread, not
+its process: one process can run two compiles at once, and a phase's process
+CPU then counts the other compile's threads. One build a side gives one
+ratio: a quantity over +10% fails, a phase only when it also rose by 0.5 s or
+more. A phase only one build ran is `new` or `gone`, work moved between
+processes that the totals judge. It prints `batch speed gate: PASS` or `FAIL`
+and exits 0 or 1, or 3 when a build's files are missing or the build failed;
+`--out` records every quantity.
 
 `--lane quick|full` runs the gauntlet's `compile_throughput` cell
 (`Tools/gauntlet/measurement-manifest.json`) with the same tool. The full lane
