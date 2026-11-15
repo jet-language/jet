@@ -3113,7 +3113,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     if ir_reactive_method(m, p, b, ty, receiver, operation, args, span) == .Val(result) {
         return result
     }
-    if operation == .SerdeEncode(_) -> return ir_serde_encode(m, p, b, ty, receiver, span)
+    if operation == .SerdeEncode(stored) -> return ir_serde_encode(m, p, b, ty, receiver, stored, span)
     if operation == .CursorTakePattern(text_parts, canonical) {
         return ir_take_pattern(m, p, b, ty, receiver, false, text_parts, [BinMatchPart]{}, canonical, span)
     }

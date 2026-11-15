@@ -40,13 +40,13 @@ ir_core_reach_is_top_level: fn(kind: TFuncKind) -> Bool Never! {
 }
 
 // Whether a function is a derived Encode/Decode method: a compiler-generated
-// `encode`/`decode`/`__read` method. Sema checks one only when a codec
-// requirement demands it, and its callers reach it through an owner-type
-// lookup during instance lowering (`value.encode()` inside
-// `json.to_string<T>`, `__Decoding.read<T, …>`), never by a key in a body,
-// so a checked one is rooted.
+// `encode`/`decode`/`__read`/`encode_stored`/`decode_stored` method. Sema
+// checks one only when a codec requirement demands it, and its callers reach
+// it through an owner-type lookup during instance lowering (`value.encode()`
+// inside `json.to_string<T>`, `__Decoding.read<T, …>`), never by a key in a
+// body, so a checked one is rooted.
 ir_core_reach_generated_codec: fn(function: FnBody) -> Bool Never! {
-    function.synthetic && !ir_core_reach_is_top_level(function.kind) && (function.name == "encode" || function.name == "decode" || function.name == "__read")
+    function.synthetic && !ir_core_reach_is_top_level(function.kind) && (function.name == "encode" || function.name == "decode" || function.name == "__read" || function.name == "encode_stored" || function.name == "decode_stored")
 }
 
 // Source-owned selector policy. Both reachability and expression lowering

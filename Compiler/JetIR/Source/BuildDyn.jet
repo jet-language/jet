@@ -21,7 +21,7 @@ ir_dyn_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
         .DynHas -> return Val(ir_dyn_key_lookup(m, p, b, ty, dyn_row, receiver, args, true, span))
         .DynSetPath(keys, site, location) -> return Val(ir_dyn_set_path(m, p, b, dyn_row, receiver, keys, site, location, args, span))
         .DynRemove -> return Val(ir_dyn_remove(m, p, b, ty, dyn_row, receiver, args, span))
-        .DynDecode(target, _) -> return Val(ir_dyn_decode(m, p, b, ty, receiver, target, args, span))
+        .DynDecode(target, stored) -> return Val(ir_dyn_decode(m, p, b, ty, receiver, target, stored, args, span))
         .DynIndexKey(site, location) -> return Val(ir_dyn_index(m, p, b, ty, receiver, "jet_dyn_index_key", true, site, location, args, span))
         .DynIndexAt(site, location) -> return Val(ir_dyn_index(m, p, b, ty, receiver, "jet_dyn_index_at", false, site, location, args, span))
         .DynBinary(op, site, location) -> return Val(ir_dyn_operator(m, p, b, ty, receiver, "jet_dyn_binary", op, site, location, args, span))
@@ -506,12 +506,16 @@ ir_dyn_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: 
 // container, F32 or Dyn target's Core/Encoding/Encoding.jet decode helper
 // (ir_codec_decode_helper, ir_dyn_fixed_decode); else the runtime's canonical
 // scalar adapter jet_rt_codec_decode_<scalar>, which borrows the tree.
-ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, target: Type, args: [Int], span: Span) -> Int Never! {
+// `tree.decode_stored<T>()` (`stored`) calls T's derived `decode_stored`
+// when T has one, a struct with a `#Secret` field; any other target decodes
+// as `decode<T>()` does.
+ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, target: Type, stored: Bool, args: [Int], span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(b, span, "Dyn.decode with {args.len()} arguments")
     concrete: ir_fact(p, b, target, span)
     if ir_failed(b) -> return -1
     tree_arg: ir_codec_arg(receiver)
-    if ir_codec_impl(p, concrete, "Decode", "decode") == .Val(found) -> return ir_call(m, p, b, found.key, found.args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
+    method: if stored && ir_codec_impl(p, concrete, "Decode", "decode_stored") != None -> "decode_stored" else -> "decode"
+    if ir_codec_impl(p, concrete, "Decode", method) == .Val(found) -> return ir_call(m, p, b, found.key, found.args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     if ir_codec_decode_helper(p, concrete) == .Val(helper) {
         helper_key: ir_codec_decode_key(p, helper.name) ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(concrete)}: Core/Encoding/Encoding.jet {helper.name} is outside the checked program")
         return ir_call(m, p, b, helper_key, helper.type_args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
@@ -589,7 +593,7 @@ ir_dyn_union_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
     loop (index, member) in members {
         tree_node: ir_node(b, tree_ty, NodeKind.Local{local: tree_local}, span)
         attempt_ty: Type.Result{ok: member.copy(), err: err_ty.copy()}
-        attempt: ir_dyn_decode(m, p, b, attempt_ty, tree_node, member, [Int]{}, span)
+        attempt: ir_dyn_decode(m, p, b, attempt_ty, tree_node, member, false, [Int]{}, span)
         if ir_failed(b) || attempt < 0 {
             ir_scope_close(m, b)
             return -1
@@ -712,11 +716,14 @@ ir_codec_scalar: fn(target: Type) -> String? Never! {
 // or String value is boxed as its Dyn variant (a Char is the Text of its one
 // character), and a String-keyed Map or a List or fixed List encodes as an
 // Object or Array of its encoded values. The builtin and typed codec routes
-// have no lowering here.
-ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
+// have no lowering here. `value.encode_stored()` (`stored`) calls the
+// derived `encode_stored` of a struct with a `#Secret` field; any other value
+// encodes as `value.encode()` does.
+ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, stored: Bool, span: Span) -> Int Never! {
     concrete: ir_ty(p, b, receiver)
     if ir_dyn_def(p, concrete) != None -> return ir_expr(m, p, b, receiver)
-    if ir_codec_impl(p, concrete, "Encode", "encode") == .Val(found) {
+    method: if stored && ir_codec_impl(p, concrete, "Encode", "encode_stored") != None -> "encode_stored" else -> "encode"
+    if ir_codec_impl(p, concrete, "Encode", method) == .Val(found) {
         self_slot: ir_expr(m, p, b, receiver)
         if ir_failed(b) || self_slot < 0 -> return -1
         return ir_call(m, p, b, found.key, found.args, self_slot, [IRWriteBack]{}, [BodyCallArg]{}, span)
