@@ -340,6 +340,23 @@ x64_alu_rr: fn(code: &X64Code, op: X64Alu, dst: Int, src: Int) Never! {
     x64_modrm_reg(code.bytes, src, dst)
 }
 
+// xor r32, r32 (31 /r; REX.R and REX.B for r8-r15): the whole register
+// cleared, in two bytes up to rdi and three past it. It sets the flags.
+x64_zero: fn(code: &X64Code, reg: Int) Never! {
+    if reg >= 8 -> x64_byte(code.bytes, 0x45)
+    x64_byte(code.bytes, 0x31)
+    x64_modrm_reg(code.bytes, reg, reg)
+}
+
+#Test("A register clears as xor eax, eax and xor r9d, r9d") {
+    low := x64_code()
+    x64_zero(low, X64_RAX)
+    assert_eq(low.bytes, [U8]{0x31, 0xc0})
+    high := x64_code()
+    x64_zero(high, 9)
+    assert_eq(high.bytes, [U8]{0x45, 0x31, 0xc9})
+}
+
 // add/sub/cmp/and/or/xor dst, imm (REX.W 83 /n ib, or REX.W 81 /n id). The immediate must fit i32.
 x64_alu_ri: fn(code: &X64Code, op: X64Alu, dst: Int, value: Int) Never! {
     x64_rex(code.bytes, true, 0, dst)

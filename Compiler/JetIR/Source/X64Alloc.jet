@@ -270,6 +270,15 @@ ir_x64_inline_atomic: fn(m: IRModule, f: IRFunction, at: Int) -> String Never! {
     operation
 }
 
+// The slot whose register the result of instruction `at` may take first
+// (ir_x64_scan's partners): an inline atomic add's delta, which its lock
+// xadd turns into the old value in place, else the first operand `a` when
+// the instruction reads it as a slot (`left_reads`); -1 for none.
+ir_x64_partner: fn(m: IRModule, f: IRFunction, at: Int, left_reads: [Bool]) -> Int Never! {
+    if ir_x64_inline_atomic(m, f, at) == "add" -> return f.args[f.b[at] + 1]
+    if left_reads[at] -> f.a[at] else -> -1
+}
+
 // Whether selecting instruction `at` makes no call, in its body or in a
 // slow path, and leaves r8 and r9 alone: structure, a constant, a memory
 // access, a frame address or byte copy, an inline-range test (IntBig, in
@@ -521,10 +530,11 @@ ir_x64_one_shot: fn(f: IRFunction, depths: [Int], around: [Int], bases: &[Int], 
 // temporary shares a home with the others whose ranges (`starts`..`ends`,
 // loop-grown) lie wholly apart from its own, taken in order of first use; a
 // `named` slot keeps its home to itself, the place its variable lives over
-// the whole body (ir_x64_variables). The homes the most references (`refs`)
-// go through sit nearest rbp, where a displacement takes one byte (down to
-// rbp - 128) instead of four; ties keep first-use order.
-ir_x64_homes: fn(starts: [Int], ends: [Int], refs: [Int], homed: [Bool], named: [Bool], below: Int) -> [Int] Never! {
+// the whole body (ir_x64_variables). The homes with the most references
+// (`weights`, each weighed by its loop level as spill weights are) sit
+// nearest rbp, where a displacement takes one byte (down to rbp - 128)
+// instead of four; ties keep first-use order.
+ir_x64_homes: fn(starts: [Int], ends: [Int], weights: [Int], homed: [Bool], named: [Bool], below: Int) -> [Int] Never! {
     count: starts.len()
     firsts := [Int]{}
     loop slot in 0..<count {
@@ -555,7 +565,7 @@ ir_x64_homes: fn(starts: [Int], ends: [Int], refs: [Int], homed: [Bool], named: 
             home_kept.push(named[slot])
         }
         home_of[slot] = home
-        home_refs[home] = home_refs[home] + refs[slot]
+        home_refs[home] = home_refs[home] + weights[slot]
         home_ends[home] = ends[slot]
     }
     total: home_refs.len()
@@ -571,15 +581,15 @@ ir_x64_homes: fn(starts: [Int], ends: [Int], refs: [Int], homed: [Bool], named: 
 
 // Five slots over two saved registers (16 bytes): 1 follows 0 and 4
 // follows 1 in one home; 3 overlaps 1, and 2 is named, so each has its own.
-// Most references first: 3's home (10), 2's (5), then the shared one (3);
+// The most weight first: 3's home (10), 2's (5), then the shared one (3);
 // 5 has no home.
 #Test("Temporaries whose ranges lie apart share a home, the busiest nearest rbp") {
     starts: [Int]{0, 3, 1, 4, 7, 0}
     ends: [Int]{2, 5, 6, 9, 8, 9}
-    refs: [Int]{1, 1, 5, 10, 1, 4}
+    weights: [Int]{1, 1, 5, 10, 1, 4}
     homed: [Bool]{true, true, true, true, true, false}
     named: [Bool]{false, false, true, false, false, false}
-    homes: ir_x64_homes(starts, ends, refs, homed, named, 16)
+    homes: ir_x64_homes(starts, ends, weights, homed, named, 16)
     assert_eq(homes[0], -40)
     assert_eq(homes[1], -40)
     assert_eq(homes[2], -32)
@@ -664,9 +674,6 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     // (the Float cost rule, ir_x64_clobbers).
     peaks := [Int]{}
     peak_weights := [Int]{}
-    // References per slot, as the code reads them: a frame home's count of
-    // rbp displacements (homes below).
-    refs := [Int]{}
     // Per instruction, whether it reads its first operand field `a` as a
     // slot (ir_x64_scan's partners).
     left_reads := [Bool]{}
@@ -674,7 +681,6 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         writes.push(0)
         last_write.push(-1)
         weights.push(0)
-        refs.push(0)
         peaks.push(0)
         peak_weights.push(0)
     }
@@ -690,7 +696,6 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             }
             if at > ends[slot] -> ends[slot] = at
             weights[slot] = weights[slot] + weight_at[at]
-            refs[slot] = refs[slot] + 1
             if heats[at] > peaks[slot] {
                 peaks[slot] = heats[at]
                 peak_weights[slot] = 0
@@ -706,7 +711,6 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             if at > ends[written] -> ends[written] = at
             writes[written] = writes[written] + 1
             weights[written] = weights[written] + weight_at[at]
-            refs[written] = refs[written] + 1
             if heats[at] > peaks[written] {
                 peaks[written] = heats[at]
                 peak_weights[written] = 0
@@ -835,8 +839,8 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     // those whose ranges hold no call passing more than two Floats, xmm2-xmm7
     // (IR_X64_XMM_REGISTERS). A
     // slot that starts with its write may take the register of one its
-    // writer reads last, that of the writer's first operand first
-    // (`partners`), an If's result that of its then arm's source
+    // writer reads last, that of the writer's first operand first (an
+    // atomic add's delta: `partners`), an If's result that of its then arm's source
     // (ir_x64_phis), and a copy that may share its source's register
     // (ir_x64_aliases) rides on it. Sharing holds for Float and routed slots
     // across the calls inside an instruction too: before the call
@@ -847,7 +851,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     clobbers: ir_x64_clobbers(m, f, consts, values, heats)
     floating: loop slot in 0..<count -> starts[slot] <= ends[slot] && classes[slot] == .Float && peak_weights[slot] > 2 * ir_x64_clobbered(clobbers, f.op.len(), peaks[slot], starts[slot], ends[slot])
     fresh: loop slot in 0..<count -> first_writes[slot] && starts[slot] >= 0 && ir_x64_write(f, starts[slot]) == slot
-    partners: loop slot in 0..<count -> if fresh[slot] && left_reads[starts[slot]] -> f.a[starts[slot]] else -> -1
+    partners: loop slot in 0..<count -> if fresh[slot] -> ir_x64_partner(m, f, starts[slot], left_reads) else -> -1
     phis: ir_x64_phis(m, f, starts, ends, last_write, writes, classes, consts, addressed, around)
     aliases: ir_x64_aliases(m, f, starts, ends, last_write, writes, classes, consts, addressed)
     leaf: ir_x64_leaf(m, f, classes, consts, values)
@@ -898,13 +902,38 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     // Frame homes below the saved registers, for the referenced slots
     // without a callee-saved register or a constant (a Float slot in an xmm
     // register and a routed slot keep their homes across the calls they
-    // live through).
+    // live through). A word storage (an atomic word, a word whose address
+    // is taken) is a home of its own past the slots, ranked by the
+    // loop-weighted references through its address, so a hot one sits
+    // within a one-byte displacement as a hot slot's home does.
     homed := loop slot in 0..<count -> regs[slot] < 0 && !consts[slot] && !addressed[slot] && starts[slot] <= ends[slot] && classes[slot] != .Empty
     loop slot in routed -> homed[slot] = true
-    named: loop slot in 0..<count -> f.slot_name[slot] >= 0
-    homes: ir_x64_homes(starts, ends, refs, homed, named, 8 * kept.len())
+    named := loop slot in 0..<count -> f.slot_name[slot] >= 0
+    through := loop _ in 0..<count -> 0
+    loop slot in 0..<count {
+        if roots[slot] >= 0 -> through[roots[slot]] = through[roots[slot]] + weights[slot]
+    }
+    home_starts := loop slot in 0..<count -> starts[slot]
+    home_ends := loop slot in 0..<count -> ends[slot]
+    home_weights := loop slot in 0..<count -> weights[slot]
+    words := [Int]{}
+    loop at in 0..<f.op.len() {
+        root: f.dst[at]
+        if f.op[at] != .StackAddress || root < 0 || root >= count || roots[root] != root -> next
+        if ir_x64_storage_size(f, at) != 8 || f.b[at] > 8 -> next
+        words.push(at)
+        home_starts.push(at)
+        home_ends.push(f.op.len())
+        home_weights.push(through[root])
+        homed.push(true)
+        named.push(true)
+    }
+    placed: ir_x64_homes(home_starts, home_ends, home_weights, homed, named, 8 * kept.len())
+    homes: loop slot in 0..<count -> placed[slot]
+    word_disps := loop _ in 0..<f.op.len() -> 0
+    loop (index, at) in words -> word_disps[at] = placed[count + index]
     depth := 8 * kept.len()
-    loop home in homes {
+    loop home in placed {
         if 0 - home > depth -> depth = 0 - home
     }
     result_home := 0
@@ -914,9 +943,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     }
     stack := [Int]{}
     loop at in 0..<f.op.len() {
-        disp := 0
+        disp := word_disps[at]
         op: f.op[at]
-        if op == .StackAddress && (result_storage < 0 || at != last_write[result_storage]) {
+        if op == .StackAddress && disp == 0 && (result_storage < 0 || at != last_write[result_storage]) {
             size: ir_x64_storage_size(f, at)
             align: if f.b[at] > 16 -> 16 else if f.b[at] < 1 -> 1 else -> f.b[at]
             depth = ir_x64_align(depth + size, align)
@@ -939,6 +968,32 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     total: ir_x64_align(depth, 16)
     frame_bytes: total - 8 * kept.len()
     IRX64Allocation{regs: regs.move(), xmms: xmms.move(), xmm_slots: xmm_slots.move(), routed: routed.move(), homes: homes.move(), consts: consts.move(), values: values.move(), frames: frames.move(), starts: starts.move(), ends: ends.move(), stack: stack.move(), saved: kept.move(), frame_bytes: frame_bytes, result_home: result_home, result_storage: result_storage}
+}
+
+// A word storage laid out after a 512-byte one still sits among the homes,
+// within a one-byte displacement of rbp; the wide one goes past it. The
+// atomic add's old value takes the register of its delta, which ends there.
+#Test("A word storage takes a home near rbp, and an atomic add's old value its delta's register") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    pointer: ir_pointer_row(m)
+    f := ir_function_new("words", "test:words.jet::words", "", "words.jet", 1)
+    delta: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "delta"), 1)
+    f.result = word
+    wide: ir_slot(f, pointer, IRSlotKind.Temp, -1, 0)
+    place: ir_slot(f, pointer, IRSlotKind.Temp, -1, 0)
+    old: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.StackAddress, wide, 512, 8, -1, 2)
+    _ := ir_emit(f, IROp.StackAddress, place, 8, 8, -1, 3)
+    add: ir_args(f, [Int]{place, delta})
+    _ := ir_emit(f, IROp.CallRuntime, old, ir_intern_name(m, "jet_rt_atomic_i64_add"), add, 2, 4)
+    _ := ir_emit(f, IROp.Return, -1, old, -1, -1, 5)
+    m.functions.push(f)
+    al: ir_x64_allocate(m, m.functions[0])
+    assert(al.frames[place] < 0)
+    assert(al.frames[place] >= -128)
+    assert(al.frames[wide] <= -512)
+    if al.regs[delta] >= 0 -> assert_eq(al.regs[old], al.regs[delta])
 }
 
 // IR_X64_ALIAS_SPAN: the most instructions a copy's range may cover to

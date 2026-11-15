@@ -146,6 +146,7 @@ use {
         x64_vfmadd213sd_mem,
         x64_xchg_mem,
         x64_xgetbv,
+        x64_zero,
     ]
 }
 
@@ -1513,11 +1514,14 @@ ir_x64_block_retain: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
 // A 64-bit atomic of jet_rt_atomic_i64_* or jet_rt_atomic_u64_* (JetRuntime
 // Atomic.jet) inline (X64Alloc.jet ir_x64_inline_atomic), with the x86-64
 // sequentially consistent mapping the routine makes, on the word in place:
-// init and load a mov, store an xchg, add a lock xadd (its old value, in the
-// result's own register unless that is the base) or, unread, a lock inc or
+// init and load a mov, store an xchg (of a cleared rax for a zero), add a
+// lock xadd (its old value, in the result's own register unless that is the
+// base; the allocator gives the result the delta's register where the
+// delta ends there: X64Alloc.jet ir_x64_partner) or, unread, a lock inc or
 // dec by a constant 1, compare_exchange a lock cmpxchg whose ZF is the Bool,
 // left in the flags for a branch right after it (ir_x64_fusable). A frame
-// address is the operand's own rbp displacement.
+// address is the operand's own rbp displacement: a word storage sits among
+// the homes by its loop-weighted references (X64Alloc.jet ir_x64_allocate).
 ir_x64_atomic: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, operation: String) Never! {
     start: f.b[at]
     place: f.args[start]
@@ -1536,7 +1540,9 @@ ir_x64_atomic: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             ir_x64_store(e, m, f, al, dst, reg)
         }
         "store" -> {
-            ir_x64_load(e, m, f, al, f.args[start + 1], X64_RAX)
+            value: f.args[start + 1]
+            zero: al.consts[value] && al.values[value] == 0
+            if zero -> x64_zero(e.code, X64_RAX) else -> ir_x64_load(e, m, f, al, value, X64_RAX)
             x64_xchg_mem(e.code, base, disp, X64_RAX)
         }
         "add" -> {
