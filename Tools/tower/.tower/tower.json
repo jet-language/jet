@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6867,
-    "rev": 103175,
+    "nextNum": 6870,
+    "rev": 103200,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40749,21 +40749,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A design proposal tied to D-LIVEQUERY1, D-SYNC1, D-DBPOLICY1, D-DX-QUERY1, and D-DX-SERVERFN1 covers client cache, partial bootstrap, transaction accept/reject with rollback, socket fan-out, offline queue, and local-only mode.",
+          "text": "The sync design covers partial bootstrap for large workspaces and a local-only mode with sync switched off (the parts Docs/proposals/2026-11-13-web-app-framework-shape.md does not cover; it already covers the client cache, rollback, socket fan-out and the offline queue), as a reviewed design note. Proof: `git grep -n -i -E 'partial bootstrap|local-only' -- Docs/proposals`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-28T17:35:52.739Z"
+          "at": "2026-11-15T02:54:12.045Z"
         },
         {
           "n": 2,
-          "text": "Query, mutation, and action are defined as effect-row classes the compiler checks, with a diagnostic and snapshot for a query that writes and a mutation that calls the network.",
+          "text": "Query, mutation and action are effect-row classes the compiler checks: a query that writes and a mutation that reaches Net are each refused with a registered code and what/why/fix text. Proof: `jet test Compiler --profile ui --filter sync_` matches the snapshots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-28T17:35:53.628Z"
+          "at": "2026-11-15T02:54:12.908Z"
         },
         {
           "n": 5,
@@ -40785,12 +40785,12 @@
         },
         {
           "n": 7,
-          "text": "[#3700] Examples/features/tooling/app_live.jet and sync_crdt.jet match goldens on every level. `app.live` takes a `-[DB.Read]>` query and returns a typed value. A DB.Write query is a compile error (UI snapshot tests/ui/app_live_write_query). Overlap invalidation follows D-INVALIDATE1. No supported call returns AppError.Unsupported.",
+          "text": "`app.live` takes a `-[DB.Read]>` query and returns a typed value, and invalidation of overlapping reads follows D-INVALIDATE1=A; a DB.Write query is a compile error, and no supported call returns AppError.Unsupported. Proof: `jet test Compiler --profile cases --filter web_app/app_live_` and `jet test Compiler --profile ui --filter app_live_write_query`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:26:20.901Z"
+          "at": "2026-11-15T02:54:13.806Z"
         },
         {
           "n": 8,
@@ -40977,8 +40977,8 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-13T18:43:02.366Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:54:13.806Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G9"
       ],
@@ -82385,6 +82385,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned: this card keeps the parity audit (c1, c2, c4, c6, c31), the one-runtime suite (c7) and the one-app and server-call proofs (c35, c36). Routes went to #6864, endpoints to #6865, browser tests to #6866, forms and tables to #6821 (#6821 c3, #6821 c4, #6821 c5)."
+        },
+        {
           "at": "2026-11-14",
           "by": "Main",
           "text": "Shape (Main, 2026-11-14): framework-surface work on this card builds to the ratified D-WEBAPP-SHAPE1=A (#6792, Docs/proposals/2026-11-13-web-app-framework-shape.md). Every element of that shape has a child card under #6792 (#6799-#6831, #6445, #6447) with executable-example criteria; new surface work here names the shape element it builds and must not contradict it."
@@ -82458,21 +82463,22 @@
         },
         {
           "n": 7,
-          "text": "(was #2428 c1) The first-party Router, Query, Forms, Table/Virtual and Store suite runs on one reactive App runtime, with goldens on O0, O1, O2 and web.",
+          "text": "Routes, data queries, forms, tables and stores run on one reactive app runtime: one example app uses all five, and its golden passes on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter Web/AppSuite`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:04:54.431Z"
+          "at": "2026-11-15T02:52:21.482Z"
         },
         {
           "n": 8,
           "text": "(was #2472 c1) Checked route declarations carry typed path, search, loader and navigation contracts, and a wrong route is rejected at compile time with a registered diagnostic and a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:04:55.246Z"
+          "evidence": "Moved to #6864 c1: typed routes are their own stream",
+          "at": "2026-11-15T02:52:23.340Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
@@ -82486,38 +82492,42 @@
         {
           "n": 10,
           "text": "(was #2472 c3) Typed loader binding, preload/abort plumbing, and pending/error/not-found boundary source are integrated in App and its browser graph consumer Proof: a golden on O0, O1, O2 and web where a route loader's pending, error and not-found boundaries render and an aborted navigation cancels its preload (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:16:01.211Z"
+          "evidence": "Moved to #6864 c2: typed routes are their own stream",
+          "at": "2026-11-15T02:52:24.273Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
           "text": "(was #2472 c4) Route cache identity, dependency facts, freshness transitions, invalidation and collection are integrated, with a case proving the observable lifecycle.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:04:56.090Z"
+          "evidence": "Moved to #6864 c3: typed routes are their own stream",
+          "at": "2026-11-15T02:52:25.243Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
           "text": "(was #2472 c5) Browser/server capability rejection and handler diagnostics stay on the checked App graph boundary, with a UI snapshot per rejection.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:04:56.925Z"
+          "evidence": "Moved to #6864 c4: typed routes are their own stream",
+          "at": "2026-11-15T02:52:26.220Z",
+          "closure": "obsolete"
         },
         {
           "n": 13,
           "text": "(was #2475 c1) Typed headless table and virtual models, checked column access, unified local and server state and all consumer routes are implemented, with goldens on O0, O1, O2 and web.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:04:57.744Z"
+          "evidence": "Moved to #6821 c5: the table and virtual list are standard views (D-VIEW-SET1)",
+          "at": "2026-11-15T02:52:27.167Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
@@ -82532,74 +82542,82 @@
         {
           "n": 15,
           "text": "(was #2498 c2) The ratified scaffold creates an isolated browser test project with configured browsers and a reusable `jet dev` web server, then runs a first test, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:04:59.449Z"
+          "evidence": "Moved to #6866 c1: browser testing is its own stream",
+          "at": "2026-11-15T02:52:28.087Z",
+          "closure": "obsolete"
         },
         {
           "n": 16,
           "text": "(was #2498 c3) The selected UI mode shows the test tree, filters, timeline, DOM snapshots, source, logs, errors, console, network, attachments and watch updates from one test run, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:05:00.253Z"
+          "evidence": "Moved to #6866 c2: browser testing is its own stream",
+          "at": "2026-11-15T02:52:28.959Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
           "text": "(was #2498 c4) A retry records a bounded trace that opens in the local viewer with action snapshots, source, DOM, logs and network details, while page payloads stay excluded by default, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:05:01.091Z"
+          "evidence": "Moved to #6866 c3: browser testing is its own stream",
+          "at": "2026-11-15T02:52:29.837Z",
+          "closure": "obsolete"
         },
         {
           "n": 18,
           "text": "(was #2498 c5) Cross-browser contexts, retries, reporters and failure exit status stay deterministic and keep Jet diagnostic and source identity, proven by tests/cases rows.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:05:02.107Z"
+          "evidence": "Moved to #6866 c4: browser testing is its own stream",
+          "at": "2026-11-15T02:52:30.726Z",
+          "closure": "obsolete"
         },
         {
           "n": 20,
           "text": "(was #2962 c1) Typed endpoint admission, descriptor lowering, handler invocation and native and web codec routing are implemented, with goldens on O0, O1, O2 and web.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:05:02.925Z"
+          "evidence": "Moved to #6865 c1: endpoint contracts are their own stream",
+          "at": "2026-11-15T02:52:31.620Z",
+          "closure": "obsolete"
         },
         {
           "n": 22,
           "text": "(was #3259) One struct-declared rule set yields the same field paths and reasons for JSON decode, `T.validate` and form submission, and errors clear on the next valid submit: golden web/form_validation_one_meaning passes on O0, O1 and O2. (was #3280 c32)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:02:06.359Z"
+          "evidence": "Moved to #6821 c3: forms are built on the kit standard views card",
+          "at": "2026-11-15T02:52:32.540Z",
+          "closure": "obsolete"
         },
         {
           "n": 28,
           "text": "(was #3304) The endpoint contract agrees across dispatch, the independent client, schema and form on every tier: renaming a public input changes the descriptor-derived client, schema and form in one place; malformed path, query or body input and private result fields never cross the public boundary; typed public errors, auth requirements and HTTP statuses match the real independent client; optional, nested, enum, list and recursive schema references appear only where the endpoint declares them, with no copied web-only metadata; route facts and OpenAPI agree with the typed client, schema and form (D-FOUND-COREAPI1, D-ENDPOINT-SHAPE1; no new App access API). Proof: a Jet test endpoint_contract_replay passes on O0, O1 and O2 with curl as the independent client, and the rename diff is limited to the renamed field. (was #3280 c38-c43)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:17:43.483Z"
+          "evidence": "Moved to #6865 c2: endpoint contracts are their own stream; split into WAPI c2 and c3",
+          "at": "2026-11-15T02:52:33.426Z",
+          "closure": "obsolete"
         },
         {
           "n": 29,
           "text": "(was #3304, #2852) web.openapi(app) derives one deterministic OpenAPI document from the checked route table on web.app() (D-ROUTE-ONE1=A): stable operation identity and typed input, success, failure, auth and status projections; no internal or visual routes; schema and client are derived artifacts, and every execution adapter only marshals that shared model. Golden web/app_openapi on O0, O1 and O2. (was #3280 c45, #2852 c1)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:17:54.302Z"
+          "evidence": "Moved to #6865 c4: endpoint contracts are their own stream",
+          "at": "2026-11-15T02:52:34.430Z",
+          "closure": "obsolete"
         },
         {
           "n": 30,
@@ -82612,21 +82630,22 @@
         },
         {
           "n": 31,
-          "text": "The 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun on the built framework against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel; every gap it lists is closed or explained on a card, and the rerun is committed as a dated Docs/research report. Its timing cells are G11 (#2858).",
+          "text": "The 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun on the built framework against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel; every gap it lists is closed or explained on a card, and the rerun is committed as a dated Docs/research report. Its timing cells belong to G11 (#2858).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:16:03.269Z"
+          "at": "2026-11-15T02:52:22.422Z"
         },
         {
           "n": 32,
           "text": "(was #2474 c1) The ratified typed form fluent validation chain, canonical submission lifecycle and all registration and lowering consumers are implemented, with goldens on O0, O1, O2 and web. (was #5201 c22)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:17:13.131Z"
+          "evidence": "Moved to #6821 c4: forms are built on the kit standard views card",
+          "at": "2026-11-15T02:52:35.425Z",
+          "closure": "obsolete"
         },
         {
           "n": 33,
@@ -82640,11 +82659,12 @@
         {
           "n": 34,
           "text": "Route markers on struct methods, added to the app with one call (D-HTTP-ROUTE-EXPOSE1=A, D-ROUTE-ONE1=A): a jokes API with GET and POST routes serves identically on O0, O1 and O2, `web.openapi` renders both routes, and a bad path parameter is a compile error with a UI snapshot. Proof: `jet test Compiler --profile golden --filter Web/JokesApi`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:49.467Z"
+          "evidence": "Moved to #6865 c5: endpoint contracts are their own stream",
+          "at": "2026-11-15T02:52:36.320Z",
+          "closure": "obsolete"
         },
         {
           "n": 35,
@@ -82677,7 +82697,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T00:55:19.476Z",
-      "updated": "2026-11-15T02:49:32.256Z",
+      "updated": "2026-11-15T02:52:37.184Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 36
     },
@@ -97507,6 +97527,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:52:19.417Z"
+        },
+        {
+          "n": 5,
+          "text": "The table and virtual list views are headless typed models: a column access is checked against the row type, local and server data use one state, and a 100,000-row virtual list renders only its visible rows, with goldens on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter Web/TypedTable`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:20.563Z"
         }
       ],
       "refs": [],
@@ -97517,9 +97546,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:33.941Z",
-      "updated": "2026-11-15T02:52:19.417Z",
+      "updated": "2026-11-15T02:52:20.564Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0429qak",
@@ -101315,6 +101344,282 @@
       "needsAcceptance": false,
       "created": "2026-11-15T02:52:17.496Z",
       "updated": "2026-11-15T02:52:17.496Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0m0czk2",
+      "num": 6867,
+      "title": "Offline write queue: request keys, row versions, shared tabs, session expiry and refused-write notices",
+      "body": "Destination: an app's writes made offline are queued, replayed exactly once, never conflict with the device's own earlier edits, survive tabs and session expiry, and a refused write is never lost silently.\n\nWhy it matters: local-first apps (Linear, Convex) win on writes that just work offline; a queue that double-applies, conflicts with itself or drops a refusal loses user data.\n\nDecisions: D-SYNC2=A (typed local collections that work offline and sync), D-SYNC1=A (CRDT values), D-WEBAPP-SHAPE1=A (shape: Docs/proposals/2026-11-13-web-app-framework-shape.md). Gaps K1 come from the #6792 review round 2.\n\nSource: #3709 c6, c11, c14-c17, c23, c26. Parent: #3709.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Two clients: one edits offline, reconnects, the server refuses one of its writes and that client rolls it back, on O0, O1, O2 and web. Proof: `jet test Compiler --profile cases --filter sync_two_clients`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:09.432Z"
+        },
+        {
+          "n": 2,
+          "text": "Every queued or retried remote write carries a request key; the server keeps (account, key) -> result for 24 hours and answers a replay with the stored result. Proof: `jet test Compiler --profile cases --filter web_app/replayed_write_returns_stored_result` (the first response is dropped).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:09.432Z"
+        },
+        {
+          "n": 3,
+          "text": "A second queued edit to one row carries the version the first edit predicts, so a device never conflicts with itself. Proof: `jet test Compiler --profile cases --filter web_app/two_offline_edits_one_row`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:09.432Z"
+        },
+        {
+          "n": 4,
+          "text": "Browser tabs of one origin share one queue (IndexedDB plus a Web Lock), and the queue replays once. Proof: `jet test Compiler --profile cases --filter web_app/two_tabs_share_one_queue`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:09.432Z"
+        },
+        {
+          "n": 5,
+          "text": "When the session expires offline the queue is held, never sent under another account, and resumes after sign-in as the same account. Proof: `jet test Compiler --profile cases --filter web_app/queue_held_across_session_expiry`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:09.432Z"
+        },
+        {
+          "n": 6,
+          "text": "A client-made UUIDv7 ID lets an offline create open its row at once. An ID type's decoder accepts only UUIDv7 text (422 otherwise; a test sends \"t1\"). Table.add meeting a taken key answers DBError.Exists when the caller can read that row and Denied when it cannot, and the queue reports it. Proof: `jet test Compiler --profile cases --filter web_app/offline_create_with_client_id`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:09.432Z"
+        },
+        {
+          "n": 7,
+          "text": "A refused queued write whose screen is gone, or which is refused after a restart, adds a notice to the app notice list, kept until dismissed. Edits rebased on it replay with the row version each was made against, so one whose row changed since answers Conflict; each is judged on its own checks with its own notice. Proof: `jet test Compiler --profile cases --filter web_app/refused_queued_write_without_a_screen_becomes_a_kept_notice`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:09.432Z"
+        },
+        {
+          "n": 8,
+          "text": "Network partitions, concurrent merges, duplicated or reordered operations and reconnects keep every replica convergent: a seeded property test of random schedules over two and three replicas ends with equal state. Proof: `jet test Compiler --profile cases --filter sync_crdt/partitions_converge`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:09.432Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "sync",
+        "offline"
+      ],
+      "goals": [
+        "G9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:54:09.432Z",
+      "updated": "2026-11-15T02:54:09.432Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c00cqn1l",
+      "num": 6868,
+      "title": "Live queries scale: shared results, per-server caps, cross-server invalidation and SQL-narrowed read sets",
+      "body": "Destination: live queries (D-LIVEQUERY1=A, app.live) stay correct and cheap as subscribers and servers grow: results are shared when they can be, capped and coalesced when they burst, invalidated across servers, and narrowed to the rows they read.\n\nWhy it matters: a live query that re-runs for every subscriber on every write does not survive real traffic; one shared wrongly leaks data between callers.\n\nDecisions: D-LIVEQUERY1=A, D-INVALIDATE1=A, D-WEBAPP-SHAPE1=A. Gaps K3 come from the #6792 review round 2.\n\nSource: #3709 c13, c18-c21, c24, c25. Parent: #3709.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A live query over a tracked source updates from real deltas, a no-op write leaves the cached result untouched, a write publishes only after its transaction commits, and cancelling the subscription ends its re-runs, on O0, O1, O2 and web. Proof: `jet test Compiler --profile cases --filter web_app/live_query_lifecycle`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:10.299Z"
+        },
+        {
+          "n": 2,
+          "text": "A live query that reads no caller-dependent input shares one result among all subscribers with the same arguments. Proof: `jet test Compiler --profile cases --filter web_app/live_query_shared_result`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:10.299Z"
+        },
+        {
+          "n": 3,
+          "text": "Each server caps live subscriptions and re-runs per second and coalesces bursts of writes into one re-run. Proof: `jet test Compiler --profile cases --filter web_app/live_query_caps_and_coalescing` (a load case).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:10.299Z"
+        },
+        {
+          "n": 4,
+          "text": "Invalidations reach subscribers on other servers through a broker, Postgres LISTEN/NOTIFY first. Proof: `jet test Compiler --profile cases --filter web_app/live_query_cross_server_invalidation`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:10.299Z"
+        },
+        {
+          "n": 5,
+          "text": "Predicates the compiler can turn into SQL narrow the read set; any other predicate falls back to table-level invalidation, and `jet inspect` shows which. Proof: `jet test Compiler --profile cases --filter web_app/live_query_read_set_narrowing`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:10.299Z"
+        },
+        {
+          "n": 6,
+          "text": "A caller-dependent live query (one that reads app.caller() or runs under a row policy) is not shared between callers; the cost, one re-run per subscriber per write that meets the read set, is measured under the per-server caps. Proof: `jet test Compiler --profile cases --filter web_app/caller_dependent_live_query_is_not_shared`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:10.299Z"
+        },
+        {
+          "n": 7,
+          "text": "app.presence counts only accounts whose last read of that screen passed its policies: a refused reader is not counted. Proof: `jet test Compiler --profile cases --filter web_app/presence_counts_only_admitted_readers`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:10.299Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "sync",
+        "live-query"
+      ],
+      "goals": [
+        "G9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:54:10.299Z",
+      "updated": "2026-11-15T02:54:10.299Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0ems7zb",
+      "num": 6869,
+      "title": "Row policies: a typed Table.guard judges every read and write, and no path bypasses it",
+      "body": "Destination: a table's typed row policy (Table.guard(fn(db.Op, db.Who, db.Store) -> Bool)) is applied to every read and write from live queries, endpoints, jobs and webhooks, and no call path, malformed policy or unauthorized row gets around it.\n\nWhy it matters: row policies are the app's access control; one path that skips the guard leaks every row behind it.\n\nDecisions: D-DBPOLICY1=A (typed row-level access policies), D-WEBAPP-SHAPE1=A. Example app: Crewboard in Docs/proposals/2026-11-13-web-app-framework-shape.md.\n\nSource: #3709 c10-c12, c22. Parent: #3709.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Table.guard(fn(db.Op, db.Who, db.Store) -> Bool) judges a read on the stored row, an insert on the new row, a delete on the stored row and an update on both; the policy's reads see the transaction's earlier writes but not the write being judged, and a row the caller may not read is never returned. Proof: `jet test Compiler --profile cases --filter db/row_policy_judges_each_operation`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:11.163Z"
+        },
+        {
+          "n": 2,
+          "text": "Crewboard's policies hold: a Member's update of its own member row to Owner is refused; the creator rule admits an Owner member insert only for a project whose row names the caller as created_by and has no members, so create_project makes the caller its owner and nothing else can; an outsider's search and my_projects return nothing. Proof: `jet test Compiler --profile cases --filter web_app/crewboard_row_policies`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:11.163Z"
+        },
+        {
+          "n": 3,
+          "text": "The guard runs on every path that reads or writes a guarded table: live queries, endpoints, jobs and webhooks; a seeded test tries each path with an unauthorized caller and every attempt is refused. Proof: `jet test Compiler --profile cases --filter db/row_policy_no_bypass`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:11.163Z"
+        },
+        {
+          "n": 4,
+          "text": "A policy that does not type-check, or that reads a table it may not, is a compile error with a registered diagnostic and a UI snapshot. Proof: `jet test Compiler --profile ui --filter row_policy_invalid_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:54:11.163Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "db",
+        "security"
+      ],
+      "goals": [
+        "G9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:54:11.163Z",
+      "updated": "2026-11-15T02:54:11.163Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -206734,6 +207039,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:54:13.806Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ttcd0k",
+      "note": "#7: Examples/features/tooling/app_live.jet no longer exists on dev; strip debris; add proof; was: [#3700] Examples/features/tooling/app_live.jet and sync_crdt.jet match goldens on every level. `app.live` takes a `-[DB.Read]>` query and returns a typed value. A DB.Write query is a compile error (UI"
+    },
+    {
+      "at": "2026-11-15T02:54:12.908Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ttcd0k",
+      "note": "#2: merged its proof criterion c5 into it; was: Query, mutation, and action are defined as effect-row classes the compiler checks, with a diagnostic and snapshot for a query that writes and a mutation that calls the network."
+    },
+    {
+      "at": "2026-11-15T02:54:12.045Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ttcd0k",
+      "note": "#1: the D-WEBAPP-SHAPE1 proposal (e1641aeec0) covers the client cache, rollback, socket fan-out and the offline queue; partial bootstrap and local-only mode remain; was: A design proposal tied to D-LIVEQUERY1, D-SYNC1, D-DBPOLICY1, D-DX-QUERY1, and D-DX-SERVERFN1 covers client cache, partial bootstrap, transaction accept/reject with rollback, socket fan-out, offline q"
+    },
+    {
+      "at": "2026-11-15T02:54:11.163Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0ems7zb",
+      "note": "Row policies: a typed Table.guard judges every read and write, and no path bypasses it"
+    },
+    {
+      "at": "2026-11-15T02:54:10.299Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c00cqn1l",
+      "note": "Live queries scale: shared results, per-server caps, cross-server invalidation and SQL-narrowed read sets"
+    },
+    {
+      "at": "2026-11-15T02:54:09.432Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0m0czk2",
+      "note": "Offline write queue: request keys, row versions, shared tabs, session expiry and refused-write notices"
+    },
+    {
+      "at": "2026-11-15T02:52:37.184Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0vxf4u0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:52:36.320Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-15T02:52:35.425Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#32"
+    },
+    {
+      "at": "2026-11-15T02:52:34.430Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-15T02:52:33.426Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-15T02:52:32.540Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-15T02:52:31.620Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T02:52:30.726Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-15T02:52:29.837Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-15T02:52:28.959Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T02:52:28.087Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-15T02:52:27.168Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T02:52:26.220Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T02:52:25.243Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T02:52:24.273Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T02:52:23.340Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T02:52:22.422Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vxf4u0",
+      "note": "#31: unchanged outcome; wording; was: The 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun on the built framework against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel; every gap it lists is closed or ex"
+    },
+    {
+      "at": "2026-11-15T02:52:21.482Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vxf4u0",
+      "note": "#7: strip debris; add proof; was: (was #2428 c1) The first-party Router, Query, Forms, Table/Virtual and Store suite runs on one reactive App runtime, with goldens on O0, O1, O2 and web."
+    },
+    {
+      "at": "2026-11-15T02:52:20.564Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00xuadc",
+      "note": "#5 The table and virtual list views are headless typed models: "
+    },
     {
       "at": "2026-11-15T02:52:19.417Z",
       "by": "TowerKeeper-1",
