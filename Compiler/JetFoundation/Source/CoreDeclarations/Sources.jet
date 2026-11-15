@@ -39,7 +39,7 @@ core_decl_path_end: fn(bytes: [U8], start: Int) -> Int Never! {
 core_decl_word_then_space: fn(text: String, at: Int, word: String) -> Bool Never! {
     bytes: text.bytes()
     end: at + core_decl_len(word)
-    end < bytes.len() && core_decl_slice(text, at, end) == word && core_decl_space(Int{bytes[end]})
+    end < bytes.len() && foundation_byte_text(bytes, at, end) == word && core_decl_space(Int{bytes[end]})
 }
 
 // The byte of `line` after any `#Attr` or `#Attr("…")` attributes, or -1
@@ -70,7 +70,7 @@ core_decl_fn_name_at: fn(line: String, at: Int) -> String Never! {
     if name_end == at || !core_decl_tail(line, name_end).starts_with(": fn") -> return ""
     following: name_end + 4
     if following < bytes.len() && core_decl_word(Int{bytes[following]}) -> return ""
-    core_decl_slice(line, at, name_end)
+    foundation_byte_text(bytes, at, name_end)
 }
 
 // The name a `name: fn` declaration line declares after any attributes; ""
@@ -113,7 +113,7 @@ core_decl_type_name: fn(line: String) -> String Never! {
     at: if core_decl_word_then_space(line, start, "pub") -> core_decl_skip_space(bytes, start + 3) else -> start
     name_end: core_decl_name_end(bytes, at)
     if name_end == at || !core_decl_declares_at(bytes, core_decl_generics_end(bytes, name_end)) -> return ""
-    core_decl_slice(line, at, name_end)
+    foundation_byte_text(bytes, at, name_end)
 }
 
 // Whether `line` starts a top-level item: a column-0 declaration (dotted
@@ -150,16 +150,16 @@ core_decl_use_at: fn(text: String, start: Int) -> CoreDeclUse? Never! {
     alias := ""
     alias_end: core_decl_name_end(bytes, at)
     if alias_end > at && alias_end < bytes.len() && (Int{bytes[alias_end]}) == 58 {
-        alias = core_decl_slice(text, at, alias_end)
+        alias = foundation_byte_text(bytes, at, alias_end)
         at = core_decl_skip_space(bytes, alias_end + 1)
     }
     if core_decl_name_end(bytes, at) == at -> return None
     path_end: core_decl_path_end(bytes, at)
-    if core_decl_skip_space(bytes, path_end) >= bytes.len() -> return Val(CoreDeclUse{alias: alias, target: core_decl_slice(text, at, path_end), items: None})
+    if core_decl_skip_space(bytes, path_end) >= bytes.len() -> return Val(CoreDeclUse{alias: alias, target: foundation_byte_text(bytes, at, path_end), items: None})
     if (Int{bytes[path_end]}) != 91 || path_end - at < 2 || (Int{bytes[path_end - 1]}) != 46 -> return None
     close: core_decl_tail(text, path_end + 1).find("]")
     if close < 0 || core_decl_skip_space(bytes, path_end + 2 + close) < bytes.len() -> return None
-    Val(CoreDeclUse{alias: alias, target: core_decl_slice(text, at, path_end - 1), items: Val(core_decl_slice(text, path_end + 1, path_end + 1 + close))})
+    Val(CoreDeclUse{alias: alias, target: foundation_byte_text(bytes, at, path_end - 1), items: Val(foundation_byte_text(bytes, path_end + 1, path_end + 1 + close))})
 }
 
 // `local` occurs in `body` after a byte that does not continue a name.
@@ -261,7 +261,7 @@ core_decl_encoding_problem: fn(encoding: String, formats: [CoreDeclarationFormat
     // The cases are the body's first lines; a blank line ends them, and the
     // enum's own methods and impls follow it.
     cases := [String]{}
-    loop line in core_decl_slice(encoding, body_start, body_start + close).split("\n") {
+    loop line in foundation_byte_text(encoding.bytes(), body_start, body_start + close).split("\n") {
         trimmed: line.trim()
         if trimmed == "" && cases.len() > 0 -> break
         if trimmed != "" -> cases.push(trimmed)
@@ -292,7 +292,7 @@ core_decl_enum_body_start: fn(text: String, name: String) -> Int Never! {
         if !line_start {
             word := at
             loop word > 0 && core_decl_space(Int{bytes[word - 1]}) -> word -= 1
-            if word < at && word >= 3 && core_decl_slice(text, word - 3, word) == "pub" {
+            if word < at && word >= 3 && foundation_byte_text(bytes, word - 3, word) == "pub" {
                 pub_start := word - 3
                 loop pub_start > 0 && (Int{bytes[pub_start - 1]} == 32 || Int{bytes[pub_start - 1]} == 9) -> pub_start -= 1
                 line_start = pub_start == 0 || Int{bytes[pub_start - 1]} == 10
@@ -300,7 +300,7 @@ core_decl_enum_body_start: fn(text: String, name: String) -> Int Never! {
         }
         if !line_start -> next
         keyword: core_decl_skip_space(bytes, at + core_decl_len(needle))
-        if core_decl_slice(text, keyword, if keyword + 4 <= bytes.len() -> keyword + 4 else -> bytes.len()) != "enum" -> next
+        if foundation_byte_text(bytes, keyword, if keyword + 4 <= bytes.len() -> keyword + 4 else -> bytes.len()) != "enum" -> next
         brace: core_decl_skip_space(bytes, keyword + 4)
         if brace < bytes.len() && (Int{bytes[brace]}) == 123 -> return brace + 1
     }
@@ -320,7 +320,7 @@ core_decl_enum_variants: fn(text: String, open: Int) -> [String] Never! {
         }
         end += 1
     }
-    kept: loop line in core_decl_slice(text, open, end - 1).split("\n") -> if line.find(COMMENT_PREFIX) < 0 -> line.copy() else -> core_decl_slice(line, 0, line.find(COMMENT_PREFIX))
+    kept: loop line in foundation_byte_text(bytes, open, end - 1).split("\n") -> if line.find(COMMENT_PREFIX) < 0 -> line.copy() else -> foundation_byte_text(line.bytes(), 0, line.find(COMMENT_PREFIX))
     body: kept.join("\n")
     code_bytes: body.bytes()
     variants := [String]{}
@@ -344,7 +344,7 @@ core_decl_enum_variants: fn(text: String, open: Int) -> [String] Never! {
         }
         word_end := index + 1
         loop word_end < code_bytes.len() && core_decl_word(Int{code_bytes[word_end]}) -> word_end += 1
-        word: core_decl_slice(body, index, word_end)
+        word: foundation_byte_text(code_bytes, index, word_end)
         if word == "fn" || word == "impl" -> break
         if core_decl_upper(code) -> variants.push(word)
         index = word_end

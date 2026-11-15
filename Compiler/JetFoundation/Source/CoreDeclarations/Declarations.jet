@@ -219,18 +219,18 @@ core_decl_syntax_constants: fn(syntax: [CoreDeclarationFile]) -> [String: String
         loop line in file.text.split("\n") {
             bytes: line.bytes()
             colon: line.find(": ")
-            if colon <= 0 || !core_decl_is_constant(core_decl_slice(line, 0, colon)) -> next
-            name: core_decl_slice(line, 0, colon)
+            if colon <= 0 || !core_decl_is_constant(foundation_byte_text(bytes, 0, colon)) -> next
+            name: foundation_byte_text(bytes, 0, colon)
             open: colon + 2
             if open < bytes.len() && (Int{bytes[open]}) == 34 {
                 close: core_decl_quote_end(bytes, open)
                 if close < 0 -> next
-                constants[name] = core_decl_jet_string_text(core_decl_slice(line, open + 1, close), "{file.path} {name}") ?? return Err(err)
+                constants[name] = core_decl_jet_string_text(foundation_byte_text(bytes, open + 1, close), "{file.path} {name}") ?? return Err(err)
                 next
             }
             rest: core_decl_tail(line, open)
             if !rest.starts_with("String.from_bytes([U8]{{") || !rest.ends_with("}})") -> next
-            items: core_decl_slice(rest, core_decl_len("String.from_bytes([U8]{{"), core_decl_len(rest) - 2)
+            items: foundation_byte_text(rest.bytes(), core_decl_len("String.from_bytes([U8]{{"), core_decl_len(rest) - 2)
             text_bytes := [U8]{}
             listed := true
             loop item in items.split(",") {
@@ -263,7 +263,7 @@ core_decl_take_word: fn(line: String, at: Int) -> CoreDeclTake? Never! {
     if start < 0 || start >= bytes.len() -> return None
     end := start
     loop end < bytes.len() && !core_decl_space(Int{bytes[end]}) -> end += 1
-    Val(CoreDeclTake{text: core_decl_slice(line, start, end), end: end})
+    Val(CoreDeclTake{text: foundation_byte_text(bytes, start, end), end: end})
 }
 
 // The body between byte `open` and the first byte `close` after the
@@ -275,7 +275,7 @@ core_decl_take_block: fn(line: String, at: Int, open: Int, close: Int) -> CoreDe
     end := start + 1
     loop end < bytes.len() && (Int{bytes[end]}) != close -> end += 1
     if end >= bytes.len() -> return None
-    Val(CoreDeclTake{text: core_decl_slice(line, start + 1, end), end: end + 1})
+    Val(CoreDeclTake{text: foundation_byte_text(bytes, start + 1, end), end: end + 1})
 }
 
 // `<keyword> <open>…<close>` after byte `at`: its body, an empty body ending
@@ -378,7 +378,7 @@ core_decl_core_paths: fn(list: String, context: String) -> [String] CoreDeclarat
 // The argument of `<head>(<argument>)` when `descriptor` is exactly that.
 core_decl_descriptor_argument: fn(descriptor: String, head: String) -> String? Never! {
     if !descriptor.starts_with("{head}(") || !descriptor.ends_with(")") -> return None
-    Val(core_decl_slice(descriptor, core_decl_len(head) + 1, core_decl_len(descriptor) - 1))
+    Val(foundation_byte_text(descriptor.bytes(), core_decl_len(head) + 1, core_decl_len(descriptor) - 1))
 }
 
 // `Name`, `Name: plain`, `Name: crypto_nominal`, `Name: plain(A|B)`,
@@ -582,7 +582,7 @@ core_decl_plain_quoted: fn(text: String, at: Int) -> CoreDeclTake? Never! {
     loop end < bytes.len() {
         code: Int{bytes[end]}
         if code == 92 -> return None
-        if code == 34 -> return Val(CoreDeclTake{text: core_decl_slice(text, at + 1, end), end: end + 1})
+        if code == 34 -> return Val(CoreDeclTake{text: foundation_byte_text(bytes, at + 1, end), end: end + 1})
         end += 1
     }
     None
@@ -748,7 +748,7 @@ core_decl_list_body: fn(source: String, anchor: String, path: String) -> String 
             123 -> depth += 1
             125 -> {
                 depth -= 1
-                if depth == 0 -> return Ok(core_decl_slice(source, open + 1, index))
+                if depth == 0 -> return Ok(foundation_byte_text(bytes, open + 1, index))
             }
             else -> {}
         }
@@ -769,7 +769,7 @@ core_decl_resolve_items: fn(body: String, constants: [String: String]) -> [Strin
         }
         close: core_decl_quote_end(bytes, at)
         if close < 0 -> break
-        value: core_decl_slice(body, at + 1, close).replace("\\\"", "\"")
+        value: foundation_byte_text(bytes, at + 1, close).replace("\\\"", "\"")
         if !out.contains(value) -> out.push(value)
         at = close + 1
     }
@@ -781,7 +781,7 @@ core_decl_resolve_items: fn(body: String, constants: [String: String]) -> [Strin
             next
         }
         if start < 0 -> next
-        name: core_decl_slice(body, start, index)
+        name: foundation_byte_text(bytes, start, index)
         start = -1
         if !core_decl_is_constant(name) -> next
         if constants.get(name) == .Val(value) && !out.contains(value) -> out.push(value.copy())
@@ -833,7 +833,7 @@ core_decl_mem_tier_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarat
             attributes = if line.starts_with("#") -> "{attributes}{line}" else -> ""
             next
         }
-        written: "{attributes}{core_decl_slice(line, 0, core_decl_attributes_end(line))}"
+        written: "{attributes}{foundation_byte_text(line.bytes(), 0, core_decl_attributes_end(line))}"
         attributes = ""
         if written.find("#Unsafe(\"") >= 0 || (written.find("#[") >= 0 && written.find("Unsafe(\"") >= 0) -> marked.push(name)
     }
@@ -876,7 +876,7 @@ core_decl_snake_segment: fn(segment: String) -> String Never! {
         previous: Int{bytes[index - 1]}
         acronym_end: core_decl_upper(previous) && index + 1 < bytes.len() && core_decl_lower(Int{bytes[index + 1]})
         if acronym_end || core_decl_lower(previous) || core_decl_digit(previous) {
-            parts.push(core_decl_slice(segment, start, index))
+            parts.push(foundation_byte_text(bytes, start, index))
             start = index
         }
     }
@@ -967,7 +967,7 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
         bytes: line.bytes()
         head_end := 0
         loop head_end < bytes.len() && !core_decl_space(Int{bytes[head_end]}) -> head_end += 1
-        head: core_decl_slice(line, 0, head_end)
+        head: foundation_byte_text(bytes, 0, head_end)
         if head == {
             "bootstrap" -> {
                 groups: core_decl_bootstrap_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
@@ -997,7 +997,7 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
             "dispatcher_row" -> {
                 groups: core_decl_dispatcher_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
                 expression := groups[3].trim()
-                if expression.ends_with(",") -> expression = core_decl_slice(expression, 0, core_decl_len(expression) - 1)
+                if expression.ends_with(",") -> expression = foundation_byte_text(expression.bytes(), 0, core_decl_len(expression) - 1)
                 row: core_decl_dispatcher(groups, expression, number, constants) ?? return Err(core_decl_at(number, err))
                 key: if row.kind == "receiver" -> "receiver@{number}" else -> "{row.module_name}.{row.member}"
                 if dispatcher_keys.contains(key) -> return Err(core_decl_fail_at(number, "duplicate Core dispatcher row `{key}`"))

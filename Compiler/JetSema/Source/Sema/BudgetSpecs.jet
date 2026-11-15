@@ -16,6 +16,7 @@ use jet_foundation.[
     Stmt,
     expr_binary_operands,
     expr_span,
+    foundation_byte_text,
     type_name,
 ]
 
@@ -327,17 +328,12 @@ sema_budget_unresolved: fn(spec: BudgetSpec, attachment: String, why: String, fi
 
 BudgetNamedKey: struct { kind: String, name: String }
 
-// The bytes of `text` in `start..<end`.
-sema_budget_bytes_slice: fn(text: String, start: Int, end: Int) -> String Never! {
-    String.from_bytes_lossy(text.bytes()[start..<end])
-}
-
 // `Kind(name)` split into its kind and name.
 sema_budget_named_key: fn(value: String) -> BudgetNamedKey? Never! {
     open: value.find("(")
     if open < 0 || !value.ends_with(")") -> return None
     length: value.bytes().len()
-    Val(BudgetNamedKey{kind: sema_budget_bytes_slice(value, 0, open), name: sema_budget_bytes_slice(value, open + 1, length - 1)})
+    Val(BudgetNamedKey{kind: foundation_byte_text(value.bytes(), 0, open), name: foundation_byte_text(value.bytes(), open + 1, length - 1)})
 }
 
 sema_budget_validate_collisions: fn(specs: [LocatedBudgetSpec], findings: &[BudgetLocatedDiagnostic]) Never! {
@@ -468,7 +464,7 @@ sema_budget_elaborate: fn(role: String, entry: BudgetDecl, workloads: [String: C
         if identity == "Clean" || identity == "NoChange" {
             compile_workload = Val(CompileWorkloadFact{mode: identity, name: None, target: target, patch: None})
         } else if identity.starts_with("Edit(") && identity.ends_with(")") {
-            workload_name: sema_budget_bytes_slice(identity, 5, identity.bytes().len() - 1)
+            workload_name: foundation_byte_text(identity.bytes(), 5, identity.bytes().len() - 1)
             workload: workloads.get(workload_name) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "compile edit workload `{workload_name}` is not declared", "add the named `CompilerWorkload.Edit` entry to `compile_workloads`", provider_span)))
             if workload.target != target -> return Err(sema_budget_fail(sema_budget_invalid(name, "compile edit workload `{workload_name}` targets `{workload.target}` but the budget scope targets `{target}`", "make the workload target and `.Target(...)` scope name identical", provider_span)))
             compile_workload = Val(workload)
@@ -532,7 +528,7 @@ sema_budget_closed_provider: fn(name: String, expr: Expr) -> String BudgetSpecEr
         if (variant == "BuildArtifact" || variant == "AllocationProbe" || variant == "BenchMeasurement" || variant == "ServiceProbe" || variant == "SceneProbe") && value.name != "" -> return Ok(key)
         if variant == "CompilerProbe" {
             inner: value.name
-            edit: inner.starts_with("Edit(") && inner.ends_with(")") && sema_budget_snake_case(sema_budget_bytes_slice(inner, 5, inner.bytes().len() - 1))
+            edit: inner.starts_with("Edit(") && inner.ends_with(")") && sema_budget_snake_case(foundation_byte_text(inner.bytes(), 5, inner.bytes().len() - 1))
             if inner == "Clean" || inner == "NoChange" || edit -> return Ok(key)
         }
     }
@@ -665,13 +661,13 @@ sema_budget_snake_or_kebab: fn(value: String) -> Bool Never! {
 sema_budget_provider_kind: fn(provider: String) -> String Never! {
     open: provider.find("(")
     if open < 0 -> return provider.copy()
-    sema_budget_bytes_slice(provider, 0, open)
+    foundation_byte_text(provider.bytes(), 0, open)
 }
 
 sema_budget_provider_identity: fn(provider: String) -> String? Never! {
     open: provider.find("(")
     if open < 0 || !provider.ends_with(")") -> return None
-    Val(sema_budget_bytes_slice(provider, open + 1, provider.bytes().len() - 1))
+    Val(foundation_byte_text(provider.bytes(), open + 1, provider.bytes().len() - 1))
 }
 
 BudgetStructLit: struct { type_name: String, fields: [ExprField] }

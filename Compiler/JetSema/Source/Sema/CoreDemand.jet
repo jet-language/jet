@@ -73,6 +73,7 @@ use jet_foundation.[
     symbol_table_key,
     module_is_core,
     module_text,
+    foundation_byte_text,
 ]
 
 // Indexes the deferred bodies of `graph` for one finalization: none unless
@@ -1304,7 +1305,7 @@ sema_core_demand_template_key: fn(key: String) -> String Never! {
         if byte == 62 -> depth += 1
         if byte == 60 {
             depth -= 1
-            if depth == 0 -> return key.slice(0, position)
+            if depth == 0 -> return foundation_byte_text(bytes, 0, position)
         }
         position -= 1
     }

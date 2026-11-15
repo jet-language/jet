@@ -73,6 +73,7 @@ use {
         module_is_none,
         owned_trait_conversion,
         module_text,
+        foundation_byte_text,
     ]
 }
 
@@ -2319,8 +2320,8 @@ sema_expression_variant_head: fn(head: Type, environment: SemaScopeEnvironment, 
     // and its variants"; spec.md:518-519: labeled payloads use `Type.Variant{label: value}`.
     separator: path.rfind(".")
     if separator <= 0 -> return None
-    enum_name: path.slice(0, separator)
-    variant: path.slice(separator + 1, path.len())
+    enum_name: foundation_byte_text(path.bytes(), 0, separator)
+    variant: foundation_byte_text(path.bytes(), separator + 1, path.count_bytes())
     head_value: SemaExpressionVariantHead{enum_name: enum_name, variant: variant}
     owner: sema_expression_type_symbol(scopes, environment, program, enum_name)
     if owner == .Val(symbol) {
@@ -2429,7 +2430,7 @@ sema_expression_type_leaf: fn(text: String) -> String Never! {
     dot: text.rfind(".")
     colon: text.rfind(":")
     cut: if dot > colon -> dot else -> colon
-    text.slice(cut + 1, text.len())
+    foundation_byte_text(text.bytes(), cut + 1, text.count_bytes())
 }
 
 // E0753: a distinct head never re-types its base value;

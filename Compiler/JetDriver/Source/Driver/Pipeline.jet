@@ -200,6 +200,7 @@ use {
         diagnostic_column_at,
         diagnostic_line_at,
         diagnostic_with_source_mapping,
+        foundation_byte_text,
         jet_target_active_os_name,
         jet_target_layout_from_machine,
         jet_target_machine_for_facts,
@@ -2683,7 +2684,9 @@ jet_driver_comptime_flush: fn(
                 jet_driver_ice_record(census, item_name, "comptime.build", "unlowered", line)
                 next
             }
-            jet_driver_ice_record(census, line.slice(0..<at + 1), "comptime.build", "unlowered", line.slice(at + 3..<line.len()))
+            // `find` counts bytes, so the name and reason are cut from the bytes.
+            bytes: line.bytes()
+            jet_driver_ice_record(census, foundation_byte_text(bytes, 0, at + 1), "comptime.build", "unlowered", foundation_byte_text(bytes, at + 3, bytes.len()))
         }
         stopped := jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
         stopped.internal_problem = Val("the comptime evaluator can't build `{item_name}`: {jet_driver_ice_text(census)}")

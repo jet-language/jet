@@ -134,11 +134,6 @@ effect_vocabulary_strays: fn(found: [String], known: [String]) -> [String] {
     out
 }
 
-// The text of bytes `start..<end` of `text`.
-effect_vocabulary_slice: fn(text: String, start: Int, end: Int) -> String {
-    String.from_bytes_lossy(text.bytes()[start..<end])
-}
-
 // The whitespace-separated words of `text`.
 effect_vocabulary_words: fn(text: String) -> [String] {
     out := [String]{}
@@ -188,7 +183,7 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
         start: offset + raw.bytes().len() - raw.trim_start().bytes().len()
         offset += raw.bytes().len() + 1
         comment: raw.find(COMMENT_PREFIX)
-        line: (if comment < 0 -> raw.copy() else -> effect_vocabulary_slice(raw, 0, comment)).trim()
+        line: (if comment < 0 -> raw.copy() else -> foundation_byte_text(raw.bytes(), 0, comment)).trim()
         if line == "" -> next
         fields: effect_vocabulary_words(line)
         place: "{path}:{index + 1}"

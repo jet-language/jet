@@ -58,6 +58,7 @@ use jet_foundation.[
     symbol_table_key,
     type_name,
     checked_symbol_local,
+    foundation_byte_text,
 ]
 
 SemaMethodSpecialCheck: struct {
@@ -1933,7 +1934,7 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
     }
     suggestion: sema_call_method_suggestion(method, nominal, actual, environment, program)
     // A module-qualified receiver name (`module::Type`) names its module.
-    owner_module: if type_name_value.contains("::") -> type_name_value.slice(0, type_name_value.rfind("::")) else -> ""
+    owner_module: if type_name_value.contains("::") -> foundation_byte_text(type_name_value.bytes(), 0, type_name_value.rfind("::")) else -> ""
     protected: sema_call_core_nominal(nominal, environment, program) || (!source_owned && (sema_reserved_type_name(display) || sema_module_is_core_source(owner_module)))
     if protected {
         reached: if suggestion == None -> sema_call_method_reached_through(method, nominal, environment, program) else -> None

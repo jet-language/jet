@@ -54,6 +54,7 @@ use {
         symbol_table,
         type_name,
         foundation_named_type,
+        foundation_byte_text,
         ModuleID,
         module_is_core,
         owned_trait_conversion,
@@ -710,7 +711,7 @@ sema_error_conversion_hook_route: fn(plain_types: [String], target: String, targ
     if plain_types.contains(target) || !(foundation_named_type(target) == .Named(_)) || sema_registration_builtin_scalar(target) != None -> return None
     written: type_name(source)
     open: written.find("<")
-    from_ty: if open > 0 -> written.slice(0, open) else -> written
+    from_ty: if open > 0 -> foundation_byte_text(written.bytes(), 0, open) else -> written
     source_span: trait_span ?? target_span
     Val(ErrorConvDef{from_ty: from_ty, from_span: source_span, to_ty: target, to_span: target_span, body: hook.body, body_span: hook.span, markers: markers})
 }
@@ -1435,7 +1436,7 @@ sema_check_public_failure_carrier_graph: fn(function: String, error_type: Type, 
 }
 
 sema_public_failure_shown_name: fn(source: String, span: Span, leaf: String) -> String {
-    shown: sema_call_histories_span_text(source, span)
+    shown: foundation_byte_text(source.bytes(), span.start, span.end)
     if shown == "" -> return leaf.copy()
     shown
 }

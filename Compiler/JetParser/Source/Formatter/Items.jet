@@ -71,6 +71,7 @@ use jet_foundation.[
     codable_tag_field,
     codable_untagged,
     expr_span,
+    foundation_byte_text,
     owned_trait_requested,
 ]
 
@@ -229,7 +230,7 @@ jfmt_items_rfind: fn(haystack: [U8], needle: [U8], before: Int) -> Int? Never! {
 jfmt_last_segment: fn(text: String, separator: String) -> String Never! {
     bytes: text.bytes()
     position: jfmt_items_rfind(bytes, separator.bytes(), bytes.len()) ?? return text.copy()
-    jfmt_bytes_text(bytes, position + separator.bytes().len(), bytes.len())
+    foundation_byte_text(bytes, position + separator.bytes().len(), bytes.len())
 }
 
 jfmt_has_name: fn(entries: [NamedSpan], name: String) -> Bool Never! {
@@ -313,7 +314,7 @@ jfmt_unit_type_name: fn(member: String) -> String Never! {
     loop segment in member.split("_") {
         bytes: segment.bytes()
         if bytes.len() == 0 -> next
-        out = "{out}{jfmt_bytes_text(bytes, 0, 1).to_upper()}{jfmt_bytes_text(bytes, 1, bytes.len())}"
+        out = "{out}{foundation_byte_text(bytes, 0, 1).to_upper()}{foundation_byte_text(bytes, 1, bytes.len())}"
     }
     if out.len() == 0 -> return member.copy()
     out
@@ -344,7 +345,7 @@ jfmt_unit_family_decodes: fn(family: UnitFamilyDef, name: String) -> Bool? Never
 
 // Rust `Names::member_name(module_name, "")`.
 jfmt_member_name_prefix: fn(module_name: String) -> String Never! {
-    stripped: if module_name.starts_with("__jet_") -> jfmt_bytes_text(module_name.bytes(), 6, module_name.bytes().len()) else -> module_name.copy()
+    stripped: if module_name.starts_with("__jet_") -> foundation_byte_text(module_name.bytes(), 6, module_name.bytes().len()) else -> module_name.copy()
     decoded: jfmt_decode_generated_suffix(stripped) ?? stripped
     jfmt_generated_path("{decoded}.")
 }
@@ -503,7 +504,7 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
                 if code_module.body == .Val(body) {
                     prefix: jfmt_member_name_prefix(code_module.name)
                     if name.starts_with(prefix) {
-                        inner: jfmt_bytes_text(name.bytes(), prefix.bytes().len(), name.bytes().len())
+                        inner: foundation_byte_text(name.bytes(), prefix.bytes().len(), name.bytes().len())
                         if jfmt_decode_named_shapes(body, inner, args, seen) == .Val(shapes) -> return Val(shapes)
                     }
                     if jfmt_decode_named_shapes(body, name, args, seen) == .Val(shapes) -> return Val(shapes)
@@ -689,7 +690,7 @@ jfmt_fmt_item: fn(f: &JetFmt, item: Item) {
                 // so the declaration is written as the source spelled it. The
                 // parser accepts only the canonical arrows, so there is no
                 // arrow to respell.
-                jfmt_write(f, jfmt_bytes_text(text_bytes, 0, text_bytes.len()))
+                jfmt_write(f, foundation_byte_text(text_bytes, 0, text_bytes.len()))
                 jfmt_newline(f)
                 jfmt_skip_verbatim_comments(f, i.span.end)
             } else {
@@ -2253,7 +2254,7 @@ jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, impls: [TraitImplB
         value: setting.value ?? next
         if rows > 0 -> jfmt_newline(f)
         jfmt_emit_leading(f, setting.name_span.start)
-        jfmt_write(f, jfmt_bytes_text(setting.name.bytes(), 1, setting.name.bytes().len()))
+        jfmt_write(f, foundation_byte_text(setting.name.bytes(), 1, setting.name.bytes().len()))
         jfmt_write(f, ": ")
         jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
         rows += 1
@@ -2498,7 +2499,7 @@ jfmt_fmt_enum_group: fn(f: &JetFmt, e: EnumDef, g: EnumGroup, derives_decode: Bo
             jfmt_fmt_enum_group(f, e, e.groups[entry.index], derives_decode)
         } else {
             v: e.variants[entry.index]
-            leaf: if v.name.starts_with(prefix) -> jfmt_bytes_text(v.name.bytes(), prefix.bytes().len(), v.name.bytes().len()) else -> v.name
+            leaf: if v.name.starts_with(prefix) -> foundation_byte_text(v.name.bytes(), prefix.bytes().len(), v.name.bytes().len()) else -> v.name
             jfmt_fmt_variant_name_and_payload(f, v, leaf, derives_decode)
         }
     }
@@ -2586,7 +2587,7 @@ jfmt_enum_entries_at_prefix: fn(e: EnumDef, prefix: String) -> [JetFmtEnumEntry]
 
 jfmt_is_direct_child_path: fn(path: String, prefix: String) -> Bool Never! {
     if !path.starts_with(prefix) -> return false
-    rest: jfmt_bytes_text(path.bytes(), prefix.bytes().len(), path.bytes().len())
+    rest: foundation_byte_text(path.bytes(), prefix.bytes().len(), path.bytes().len())
     !rest.contains(".")
 }
 

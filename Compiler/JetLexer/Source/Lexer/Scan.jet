@@ -92,19 +92,6 @@ is_whitespace_at: fn(source: [U8], index: Int) -> Bool Never! {
     unicode.is_whitespace(scalar_at(source, index))
 }
 
-slice_text: fn(source: [U8], start: Int, end: Int) -> String Never! {
-    stop: if end < source.len() -> end else -> source.len()
-    if start >= stop -> return ""
-    if start >= 0 -> return String.from_bytes(source.slice(start, stop)) ?? ""
-    out := [U8]{}
-    i := start
-    loop i < end && i < source.len() {
-        out.push(source[i])
-        i += 1
-    }
-    String.from_bytes(out) ?? ""
-}
-
 emit: fn(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) Never! {
     flag := 0
     if uppercase -> flag = 1

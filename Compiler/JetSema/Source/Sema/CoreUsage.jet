@@ -58,6 +58,7 @@ use jet_foundation.[
     name_intern,
     name_table,
     name_table_sized,
+    foundation_byte_text,
 ]
 
 SemaCoreImport: struct {
@@ -483,10 +484,10 @@ sema_core_check_ui_capabilities: fn(call_facts: [SemaCallSiteFact], graph: SemaR
 sema_core_source_call_usage: fn(key: String, graph: SemaRegistrationGraph) -> String? Never! {
     if !key.starts_with("function:<corelib>/") -> return None
     cut: key.rfind(":")
-    head: key.slice(0, cut)
+    head: foundation_byte_text(key.bytes(), 0, cut)
     if !head.ends_with(":") -> return None
-    index: sema_registration_module_index_text(graph, head.slice(9, head.len() - 1)) ?? return None
-    Val("{graph.modules[index].module_name}::{key.slice(cut + 1, key.len())}")
+    index: sema_registration_module_index_text(graph, foundation_byte_text(head.bytes(), 9, head.count_bytes() - 1)) ?? return None
+    Val("{graph.modules[index].module_name}::{foundation_byte_text(key.bytes(), cut + 1, key.count_bytes())}")
 }
 
 sema_core_check_ui_usage: fn(usage: String, span: Span?, needs: [String], reported: &[String], diagnostics: &[Diagnostic]) {

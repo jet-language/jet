@@ -4528,7 +4528,7 @@ jet_driver_member_import: fn(declaration: ImportDecl, imports: [ImportDecl], out
         parts: name.split(".").to_list()
         if parts.len() < 2 -> return None
         member: parts[parts.len() - 1]
-        owner: name.slice(0, name.count_bytes() - member.count_bytes() - 1)
+        owner: name.slice(0, name.len() - member.len() - 1)
         names_member := false
         if parts[0] == "core" {
             if parts.len() == 2 || jet_driver_core_module_named(request.core_sources, name) || jet_driver_core_private_unit(name, span) != None -> return None

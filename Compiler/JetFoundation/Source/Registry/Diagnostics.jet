@@ -262,7 +262,7 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentit
         loop at in stem_start..<cursor {
             if diagnostic_byte_at(bytes, at) == 46 -> stem_end = at
         }
-        qualifier = diagnostic_bytes_text(bytes, stem_start, stem_end)
+        qualifier = foundation_byte_text(bytes, stem_start, stem_end)
     } else {
         cursor = index + 10
         segment := cursor
@@ -270,7 +270,7 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentit
             if diagnostic_byte_at(bytes, cursor) == 46 -> segment = cursor + 1
             cursor += 1
         }
-        qualifier = diagnostic_bytes_text(bytes, segment, cursor)
+        qualifier = foundation_byte_text(bytes, segment, cursor)
     }
     leaf := -1
     loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) {
@@ -284,7 +284,7 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentit
     if leaf < 0 || leaf >= cursor -> return -1
     head_end := leaf
     loop head_end < cursor && diagnostic_byte_at(bytes, head_end) != 46 -> head_end += 1
-    found.push(DiagnosticIdentity{start: index, end: cursor, name: diagnostic_bytes_text(bytes, leaf, cursor), head: diagnostic_bytes_text(bytes, leaf, head_end), qualifier: qualifier})
+    found.push(DiagnosticIdentity{start: index, end: cursor, name: foundation_byte_text(bytes, leaf, cursor), head: foundation_byte_text(bytes, leaf, head_end), qualifier: qualifier})
     cursor
 }
 

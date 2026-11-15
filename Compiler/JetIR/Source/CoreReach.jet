@@ -27,6 +27,7 @@ use {
         TStrFormat,
         TTryConvert,
         core_identity_in_module,
+        foundation_byte_text,
     ]
     jet_foundation.[DeclTable, ModuleID, NameRows, NameTable, Span, SymbolTable, Type, decl_table_find, decl_table_key, module_is_core, name_find, name_index, name_intern, name_rows, name_rows_get_text, name_rows_set_first, name_table_sized, symbol_key]
 }
@@ -703,7 +704,7 @@ ir_core_reach_template_key: fn(key: String) -> String Never! {
         if byte == 62 -> depth += 1
         if byte == 60 {
             depth -= 1
-            if depth == 0 -> return key.slice(0, position)
+            if depth == 0 -> return foundation_byte_text(bytes, 0, position)
         }
         position -= 1
     }

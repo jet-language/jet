@@ -30,17 +30,6 @@ diagnostic_push_text: fn(out: &[U8], text: String) Never! {
     loop byte in text.bytes() -> out.push(byte)
 }
 
-diagnostic_bytes_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
-    out := [U8]{}
-    index := if start < 0 -> 0 else -> start
-    limit: if end > bytes.len() -> bytes.len() else -> end
-    loop index < limit {
-        out.push(bytes[index])
-        index += 1
-    }
-    String.from_bytes(out) ?? ""
-}
-
 diagnostic_codepoint_at: fn(bytes: [U8], index: Int, width: Int) -> Int Never! {
     first: diagnostic_byte_at(bytes, index)
     second: if width == 2 || width == 3 || width == 4 -> diagnostic_byte_at(bytes, index + 1) else -> 0
@@ -210,7 +199,7 @@ diagnostic_line_text_at: fn(bytes: [U8], offset: Int) -> String Never! {
     end := start
     loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
     if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
-    diagnostic_bytes_text(bytes, start, end)
+    foundation_byte_text(bytes, start, end)
 }
 
 // The first `count` characters of `text`.
@@ -222,7 +211,7 @@ diagnostic_prefix_chars: fn(text: String, count: Int) -> String Never! {
         index += diagnostic_utf8_width(bytes, index)
         taken += 1
     }
-    diagnostic_bytes_text(bytes, 0, index)
+    foundation_byte_text(bytes, 0, index)
 }
 
 diagnostic_is_char_boundary: fn(bytes: [U8], index: Int) -> Bool Never! {
@@ -237,7 +226,7 @@ diagnostic_snippet_first_line: fn(bytes: [U8], span: Span) -> String Never! {
     if span.start > end || !diagnostic_is_char_boundary(bytes, span.start) || !diagnostic_is_char_boundary(bytes, end) -> return ""
     stop := span.start
     loop stop < end && bytes[stop] != (U8{10}) -> stop += 1
-    diagnostic_bytes_text(bytes, span.start, stop)
+    foundation_byte_text(bytes, span.start, stop)
 }
 
 diagnostic_right_align: fn(text: String, width: Int) -> String Never! {

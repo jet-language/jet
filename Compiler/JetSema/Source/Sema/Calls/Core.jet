@@ -65,6 +65,7 @@ use jet_foundation.[
     module_is_core,
     module_none,
     module_text,
+    foundation_byte_text,
 ]
 
 // A visible module alias (`use slots`, `use core.mem`) and the registered
@@ -279,7 +280,7 @@ sema_call_core_unbuilt_settle: fn(unbuilt: SemaCoreUnbuiltCall?, before: Int, di
     call: unbuilt ?? return
     if sema_has_error_since(diagnostics, before) -> return
     row: core_unbuilt_call(call.module_name, call.member) ?? return
-    short: call.module_name.slice(call.module_name.rfind(".") + 1, call.module_name.len())
+    short: foundation_byte_text(call.module_name.bytes(), call.module_name.rfind(".") + 1, call.module_name.count_bytes())
     diagnostics.push(sema_call_core_unbuilt_error("{short}.{call.member}", row, call.span))
 }
 
@@ -680,7 +681,7 @@ sema_call_core_no_os_hint: fn(module_name: String) -> String? Never! {
 sema_call_core_no_os_refused: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
     if !sema_scope_environment_no_os(environment, program) -> return false
     hint: sema_call_core_no_os_hint(module_name) ?? return false
-    short_name: module_name.slice(module_name.rfind(".") + 1, module_name.len())
+    short_name: foundation_byte_text(module_name.bytes(), module_name.rfind(".") + 1, module_name.count_bytes())
     diagnostics.push(sema_error("E3301", span, "`{short_name}.{member}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", hint))
     true
 }
@@ -1274,8 +1275,8 @@ sema_call_core_type_constraint_satisfied: fn(constraint: CoreCallTypeConstraint,
                 loop parameter in environment.generic_params {
                     if parameter.name == name -> return true
                 }
-                colon_leaf: name.slice(name.rfind(":") + 1, name.len())
-                leaf: colon_leaf.slice(colon_leaf.rfind(".") + 1, colon_leaf.len())
+                colon_leaf: foundation_byte_text(name.bytes(), name.rfind(":") + 1, name.count_bytes())
+                leaf: foundation_byte_text(colon_leaf.bytes(), colon_leaf.rfind(".") + 1, colon_leaf.count_bytes())
                 return leaf == "SigningKey" || leaf == "X25519SecretKey"
             }
             false

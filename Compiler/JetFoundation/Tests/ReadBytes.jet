@@ -2,7 +2,7 @@
 // These literal byte-input fixtures do not prove a String storage projection,
 // native activation, allocation counts, or failure-close behavior.
 use jet_foundation.[
-    diagnostic_codepoint_at, diagnostic_utf8_width, foundation_append_read_bytes,
+    diagnostic_codepoint_at, diagnostic_utf8_width, foundation_append_read_bytes, foundation_byte_text,
     foundation_read_bytes_at, foundation_read_bytes_len, foundation_read_bytes_scalar_at,
     foundation_utf8_lead_width, foundation_utf8_width,
 ]
@@ -54,4 +54,16 @@ read_bytes_require: fn(ok: Bool, message: String) Never! {
     read_bytes_require(diagnostic_utf8_width([U8]{240, 128, 65, 128}, 0) == 1, "bad third byte")
     read_bytes_require(diagnostic_codepoint_at([U8]{65}, 0, 0) == 65 && diagnostic_codepoint_at([U8]{65}, 0, 5) == 65, "original other-width fallback")
     read_bytes_require(diagnostic_utf8_width([U8]{224, 128, 128}, 0) == 3, "existing continuation-only width policy")
+}
+
+#Test("byte_text cuts at byte offsets") {
+    // "a—b" is a, the three bytes of an em dash, then b: byte 4 is `b`,
+    // though `b` is the third character.
+    bytes: "a—b: c".bytes()
+    read_bytes_require(foundation_byte_text(bytes, 4, 5) == "b", "a cut after a multi-byte character")
+    read_bytes_require(foundation_byte_text(bytes, 0, 4) == "a—", "a cut that ends after a whole character")
+    read_bytes_require(foundation_byte_text(bytes, 6, 100) == " c", "the end clamped to the bytes")
+    read_bytes_require(foundation_byte_text(bytes, -3, 1) == "a", "the start clamped to zero")
+    read_bytes_require(foundation_byte_text(bytes, 2, 5) == "", "a cut inside a character")
+    read_bytes_require(foundation_byte_text(bytes, 3, 3) == "" && foundation_byte_text(bytes, 5, 4) == "", "empty and reversed ranges")
 }

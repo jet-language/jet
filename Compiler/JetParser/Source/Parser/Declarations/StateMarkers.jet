@@ -21,6 +21,7 @@ use {
         Type,
         diagnostic_from_registry,
         diagnostic_with_edit,
+        foundation_byte_text,
         name_find,
         name_index,
         name_intern,
@@ -170,7 +171,7 @@ parser_state_marker_edit: fn(owner: String, info: StateMarkerOwner?, group: [Sta
     if state.groups.len() > 0 || !parser_state_marker_text_is(source, state.span.start, "state") -> return None
     open: parser_state_marker_skip_space(source, state.span.start + 5)
     if !parser_state_marker_text_is(source, open, "{{") -> return None
-    if parser_state_marker_text(source, state.span.start, state.span.end).contains(COMMENT_PREFIX) -> return None
+    if foundation_byte_text(source, state.span.start, state.span.end).contains(COMMENT_PREFIX) -> return None
     // Each state's moves, at the state's index of `state.states`.
     moves := [[String]]{}
     loop _ in state.states -> moves.push([String]{})
@@ -213,15 +214,15 @@ parser_state_marker_param_edit: fn(function: Func, owner: String, state: String,
     if param.declared_footprint != None -> return None
     if param.ty_span.start == param.name_span.start && param.ty_span.end == param.name_span.end {
         end: param.name_span.end
-        if param.name != "self" || end < 4 || parser_state_marker_text(source, end - 4, end) != "self" -> return None
+        if param.name != "self" || end < 4 || foundation_byte_text(source, end - 4, end) != "self" -> return None
         start := end - 4
         loop start > 0 && (Int{source[start - 1]}) == 38 -> start -= 1
-        caps: parser_state_marker_text(source, start, end - 4)
+        caps: foundation_byte_text(source, start, end - 4)
         return Val(TextEdit{span: Span{start: start, end: end}, new_text: "self: {caps}{owner}.{state}"})
     }
     start := param.ty_span.start
     loop start < param.ty_span.end && (Int{source[start]} == 38 || parser_state_marker_blank(source[start])) -> start += 1
-    written: parser_state_marker_text(source, start, param.ty_span.end)
+    written: foundation_byte_text(source, start, param.ty_span.end)
     if written != owner && written != "Self" -> return None
     Val(TextEdit{span: Span{start: start, end: param.ty_span.end}, new_text: "{owner}.{state}"})
 }
@@ -232,8 +233,8 @@ parser_state_marker_result_edit: fn(function: Func, owner: String, state: String
     span: function.return_type_span ?? return None
     prefixes: [String]{owner, "Self"}
     loop prefix in prefixes {
-        end: span.start + prefix.len()
-        if end > span.end || parser_state_marker_text(source, span.start, end) != prefix -> next
+        end: span.start + prefix.count_bytes()
+        if end > span.end || foundation_byte_text(source, span.start, end) != prefix -> next
         if end < span.end && parser_state_marker_ident_byte(source[end]) -> next
         return Val(TextEdit{span: Span{start: span.start, end: end}, new_text: "{owner}.{state}"})
     }
@@ -256,7 +257,7 @@ parser_state_marker_list: fn(state: StateDecl, moves: [[String]], source: [U8]) 
     loop line_start > 0 && (Int{source[line_start - 1]}) != 10 -> line_start -= 1
     indent_end := line_start
     loop indent_end < state.span.start && parser_state_marker_blank(source[indent_end]) -> indent_end += 1
-    indent: parser_state_marker_text(source, line_start, indent_end)
+    indent: foundation_byte_text(source, line_start, indent_end)
     lines := [String]{"state {{"}
     loop member in state.states {
         at: parser_state_marker_state_at(state, member.name) ?? 0
@@ -283,7 +284,7 @@ parser_state_marker_combine: fn(edits: [TextEdit], source: [U8]) -> TextEdit? Ne
     parts := [String]{}
     loop edit in sorted {
         if edit.span.start < cursor -> return None
-        parts.push(parser_state_marker_text(source, cursor, edit.span.start))
+        parts.push(foundation_byte_text(source, cursor, edit.span.start))
         parts.push(edit.new_text.copy())
         cursor = edit.span.end
     }
@@ -295,13 +296,8 @@ parser_state_marker_leaf: fn(path: String) -> String Never! {
     parts[parts.len() - 1].copy()
 }
 
-parser_state_marker_text: fn(source: [U8], start: Int, end: Int) -> String Never! {
-    if start < 0 || end > source.len() || start >= end -> return ""
-    String.from_bytes(source.slice(start, end)) ?? ""
-}
-
 parser_state_marker_text_is: fn(source: [U8], at: Int, word: String) -> Bool Never! {
-    parser_state_marker_text(source, at, at + word.len()) == word
+    foundation_byte_text(source, at, at + word.count_bytes()) == word
 }
 
 parser_state_marker_skip_space: fn(source: [U8], at: Int) -> Int Never! {

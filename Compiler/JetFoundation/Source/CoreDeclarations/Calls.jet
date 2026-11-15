@@ -117,7 +117,7 @@ core_decl_split_top_level: fn(source: String, context: String) -> [String] CoreD
             123 -> brace += 1
             125 -> brace -= 1
             44 -> if paren == 0 && bracket == 0 && brace == 0 {
-                part: core_decl_slice(source, start, index).trim()
+                part: foundation_byte_text(bytes, start, index).trim()
                 if part != "" -> parts.push(part)
                 start = index + 1
             }
@@ -145,8 +145,8 @@ core_decl_read_call: fn(source: String, start: Int, context: String) -> CoreDecl
     open: core_decl_skip_space(bytes, end)
     if open >= bytes.len() || (Int{bytes[open]}) != 40 -> return Err(core_decl_fail("unsupported Rust call in {context}: {source.trim()}"))
     close: core_decl_call_end(source, open, context) ?? return Err(err)
-    args: core_decl_split_top_level(core_decl_slice(source, open + 1, close), context) ?? return Err(err)
-    Ok(CoreDeclRustCall{name: core_decl_slice(source, start, end), args: args, end: close + 1})
+    args: core_decl_split_top_level(foundation_byte_text(bytes, open + 1, close), context) ?? return Err(err)
+    Ok(CoreDeclRustCall{name: foundation_byte_text(bytes, start, end), args: args, end: close + 1})
 }
 
 // A call that is the whole of `expression`.
@@ -221,17 +221,17 @@ core_decl_rust_string_text: fn(content: String, context: String) -> String CoreD
             next
         }
         if escape == 120 {
-            digits: core_decl_slice(content, index, if index + 2 < bytes.len() -> index + 2 else -> bytes.len())
+            digits: foundation_byte_text(bytes, index, if index + 2 < bytes.len() -> index + 2 else -> bytes.len())
             value: core_decl_hex_number(digits)
             if core_decl_len(digits) != 2 || value < 0 || value > 127 -> return Err(core_decl_fail("invalid Rust byte escape in {context}"))
             out.push(U8{value})
             index += 2
             next
         }
-        if escape != 117 || index >= bytes.len() || (Int{bytes[index]}) != 123 -> return Err(core_decl_fail("unsupported Rust string escape `\\{core_decl_slice(content, index - 1, index)}` in {context}"))
+        if escape != 117 || index >= bytes.len() || (Int{bytes[index]}) != 123 -> return Err(core_decl_fail("unsupported Rust string escape `\\{foundation_byte_text(bytes, index - 1, index)}` in {context}"))
         close: core_decl_tail(content, index + 1).find("}}")
         if close < 0 -> return Err(core_decl_fail("unterminated Rust Unicode escape in {context}"))
-        value: core_decl_hex_number(core_decl_slice(content, index + 1, index + 1 + close).replace("_", ""))
+        value: core_decl_hex_number(foundation_byte_text(bytes, index + 1, index + 1 + close).replace("_", ""))
         if value < 0 -> return Err(core_decl_fail("invalid Rust Unicode escape in {context}"))
         if value > 1114111 || (value >= 55296 && value <= 57343) -> return Err(core_decl_fail("invalid Rust Unicode scalar in {context}"))
         loop byte in core_decl_utf8(value) -> out.push(byte)
@@ -245,7 +245,7 @@ core_decl_quoted: fn(value: String) -> String? Never! {
     bytes: value.bytes()
     if bytes.len() < 2 || (Int{bytes[0]}) != 34 -> return None
     if core_decl_quote_end(bytes, 0) != bytes.len() - 1 -> return None
-    Val(core_decl_slice(value, 1, bytes.len() - 1))
+    Val(foundation_byte_text(bytes, 1, bytes.len() - 1))
 }
 
 // The Syntax constant a Rust path names (`NAME`, `Syntax::NAME`,
@@ -275,7 +275,7 @@ core_decl_rust_slice: fn(expression: String, context: String) -> [String] CoreDe
     value: expression.trim()
     inner: if value.starts_with("&") -> value.removeprefix("&").trim_start() else -> ""
     if !inner.starts_with("[") || !inner.ends_with("]") -> return Err(core_decl_fail("unsupported Rust slice in {context}: {value}"))
-    core_decl_split_top_level(core_decl_slice(inner, 1, core_decl_len(inner) - 1), context)
+    core_decl_split_top_level(foundation_byte_text(inner.bytes(), 1, core_decl_len(inner) - 1), context)
 }
 
 core_decl_rust_bool: fn(expression: String, context: String) -> Bool CoreDeclarationError! {

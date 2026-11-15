@@ -34,6 +34,17 @@ foundation_utf8_codepoint: fn(first: Int, second: Int, third: Int, fourth: Int, 
     }
 }
 
+// The text of bytes `start..<end` of `bytes`, both bounds clamped into them;
+// "" for an empty range or one that cuts a character. Spans, String.find and
+// rfind, and byte scans count bytes, while String.slice, len and index_of
+// count characters, so text cut at a byte offset is cut here.
+foundation_byte_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
+    low: if start < 0 -> 0 else -> start
+    high: if end > bytes.len() -> bytes.len() else -> end
+    if low >= high -> return ""
+    String.from_bytes(bytes[low..<high]) ?? ""
+}
+
 // Compiler-internal READ operations on an already supplied byte array.
 // These helpers do not project a String, materialize a view, or grant access
 // to a Core private leaf. The caller keeps the source alive and unchanged.

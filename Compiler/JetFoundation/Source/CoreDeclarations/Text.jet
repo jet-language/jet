@@ -3,14 +3,9 @@
 // dispatcher rows, the Syntax constants and the Core sources the
 // declarations name are all read with these while the compiler builds.
 
-// The text of bytes `start..<end` of `text` (indexes from text.bytes()).
-core_decl_slice: fn(text: String, start: Int, end: Int) -> String Never! {
-    String.from_bytes_lossy(text.bytes()[start..<end])
-}
-
 core_decl_len: fn(text: String) -> Int Never! { text.bytes().len() }
 
-core_decl_tail: fn(text: String, start: Int) -> String Never! { core_decl_slice(text, start, core_decl_len(text)) }
+core_decl_tail: fn(text: String, start: Int) -> String Never! { foundation_byte_text(text.bytes(), start, core_decl_len(text)) }
 
 core_decl_space: fn(code: Int) -> Bool Never! {
     code == 32 || code == 9 || code == 10 || code == 11 || code == 12 || code == 13
@@ -124,14 +119,14 @@ core_decl_line: fn(raw: String) -> String Never! {
             quoted = true
             next
         }
-        if code == 47 && (Int{bytes[index + 1]}) == 47 -> return core_decl_slice(raw, 0, index).trim()
+        if code == 47 && (Int{bytes[index + 1]}) == 47 -> return foundation_byte_text(bytes, 0, index).trim()
     }
     raw.trim()
 }
 
 // The lines of `text`, a `\r\n` ending read as `\n`.
 core_decl_source_lines: fn(text: String) -> [String] Never! {
-    loop line in text.split("\n") -> if line.ends_with("\r") -> core_decl_slice(line, 0, core_decl_len(line) - 1) else -> line.copy()
+    loop line in text.split("\n") -> if line.ends_with("\r") -> foundation_byte_text(line.bytes(), 0, core_decl_len(line) - 1) else -> line.copy()
 }
 
 // Whether path `a` sorts before path `b` the way a sorted directory walk

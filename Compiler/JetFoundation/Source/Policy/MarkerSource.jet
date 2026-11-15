@@ -33,12 +33,6 @@ MarkerSourceDefault: struct {
     default: String
 }
 
-marker_source_slice: fn(text: String, start: Int, end: Int) -> String Never! {
-    bytes: text.bytes()
-    if start >= end -> return ""
-    String.from_bytes(bytes[start..<end]) ?? ""
-}
-
 // True when this byte sits at top level and outside a string.
 marker_source_scan_step: fn(scan: &MarkerSourceScan, byte: Int) -> Bool Never! {
     if scan.in_string {
@@ -73,14 +67,15 @@ marker_source_split_top_level: fn(text: String) -> [String] Never! {
     entries := [String]{}
     start := 0
     scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
-    loop (index, byte) in text.bytes() {
+    bytes: text.bytes()
+    loop (index, byte) in bytes {
         value: Int{byte}
         if marker_source_scan_step(scan, value) && value == 44 {
-            entries.push(marker_source_slice(text, start, index).trim())
+            entries.push(foundation_byte_text(bytes, start, index).trim())
             start = index + 1
         }
     }
-    last: marker_source_slice(text, start, text.len()).trim()
+    last: foundation_byte_text(bytes, start, bytes.len()).trim()
     if last.len() > 0 -> entries.push(last)
     entries
 }
@@ -98,10 +93,10 @@ marker_source_split_default: fn(value: String) -> MarkerSourceDefault? Never! {
                 inner: Int{bytes[end]}
                 marker_source_scan_step(default_scan, inner)
                 if inner == 125 && default_scan.depth == 0 && !default_scan.in_string {
-                    if marker_source_slice(value, end + 1, bytes.len()).trim().len() == 0 {
+                    if foundation_byte_text(bytes, end + 1, bytes.len()).trim().len() == 0 {
                         return Val(MarkerSourceDefault{
-                            type_text: marker_source_slice(value, 0, index).trim(),
-                            default: marker_source_slice(value, index + 1, end).trim(),
+                            type_text: foundation_byte_text(bytes, 0, index).trim(),
+                            default: foundation_byte_text(bytes, index + 1, end).trim(),
                         })
                     }
                     break
@@ -117,7 +112,7 @@ marker_source_split_default: fn(value: String) -> MarkerSourceDefault? Never! {
 // The entries of a `[…]` value.
 marker_source_list: fn(value: String) -> [String] Never! {
     if !value.starts_with("[") || !value.ends_with("]") || value.len() < 2 -> panic("expected a `[…]` list, found `{value}`")
-    marker_source_split_top_level(marker_source_slice(value, 1, value.len() - 1))
+    marker_source_split_top_level(foundation_byte_text(value.bytes(), 1, value.count_bytes() - 1))
 }
 
 marker_source_flag: fn(value: String, line: String) -> Bool Never! {
@@ -129,7 +124,7 @@ marker_source_flag: fn(value: String, line: String) -> Bool Never! {
 }
 
 marker_source_unprefixed: fn(written: String) -> String Never! {
-    if written.starts_with(".") -> return marker_source_slice(written, 1, written.len())
+    if written.starts_with(".") -> return foundation_byte_text(written.bytes(), 1, written.count_bytes())
     written.copy()
 }
 
@@ -231,15 +226,16 @@ marker_source_members: fn(text: String) -> [String] Never! {
     entries := [String]{}
     start := 0
     scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
-    loop (index, byte) in text.bytes() {
+    bytes: text.bytes()
+    loop (index, byte) in bytes {
         value: Int{byte}
         if marker_source_scan_step(scan, value) && (value == 10 || value == 44 || value == 59) {
-            entry: marker_source_slice(text, start, index).trim()
+            entry: foundation_byte_text(bytes, start, index).trim()
             if entry.len() > 0 -> entries.push(entry)
             start = index + 1
         }
     }
-    last: marker_source_slice(text, start, text.len()).trim()
+    last: foundation_byte_text(bytes, start, bytes.len()).trim()
     if last.len() > 0 -> entries.push(last)
     entries
 }
@@ -248,7 +244,7 @@ marker_source_members: fn(text: String) -> [String] Never! {
 marker_source_block: fn(member: String, what: String) -> String Never! {
     open: marker_source_byte_index(member, 123) ?? panic("{what} without a `{{` body: {member}")
     close: marker_source_last_byte_index(member, 125) ?? panic("{what} without a closing `}}`: {member}")
-    marker_source_slice(member, open + 1, close)
+    foundation_byte_text(member.bytes(), open + 1, close)
 }
 
 // The offset of the first `:` in `text`.
@@ -259,7 +255,7 @@ marker_source_setting_separator: fn(text: String) -> Int? Never! {
 // The text after a member's first `:`, or None for a member with none.
 marker_source_declared_value: fn(member: String) -> String? Never! {
     colon: marker_source_byte_index(member, 58) ?? return None
-    Val(marker_source_slice(member, colon + 1, member.len()).trim())
+    Val(foundation_byte_text(member.bytes(), colon + 1, member.count_bytes()).trim())
 }
 
 // Whether a member declares a function, `name: fn(…)`.
@@ -274,7 +270,7 @@ marker_source_struct_name: fn(member: String) -> String? Never! {
     value: marker_source_declared_value(member) ?? return None
     if !value.starts_with("struct ") && !value.starts_with("struct{{") -> return None
     colon: marker_source_byte_index(member, 58) ?? return None
-    Val(marker_source_slice(member, 0, colon).trim())
+    Val(foundation_byte_text(member.bytes(), 0, colon).trim())
 }
 
 // One marker type: the fields are the rule's parameters and the
@@ -304,8 +300,8 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
     loop entry in marker_source_members(block) {
         if marker_source_is_function(entry) -> next
         separator: marker_source_setting_separator(entry) ?? panic("a marker setting reads `name: value`, found `{entry}` in {context}")
-        key: marker_source_slice(entry, 0, separator).trim()
-        value: marker_source_slice(entry, separator + 1, entry.len()).trim()
+        key: foundation_byte_text(entry.bytes(), 0, separator).trim()
+        value: foundation_byte_text(entry.bytes(), separator + 1, entry.count_bytes()).trim()
         if key == {
             "sites" -> sites = loop item in marker_source_list(value) -> marker_source_site(item, context)
             "scopes" -> scopes = loop item in marker_source_list(value) -> marker_source_scope(item, context)
@@ -330,8 +326,8 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
     loop index in 0..<fields.len() {
         entry: fields[index]
         colon: marker_source_byte_index(entry, 58) ?? panic("marker field without `:` in {context}: {entry}")
-        label: marker_source_slice(entry, 0, colon).trim()
-        value: marker_source_slice(entry, colon + 1, entry.len()).trim()
+        label: foundation_byte_text(entry.bytes(), 0, colon).trim()
+        value: foundation_byte_text(entry.bytes(), colon + 1, entry.count_bytes()).trim()
         type_text := value
         default := String?{None}
         if marker_source_split_default(value) == .Val(split) {
@@ -340,7 +336,7 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
         }
         // A last list field with no default takes the remaining arguments.
         if index == fields.len() - 1 && default == None && type_text.starts_with("[") && type_text.ends_with("]") {
-            element: marker_source_slice(type_text, 1, type_text.len() - 1).trim()
+            element: foundation_byte_text(type_text.bytes(), 1, type_text.count_bytes() - 1).trim()
             variadic = Val(marker_source_arg_type(element))
             variadic_source_type = Val(element)
             variadic_name = Val(label)
@@ -405,7 +401,7 @@ marker_decl_signature: fn(declaration: MarkerDecl, source: String) -> String Nev
             default: if parameter.value != None -> "{{{value}}}" else -> ""
             parts.push("{parameter.name}: {shown}{default}")
         } else {
-            key: if parameter.name.starts_with("$") -> marker_source_slice(parameter.name, 1, parameter.name.len()) else -> parameter.name.copy()
+            key: if parameter.name.starts_with("$") -> foundation_byte_text(parameter.name.bytes(), 1, parameter.name.count_bytes()) else -> parameter.name.copy()
             settings.push("{key}: {value}")
         }
     }

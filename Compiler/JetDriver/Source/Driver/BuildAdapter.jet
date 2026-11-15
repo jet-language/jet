@@ -2,7 +2,7 @@
 // code (JetEval Native.jet) reaches every Build and BuildPlan host method of
 // the invocation through it.
 use {
-    jet_foundation.[SemaNameCase, Span, TComptimeField, TComptimeReport, TComptimeValue, Type, TypeTupleField, sema_casing_ascii_has_case, type_name]
+    jet_foundation.[SemaNameCase, Span, TComptimeField, TComptimeReport, TComptimeValue, Type, TypeTupleField, foundation_byte_text, sema_casing_ascii_has_case, type_name]
     jet_eval.[JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_build_context_id, jet_eval_build_field, jet_eval_build_session_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value, jet_eval_reflection_calls_to, jet_eval_reflection_marked_functions]
 
     build_input_crypto: core.crypto
@@ -772,8 +772,9 @@ jet_driver_build_http_length: fn(headers: [[U8]]) JetDriverBuildHTTPError! {
         line: String.from_bytes(bytes) ?? next
         colon: line.find(":")
         if colon < 0 -> next
-        if line.slice(0..<colon).lower() != "content-length" -> next
-        value: line.slice(colon + 1..<line.len()).trim()
+        // `find` counts bytes, so the name and value are cut from the bytes.
+        if foundation_byte_text(bytes, 0, colon).lower() != "content-length" -> next
+        value: foundation_byte_text(bytes, colon + 1, bytes.len()).trim()
         length: Int.parse(value) ?? return Err(JetDriverBuildHTTPError{message: "invalid Content-Length"})
         if length < 0 || length > 18446744073709551615 -> return Err(JetDriverBuildHTTPError{message: "invalid Content-Length"})
         if length > JET_DRIVER_BUILD_MAX_FETCH_BYTES -> return Err(JetDriverBuildHTTPError{message: "response exceeds its size bound"})

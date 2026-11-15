@@ -27,6 +27,7 @@ use {
         AST_EMPTY_CALL_ARG_FLAGS,
         sha256_hex,
         module_text,
+        foundation_byte_text,
     ]
     jet_parser.[
         parse_generated_source,
@@ -67,7 +68,7 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, env
         label := sema_call_devtools_label(args[index])
         if label == "" -> label = sema_call_histories_position_label(index)
         loop role in 0..<roles.len() {
-            if roles[role] == label -> identities[role] = sema_call_histories_span_text(module_source, args[index].span)
+            if roles[role] == label -> identities[role] = foundation_byte_text(module_source.bytes(), args[index].span.start, args[index].span.end)
         }
         if label == "strategy" && !sema_call_histories_is_none(args[index].expr) -> has_strategy = true
     }
@@ -127,14 +128,6 @@ sema_call_histories_position_label: fn(index: Int) -> String Never! {
 
 sema_call_histories_frame: fn(value: String) -> String Never! { "{value.len()}:{value}" }
 
-// The source text under `span`. Spans count bytes, so the slice is taken on
-// the bytes: a character slice would shift past every multi-byte character
-// before the span.
-sema_call_histories_span_text: fn(source: String, span: Span) -> String Never! {
-    bytes: source.bytes()
-    if span.start < 0 || span.end > bytes.len() || span.start >= span.end -> return ""
-    String.from_bytes(bytes.slice(span.start, span.end)) ?? ""
-}
 
 // The digest of every module source of the package, in load order.
 sema_call_histories_package_digest: fn(graph: SemaRegistrationGraph, package_identity: String) -> String Never! {

@@ -127,6 +127,7 @@ use jet_foundation.[
     compiler_threads_heaviest_first,
     owned_trait_codec_marker,
     owned_trait_bounds_pure,
+    foundation_byte_text,
 ]
 
 // Exact registered APIs without a browser host provider. The compiler witness
@@ -186,7 +187,7 @@ sema_target_socket_surface: fn(path: String) -> String? Never! {
     if core_module_export(path) != None -> return None
     separator: path.rfind(".")
     if separator < 0 -> return None
-    owner: path.slice(0, separator)
+    owner: foundation_byte_text(path.bytes(), 0, separator)
     if sema_target_is_socket_surface(owner) -> Val(owner) else -> None
 }
 
@@ -195,8 +196,8 @@ sema_target_wasip2_unsupported_operations: fn(used_core: [String]) -> [String] N
     loop usage in used_core {
         separator: usage.find("::")
         if separator < 0 -> next
-        module_name: usage.slice(0, separator)
-        member: usage.slice(separator + 2, usage.len())
+        module_name: foundation_byte_text(usage.bytes(), 0, separator)
+        member: foundation_byte_text(usage.bytes(), separator + 2, usage.count_bytes())
         unsupported: if module_name == {
             "core.net" -> if member == {
                 "tcp_connect_happy" | "tcp_ready" | "udp_ready" | "tls_connect" | "tls_read" | "tls_write" | "tls_close" | "dns_a" | "dns_aaaa" | "dns_txt" | "dns_ptr" | "dns_srv" -> true
@@ -256,7 +257,7 @@ sema_target_check_socket_surfaces: fn(graph: SemaRegistrationGraph, used_core: [
             }
             loop operation in operations {
                 separator: operation.rfind(".")
-                if separator < 0 || operation.slice(0, separator) != surface -> next
+                if separator < 0 || foundation_byte_text(operation.bytes(), 0, separator) != surface -> next
                 operation_key: "{graph.modules[module_row_index].module_identity.id}:{span.start}:{span.end}:E3305:{operation}"
                 if seen.get(operation_key) != None -> next
                 seen[operation_key] = true

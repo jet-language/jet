@@ -150,6 +150,7 @@ use {
         unit_family_distinct_defs,
         CModule,
         TCompilerBuiltin,
+        foundation_byte_text,
     ]
     jet_parser.[
         jfmt_decode_shapes,
@@ -2791,10 +2792,10 @@ sema_registration_unknown_impl_target: fn(definition: ImplDef) -> Diagnostic {
     type_name: definition.type_name
     header: if definition.trait_name == .Val(trait_name) -> "{type_name}.{trait_name}" else -> type_name
     dot: type_name.rfind(".")
-    leaf: type_name.slice(dot + 1, type_name.len())
+    leaf: foundation_byte_text(type_name.bytes(), dot + 1, type_name.count_bytes())
     built_in: dot < 0 && (sema_registration_builtin_scalar(type_name) != None || sema_core_is_math_type(type_name))
     why := "no struct, enum, or distinct type named `{type_name}` is declared here, and an `impl` only extends a declared type"
-    fix := if dot >= 0 -> "export `{leaf}` from `{type_name.slice(0, dot)}` as a struct, enum, or distinct type, or check the spelling" else -> "declare `{leaf}: struct`, `{leaf}: enum`, or `{leaf}: distinct …` first, or check the spelling"
+    fix := if dot >= 0 -> "export `{leaf}` from `{foundation_byte_text(type_name.bytes(), 0, dot)}` as a struct, enum, or distinct type, or check the spelling" else -> "declare `{leaf}: struct`, `{leaf}: enum`, or `{leaf}: distinct …` first, or check the spelling"
     if built_in {
         why = "`{type_name}` is built in, and an `impl` only extends a struct, enum, or distinct type declared by your program"
         trait_name: definition.trait_name ?? ""

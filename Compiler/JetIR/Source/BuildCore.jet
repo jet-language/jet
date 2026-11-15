@@ -39,7 +39,7 @@
 
 use {
     jet_backend.[X64DataExport]
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, name_rows_get_text, name_rows_sorted, name_rows_value, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, foundation_byte_text, name_rows_get_text, name_rows_sorted, name_rows_value, sha256_bytes, sha256_hex_bytes]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -192,7 +192,7 @@ ir_core_package: fn(module_name: String) -> String Never! {
     bytes: module_name.bytes()
     end := start
     loop end < bytes.len() && bytes[end] != (U8{46}) && bytes[end] != (U8{95}) -> end += 1
-    module_name.slice(start..<end)
+    foundation_byte_text(bytes, start, end)
 }
 
 // Builds the library's roots in `program` but the `skipped` ones and those

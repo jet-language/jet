@@ -31,6 +31,7 @@ use {
         TextEdit,
         Type,
         expr_span,
+        foundation_byte_text,
         name_index,
         name_intern,
         name_start,
@@ -274,15 +275,10 @@ jfmt_compound_spell: fn(op: BinOp) -> String Never! {
 
 // ---- byte/text helpers ----
 
-jfmt_bytes_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
-    if start < 0 || end > bytes.len() || start > end -> return ""
-    String.from_bytes(bytes[start..<end]) ?? ""
-}
-
-// Rust `self.src.get(start..end)`: the source text of a byte span, "" when
-// the span is out of range.
+// Rust `self.src.get(start..end)`: the source text of a byte span, clamped
+// into the source.
 jfmt_src_text: fn(f: JetFmt, start: Int, end: Int) -> String Never! {
-    jfmt_bytes_text(f.src_bytes, start, end)
+    foundation_byte_text(f.src_bytes, start, end)
 }
 
 // Rust `src.get(start..end).is_some()`.
@@ -1838,7 +1834,7 @@ jfmt_new: fn(prog: Program, src: String, source_toks: [Token], simplify: Bool) -
     bytes: src.bytes()
     comments := [JetFmtComment]{}
     loop token in source_toks {
-        if jfmt_is_comment_kind(token.kind) -> comments.push(JetFmtComment{text: jfmt_bytes_text(bytes, token.span.start, token.span.end), span: token.span})
+        if jfmt_is_comment_kind(token.kind) -> comments.push(JetFmtComment{text: foundation_byte_text(bytes, token.span.start, token.span.end), span: token.span})
     }
     closes: jfmt_brace_closes(source_toks)
     JetFmt{
@@ -1977,7 +1973,7 @@ jfmt_fmt_launch_line: fn(f: &JetFmt) Never! {
     if bytes.len() < 3 || bytes[0] != (U8{35}) || bytes[1] != (U8{33}) || bytes[2] != (U8{47}) -> return
     end := 0
     loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
-    jfmt_write(f, jfmt_bytes_text(bytes, 0, end))
+    jfmt_write(f, foundation_byte_text(bytes, 0, end))
     jfmt_newline(f)
     next_start: if f.source_toks.len() > 0 -> f.source_toks[0].span.start else -> bytes.len()
     if next_start > end && jfmt_source_has_blank_line(bytes, end, next_start) -> jfmt_newline(f)
@@ -2233,7 +2229,7 @@ jfmt_lines: fn(text: String) -> [String] Never! {
     if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := lines.pop()
     loop index in 0..<lines.len() {
         bytes: lines[index].bytes()
-        if bytes.len() > 0 && bytes[bytes.len() - 1] == 13 -> lines[index] = jfmt_bytes_text(bytes, 0, bytes.len() - 1)
+        if bytes.len() > 0 && bytes[bytes.len() - 1] == 13 -> lines[index] = foundation_byte_text(bytes, 0, bytes.len() - 1)
     }
     lines
 }

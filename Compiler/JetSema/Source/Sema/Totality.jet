@@ -3,7 +3,7 @@
 // neither broke the law; the driver turns each function it left incomplete
 // into one ICE row (jet_driver_totality_problem), so one run names them all
 // instead of one whole-graph stop.
-use jet_foundation.[ModuleTable, module_text]
+use jet_foundation.[ModuleTable, foundation_byte_text, module_text]
 
 // One function a check left incomplete, with one recorded cause.
 SemaTotalityRow: struct {
@@ -41,5 +41,5 @@ sema_totality_rows: fn(modules: [SemaGraphModuleResult], table: ModuleTable) -> 
 sema_totality_reason_row: fn(owner: String, reason: String) -> SemaTotalityRow Never! {
     at: reason.find("`: ")
     if at < 0 -> return SemaTotalityRow{owner: owner.copy(), function: "-", reason: reason.copy()}
-    SemaTotalityRow{owner: owner.copy(), function: reason.slice(0..<at + 1), reason: reason.slice(at + 3..<reason.len())}
+    SemaTotalityRow{owner: owner.copy(), function: foundation_byte_text(reason.bytes(), 0, at + 1), reason: foundation_byte_text(reason.bytes(), at + 3, reason.count_bytes())}
 }

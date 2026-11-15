@@ -34,6 +34,7 @@ use {
         dimension_display_name,
         expr_source_start,
         expr_span,
+        foundation_byte_text,
         measure_expression,
         pipe_value_is_name,
         type_name,
@@ -1021,9 +1022,11 @@ jfmt_fmt_named_struct_head: fn(f: &JetFmt, type_name: String, type_args: [Type],
         jfmt_fmt_struct_head_type_args(f, type_args, source_span)
         return
     }
-    jfmt_write(f, type_name.slice(0, dot))
+    // `find` counts bytes, so the head is cut from the bytes.
+    bytes: type_name.bytes()
+    jfmt_write(f, foundation_byte_text(bytes, 0, dot))
     jfmt_fmt_struct_head_type_args(f, type_args, source_span)
-    jfmt_write(f, type_name.slice(dot, type_name.len()))
+    jfmt_write(f, foundation_byte_text(bytes, dot, bytes.len()))
 }
 
 jfmt_fmt_struct_head_type_args: fn(f: &JetFmt, type_args: [Type], source_span: Span?) {
@@ -1094,7 +1097,7 @@ jfmt_layout_selector_name: fn(name: String) -> String? Never! {
     prefix: jfmt_internal_name("jet.layout.selector.")
     if !name.starts_with(prefix) -> return None
     bytes: name.bytes()
-    Val(jfmt_bytes_text(bytes, prefix.bytes().len(), bytes.len()))
+    Val(foundation_byte_text(bytes, prefix.bytes().len(), bytes.len()))
 }
 
 jfmt_fmt_err_constructor: fn(f: &JetFmt, fields: [ExprField], span: Span) {
