@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 106525,
+    "rev": 106526,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -96102,6 +96102,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "Correction to the p190b c9 log: those numbers don't meet the criterion's setup. (1) They were taken in the gate tree, where a run with a named toolchain root binds Core lazily, skips the core.bodies lend and checks about 1000 more Core bodies from text (op twin run: bodies_loaded 0, from_text 1130 in-tree against 982 and 128 out of tree; Request.jet:2274-2289). (2) systemd MemoryPeak leaves out the jet image's cached file pages, while the criterion's /usr/bin/time maxrss counts about 90 MB of them. The receipt is retaken out of tree with maxrss, in a quiet measurement slot between cycles. The in-tree lazy binding is a Core-from-text path under #6328 c22."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c9 on batch compiler p190b (dev c47e14b464, with the precompiled-Core fragments, register-mentions, step T and file-rule stack): the scaling-corpora shapes run had a median wall of 444 ms over 5 runs (434-574) and a median peak of 183.5 MB (180-192.5), with comptime.bodies at 0.1 ms. That passes the first program. Step T counters: bodies_loaded 452, bodies_from_text 66, core_source_units 0. The optimization twin took 1.017-1.064 s and peaked at 328-334 MB: memory passes 400 MB, but wall fails 1 s by about 3%. PrecompiledCore-4 owns the remaining ~50 ms and the committed receipt the criterion requires."
         },
         {
@@ -96404,7 +96409,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-15T21:45:29.087Z",
+      "updated": "2026-11-15T21:49:53.287Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -218560,6 +218565,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T21:49:53.287Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T21:47:00.157Z",
       "by": "Main",
