@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6844,
-    "rev": 102622,
+    "rev": 102625,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35,7 +35,7 @@
         "radar:e11"
       ]
     },
-    "completionCursor": "2026-11-15T00:00:03.520Z"
+    "completionCursor": "2026-11-15T01:17:55.455Z"
   },
   "epochs": [
     {
@@ -42829,20 +42829,20 @@
         {
           "n": 2,
           "text": "Every owed-transition diagnostic uses one sentence shape, and each existing safety check stays at least as strict, proven by the existing UI snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-01T12:23:23.782Z"
+          "evidence": "Holds on dev since 49f6bf6fe6: every value-debt diagnostic (E0140, E0141, E0142, E0143, E0419, L1101) opens \"`x` still owes <transition>\", with the same code, span, why and fix as before. The UI snapshots that commit touched all pass on the gate-p136 batch jet: `jet test Compiler --profile ui --filter must_use_` 4 PASS 0 FAIL, `--filter task_list` 12 PASS 0 FAIL, `--filter iter_unconsumed` 1 PASS, `--filter scope_guard_discarded` 4 PASS, and `--filter single_use_` 12 PASS for single_use_aliased, single_use_branch, single_use_branch_expr and single_use_consume_unaudited (its 1 FAIL, ownership/single_use_copy_is_refused, is a newer d93656f4c3 snapshot with a caret-width mismatch, not a debt line).",
+          "at": "2026-11-15T01:18:21.688Z"
         },
         {
           "n": 3,
           "text": "[#4151]  • The owner-design criterion is met by D-OWES1=A (ratified 2026-10-02: `#MustFinish(commit, rollback, on_fail: rollback)`). • A function that can return with an open transaction is rejected at compile time (UI snapshot). A failed commit cannot be ignored. • Database begin/commit/rollback stop returning Bool (Database.jet:38-45,61-68).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:29:33.064Z"
+          "evidence": "Holds on dev since 3ad0f3310a: core.db Database.begin returns a #SingleUse DBTransaction (`-[DB]> DBTransaction DBError!`, Core/Db/Db.jet:719), and its commit and rollback fail with DBError!, so none returns Bool. The D-OWES1 debt is spelled #SingleUse rather than #MustFinish. `jet test Compiler --profile ui --filter single_use_` PASSes ownership/single_use_return_leaves_transaction_open (a return that leaves the transaction open is a compile error), and `--filter db_commit_failure_cannot_be_ignored` gives 1 PASS, on the gate-p136 batch jet.",
+          "at": "2026-11-15T01:18:22.753Z"
         },
         {
           "n": 4,
@@ -42865,7 +42865,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-01T12:23:21.776Z",
-      "updated": "2026-11-07T04:02:30.459Z",
+      "updated": "2026-11-15T01:18:22.753Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -205676,6 +205676,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T01:18:22.754Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0kz2hdf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T01:18:21.688Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0kz2hdf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T01:17:55.455Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-15T01:17:55.455Z"
+    },
     {
       "at": "2026-11-15T01:11:01.671Z",
       "by": "Main",
