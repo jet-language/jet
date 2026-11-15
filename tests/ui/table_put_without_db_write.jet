@@ -1,0 +1,21 @@
+// A typed table's `get` and `query` carry DB.Read and its `add`, `put` and
+// `delete` carry DB.Write, so a function whose effect row allows only DB.Read
+// can read rows but not write one.
+use db: core.db
+
+#Codable
+Task: struct {
+    id: Int
+    title: String
+}
+
+rename: fn(tasks: db.Table<Int, Task>, id: Int, title: String) -[DB.Read]> {
+    task: tasks.get(id) ?? return
+    _: tasks.put(Task{id: task.id, title: title}) ?? return
+}
+
+run: fn() {
+    store: db.open_memory()
+    tasks: store.table("tasks", key: fn(task: Task) { task.id })
+    rename(tasks, 1, "renamed")
+}

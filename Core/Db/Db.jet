@@ -23,6 +23,10 @@ use {
     encoding: core.encoding
     core.encoding.[Dyn]
     stream: __core_encoding_stream
+    json: core.encoding.json
+    // A typed table's `query` is a data query over its rows.
+    data: core.data
+    core.data.[Query]
     // DBScope.live bindings share app's process-wide live registry.
     app
     app.[Live]
@@ -131,18 +135,29 @@ pool_receipt_text: fn(receipt: DBPoolReceipt) -> String Never! {
     assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=drained max=2 available=1 leased=0 opening=1 ready=0 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
 }
 
+// A database operation's failure. `Failed` carries the engine's or the API's
+// message; `Exists` is `Table.add` finding a row that holds the key already.
 #[Error, Equatable]
-DBError: struct {
-    message: String
+DBError: enum {
+    Failed(String)
+    Exists
 
-    impl Display { display: fn(self) -> String { self.message.copy() } }
+    // The failure in one line.
+    message: fn(self) -> String {
+        if self == {
+            .Failed(text) -> text.copy()
+            .Exists -> "a row with that key exists"
+        }
+    }
 
-    impl Debug { debug: fn(&&self) -> String { self.message } }
+    impl Display { display: fn(self) -> String { self.message() } }
+
+    impl Debug { debug: fn(&&self) -> String { self.message() } }
 }
 
-impl DBError -> Err { Err(self.message) }
+impl DBError -> Err { Err(self.message()) }
 row_value: fn(row: [String: DBValue], column: String) -> DBValue DBError! {
-    value: row.get(column) ?? return Err(DBError{message: "missing column `{column}`"})
+    value: row.get(column) ?? return Err(db_error("missing column `{column}`"))
     Ok(value)
 }
 
@@ -150,7 +165,7 @@ row_int: fn(row: [String: DBValue], column: String) -> Int DBError! {
     value: row_value(row, column)
     if value == {
         .Int(number) -> Ok(number)
-        .Null | .Float(_) | .Text(_) | .Bool(_) | .Blob(_) -> Err(DBError{message: "expected an int, got {render_value(value)}"})
+        .Null | .Float(_) | .Text(_) | .Bool(_) | .Blob(_) -> Err(db_error("expected an int, got {render_value(value)}"))
     }
 }
 
@@ -159,7 +174,7 @@ row_float: fn(row: [String: DBValue], column: String) -> Float DBError! {
     if value == {
         .Float(number) -> Ok(number)
         .Int(number) -> Ok(Float{number})
-        .Null | .Text(_) | .Bool(_) | .Blob(_) -> Err(DBError{message: "expected a float, got {render_value(value)}"})
+        .Null | .Text(_) | .Bool(_) | .Blob(_) -> Err(db_error("expected a float, got {render_value(value)}"))
     }
 }
 
@@ -167,7 +182,7 @@ row_text: fn(row: [String: DBValue], column: String) -> String DBError! {
     value: row_value(row, column)
     if value == {
         .Text(text) -> Ok(text)
-        .Null | .Int(_) | .Float(_) | .Bool(_) | .Blob(_) -> Err(DBError{message: "expected text, got {render_value(value)}"})
+        .Null | .Int(_) | .Float(_) | .Bool(_) | .Blob(_) -> Err(db_error("expected text, got {render_value(value)}"))
     }
 }
 
@@ -178,9 +193,9 @@ row_bool: fn(row: [String: DBValue], column: String) -> Bool DBError! {
         .Int(number) -> {
             if number == 0 -> return Ok(false)
             if number == 1 -> return Ok(true)
-            Err(DBError{message: "expected a bool, got {number}"})
+            Err(db_error("expected a bool, got {number}"))
         }
-        .Null | .Float(_) | .Text(_) | .Blob(_) -> Err(DBError{message: "expected a bool, got {render_value(value)}"})
+        .Null | .Float(_) | .Text(_) | .Blob(_) -> Err(db_error("expected a bool, got {render_value(value)}"))
     }
 }
 
@@ -250,7 +265,7 @@ __float_text: fn(value: Float) -> String Never! {
     String.from_bytes(out) ?? panic("decimal float text must be UTF-8")
 }
 
-priv db_error: fn(message: String) -> DBError Never! { DBError{message: message.copy()} }
+priv db_error: fn(message: String) -> DBError Never! { DBError.Failed(message.copy()) }
 priv db_closed: fn() -> DBError Never! { db_error("database connection is closed") }
 
 // Checked SQL: the template text with `?` placeholders plus its bound values.
@@ -695,7 +710,7 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
 
 // ---- connections and scopes ----------------------------------------------
 
-// One SQLite connection shared by a DBConnection and every scope derived from
+// One SQLite connection shared by a Store and every scope derived from
 // it. `close` shuts the driver down in place for all of them. `path` is the
 // location it was opened at, for display. `written` names the tables written
 // since the last begin or commit, so a rollback can re-run their live bindings.
@@ -708,7 +723,7 @@ priv DBState: struct {
     began: Int{0}
 }
 
-DBConnection: struct {
+Store: struct {
     state: Shared<DBState>
 
     with_policy: fn(self, policy: RowPolicy, user: String) -[DB]> DBScope Never! {
@@ -718,13 +733,18 @@ DBConnection: struct {
     // or rolled back.
     begin: fn(self) -[DB]> DBTransaction DBError! { db_begin(self.state, false) }
     close: fn(self) -[DB]> Bool Never! { db_shutdown(self.state) }
+    // The typed table `name`: rows of type `T`, each found by the key that
+    // the pure function `key` computes from it.
+    table: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(self, name: String, key: &&fn(T) -[]> K) -> Table<K, T> Never! {
+        Table<K, T>{state: self.state.copy(), name: name.copy(), key_of: key.move()}
+    }
 
     // One line: where the database lives and whether it is still open.
     impl Display {
         display: fn(self) -> String {
             guard: self.state.guard_edit()
             status: if driver_closed(guard.value.driver) -> "closed" else -> "open"
-            "DBConnection({guard.value.path}, {status})"
+            "Store({guard.value.path}, {status})"
         }
     }
 }
@@ -785,12 +805,160 @@ DBTransaction: struct {
     }
 }
 
-priv db_open: fn(path: String, failure: String) -> DBConnection Never! {
-    driver := __driver_open(path) ?? panic(failure)
-    DBConnection{state: Shared{DBState{driver: driver.move(), path: path.copy(), written: [String]{}}}}
+// ---- typed tables ----------------------------------------------------------
+
+// The column a typed table keeps each encoded row in, and the one key column
+// of a table whose key is not a record.
+TABLE_ROW_COLUMN: "jet_row"
+TABLE_KEY_COLUMN: "key"
+
+// A typed table, from `store.table(name, key:)`. Each field of the key is a
+// key column (a key that is not a record is the one column `key`) and those
+// columns are the primary key; the column `jet_row` holds the encoded row.
+// The first write creates the table, and until then it reads as empty. Reads
+// carry DB.Read and writes DB.Write.
+Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
+    priv state: Shared<DBState>
+    priv name: String
+    priv key_of: fn(T) -[]> K
+
+    // The row whose key is `key`, or None.
+    get: fn(self, key: K) -[DB.Read]> T? DBError! {
+        cells: table_cells(self.name, key.encode()) ?? return Err(err)
+        guard := self.state.guard_edit()
+        if driver_closed(guard.value.driver) -> return Err(db_closed())
+        rows: table_read(guard.value.driver, self.name, "SELECT {TABLE_ROW_COLUMN} FROM \"{self.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
+        if rows.len() == 0 -> return Ok(None)
+        row: table_decode<T>(rows[0]) ?? return Err(err)
+        Ok(Val(row))
+    }
+    // Adds `row`, whose key no row may hold yet (else `Exists`).
+    add: fn(self, row: T) -[DB.Write]> T DBError! { table_write<K, T>(self, row, false) }
+    // Adds `row`, or replaces the row that holds its key.
+    put: fn(self, row: T) -[DB.Write]> T DBError! { table_write<K, T>(self, row, true) }
+    // Removes the row whose key is `key`, if there is one.
+    delete: fn(self, key: K) DBError! -[DB.Write]> {
+        cells: table_cells(self.name, key.encode()) ?? return Err(err)
+        guard := self.state.guard_edit()
+        if driver_closed(guard.value.driver) -> return Err(db_closed())
+        if !table_exists(guard.value.driver, self.name) -> return Ok()
+        _: __driver_execute(guard.value.driver, "DELETE FROM \"{self.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
+        Ok()
+    }
+    // Every row, in key order, as a data query.
+    query: fn(self) -[DB.Read]> Query<T> DBError! {
+        if !sql_identifier(self.name.bytes()) -> return Err(table_name_error(self.name))
+        guard := self.state.guard_edit()
+        if driver_closed(guard.value.driver) -> return Err(db_closed())
+        rows: table_read(guard.value.driver, self.name, "SELECT {TABLE_ROW_COLUMN} FROM \"{self.name}\"", [DBValue]{}) ?? return Err(err)
+        keyed := [(key: K, row: T)]{}
+        loop stored in rows {
+            row: table_decode<T>(stored) ?? return Err(err)
+            keyed.push((key: self.key_of(row.copy()), row: row))
+        }
+        keyed.sort_by(fn(left: (key: K, row: T), right: (key: K, row: T)) { left.key <=> right.key })
+        out := [T]{}
+        loop entry in keyed -> out.push(entry.row.copy())
+        Ok(data.query(out))
+    }
 }
-open: fn(path: String) -[DB]> DBConnection Never! { db_open(path, "database open failed") }
-open_memory: fn() -[DB]> DBConnection Never! { db_open(":memory:", "in-memory database open failed") }
+
+// `add` (replace false) and `put` (replace true): creates the table on its
+// first write, then inserts the encoded row under its key columns.
+priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, row: T, replace: Bool) -[DB.Write]> T DBError! {
+    key: table.key_of(row.copy())
+    cells: table_cells(table.name, key.encode()) ?? return Err(err)
+    encoded: json.to_string<T>(row) ?? return Err(db_error("the row for table `{table.name}` does not encode: {err}"))
+    columns := [String]{}
+    loop cell in cells -> columns.push("\"{cell.column}\"")
+    names: columns.join(", ")
+    guard := table.state.guard_edit()
+    if driver_closed(guard.value.driver) -> return Err(db_closed())
+    _: __driver_execute(guard.value.driver, "CREATE TABLE IF NOT EXISTS \"{table.name}\" ({names}, {TABLE_ROW_COLUMN} TEXT NOT NULL, PRIMARY KEY ({names}))", [DBValue]{}) ?? return Err(err)
+    if !replace {
+        held: __driver_query(guard.value.driver, "SELECT 1 AS held FROM \"{table.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
+        if held.len() > 0 -> return Err(DBError.Exists)
+    }
+    values := table_values(cells)
+    values.push(DBValue.Text(encoded))
+    marks := [String]{}
+    loop _ in 0..<values.len() -> marks.push("?")
+    verb: if replace -> "INSERT OR REPLACE" else -> "INSERT"
+    _: __driver_execute(guard.value.driver, "{verb} INTO \"{table.name}\" ({names}, {TABLE_ROW_COLUMN}) VALUES ({marks.join(", ")})", values) ?? return Err(err)
+    Ok(row)
+}
+
+// The key columns and values of an encoded key: one per field of a record
+// key, else the one column `key`.
+priv table_cells: fn(name: String, key: Dyn) -> [(column: String, value: DBValue)] DBError! {
+    if !sql_identifier(name.bytes()) -> return Err(table_name_error(name))
+    cells := [(column: String, value: DBValue)]{}
+    if !(key == .Object(_)) {
+        cells.push((column: TABLE_KEY_COLUMN, value: table_value(key)))
+        return Ok(cells)
+    }
+    loop entry in stream.object_entries(key) {
+        if !sql_identifier(entry.key.bytes()) || entry.key == TABLE_ROW_COLUMN -> return Err(db_error("table `{name}` cannot have the key column `{entry.key}`"))
+        cells.push((column: entry.key.copy(), value: table_value(entry.value)))
+    }
+    if cells.len() == 0 -> return Err(db_error("table `{name}` has a key with no fields"))
+    Ok(cells)
+}
+
+// A key field's column value: a scalar as itself, anything else as its JSON
+// text.
+priv table_value: fn(value: Dyn) -> DBValue Never! {
+    if value == {
+        .Null -> DBValue.Null
+        .Bool(flag) -> DBValue.Bool(flag)
+        .Int(number) -> DBValue.Int(number)
+        .Float(number) -> DBValue.Float(number)
+        .Text(text) -> DBValue.Text(text)
+        .Bytes(bytes) -> DBValue.Blob(bytes)
+        .Number(_) | .DateTime(_) | .Array(_) | .Object(_) -> DBValue.Text(json.to_string(value) ?? panic("a decoded key field always encodes as JSON"))
+    }
+}
+
+priv table_match: fn(cells: [(column: String, value: DBValue)]) -> String Never! {
+    terms := [String]{}
+    loop cell in cells -> terms.push("\"{cell.column}\" = ?")
+    terms.join(" AND ")
+}
+
+priv table_values: fn(cells: [(column: String, value: DBValue)]) -> [DBValue] Never! {
+    values := [DBValue]{}
+    loop cell in cells -> values.push(cell.value.copy())
+    values
+}
+
+priv table_name_error: fn(name: String) -> DBError Never! { db_error("`{name}` is not a table name: use letters, digits and `_`") }
+
+priv table_exists: fn(driver: &__Driver, name: String) -> Bool Never! {
+    found: __driver_query(driver, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [DBValue]{.Text(name.copy())}) ?? return false
+    found.len() > 0
+}
+
+// A read of a typed table: a table no write has created yet holds no rows.
+priv table_read: fn(driver: &__Driver, name: String, sql: String, values: [DBValue]) -> [[String: DBValue]] DBError! {
+    if !table_exists(driver, name) -> return Ok([[String: DBValue]]{})
+    __driver_query(driver, sql, values)
+}
+
+priv table_decode: fn<T: Decode>(stored: [String: DBValue]) -> T DBError! {
+    text: row_text(stored, TABLE_ROW_COLUMN) ?? return Err(err)
+    tree: json.parse(text) ?? return Err(db_error("a stored row is not JSON: {err}"))
+    if tree.decode<T>() == {
+        .Ok(value) -> Ok(value)
+        .Err(failures) -> Err(db_error("a stored row does not decode: {failures[0].reason}"))
+    }
+}
+
+priv db_open: fn(path: String, failure: String) -> Store Never! {
+    driver := __driver_open(path) ?? panic(failure)
+    Store{state: Shared{DBState{driver: driver.move(), path: path.copy(), written: [String]{}}}}
+}
+open: fn(path: String) -[DB]> Store Never! { db_open(path, "database open failed") }
+open_memory: fn() -[DB]> Store Never! { db_open(":memory:", "in-memory database open failed") }
 
 priv db_begin: fn(state: Shared<DBState>, immediate: Bool) -> DBTransaction DBError! {
     guard := state.guard_edit()
@@ -1100,7 +1268,7 @@ priv migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBEr
 }
 
 migrate: fn(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
-    if migration_validate(name, steps) == .Val(failure) -> return Err(db_error(failure.message))
+    if migration_validate(name, steps) == .Val(failure) -> return Err(failure.copy())
     tx: db_begin(scope.state, true) ?? return Err(db_error("could not begin migration `{name}`"))
     applied: migration_apply(scope, name, steps) ?? {
         tx.rollback().drop("the failed migration step is the reported failure")
@@ -1221,7 +1389,7 @@ DBPool: struct {
         defer close(waiter)
         loop {
             claim := pool_claim(self.state, waiter.ticket, deadline_ns)
-            if claim.failure == .Val(failure) -> return Err(db_error(failure.message))
+            if claim.failure == .Val(failure) -> return Err(failure.copy())
             if claim.drivers.len() > 0 {
                 driver: claim.drivers.remove(0, .Slot) ?? panic("database pool lost a claimed connection")
                 return Ok(DBLease{state: Shared{LeaseState{pool: self.state.copy(), drivers: [__Driver]{driver.move()}}}})
@@ -1538,7 +1706,7 @@ __Driver: struct {
 }
 priv driver_closed: fn(driver: __Driver) -> Bool Never! { !driver.live }
 
-error: fn(driver: __Driver) -> DBError Never! { DBError{message: prep.errmsg(driver.database)} }
+error: fn(driver: __Driver) -> DBError Never! { DBError.Failed(prep.errmsg(driver.database)) }
 
 // Backend open reports None; public open preserves E3001, while the queue maps
 // None to its existing Unavailable error. Failed opens close their connection.
@@ -1607,7 +1775,7 @@ prepare: fn(driver: &__Driver, sql: String) -> CachedStatement DBError! {
         }
     }
     text: key.bytes()
-    if text.len() >= 2147483647 -> return Err(DBError{message: "Error code 18: String or BLOB exceeds size limit"})
+    if text.len() >= 2147483647 -> return Err(db_error("Error code 18: String or BLOB exceeds size limit"))
     prepared: prep.prepare_v3(driver.database, text, 1)
     if prepared.rc != base.OK {
         failure := error(driver)
@@ -1616,7 +1784,7 @@ prepare: fn(driver: &__Driver, sql: String) -> CachedStatement DBError! {
         // modern_sqlite's SQL/offset diagnostic suffix.
         if primary < 2 || primary > 26 {
             offset: prep.error_offset(driver.database)
-            if offset >= 0 -> failure.message = "{failure.message} in {key} at offset {offset}"
+            if offset >= 0 -> failure = db_error("{failure.message()} in {key} at offset {offset}")
         }
         // SQLite hands back no statement on error; finalize(-1) does nothing.
         _: prep.finalize_stmt(driver.database, prepared.stmt)
@@ -1642,7 +1810,7 @@ step_statement: fn(driver: &__Driver, statement: Int) -> Int Never! {
 }
 bind: fn(driver: &__Driver, statement: Int, params: [DBValue]) -> DBError? Never! {
     needed: if statement < 0 -> 0 else -> api.bind_parameter_count(driver.database, statement)
-    if params.len() != needed -> return Val(DBError{message: "Wrong number of parameters passed to query. Got {params.len()}, needed {needed}"})
+    if params.len() != needed -> return Val(db_error("Wrong number of parameters passed to query. Got {params.len()}, needed {needed}"))
     loop at in 0..<params.len() {
         index: at + 1
         status := base.OK
@@ -1654,13 +1822,13 @@ bind: fn(driver: &__Driver, statement: Int, params: [DBValue]) -> DBError? Never
             .Text(text) -> {
                 bytes: text.bytes()
                 length: bytes.len()
-                if length >= 2147483647 -> return Val(DBError{message: "Error code 18: String or BLOB exceeds size limit"})
+                if length >= 2147483647 -> return Val(db_error("Error code 18: String or BLOB exceeds size limit"))
                 // Empty TEXT binds empty text, never NULL.
                 status = api.bind_text(driver.database, statement, index, Val(bytes), length)
             }
             .Blob(bytes) -> {
                 length: bytes.len()
-                if length >= 2147483647 -> return Val(DBError{message: "Error code 18: String or BLOB exceeds size limit"})
+                if length >= 2147483647 -> return Val(db_error("Error code 18: String or BLOB exceeds size limit"))
                 if length == 0 -> status = api.bind_zeroblob(driver.database, statement, index, 0)
                 else -> status = api.bind_blob(driver.database, statement, index, Val(bytes), length)
             }
@@ -1686,7 +1854,7 @@ __driver_execute: fn(driver: &__Driver, sql: String, params: [DBValue]) -> Int D
             if reset_status == base.OK -> count = prep.changes(driver.database)
             else -> failure = Val(error(driver))
         }
-        status == base.ROW -> failure = Val(DBError{message: "Execute returned results - did you mean to call query?"})
+        status == base.ROW -> failure = Val(db_error("Execute returned results - did you mean to call query?"))
         else -> failure = Val(error(driver))
     }
     release(driver, statement)
@@ -1772,10 +1940,10 @@ __driver_query: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [[Strin
     }
     release(driver, statement)
     if failure == .Val(found_failure) -> return Err(found_failure)
-    if wire_rows + decimal_width(rows.len()) + 3 > 67108864 -> return Err(DBError{message: "database result exceeds the wire-size limit"})
-    if rows.len() > 1000000 -> return Err(DBError{message: "database row count exceeds the wire limit"})
-    if column_overflow -> return Err(DBError{message: "database column count exceeds the wire limit"})
-    if duplicate -> return Err(DBError{message: "database row contains a duplicate column"})
+    if wire_rows + decimal_width(rows.len()) + 3 > 67108864 -> return Err(db_error("database result exceeds the wire-size limit"))
+    if rows.len() > 1000000 -> return Err(db_error("database row count exceeds the wire limit"))
+    if column_overflow -> return Err(db_error("database column count exceeds the wire limit"))
+    if duplicate -> return Err(db_error("database row contains a duplicate column"))
     Ok(rows)
 }
 __driver_query_one: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [String: DBValue]? DBError! {
@@ -1801,26 +1969,26 @@ __driver_health: fn(driver: &__Driver) -> Bool Never! {
     assert_eq(row_bool(row, "one") ?? false, true)
     if row_value(row, "absent") == {
         .Ok(_) -> assert(false)
-        .Err(error) -> assert_eq(error.message, "missing column `absent`")
+        .Err(error) -> assert_eq(error.message(), "missing column `absent`")
     }
     if row_int(row, "text") == {
         .Ok(_) -> assert(false)
-        .Err(error) -> assert_eq(error.message, "expected an int, got jet")
+        .Err(error) -> assert_eq(error.message(), "expected an int, got jet")
     }
     floating: [String: DBValue]{"value": DBValue.Float(1.0)}
     if row_int(floating, "value") == {
         .Ok(_) -> assert(false)
-        .Err(error) -> assert_eq(error.message, "expected an int, got 1")
+        .Err(error) -> assert_eq(error.message(), "expected an int, got 1")
     }
     large: [String: DBValue]{"value": DBValue.Float(1e21)}
     if row_int(large, "value") == {
         .Ok(_) -> assert(false)
-        .Err(error) -> assert_eq(error.message, "expected an int, got 1000000000000000000000")
+        .Err(error) -> assert_eq(error.message(), "expected an int, got 1000000000000000000000")
     }
     blob: [String: DBValue]{"value": DBValue.Blob([U8]{1, 2})}
     if row_text(blob, "value") == {
         .Ok(_) -> assert(false)
-        .Err(error) -> assert_eq(error.message, "expected text, got [1, 2]")
+        .Err(error) -> assert_eq(error.message(), "expected text, got [1, 2]")
     }
 }
 
@@ -1878,12 +2046,12 @@ __driver_health: fn(driver: &__Driver) -> Bool Never! {
     assert_eq(row_text(schema[0], "sql") ?? "", "CREATE INDEX jobs_due ON jobs (queue, state, due, sequence)")
     if __driver_execute(driver, "CREATE UNIQUE INDEX jobs_queue ON jobs (queue)", [DBValue]{}) == {
         .Ok(_) -> assert(false)
-        .Err(error) -> assert(error.message.contains("UNIQUE constraint failed: jobs.queue"))
+        .Err(error) -> assert(error.message().contains("UNIQUE constraint failed: jobs.queue"))
     }
     _: __driver_execute(driver, "CREATE UNIQUE INDEX jobs_sequence ON jobs (sequence)", [DBValue]{}) ?? panic("SQLite unique index failed")
     if __driver_execute(driver, "INSERT INTO jobs VALUES ('q0', 'ready', 5, 3)", [DBValue]{}) == {
         .Ok(_) -> assert(false)
-        .Err(error) -> assert(error.message.contains("UNIQUE constraint failed: jobs.sequence"))
+        .Err(error) -> assert(error.message().contains("UNIQUE constraint failed: jobs.sequence"))
     }
     assert(__driver_shutdown(driver))
 }
@@ -1904,19 +2072,19 @@ priv driver_cache_parity_probe: fn() Never! {
     assert(__driver_rollback(driver))
     if __driver_execute(driver, "SELECT ? AS value", [DBValue]{.Int(1)}) == {
         .Ok(_) -> assert(false)
-        .Err(failure) -> assert_eq(failure.message, "Execute returned results - did you mean to call query?")
+        .Err(failure) -> assert_eq(failure.message(), "Execute returned results - did you mean to call query?")
     }
     if __driver_query(driver, "SELECT ?", [DBValue]{}) == {
         .Ok(_) -> assert(false)
-        .Err(failure) -> assert_eq(failure.message, "Wrong number of parameters passed to query. Got 0, needed 1")
+        .Err(failure) -> assert_eq(failure.message(), "Wrong number of parameters passed to query. Got 0, needed 1")
     }
     if __driver_query(driver, "SELECT 1 AS same, 2 AS same", [DBValue]{}) == {
         .Ok(_) -> assert(false)
-        .Err(failure) -> assert_eq(failure.message, "database row contains a duplicate column")
+        .Err(failure) -> assert_eq(failure.message(), "database row contains a duplicate column")
     }
     if __driver_query(driver, "SELEC invalid", [DBValue]{}) == {
         .Ok(_) -> assert(false)
-        .Err(failure) -> assert(failure.message.contains(" in SELEC invalid at offset 0"))
+        .Err(failure) -> assert(failure.message().contains(" in SELEC invalid at offset 0"))
     }
 }
 
@@ -1983,7 +2151,7 @@ priv driver_cache_parity_probe: fn() Never! {
         (sql: "SELECT * FROM __jet_migrations", message: "migration metadata is managed only by db.migrate"),
     }
     loop entry in rejected {
-        if policy_apply(sql_raw(entry.sql), owned, "alice", false) == .Err(failure) -> assert_eq(failure.message, entry.message) else -> panic("accepted `{entry.sql}`")
+        if policy_apply(sql_raw(entry.sql), owned, "alice", false) == .Err(failure) -> assert_eq(failure.message(), entry.message) else -> panic("accepted `{entry.sql}`")
     }
     assert_eq(policy_show(owned), "RowPolicy(table=tasks, expr=owner == user)")
     assert(policy_allows(owned, user: "alice", owner: "alice"))

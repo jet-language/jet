@@ -6335,8 +6335,13 @@ subquery from another table) is refused.
 
 | Signature | Result | Description |
 |---|---|---|
-| `open(url: String) -[DB]> DBConnection` | connection | Open a database URL. |
-| `open_memory() -[DB]> DBConnection` | connection | Open an in-memory database. |
+| `open(url: String) -[DB]> Store` | store | Open a database URL. |
+| `open_memory() -[DB]> Store` | store | Open an in-memory database. |
+| `store.table(name: String, key: fn(T) -[]> K) -> Table<K, T>` | table | Name one typed table of `T` rows keyed by the pure `key` function. |
+| `table.get(key: K) -[DB.Read]> T? DBError!` | row | Read the row with that key, or `None`. |
+| `table.add(row: T) -[DB.Write]> T DBError!` / `table.put(row: T) -[DB.Write]> T DBError!` | row | Insert a new row (`DBError.Exists` when its key is held) or insert-or-replace one. |
+| `table.delete(key: K) DBError! -[DB.Write]>` | — | Remove the row with that key, if any. |
+| `table.query() -[DB.Read]> Query<T> DBError!` | query | Read every row, in key order, as a `core.data` query. |
 | `pool(url: String, max: Int) -[DB]> DBPool DBError!` | pool | Create a bounded connection pool (`DBPool` → `DBLease`, `DBPoolReceipt`). |
 | `policy(table: String, expression: String) -[DB]> RowPolicy DBError!` | policy | Compile a checked row-access policy. |
 | `policy_audit(scope: DBScope) -[DB]> String` | text | Inspect policy decisions for a scope. |
@@ -6372,6 +6377,17 @@ again.
 `execute`, `begin`), which a generic bound names bare:
 `count: fn<T: Driver>(conn: T)` takes any scope and calls its methods.
 
+A typed table stores `T` rows by key. `store.table("tasks", key: fn(task:
+Task) { task.id })` names the table and the key function; `K` is `Encode`,
+`Decode` and `Comparable`, `T` is `Encode` and `Decode`, and the key function
+is pure, so a row's key is a function of the row alone. The table's columns
+are one per field of the encoded key (one `key` column when `K` is a scalar),
+which together form the primary key, and a `jet_row` column holding the row's
+JSON encoding. The first write creates the table; reading a table that was
+never written finds no rows. `get` and `query` carry `DB.Read` and `add`,
+`put` and `delete` carry `DB.Write`, so a function that writes a table must
+allow `DB.Write` (E0740 otherwise).
+
 `DBScope.live` (D-LIVEQUERY1, #1158) refuses any statement other than one
 `SELECT` and applies the scope's policy before binding, so a refused query
 fails at the call. The binding is identified by the scope's user, the
@@ -6405,7 +6421,9 @@ Rows are inspectable `[String: DBValue]` maps. The closed value carrier has
 `Null`, `Int`, `Float`, `Text`, `Bool`, and `Blob([U8])` variants; SQLite Boolean
 affinity returns integer `0`/`1`, which the Boolean reader accepts. Blob reads
 preserve every byte, including empty blobs, without text conversion. `DBError`
-retains the driver's message rather than exposing a raw engine pointer.
+is an enum: `Failed(String)` retains the driver's message rather than exposing
+a raw engine pointer, and `Exists` is a typed table's `add` meeting a held
+key. `message()` is the text that `Display` and `Debug` show.
 
 Pool receipts remain opaque values produced by a pool. Their equality and
 Show/Display/Debug projection are source-owned: each projection preserves the

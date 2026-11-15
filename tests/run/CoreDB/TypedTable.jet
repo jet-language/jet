@@ -1,0 +1,59 @@
+// A typed table keeps rows under the key its key function gives, refuses an
+// `add` over a held key, replaces on `put`, and reads back in key order.
+package: {
+    name: "db_typed_table"
+    authority: { allow: [DB, IO] }
+}
+
+use db: core.db
+
+#Codable
+Task: struct {
+    id: Int
+    title: String
+    done: Bool
+}
+
+show: fn(tasks: db.Table<Int, Task>) -[DB.Read]> String {
+    rows: (tasks.query() ?? return "unreadable").collect() ?? return "uncollected"
+    out := [String]{}
+    loop task in rows {
+        mark: if task.done -> " (done)" else -> ""
+        out.push("{task.id}:{task.title}{mark}")
+    }
+    "[{out.join(", ")}]"
+}
+
+failure: fn(error: db.DBError) -> String { "refused: {error.message()}" }
+
+fill: fn(tasks: db.Table<Int, Task>) -[DB.Write]> {
+    _: tasks.add(Task{id: 3, title: "ship", done: false}) ?? panic("add 3")
+    _: tasks.add(Task{id: 1, title: "plan", done: true}) ?? panic("add 1")
+    if tasks.add(Task{id: 1, title: "again", done: false}) == {
+        .Ok(_) -> print("a second add of 1 was accepted")
+        .Err(error) -> print(failure(error))
+    }
+    _: tasks.put(Task{id: 2, title: "build", done: false}) ?? panic("put 2")
+    _: tasks.put(Task{id: 3, title: "ship it", done: false}) ?? panic("put 3")
+}
+
+finish: fn(tasks: db.Table<Int, Task>, id: Int) -[DB.Read, DB.Write]> {
+    task: tasks.get(id) ?? panic("read {id}")
+    _: tasks.put(Task{id: task.id, title: task.title, done: true}) ?? panic("finish {id}")
+}
+
+run: fn() {
+    store: db.open_memory()
+    tasks: store.table("tasks", key: fn(task: Task) { task.id })
+    print("empty {show(tasks)}")
+    fill(tasks)
+    print("filled {show(tasks)}")
+    finish(tasks, 2)
+    tasks.delete(1) ?? panic("delete 1")
+    print("after finishing 2 and deleting 1 {show(tasks)}")
+    if tasks.get(1) == {
+        .Val(task) -> print("1 is still there: {task.title}")
+        .None -> print("1 is gone")
+        .Err(error) -> print(failure(error))
+    }
+}

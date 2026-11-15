@@ -23,8 +23,8 @@ label: fn(error: TaskFailure) -> String {
 
 wait_lease: fn(pool: DBPool, started: Sender<Int>) -[DB, Time.Wait]> String {
     started.send(1)
-    lease: pool.acquire(deadline: 60000ms) ?? return "waiter: {err.message}"
-    lease.close() ?? return "waiter release: {err.message}"
+    lease: pool.acquire(deadline: 60000ms) ?? return "waiter: {err.message()}"
+    lease.close() ?? return "waiter release: {err.message()}"
     "waiter: acquired"
 }
 
@@ -41,19 +41,19 @@ try_lease: fn(pool: DBPool) -[DB, Time.Wait]> String {
             lease.close() ?? return "release failed"
             return "acquired"
         }
-        .Err(error) -> return "refused: {error.message}"
+        .Err(error) -> return "refused: {error.message()}"
     }
 }
 
 slow_tx: fn(scope: DBScope, started: Sender<Int>) -[DB, Time.Wait]> String {
-    tx: scope.begin() ?? return "begin: {err.message}"
+    tx: scope.begin() ?? return "begin: {err.message()}"
     _: scope.execute(SQL{"INSERT INTO t (v) VALUES (1)"}) ?? {
         tx.rollback() ?? return "insert and rollback failed"
         return "insert failed"
     }
     started.send(1)
     time.sleep(5000ms)
-    tx.commit() ?? return "commit: {err.message}"
+    tx.commit() ?? return "commit: {err.message()}"
     "committed"
 }
 
@@ -101,6 +101,6 @@ run: fn() {
             print("a new transaction begins: true")
             tx.rollback() ?? panic("rollback")
         }
-        .Err(error) -> print("a new transaction begins: {error.message}")
+        .Err(error) -> print("a new transaction begins: {error.message()}")
     }
 }

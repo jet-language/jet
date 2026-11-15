@@ -32,9 +32,9 @@ WRITES: [SQL]{
 // Print the row count, the id sum and a few rows, so a read through the
 // engine shows what the file holds.
 summary: fn(scope: db.DBScope, label: String) {
-    totals: scope.query(SQL{"SELECT count(*) AS n, sum(id) AS total FROM item"}) ?? panic("{label} totals: {err.message}")
+    totals: scope.query(SQL{"SELECT count(*) AS n, sum(id) AS total FROM item"}) ?? panic("{label} totals: {err.message()}")
     loop row in totals -> print("{label}: {db.row_int(row, "n") ?? panic("n")} rows, id sum {db.row_int(row, "total") ?? panic("total")}")
-    rows: scope.query(SQL{"SELECT id, name, ratio, length(body) AS size FROM item WHERE id IN (1, 7, 99, 401, 1000) ORDER BY id"}) ?? panic("{label} rows: {err.message}")
+    rows: scope.query(SQL{"SELECT id, name, ratio, length(body) AS size FROM item WHERE id IN (1, 7, 99, 401, 1000) ORDER BY id"}) ?? panic("{label} rows: {err.message()}")
     loop row in rows {
         id: db.row_int(row, "id") ?? panic("id")
         name: db.row_text(row, "name") ?? panic("name")
@@ -42,7 +42,7 @@ summary: fn(scope: db.DBScope, label: String) {
         size: db.row_int(row, "size") ?? panic("size")
         print("  {id}|{name}|{ratio}|{size} body bytes")
     }
-    indexed: scope.query(SQL{"SELECT id FROM item WHERE name = 'Item 0014 Updated'"}) ?? panic("{label} index: {err.message}")
+    indexed: scope.query(SQL{"SELECT id FROM item WHERE name = 'Item 0014 Updated'"}) ?? panic("{label} index: {err.message()}")
     print("  Rows the index finds for 'Item 0014 Updated': {indexed.len()}")
 }
 
@@ -55,7 +55,7 @@ run: fn() {
     scope: conn.with_policy(policy, "owner")
     summary(scope, "C wrote")
     loop statement in WRITES {
-        changed: scope.execute(statement) ?? panic("write: {err.message}")
+        changed: scope.execute(statement) ?? panic("write: {err.message()}")
         print("Jet changed {changed} rows")
     }
     summary(scope, "Jet wrote")

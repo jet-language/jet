@@ -941,13 +941,13 @@ queue_sql_error: fn(operation: String, detail: ServiceError) -> ServiceError Nev
 queue_execute: fn(driver: &db.__Driver, sql: String, bindings: [DBValue], operation: String) -[DB]> Int ServiceError! {
     if db.__driver_execute(driver, sql, bindings) == {
         .Ok(count) -> Ok(count)
-        .Err(error) -> Err(queue_sql_error(operation, queue_unavailable("queue SQLite execute failed: {error.message}")))
+        .Err(error) -> Err(queue_sql_error(operation, queue_unavailable("queue SQLite execute failed: {error.message()}")))
     }
 }
 queue_query: fn(driver: &db.__Driver, sql: String, bindings: [DBValue], operation: String) -[DB]> [[String: DBValue]] ServiceError! {
     if db.__driver_query(driver, sql, bindings) == {
         .Ok(rows) -> Ok(rows)
-        .Err(error) -> Err(queue_sql_error(operation, queue_unavailable("queue SQLite query failed: {error.message}")))
+        .Err(error) -> Err(queue_sql_error(operation, queue_unavailable("queue SQLite query failed: {error.message()}")))
     }
 }
 

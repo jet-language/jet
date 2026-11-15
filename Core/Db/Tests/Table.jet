@@ -1,0 +1,49 @@
+// A typed table stores rows under their key and reads them back in key order.
+use db: core.db
+
+#Codable
+TableTask: struct {
+    id: Int
+    title: String
+}
+
+#[Codable, Comparable]
+TableCardKey: struct {
+    team: String
+    number: Int
+}
+
+#Codable
+TableCard: struct {
+    team: String
+    number: Int
+    done: Bool
+}
+
+#Test("a typed table keys rows by their key, refuses a second add and reads in key order") {
+    store: db.open_memory()
+    tasks: store.table("tasks", key: fn(row: TableTask) { row.id })
+    assert(tasks.get(1) == .None)
+    assert_eq((tasks.query() ?? panic("an empty table reads")).collect() ?? panic("the query collects"), [TableTask]{})
+    assert_eq((tasks.add(TableTask{id: 2, title: "two"}) ?? panic("the first add")).title, "two")
+    if tasks.add(TableTask{id: 2, title: "again"}) == {
+        .Ok(_) -> panic("a second add of key 2 was accepted")
+        .Err(failure) -> assert_eq(failure.message(), "a row with that key exists")
+    }
+    _: tasks.put(TableTask{id: 1, title: "one"}) ?? panic("put a new row")
+    _: tasks.put(TableTask{id: 2, title: "TWO"}) ?? panic("put over a row")
+    assert_eq((tasks.get(2) ?? panic("row 2 is there")).title, "TWO")
+    rows: (tasks.query() ?? panic("the table reads")).collect() ?? panic("the query collects")
+    assert_eq(rows.len(), 2)
+    assert_eq(rows[0].title, "one")
+    assert_eq(rows[1].title, "TWO")
+    tasks.delete(1) ?? panic("delete a row")
+    assert(tasks.get(1) == .None)
+    cards: store.table("cards", key: fn(row: TableCard) { TableCardKey{team: row.team, number: row.number} })
+    _: cards.add(TableCard{team: "a", number: 1, done: false}) ?? panic("add a card")
+    _: cards.add(TableCard{team: "b", number: 1, done: true}) ?? panic("add a card with the same number on another team")
+    assert((cards.get(TableCardKey{team: "b", number: 1}) ?? panic("card b1 is there")).done)
+    assert(store.table("no such", key: fn(row: Int) { row }).get(1) == .Err(_))
+    assert(store.close())
+    assert(tasks.get(2) == .Err(_))
+}

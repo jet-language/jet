@@ -11,7 +11,7 @@ titles: fn(state: Loadable<[[String: db.DBValue]], db.DBError>) -> String {
             loop row in rows -> out.push(db.row_text(row, "title") ?? "?")
             "loaded [{out.join(",")}]"
         }
-        .Failed(reason) -> "failed {reason.message}"
+        .Failed(reason) -> "failed {reason.message()}"
         .Idle | .Loading -> "pending"
     }
 }
@@ -44,7 +44,7 @@ run: fn() {
     print("same binding {again.id == mine.id}, per user {theirs.id != mine.id}")
     if alice.live(SQL{"DELETE FROM tasks"}) == {
         .Ok(_ok) -> print("write live: accepted")
-        .Err(failure) -> print("write live: {failure.message}")
+        .Err(failure) -> print("write live: {failure.message()}")
     }
     if alice.live(SQL{"SELECT title FROM tasks JOIN other"}) == {
         .Ok(_ok) -> print("join live: accepted")

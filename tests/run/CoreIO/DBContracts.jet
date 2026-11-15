@@ -28,8 +28,8 @@ count: fn(scope: DBScope) -[DB]> Int {
 // Queues behind the held lease until its owner cancels it.
 wait_for_lease: fn(pool: DBPool, started: Sender<Int>) -[DB, Time.Wait]> String {
     started.send(1)
-    lease: pool.acquire(deadline: 60000ms) ?? return "waiter: {err.message}"
-    lease.close() ?? return "waiter release: {err.message}"
+    lease: pool.acquire(deadline: 60000ms) ?? return "waiter: {err.message()}"
+    lease.close() ?? return "waiter release: {err.message()}"
     "waiter: acquired"
 }
 
@@ -72,7 +72,7 @@ run: fn() {
     wrong: scope.query_one(SQL{"SELECT name FROM item WHERE id = 1"}) ?? panic("select one")
     if db.row_int(wrong, "name") == {
         .Ok(_) -> print("text column as Int: accepted")
-        .Err(error) -> print("text column as Int: {error.message}")
+        .Err(error) -> print("text column as Int: {error.message()}")
     }
 
     // Rollback: explicit and failed-transaction both leave the table as it was.
@@ -94,7 +94,7 @@ run: fn() {
     held: pool.acquire(deadline: 100ms) ?? panic("first lease")
     if pool.acquire(deadline: 20ms) == {
         .Ok(_) -> print("second lease while held: granted")
-        .Err(error) -> print("second lease while held: {error.message}")
+        .Err(error) -> print("second lease while held: {error.message()}")
     }
     held.close() ?? panic("release")
     held.close() ?? panic("second release")
@@ -118,24 +118,24 @@ run: fn() {
     // Draining refuses new leases; the held one still releases, then drain ends.
     if pool.drain(deadline: 20ms) == {
         .Ok(receipt) -> print("drain with a lease out: {receipt}")
-        .Err(error) -> print("drain with a lease out: {error.message}")
+        .Err(error) -> print("drain with a lease out: {error.message()}")
     }
     if pool.acquire(deadline: 20ms) == {
         .Ok(_) -> print("lease while draining: granted")
-        .Err(error) -> print("lease while draining: {error.message}")
+        .Err(error) -> print("lease while draining: {error.message()}")
     }
     next.close() ?? panic("final release")
     print("drained: {pool.drain() ?? panic("drain")}")
     if pool.acquire(deadline: 20ms) == {
         .Ok(_) -> print("lease after drain: granted")
-        .Err(error) -> print("lease after drain: {error.message}")
+        .Err(error) -> print("lease after drain: {error.message()}")
     }
 
     // Use after close: the connection refuses work and says why.
     print("close: {conn.close()}")
     if scope.query(SQL{"SELECT id FROM item"}) == {
         .Ok(_) -> print("query after close: accepted")
-        .Err(error) -> print("query after close: {error.message}")
+        .Err(error) -> print("query after close: {error.message()}")
     }
     print("connection: {conn}")
 }
