@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106073,
+    "rev": 106074,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60544,6 +60544,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c6/c8 critical path on p159 (Speed-3, from gate-p159/trace.txt; jet build --profile dev Compiler, 35.6 s traced wall). Time by busy threads: 1 thread 8.1 s, 2-8 threads 18.4 s, 9-24 threads 8.6 s, 25+ threads 0.55 s. One serial chain: build.plan 1.1 s; generator scripts 1.35 s; load+register 2.15 s at ~6; comptime 4.9 s at 5.3 (MARKER_DECLS 2.0 s, fix landing); sema.finalize 8.5 s at 6.9 (bodies 2.4 s at 13, the rest 6.0 s at ~4.5); prelower 0.95 s on 1 thread; backend 4.8 s at ~7 with barriers between phases; CLI tail 1.2 s on 1 thread; runtime step 9.6 s (script compile 1.0, jet-bare Core check and runtime lowering 6.8 at 9-24, pack 1.2 on 1 thread); core-embed 0.9 s on 1 thread. The bar of >=24 means about 5.7 s wall for 137 CPU-s. Plan: A, a fused per-module pipeline (sema tail plus ir.build, O0, x64 and object as one task per module, no phase barriers; this is c8 and c6 together, about 6 s to 2 s); B, comptime beside sema.bodies (4.9 s to 2 s); C, A and B applied to jet-bare's runtime step (6.8 s to 2 s); D, serial links: RuntimePack as a built tool beside jet-bare (-1.0 s), and the CLI tail. A parallel image digest would change the identity format, so it needs an owner ballot."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c6 compiler-build runtime step (Speed-3, p157 trace, 10.43 s): executor staging 0.52 s; the seed compiles RuntimePack.jet 1.06 s; jet-bare doc 7.96 s at ~13 cores (runtime.core checks all 273 Core modules / 14k bodies beside the lead's 51 Core modules, so Core bodies are checked twice on the critical path, which precompiled Core removes); post-work 0.73 s; plus a 1.14 s untraced gap before the step and a duplicate read+sha256 of the 128 MB made tool in core-embed staging. Throughput's O0 build.step (15.63 s) is the same work with an O0 jet-bare. Done: the runtime tail on threads (in census). Next: executor dedup, the gap. Shelved: folding the pack script into the build host (about 1.2 s), because any route needs a new public Build method or a CLI verb, both owner gates, which 1.2 s does not justify."
         },
         {
@@ -60985,7 +60990,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T07:48:02.249Z",
+      "updated": "2026-11-15T08:28:28.774Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -66658,92 +66663,6 @@
         "G5"
       ],
       "criteriaLastN": 9
-    },
-    {
-      "id": "c0efae83",
-      "num": 6021,
-      "title": "Forwarding derive: a distinct type takes its base type's traits in one line",
-      "body": "Rust's orphan rule forces wrapper types, and each wrapper must re-implement every trait by hand. Jet's distinct types (`Die: distinct Int(1..6)`) meet the same chore. A forwarding derive lets a distinct type take its base type's traits (equality, ordering, printing, hashing, codable) in one line, through the ratified derive-request law (D-ONCE-DERIVE1=A, D-CORE-DERIVE-HOME1=A). Library API inside existing law; no new marker.\n\nSource: FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T30.\n\nRelated: #3505 (const generics), #4609 (cross-module generics, P0).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "All 3 criteria met (found by Main's G6 sweep 2026-11-12 03:4x). Closed by Main."
-        },
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "c3 is not met yet. On meet-g6decl, the expand case passed (line 3), but the DistinctForwardSourceFixtures.jet unit line was OOM-killed (rc 137) and gets a solo rerun under the big-memory lock."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A distinct type requests forwarding of listed base traits through the ratified derive-request spelling; the forwarded members behave exactly as the base type's (one test each for equality, ordering, printing, hashing and codable).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Lander meet-g6decl on seed-b9 at dev c805093fd9 (contains G6Decl-6d f5a44ce538), line 1: `jet test Compiler --profile golden --filter=DistinctForwarding` gave summary PASS 3 (o0, o1, o2), with FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR and TIMEOUT all 0. Examples/Types/DistinctForwarding.jet checks equality, ordering, printing, hashing (a Set element and a Map key) and codable forwarding against the base type.",
-          "at": "2026-11-12T01:28:52.382Z"
-        },
-        {
-          "n": 2,
-          "text": "Forwarding a trait the base type does not have is a compile error naming the trait and the base type; UI snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Lander meet-g6decl on seed-b9 at dev c805093fd9 (contains G6Decl-6d f5a44ce538), line 2: `jet test Compiler --profile ui tests/ui/distinct_forward_missing_trait.jet` gave summary PASS 1 with every other count 0. The UI snapshot shows the error naming the trait and the base type.",
-          "at": "2026-11-12T01:28:53.321Z"
-        },
-        {
-          "n": 3,
-          "text": "`jet inspect expand` shows the forwarded members as ordinary Jet source.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Lander meet-g6decl on seed-b9 at dev c805093fd9 (contains G6Decl-6d f5a44ce538 and G6Decl-54 c188674ff0). Line 3: `jet test Compiler --profile cases --filter=expand_derive_lens_shows_distinct_forwarded_members` gave PASS with all failure counts 0. Line 4r: `jet test Compiler/JetSema/Tests/DistinctForwardSourceFixtures.jet --filter=\"a distinct's forwarded members format as Jet source\"` gave 1 passed, 0 failed, rerun alone under the big-memory lock after the 10G meet cap killed it.",
-          "at": "2026-11-12T01:30:18.967Z"
-        }
-      ],
-      "refs": [
-        "#3505",
-        "#4609",
-        "D-ONCE-DERIVE1",
-        "D-CORE-DERIVE-HOME1",
-        "D-TYPE2-REFINE1"
-      ],
-      "tags": [
-        "needs-triage",
-        "derive",
-        "audit-2026-10-28",
-        "future-2026-10-28"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-28T11:57:34.842Z",
-      "updated": "2026-11-12T08:24:36.322Z",
-      "updatedBy": "Main",
-      "goals": [
-        "G6"
-      ],
-      "completedAt": "2026-11-12T08:24:36.322Z"
     },
     {
       "id": "c0uq7n80",
@@ -218297,6 +218216,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T08:28:28.774Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T08:23:48.206Z",
       "by": "Main",

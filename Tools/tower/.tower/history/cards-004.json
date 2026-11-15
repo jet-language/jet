@@ -99757,6 +99757,94 @@
       "completedAt": "2026-11-12T08:22:08.038Z",
       "questions": [],
       "retiredAt": "2026-11-15T08:23:48.374Z"
+    },
+    {
+      "id": "c0efae83",
+      "num": 6021,
+      "title": "Forwarding derive: a distinct type takes its base type's traits in one line",
+      "body": "Rust's orphan rule forces wrapper types, and each wrapper must re-implement every trait by hand. Jet's distinct types (`Die: distinct Int(1..6)`) meet the same chore. A forwarding derive lets a distinct type take its base type's traits (equality, ordering, printing, hashing, codable) in one line, through the ratified derive-request law (D-ONCE-DERIVE1=A, D-CORE-DERIVE-HOME1=A). Library API inside existing law; no new marker.\n\nSource: FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T30.\n\nRelated: #3505 (const generics), #4609 (cross-module generics, P0).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "All 3 criteria met (found by Main's G6 sweep 2026-11-12 03:4x). Closed by Main."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c3 is not met yet. On meet-g6decl, the expand case passed (line 3), but the DistinctForwardSourceFixtures.jet unit line was OOM-killed (rc 137) and gets a solo rerun under the big-memory lock."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A distinct type requests forwarding of listed base traits through the ratified derive-request spelling; the forwarded members behave exactly as the base type's (one test each for equality, ordering, printing, hashing and codable).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander meet-g6decl on seed-b9 at dev c805093fd9 (contains G6Decl-6d f5a44ce538), line 1: `jet test Compiler --profile golden --filter=DistinctForwarding` gave summary PASS 3 (o0, o1, o2), with FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR and TIMEOUT all 0. Examples/Types/DistinctForwarding.jet checks equality, ordering, printing, hashing (a Set element and a Map key) and codable forwarding against the base type.",
+          "at": "2026-11-12T01:28:52.382Z"
+        },
+        {
+          "n": 2,
+          "text": "Forwarding a trait the base type does not have is a compile error naming the trait and the base type; UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander meet-g6decl on seed-b9 at dev c805093fd9 (contains G6Decl-6d f5a44ce538), line 2: `jet test Compiler --profile ui tests/ui/distinct_forward_missing_trait.jet` gave summary PASS 1 with every other count 0. The UI snapshot shows the error naming the trait and the base type.",
+          "at": "2026-11-12T01:28:53.321Z"
+        },
+        {
+          "n": 3,
+          "text": "`jet inspect expand` shows the forwarded members as ordinary Jet source.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander meet-g6decl on seed-b9 at dev c805093fd9 (contains G6Decl-6d f5a44ce538 and G6Decl-54 c188674ff0). Line 3: `jet test Compiler --profile cases --filter=expand_derive_lens_shows_distinct_forwarded_members` gave PASS with all failure counts 0. Line 4r: `jet test Compiler/JetSema/Tests/DistinctForwardSourceFixtures.jet --filter=\"a distinct's forwarded members format as Jet source\"` gave 1 passed, 0 failed, rerun alone under the big-memory lock after the 10G meet cap killed it.",
+          "at": "2026-11-12T01:30:18.967Z"
+        }
+      ],
+      "refs": [
+        "#3505",
+        "#4609",
+        "D-ONCE-DERIVE1",
+        "D-CORE-DERIVE-HOME1",
+        "D-TYPE2-REFINE1"
+      ],
+      "tags": [
+        "needs-triage",
+        "derive",
+        "audit-2026-10-28",
+        "future-2026-10-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T11:57:34.842Z",
+      "updated": "2026-11-12T08:24:36.322Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G6"
+      ],
+      "completedAt": "2026-11-12T08:24:36.322Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T08:28:28.943Z"
     }
   ]
 }
