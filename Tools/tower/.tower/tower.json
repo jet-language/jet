@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106070,
+    "rev": 106072,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61013,6 +61013,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c39 progress on p159 (dev 79e59c81f4: hot-text r2 and the temp-receiver drop landed), median of 3 GNU time peaks: hello jet run 56,464 KB (p156 86,020); jet build hello.jet 73,368 KB (p155 84.5-86.5 MB); jet help 16,108 KB (p157 57,124). The bar is 35 MB for the hello build; c39 stays open."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c39 measured on batch compiler p155 (dev 49836bd978), 2026-11-15 01:45: hello, jet build cold (.jet removed each run, no JET_TOOLCHAIN_ROOT, 5 runs): 0.02 s wall, max RSS 84.5-86.5 MB; warm 0.02 s, 84.5-86.5 MB; binary 104,264 B; start under 10 ms (/usr/bin/time resolution; 256 KiB max RSS). Time passes the 0.12/0.10 s bars, but compile peak memory is 86 MB against the 35 MB bar, so c39 stays open on memory. Start time still needs a finer measure (perf stat)."
         },
         {
@@ -61333,11 +61338,11 @@
         {
           "n": 61,
           "text": "A program with a 20000-branch else-if chain checks and runs on O0 (jet run), O1 (jet build) and O2 (--release) with peak compiler RSS under 1 GB, and peak RSS grows at most linearly from 1000 to 20000 branches. Proof: `jet test Compiler --profile cases --filter compile_budget/else_if_chain_20000`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:29:33.717Z"
+          "evidence": "Batch compiler p159 (dev 79e59c81f4, which carries 0d9a4ea052, the else-if chain budget), 2026-11-15 03:05: jet test Compiler --profile cases --filter compile_budget/else_if_chain_20000 gives PASS 1, FAIL 0. The case checks and runs the 20000-branch chain on O0, O1 and O2 under its 1 GB peak bar, with linear growth from 1000 to 20000 branches.",
+          "at": "2026-11-15T08:16:32.215Z"
         },
         {
           "n": 62,
@@ -61356,7 +61361,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-15T07:39:45.600Z",
+      "updated": "2026-11-15T08:16:34.040Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -91801,63 +91806,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 7,
       "completedAt": "2026-11-14T06:45:05.068Z"
-    },
-    {
-      "id": "c0c6kaqk",
-      "num": 6666,
-      "title": "Gauntlet measurement-manifest test red: the AGENTS.md machine-ceiling paragraph check fails",
-      "body": "TestSystemLead-2 (21400fc471 follow-up): node --test Tools/gauntlet/harness/measurement-manifest.test.mjs passes 25/26. The one red test checks the AGENTS.md machine-ceiling paragraph against the manifest policy, and it was red before 21400fc471. The performance gate's manifest must encode the AGENTS.md two-stage policy (peer floor and machine ceiling), so either the manifest or its encoding check is stale. Separately, Tools/gauntlet/harness/integrated-gate.mjs has no caller besides its own test, so a gate that should be wired isn't.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "All criteria met (c1 rev 99864, c2 rev 99865) on dev 39388f1d4f. Closed by Main."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "node --test Tools/gauntlet/harness/measurement-manifest.test.mjs passes every test in the file (24/24 on 6ca4d72969 plus G41): the manifest encodes the AGENTS.md two-stage gate (peer floor Jet/peer < 1.00 for every matched peer with Rust judged like every other peer; machine ceiling Jet/ceiling <= 1.00 in cycles and bytes, with a named asm-parity reference per required cell), and the test's AGENTS.md check reads the current paragraph.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G11Speed-G41 landed on dev as 92ab3c5349 (tool-only; the coverage rule compares the manifest against entry dirs whose mode is not tool, since PortBars.jet judges tool entries per AGENTS.md Tooling in other languages). Lander5 2026-11-12 on 95dd5a300b plus the patch (which is the tree of 92ab3c5349): node --test Tools/gauntlet/harness/measurement-manifest.test.mjs gave tests 24, pass 24, fail 0, cancelled 0, skipped 0, rc 0. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G11Speed-G41/1.out. The node harness needs no Jet seed.",
-          "at": "2026-11-12T07:46:19.102Z"
-        },
-        {
-          "n": 2,
-          "text": "Tools/gauntlet/harness/integrated-gate.mjs is called by the perf gate that a release or milestone runs, or is deleted with its test if another gate covers the same checks; either way the integrated conformance check reaches a live caller.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Deleted with its test, since other gates cover the same checks. G11Speed-G42 landed on dev as 39388f1d4f: Tools/gauntlet/harness/integrated-gate.mjs and integrated-gate.test.mjs are removed (git ls-tree -r 39388f1d4f -- Tools/gauntlet/harness lists neither). Their checks are covered by status.mjs validateStatusGate, which run.mjs applies on every full run, and by performance-surface.mjs. required_metrics_by_mode moved into the manifest's report_contract. Lander5 on 39388f1d4f: node --test Tools/gauntlet/harness/status.test.mjs 10/10, performance-surface.test.mjs 18/18, measurement-manifest.test.mjs 24/24, all fail 0 (out $JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G11Speed-G42/{3,4,5}.out). Main 2026-11-12 03:0x: git grep -nE \"integrated-gate|integrated_gate\" 39388f1d4f -- Tools AGENTS.md \":!Tools/tower/.tower\" gives rc 1 (no live reference). The only matches are Tower's immutable history text. No Jet seed is involved (node harness).",
-          "at": "2026-11-12T07:51:25.122Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G11"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-07T09:38:47.431Z",
-      "updated": "2026-11-12T07:51:53.880Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-12T07:51:53.880Z"
     },
     {
       "id": "c09qdr1z",
@@ -218473,6 +218421,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T08:16:34.040Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T08:16:32.215Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#61"
+    },
     {
       "at": "2026-11-15T07:48:02.249Z",
       "by": "Main",
