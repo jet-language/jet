@@ -5,7 +5,7 @@
 // probe finds which `&` script parameters a function's body writes
 // (sema_script_helper_writes).
 use {
-    jet_foundation.[Span, Type, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table, type_name, type_unqualified_nominals]
+    jet_foundation.[Span, Type, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table, type_name, type_unqualified_nominals]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_sema.[
@@ -29,7 +29,7 @@ script_helper_probe: fn(source: String) -> ScriptHelperProbe {
     names := program.entry_locals.copy()
     table := module_table()
     script_id: module_intern(table, "user/script")
-    effects: jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n", table) ?? panic("canonical effect source did not parse")
+    effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("canonical effect module declares no effects")
     effects_id: effects.module_identity
     file: "user/script.jet"
     facts: SemaBuildFacts{package_name: "user", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}

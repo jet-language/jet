@@ -228,7 +228,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     load := jet_driver_load(input.request)
     parse_only := jet_driver_compiler_check_parse_only(load)
     if (!load.complete || jet_driver_has_errors(load.diagnostics)) && !parse_only -> return jet_driver_compiler_check_failure(load, load.failed_stage ?? JetDriverStage.Load, None)
-    canonical_option := jet_driver_canonical_effect_module(input.request.canonical_effect_source, load.module_table)
+    canonical_option := jet_driver_canonical_effect_module(input.request.canonical_effects, load.module_table)
     if canonical_option == None -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the embedded compiler-owned Prelude effect source is invalid"))
     canonical := canonical_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the embedded compiler-owned Prelude effect source is unavailable"))
     canonical_text: module_text(load.module_table, canonical.module_identity)
@@ -237,7 +237,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
             return jet_driver_compiler_check_failure(load, JetDriverStage.Load, Val("an authorized source unit collides with the pinned compiler-owned Prelude effect source"))
         }
     }
-    load.generated_source_files.push(SourceFile{id: source_file_id(canonical.source_file), path: canonical.source_file, source: input.request.canonical_effect_source})
+    load.generated_source_files.push(SourceFile{id: source_file_id(canonical.source_file), path: canonical.source_file, source: input.request.canonical_effects.source})
     providers := jet_driver_assemble_foreign_providers(input.request.authorized_sources, load)
     if (!load.complete || jet_driver_has_errors(load.diagnostics)) && !parse_only -> return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     if !jet_driver_foreign_provider_owners_valid(load.modules, providers, load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
@@ -257,7 +257,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
             }
         }
         else -> {
-            module_sources = jet_driver_compiler_check_module_sources(load, canonical, input.request.canonical_effect_source, input.parsed) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
+            module_sources = jet_driver_compiler_check_module_sources(load, canonical, input.request.canonical_effects.source, input.parsed) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
         }
     }
     setting_refusals: jet_driver_setting_override_diagnostics(load, input.request)

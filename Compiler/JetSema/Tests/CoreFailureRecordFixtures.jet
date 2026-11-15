@@ -4,7 +4,7 @@
 use {
     jet_foundation.[
         Diagnostic, Span, Type, compiler_threads_single, core_record_field, core_record_literal_fields,
-        core_record_literal_is_core_only, jet_target_machine_hosted, module_intern, module_table,
+        core_record_literal_is_core_only, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table,
     ]
     jet_parser.[parse_generated_source]
     jet_driver.[jet_driver_canonical_effect_module]
@@ -30,7 +30,7 @@ core_failure_record_diagnostics: fn(source: String, module_identity: String) -> 
     if parsed.diagnostics.len() != 0 -> panic("failure fixture did not parse: {source}")
     table := module_table()
     module_id: module_intern(table, module_identity)
-    effects: jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n", table) ?? panic("canonical effect source did not parse")
+    effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("canonical effect module declares no effects")
     effects_id: effects.module_identity
     package_identity: module_identity.split("/").to_list()[0]
     file := "{module_identity}/fixture.jet"

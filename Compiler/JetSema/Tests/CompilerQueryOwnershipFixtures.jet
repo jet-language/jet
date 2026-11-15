@@ -10,14 +10,14 @@ use {
         jet_driver_compiler_source_input,
     ]
     jet_eval.[jet_eval_compiler_services_parse, jet_eval_default_config]
-    jet_foundation.[compiler_threads_single]
+    jet_foundation.[compiler_threads_single, effect_vocabulary_module]
     jet_sema.[sema_has_error_since]
 }
 
 query_ownership_request: fn() -> JetDriverCompileRequest Never! {
     JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{}, entry_root_identity: "query-ownership", entry_path: "main.jet"},
-        canonical_effect_source: "IO: struct {{\n    impl Effect {{}}\n}}\n",
+        canonical_effects: effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"),
         core_sources: [JetDriverCoreSource]{},
         host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: None},
         eval_config: jet_eval_default_config(),

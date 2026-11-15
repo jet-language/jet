@@ -15,7 +15,7 @@ use {
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_foundation.[
-        Diagnostic, Span, SymbolKind, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table, symbol_key_text,
+        Diagnostic, Span, SymbolKind, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table, symbol_key_text,
     ]
 }
 
@@ -27,8 +27,8 @@ compute_fixture_modules: fn(label: String, source: String, failures: &[String]) 
     }
     table := module_table()
     main_id: module_intern(table, "compute-fixture::main")
-    effects: jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n", table) ?? {
-        failures.push("{label}: canonical effect source did not parse")
+    effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
+        failures.push("{label}: canonical effect module declares no effects")
         return None
     }
     effects_id: effects.module_identity

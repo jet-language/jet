@@ -1,7 +1,7 @@
 // Assemble with the production Compiler source unit, replacing CLI Entry.
 use {
     jet_foundation.[
-        GateEntry, GateKind, GateSet, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span,
+        EffectModuleSource, GateEntry, GateKind, GateSet, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span,
         compiler_threads_single, name_ledger_declaration,
     ]
     jet_driver.[
@@ -24,7 +24,7 @@ gate_query_request: fn(source: String, policy: String?) -> JetDriverCompileReque
     files.push(JetDriverAuthorizedSourceFile{path: "/gates/helper.jet", relative_path: "helper.jet", identity: "gates-helper", source: "helper: fn() {{ undefined_helper() }}"})
     JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/gates", identity: "gates-root", allow_hardlinks: false, files: files, foreign_cache_files: []}}, entry_root_identity: "gates-root", entry_path: "/gates/run.jet"},
-        canonical_effect_source: "", core_sources: [], host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), record_store: None, trace_sink: None, compiler_threads: compiler_threads_single(),
+        canonical_effects: EffectModuleSource{source: "", line_starts: [], decls: []}, core_sources: [], host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), record_store: None, trace_sink: None, compiler_threads: compiler_threads_single(),
     }
 }
 #Test("gate_query") {

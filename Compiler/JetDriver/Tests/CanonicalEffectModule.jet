@@ -1,0 +1,44 @@
+// The canonical effect module a compile registers without parsing
+// (EFFECT_CANONICAL_MODULE, made while the compiler builds) holds exactly the
+// effect declarations the parser reads from its text, spans included, and
+// the byte where each line of that text starts.
+use {
+    jet_foundation.[EFFECT_CANONICAL_MODULE, EffectDecl, EffectModuleSource, effect_vocabulary_module]
+    jet_parser.[parse_source]
+}
+
+canonical_effect_parsed: fn(label: String, source: String) -> [EffectDecl] Never! {
+    parsed: parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> panic("{label}: the effect text does not parse: {parsed.diagnostics:Debug}")
+    decls := [EffectDecl]{}
+    loop item in parsed.program.items {
+        if item == .EffectDecl(declaration) -> decls.push(declaration)
+    }
+    decls
+}
+
+canonical_effect_require: fn(label: String, effects: EffectModuleSource) Never! {
+    parsed: canonical_effect_parsed(label, effects.source)
+    if parsed.len() != effects.decls.len() -> panic("{label}: the parser reads {parsed.len()} effect declarations, the module holds {effects.decls.len()}")
+    loop (index, declaration) in parsed {
+        built: effects.decls[index]
+        same_spans: declaration.span.start == built.span.start && declaration.span.end == built.span.end && declaration.name_span.start == built.name_span.start && declaration.name_span.end == built.name_span.end
+        if declaration.name != built.name || declaration.irreversible != built.irreversible || !same_spans -> panic("{label}: declaration {index}: the parser reads {declaration:Debug}, the module holds {built:Debug}")
+    }
+    starts := [Int]{0}
+    loop (index, byte) in effects.source.bytes() {
+        if byte == (U8{10}) -> starts.push(index + 1)
+    }
+    if starts != effects.line_starts -> panic("{label}: the module's line starts are not its text's")
+}
+
+#Test("canonical effect module matches the parser") {
+    canonical_effect_require("canonical", EFFECT_CANONICAL_MODULE)
+}
+
+#Test("effect module of one source matches the parser") {
+    source: "// Effects.\nStore: enum {{\n    Read // a read\n    Write\n\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ self == .Write }}\n    }}\n}}\n\n  IO: struct {{\n    impl Effect {{}}\n}}\nLaunch: struct {{\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ true }}\n    }}\n}}\n"
+    effects: effect_vocabulary_module(source)
+    canonical_effect_require("one source", effects)
+    if effects.decls.len() != 5 || effects.decls[1].name != "Store.Read" || !effects.decls[0].irreversible || !effects.decls[2].irreversible || effects.decls[1].irreversible -> panic("one source: unexpected declarations {effects.decls:Debug}")
+}

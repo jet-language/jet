@@ -11,7 +11,7 @@ use {
     ]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
-    jet_foundation.[CompilerThreads, Span, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
+    jet_foundation.[CompilerThreads, Span, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table]
 }
 
 // `count` groups of a padded leaf, a function that calls through a function
@@ -45,8 +45,8 @@ effect_stack_threads_rows: fn(source: String, threads: CompilerThreads, failures
     }
     table := module_table()
     main_id: module_intern(table, "effect-stack-threads::main")
-    canonical: jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\n", table) ?? {
-        failures.push("{label}: canonical effect declaration failed parsing")
+    canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
+        failures.push("{label}: canonical effect module declares no effects")
         return [String]{}
     }
     canonical_id: canonical.module_identity

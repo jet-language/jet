@@ -233,12 +233,11 @@ use {
         name_intern,
         name_table_sized,
         ast_job_metadata,
+        ast_program,
+        EffectModuleSource,
         RuntimeInterfaceRow,
     ]
-    jet_parser.[
-        parse_source,
-        parser_guest_import_symbol,
-    ]
+    jet_parser.[parser_guest_import_symbol]
     jet_eval.[JetEvalComptimeInputAdapter]
     jet_pkg_model.[
         EFFECT_PANIC_EDGE,
@@ -3575,48 +3574,15 @@ jet_driver_registration_foreign_handle_facts: fn(
     Val(facts)
 }
 
-jet_driver_canonical_effect_segments: fn(path: String, source: String) -> [SemaSourceSegment] Never! {
-    bytes := source.bytes()
-    line_starts := [Int]{0}
-    index := 0
-    loop index < bytes.len() {
-        if bytes[index] == (U8{10}) -> line_starts.push(index + 1)
-        index += 1
-    }
-    [
-        SemaSourceSegment{
-            generated: Span{start: 0, end: bytes.len()},
-            source_file: path,
-            source_start: 0,
-            line_starts: line_starts,
-            origin: SemaSourceOrigin.CompilerGenerated,
-        },
-    ]
-}
-
 // The canonical effect module holds only the effect names its types declare
-// (their `.EffectDecl` companions): registration sees the vocabulary, and no
-// Prelude effect type enters a program's scope as a type.
-jet_driver_canonical_effect_module: fn(source: String, table: &ModuleTable) -> SemaRegistrationModuleInput? {
-    if source.len() == 0 -> return None
-    parsed := parse_source(source.bytes())
-    if parsed.diagnostics.len() != 0 -> return None
-    declarations := [Item]{}
-    loop item in parsed.program.items {
-        if item == {
-            .EffectDecl(_) -> declarations.push(item)
-            .Struct(definition) -> {
-                if definition.effect_impl == None -> return None
-            }
-            .Enum(definition) -> {
-                if definition.effect_impl == None -> return None
-            }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
-        }
-    }
-    if declarations.len() == 0 -> return None
-    program := parsed.program
-    program.items = declarations
+// (their `.EffectDecl` companions), made while the compiler builds
+// (EffectModuleSource), so a compile parses none of its text: registration
+// sees the vocabulary, and no Prelude effect type enters a program's scope as
+// a type. No declarations is no module.
+jet_driver_canonical_effect_module: fn(effects: EffectModuleSource, table: &ModuleTable) -> SemaRegistrationModuleInput? {
+    if effects.decls.len() == 0 -> return None
+    program := ast_program()
+    loop declaration in effects.decls -> program.items.push(Item.EffectDecl{value: declaration})
     source_file := "jet:canonical-prelude/Prelude/Effects.jet"
     package_identity := JET_CANONICAL_EFFECT_PACKAGE_IDENTITY
     module_path := JET_CANONICAL_EFFECT_MODULE_PATH
@@ -3628,7 +3594,15 @@ jet_driver_canonical_effect_module: fn(source: String, table: &ModuleTable) -> S
         core_source_alias: "",
         module_path: module_path,
         source_file: source_file,
-        source_segments: jet_driver_canonical_effect_segments(source_file, source),
+        source_segments: [
+            SemaSourceSegment{
+                generated: Span{start: 0, end: effects.source.count_bytes()},
+                source_file: source_file,
+                source_start: 0,
+                line_starts: effects.line_starts,
+                origin: SemaSourceOrigin.CompilerGenerated,
+            },
+        ],
         source_origin: SemaSourceOrigin.CompilerGenerated,
         program: program.move(),
         foreign_handles: [SemaRegistrationForeignHandleFacts]{},
@@ -4942,7 +4916,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     if checked_projection && request.mode != JetDriverCompileMode.Program {
         return jet_driver_compile_internal_result(load, trace, "the retained checked projection requires Program mode")
     }
-    canonical_effect_module_option := jet_driver_canonical_effect_module(request.canonical_effect_source, load.module_table)
+    canonical_effect_module_option := jet_driver_canonical_effect_module(request.canonical_effects, load.module_table)
     if canonical_effect_module_option == None {
         return jet_driver_compile_internal_result(load, trace, "the embedded compiler-owned Prelude effect source is invalid")
     }
@@ -4961,7 +4935,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             return jet_driver_compile_internal_result(load, trace, "a loaded generated source path collides with the pinned compiler-owned Prelude effect source")
         }
     }
-    load.generated_source_files.push(SourceFile{id: source_file_id(canonical_effect_module.source_file), path: canonical_effect_module.source_file, source: request.canonical_effect_source})
+    load.generated_source_files.push(SourceFile{id: source_file_id(canonical_effect_module.source_file), path: canonical_effect_module.source_file, source: request.canonical_effects.source})
     foreign_provider_inputs := jet_driver_assemble_foreign_providers(request.authorized_sources, load)
     if !load.complete || jet_driver_has_errors(load.diagnostics) {
         failure: load.failed_stage ?? JetDriverStage.Load
@@ -5451,7 +5425,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             unit: load.source_units[source_module.source_unit_index]
             module_sources.push(SemaCompilerModuleSource{module_identity: source_module.module_identity, source: jet_driver_source_text_at(load.source_files, source_positions, unit.path)})
         }
-        module_sources.push(SemaCompilerModuleSource{module_identity: canonical_effect_module_identity, source: request.canonical_effect_source})
+        module_sources.push(SemaCompilerModuleSource{module_identity: canonical_effect_module_identity, source: request.canonical_effects.source})
         // Under keep-going each failed function checked as a trap of its
         // declared signature, so the program's declarations are whole: the
         // staging build of a program that uses what `build: fn` generates

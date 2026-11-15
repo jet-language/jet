@@ -6,15 +6,16 @@
 // declarations on every commit.
 use {
     cli_files: core.files
-    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CoreDeclarationFile, EFFECT_CANONICAL_SOURCE, core_declarations_assets]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CoreDeclarationFile, EFFECT_CANONICAL_MODULE, core_declarations_assets]
     jet_sema.[SemaCoreSealSource, SemaCoreSealText]
 }
 
-// The canonical effect source: Compiler/Prelude/Effects.jet, then
+// The canonical effect module: the text of Compiler/Prelude/Effects.jet, then
 // Core/Effects/Effects.jet, then Core/Compiler/Meta.jet, read from the
-// toolchain tree while the compiler builds (JetFoundation
-// EFFECT_CANONICAL_SOURCE).
-JET_CLI_EFFECT_SOURCE: #run EFFECT_CANONICAL_SOURCE
+// toolchain tree while the compiler builds, and the effect declarations it
+// holds (JetFoundation EFFECT_CANONICAL_MODULE), so a compile parses none of
+// it.
+JET_CLI_EFFECT_MODULE: #run EFFECT_CANONICAL_MODULE
 
 // One embedded Core asset, by repository path.
 JetCLICoreAsset: struct {

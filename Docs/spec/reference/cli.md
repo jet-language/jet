@@ -698,9 +698,11 @@ computes the Core-declaration tables from them
 ([`CoreDeclarations`](../../../Compiler/JetFoundation/Source/CoreDeclarations)):
 the Core source rows, the call rows, the enum, payload and structure rows, and
 the built-in Core sources. A declaration that disagrees with the sources stops
-the build and names each problem. The canonical effect source and the effect
+the build and names each problem. The canonical effect module and the effect
 vocabulary are read the same way
-([`EffectVocabulary.jet`](../../../Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet)).
+([`EffectVocabulary.jet`](../../../Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet)):
+the build keeps the module's text with the effect declarations it holds, so a
+compile registers them without parsing that text.
 `jet inspect structure --core --json` prints the built tables: the bootstrap
 steps, root types, modules, Core sources and each Core call record's effect
 fields and Prelude symbol (`calls`). `jet Tools/agent/CoreSurfaceLedger.jet

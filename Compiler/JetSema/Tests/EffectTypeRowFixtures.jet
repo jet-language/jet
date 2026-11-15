@@ -13,7 +13,7 @@ use {
     ]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
-    jet_foundation.[Span, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table, symbol_table_key]
+    jet_foundation.[Span, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table, symbol_table_key]
 }
 
 TYPE_ROW_EFFECTS: "IO: struct {{\n    impl Effect {{}}\n}}\nNet: struct {{\n    impl Effect {{}}\n}}\nEnv: struct {{\n    impl Effect {{}}\n}}\n"
@@ -30,8 +30,8 @@ effect_type_row_graph: fn(failures: &[String]) -> SemaRegistrationGraph? {
     }
     table := module_table()
     main_id: module_intern(table, TYPE_ROW_MODULE)
-    canonical: jet_driver_canonical_effect_module(TYPE_ROW_EFFECTS, table) ?? {
-        failures.push("canonical effect declaration failed parsing")
+    canonical: jet_driver_canonical_effect_module(effect_vocabulary_module(TYPE_ROW_EFFECTS), table) ?? {
+        failures.push("canonical effect module declares no effects")
         return None
     }
     canonical_id: canonical.module_identity

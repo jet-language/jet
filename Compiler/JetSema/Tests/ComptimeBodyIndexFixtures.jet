@@ -28,6 +28,7 @@ use {
         ModuleID,
         ModuleTable,
         Span,
+        effect_vocabulary_module,
         SymbolKind,
         TComptimeValue,
         TConstantDef,
@@ -357,7 +358,7 @@ body_index_publication_lifecycle: fn() {
     parsed := parse_source(source.bytes())
     body_index_require(parsed.diagnostics.len() == 0, "the real publication-lifecycle module parses")
     table := body_index_table()
-    canonical := jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\n", table) ?? panic("the canonical effect module does not parse")
+    canonical := jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("the canonical effect module declares no effects")
     bytes: source.bytes()
     input: SemaRegistrationModuleInput{package_identity: "body-index", module_identity: body_index_module("mod::one"), module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "lifecycle.jet", source_segments: [SemaSourceSegment]{SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: "lifecycle.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
     facts: SemaBuildFacts{package_name: "body-index", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
@@ -484,7 +485,7 @@ body_index_constant_graph: fn(sources: [String]) -> SemaRegistrationGraph {
         file: "constant_{index}.jet"
         inputs.push(SemaRegistrationModuleInput{package_identity: "constant-index", module_identity: module_intern(table, "constant::{index}"), module_name: "module_{index}", core_source_alias: "", module_path: file, source_file: file, source_segments: jet_driver_source_segments(file, sources[index]), source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: sources[index]})
     }
-    canonical := jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\n", table) ?? panic("the canonical effect module does not parse")
+    canonical := jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("the canonical effect module declares no effects")
     canonical_identity: canonical.module_identity.copy()
     inputs.push(canonical)
     facts: SemaBuildFacts{package_name: "constant-index", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}

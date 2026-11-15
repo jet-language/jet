@@ -10,7 +10,7 @@ use {
         jet_driver_comptime_inputs_for, jet_driver_core_text, jet_driver_core_text_file,
     ]
     jet_eval.[jet_eval_default_config]
-    jet_foundation.[Span, TComptimeValue, compiler_threads_single]
+    jet_foundation.[EffectModuleSource, Span, TComptimeValue, compiler_threads_single]
 }
 
 // A toolchain tree holding one asset at `file`.
@@ -37,7 +37,7 @@ core_inputs_test_row: fn(path: String, text: Shared<JetDriverCoreText>) -> JetDr
 core_inputs_test_request: fn(rows: [JetDriverCoreSource], log: Shared<JetDriverComptimeInputLog>) -> JetDriverCompileRequest {
     request := JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [], entry_root_identity: "core-inputs", entry_path: "/project/main.jet"},
-        canonical_effect_source: "", core_sources: rows, host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), record_store: None, trace_sink: None, compiler_threads: compiler_threads_single(),
+        canonical_effects: EffectModuleSource{source: "", line_starts: [], decls: []}, core_sources: rows, host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), record_store: None, trace_sink: None, compiler_threads: compiler_threads_single(),
     }
     request.comptime_input_log = Val(log)
     request

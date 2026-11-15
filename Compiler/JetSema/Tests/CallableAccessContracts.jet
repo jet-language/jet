@@ -12,7 +12,7 @@ use {
         sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_registration_prepare_graph,
     ]
     jet_driver.[jet_driver_canonical_effect_module]
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table]
 }
 
 callable_access_diagnostics: fn(failures: &[String], source: String) -> [Diagnostic]? {
@@ -23,8 +23,8 @@ callable_access_diagnostics: fn(failures: &[String], source: String) -> [Diagnos
     }
     table := module_table()
     main_id: module_intern(table, "callable-access::main")
-    effects: jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n", table) ?? {
-        failures.push("canonical effect source did not parse")
+    effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
+        failures.push("canonical effect module declares no effects")
         return None
     }
     effects_id: effects.module_identity
