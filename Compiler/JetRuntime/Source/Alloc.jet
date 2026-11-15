@@ -1925,16 +1925,21 @@ alloc_user_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
         _: alloc_user_call(carrier, ALLOC_USER_GIVE, bytes, block)
         return I64{0}
     }
-    bound: sync_load(wrapping(record + I64{16}))
-    if (bound != carrier) {
-        jet_rt_native_closure_retain(carrier)
-        sync_store(wrapping(record + I64{16}), carrier)
-        alloc_user_drop(bound)
-    }
+    alloc_user_bind(record, carrier)
     sync_store(block, I64{1})
     sync_store(wrapping(block + I64{8}), I64{0})
     sync_store(wrapping(block + I64{16}), block)
     wrapping(block + ALLOC_USER_HEADER)
+}
+
+// Makes the region of `record` name `carrier` as the allocator its blocks
+// go back to, holding a reference to it in place of the one it named.
+alloc_user_bind: fn(record: I64, carrier: I64) {
+    bound: sync_load(wrapping(record + I64{16}))
+    if (bound == carrier) -> return
+    jet_rt_native_closure_retain(carrier)
+    sync_store(wrapping(record + I64{16}), carrier)
+    alloc_user_drop(bound)
 }
 
 // alloc_user_take for an allocation that cannot fail: a refusal is out of

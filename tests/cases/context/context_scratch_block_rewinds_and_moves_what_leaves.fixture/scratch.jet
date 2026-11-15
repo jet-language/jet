@@ -14,10 +14,9 @@ total: fn(values: [Int]) -> Int {
 
 // The address of the first item of `values`, in the list's buffer.
 item_address: fn(values: [Int]) -> Int {
-    cell: values[0]
     address := 0
     #Unsafe("only reads the address of an item the caller keeps alive") {
-        address = mem.address_of(cell)
+        address = mem.address_of(values[0])
     }
     address
 }
@@ -51,14 +50,17 @@ scribble: fn() -> Int {
     filled
 }
 
-run: fn() {
+// The lists whose addresses are compared are `squares(count)` for a count
+// known only at run time: `name: squares(8)` would fold while building into
+// a constant list that no block serves.
+blocks: fn(count: Int) {
     dropped := 0
     later := 0
     #Context(allocator: context.scratch) {
-        x := squares(8)
+        x := squares(count)
         dropped = item_address(x)
         x = [Int]{}
-        y: squares(8)
+        y: squares(count)
         later = item_address(y)
     }
     print("a drop frees nothing: {later > dropped}")
@@ -67,13 +69,13 @@ run: fn() {
     inner := 0
     after := 0
     #Context(allocator: context.scratch) {
-        made: squares(8)
+        made: squares(count)
         outer = item_address(made)
         #Context(allocator: context.scratch) {
-            nested: squares(8)
+            nested: squares(count)
             inner = item_address(nested)
         }
-        again: squares(8)
+        again: squares(count)
         after = item_address(again)
     }
     print("inner after outer: {inner > outer}")
@@ -81,7 +83,7 @@ run: fn() {
 
     sibling := 0
     #Context(allocator: context.scratch) {
-        made: squares(8)
+        made: squares(count)
         sibling = item_address(made)
     }
     print("sibling blocks start at one mark: {sibling == dropped}")
@@ -125,11 +127,11 @@ run: fn() {
     first_mark := 0
     second_mark := 0
     #Context(allocator: arena) {
-        made: squares(8)
+        made: squares(count)
         first_mark = item_address(made)
     }
     #Context(allocator: arena) {
-        made: squares(8)
+        made: squares(count)
         second_mark = item_address(made)
     }
     print("arena blocks start at one mark: {first_mark == second_mark && first_mark != dropped}")
@@ -140,3 +142,5 @@ run: fn() {
     }
     print("fresh arena: {fresh}")
 }
+
+run: fn() { blocks(8) }

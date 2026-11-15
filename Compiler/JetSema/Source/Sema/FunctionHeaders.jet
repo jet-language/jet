@@ -27,6 +27,7 @@ use jet_foundation.[
     NamedType,
     PolicyDeclaration,
     PolicyKey,
+    PolicyValue,
     Program,
     Span,
     Stmt,
@@ -340,6 +341,15 @@ sema_function_arithmetic_policy: fn(markers: [Marker]) -> ArithmeticPolicyFact? 
 sema_policy_arithmetic_mode: fn(declarations: [PolicyDeclaration]) -> ArithmeticMode? Never! {
     loop declaration in declarations {
         if declaration.key == PolicyKey.Arithmetic && declaration.value == .Arithmetic(mode) -> return Val(mode)
+    }
+    None
+}
+
+// The sentry mode a `#Policy(sentries: …) { … }` block declares, if any:
+// true for `.On`, false for `.Off`.
+sema_policy_sentries: fn(declarations: [PolicyDeclaration]) -> Bool? Never! {
+    loop declaration in declarations {
+        if declaration.key == PolicyKey.Sentries -> return Val(declaration.value == PolicyValue.On)
     }
     None
 }

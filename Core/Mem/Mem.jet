@@ -297,7 +297,9 @@ Allocator: trait {
 // in place and unchanged until the block ends, and the runtime calls this
 // only inside it. The sentry witness is off for that read because the
 // address was taken in this function's frame, which has returned by then.
-__allocator_handler: fn<A: Allocator>(allocator: &A) -> fn(Int, Int, Int) -> Int Never! {
+// The closure's type has no failure: the runtime takes its result as a bare
+// Int, and `-> Int Never!` here would make it a failure-carrying result.
+__allocator_handler: fn<A: Allocator>(allocator: &A) -> fn(Int, Int, Int) -> Int {
     address := 0
     #Unsafe("the allocator is a place the `#Context(allocator:)` block keeps in place until it ends") {
         address = mem.address_of(allocator)
@@ -322,16 +324,18 @@ __allocator_handler: fn<A: Allocator>(allocator: &A) -> fn(Int, Int, Int) -> Int
 
 // The blocks of `context.allocator`: `__context_take` answers the address
 // of `size` bytes at a multiple of `align` that the current allocator
-// serves, or 0 when it refuses; `__context_give` hands such a block back to
-// the allocator that served it; `__context_room` answers the bytes from the
-// address to the end of what was served, the most the block can grow to.
-// Compiler intrinsics as the region operations above are.
+// serves, or 0 when it refuses; `__context_give` hands such a block of
+// `size` bytes back to the allocator that served it; `__context_room`
+// answers the bytes from the address to the end of what was served, the
+// most the block can grow to (0 for a user allocator's block, which only
+// that allocator can resize). Compiler intrinsics as the region operations
+// above are.
 __context_take: fn(size: Int, align: Int) -> Int Never! {
     __context_take(size, align)
 }
 
-__context_give: fn(address: Int) Never! {
-    __context_give(address)
+__context_give: fn(address: Int, size: Int) Never! {
+    __context_give(address, size)
 }
 
 __context_room: fn(address: Int) -> Int Never! {
@@ -352,7 +356,7 @@ impl __ContextAllocator.Allocator {
     }
 
     release: fn(&self, block: &&Block) Never! {
-        __context_give(block.address)
+        __context_give(block.address, block.size)
         #Unsafe("the block's bytes went back to the allocator that served them") {
             consume(block)
         }

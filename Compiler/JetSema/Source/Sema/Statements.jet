@@ -207,8 +207,8 @@ sema_stmt_tree_block_can_fall_through: fn(statements: [TStmt]) -> Bool Never! {
             }
             .Loop(label, body, _) -> return sema_stmt_tree_loop_body_has_break(body, label, true)
             // Rust flow facts: a wrapper block's own exit leaves the block.
-            .Inline(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .Impure(body, _) | .Shield(body, _) | .Region(body, _) -> return sema_stmt_tree_block_can_fall_through(body)
-            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .While(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .SentryPolicy(_, _, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) | .Defer(_, _) -> return true
+            .Inline(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Shield(body, _) | .Region(body, _) -> return sema_stmt_tree_block_can_fall_through(body)
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .While(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) | .Defer(_, _) -> return true
         }
     }
     true
@@ -10659,15 +10659,21 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             sema_scope_pop_unit_policy(scopes, previous_unit_policy)
             scopes.copies_explicit = previous_copies_policy
             scopes.writes_explicit = previous_writes_policy
+            // `#Policy(sentries: …)` turns the sentry's checks on or off over
+            // its body at run time (JetIR ir_sentry_policy), so it stays a
+            // scope of its own; any other policy only changed how the body
+            // was checked.
+            sentries: sema_policy_sentries(declarations)
             if {
                 !nested.complete -> {
                     complete = false
                 }
-                else -> {
+                sentries == None -> {
                     loop checked_statement in nested.value {
                         output.push(checked_statement)
                     }
                 }
+                else -> output.push(TStmt.SentryPolicy{enabled: sentries, body: nested.value, span: span})
             }
         }
         .AuthorityScope(caps, _, binding, body, span) -> {

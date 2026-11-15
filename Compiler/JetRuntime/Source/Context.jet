@@ -94,17 +94,22 @@ context_scratch_drop: fn(record: I64) {
 // BuildRoutes.jet ir_core_context_block builds): jet_ctx_allocator_take
 // answers the address of `size` bytes at a multiple of `align`, a power of
 // two, or 0 when the current allocator refuses or the request is invalid.
-// The current allocator serves one value of align 8 (jet_rt_alloc_value_try:
-// the innermost `#Context(allocator:)` block's, else the program heap),
-// with room to round the address up to `align` and two header words below
-// it: the value's size at address - 16 and its address at address - 8.
-// jet_ctx_allocator_give hands that value back to the allocator that served
-// it (jet_rt_free finds it), and jet_ctx_allocator_room answers the bytes
-// from the address to the value's end, the most a block there can grow to.
+// A user allocator's `#Context(allocator:)` block hands the request to that
+// allocator as it is (context_user_take). Any other current allocator (an
+// arena's block, else the program heap) serves one value of align 8
+// (jet_rt_alloc_value_try) with room to round the address up to `align` and
+// two header words below it: the value's size at address - 16 and its
+// address at address - 8. jet_ctx_allocator_give hands a block of `size`
+// bytes back to the allocator that served it, and jet_ctx_allocator_room
+// answers the bytes from the address to the value's end, the most a block
+// there can grow to; a user allocator's block cannot grow or shrink, since
+// only that allocator knows its extent.
 CONTEXT_BLOCK_HEADER: I64{16}
 
 #Export(c) jet_ctx_allocator_take: fn(size: I64, align: I64) -> I64 {
     if (size < I64{0} || align <= I64{0} || align.bit_and(wrapping(align - I64{1})) != I64{0}) -> return I64{0}
+    carrier: context_user_carrier()
+    if (carrier != I64{0}) -> return context_user_take(carrier, size, align)
     alignment: if (align < I64{8}) -> I64{8} else -> align
     slack: wrapping(CONTEXT_BLOCK_HEADER + wrapping(alignment - I64{8}))
     if (size > wrapping(I64{9223372036854775807} - slack)) -> return I64{0}
@@ -117,14 +122,55 @@ CONTEXT_BLOCK_HEADER: I64{16}
     address
 }
 
-#Export(c) jet_ctx_allocator_give: fn(address: I64) {
+#Export(c) jet_ctx_allocator_give: fn(address: I64, size: I64) {
     if (address == I64{0}) -> return
+    carrier: context_user_owner(address)
+    if (carrier != I64{0}) {
+        _: alloc_user_call(carrier, ALLOC_USER_GIVE, size, address)
+        return
+    }
     jet_rt_free(sync_load(wrapping(address - I64{8})), sync_load(wrapping(address - I64{16})), I64{8})
 }
 
 #Export(c) jet_ctx_allocator_room: fn(address: I64) -> I64 {
-    if (address == I64{0}) -> return I64{0}
+    if (address == I64{0} || context_user_owner(address) != I64{0}) -> return I64{0}
     wrapping(wrapping(sync_load(wrapping(address - I64{8})) + sync_load(wrapping(address - I64{16}))) - address)
+}
+
+// The current record's carrier when a user allocator's handler serves it,
+// else 0 (an arena's carrier has no handler; Alloc.jet alloc_user_carrier_new).
+context_user_carrier: fn() -> I64 {
+    if (alloc_class_limit == I64{0}) -> return I64{0}
+    slot: alloc_user_slot()
+    if (slot == I64{0}) -> return I64{0}
+    carrier: sync_load(slot)
+    if (carrier == I64{0} || sync_load(wrapping(carrier + I64{8})) == I64{0}) -> I64{0} else -> carrier
+}
+
+// `size` bytes at `align` from `carrier`'s allocator, the very request its
+// `allocate` sees, or 0 when it refuses or a stop is pending. As
+// alloc_user_take, a block that is not inside one registered region goes
+// back and counts as a refusal, and the region's record then names
+// `carrier`, so context_user_owner finds the allocator again at the give.
+context_user_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
+    if (jet_rt_session_propagate() != I64{0}) -> return I64{0}
+    block: alloc_user_call(carrier, ALLOC_USER_TAKE, size, align)
+    if (block == I64{0}) -> return I64{0}
+    last: wrapping(block + (if (size == I64{0}) -> I64{0} else -> wrapping(size - I64{1})))
+    record: if (block.bit_and(wrapping(align - I64{1})) != I64{0}) -> I64{0} else -> alloc_page_region(block)
+    if (record == I64{0} || alloc_page_region(last) != record) {
+        _: alloc_user_call(carrier, ALLOC_USER_GIVE, size, block)
+        return I64{0}
+    }
+    alloc_user_bind(record, carrier)
+    block
+}
+
+// The user allocator's carrier that served the block at `address`, else 0:
+// the block came from an arena or the program heap.
+context_user_owner: fn(address: I64) -> I64 {
+    carrier: alloc_user_owner(address)
+    if (carrier == I64{0} || sync_load(wrapping(carrier + I64{8})) == I64{0}) -> I64{0} else -> carrier
 }
 
 // Copies the current record into `record`, which then shares its value

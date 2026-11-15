@@ -23,13 +23,14 @@ ir_list_grow_buffer: fn(m: &IRModule, b: &IRBuilder, list: Int, bytes: Int, try:
 
 // Whether `slot` addresses storage of this body's frame reserved inside its
 // innermost open `#Context(allocator: a)` block: every write of it there is
-// a StackAddress, or an Offset into such storage.
+// a StackAddress, or an Offset into such storage or a Move or Copy of it (a
+// local list's header moves from the storage its literal built).
 ir_young_storage: fn(b: IRBuilder, slot: Int) -> Bool Never! {
     if b.young_slots < 0 || slot < b.young_slots -> return false
     made := false
     loop at in b.young_ops..<b.f.op.len() {
         if b.f.dst[at] != slot -> next
-        if b.f.op[at] == .StackAddress || (b.f.op[at] == .Offset && ir_young_storage(b, b.f.a[at])) {
+        if b.f.op[at] == .StackAddress || ((b.f.op[at] == .Offset || b.f.op[at] == .Move || b.f.op[at] == .Copy) && b.f.a[at] != slot && ir_young_storage(b, b.f.a[at])) {
             made = true
         } else {
             return false
@@ -6396,12 +6397,12 @@ ir_core_region: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, operation: IRRunti
 // `context.allocator`'s blocks (Core/Mem/Mem.jet `__ContextAllocator`):
 // `__context_take(size, align)` answers the address of a block the current
 // allocator serves, or 0 (JetRuntime Context.jet jet_ctx_allocator_take);
-// `__context_give(address)` hands one back (jet_ctx_allocator_give) and
-// `__context_room(address)` answers the bytes it can grow to
+// `__context_give(address, size)` hands one back (jet_ctx_allocator_give)
+// and `__context_room(address)` answers the bytes it can grow to
 // (jet_ctx_allocator_room). Each Int crosses as a native word.
 ir_core_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, operation: IRRuntimeIntrinsic, args: [Int], span: Span) -> Int Never! {
     takes: operation == IRRuntimeIntrinsic.ContextTake
-    if args.len() != (if takes -> 2 else -> 1) -> return ir_fail_slot(b, span, "context block operation has invalid checked arity")
+    if args.len() != (if operation == IRRuntimeIntrinsic.ContextRoom -> 1 else -> 2) -> return ir_fail_slot(b, span, "context block operation has invalid checked arity")
     words: ir_core_native_words(m, p, b, args, span)
     if ir_failed(b) -> return -1
     if operation == IRRuntimeIntrinsic.ContextGive {
