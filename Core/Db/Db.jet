@@ -862,8 +862,12 @@ priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBEr
     }
     Ok(changed)
 }
+
+// A read made while a live binding's source runs joins that binding's read
+// set first (app.live_reads), so a write to its table re-runs the binding.
 priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String: DBValue]] DBError! {
     scoped: policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
+    if app.live_reads.running() && sql_table(scoped) == .Val(table) -> app.live_reads.record(live_source(table))
     guard := scope.state.guard_edit()
     if driver_closed(guard.value.driver) -> return Err(db_closed())
     __driver_query(guard.value.driver, scoped.text, scoped.values)
@@ -872,7 +876,8 @@ priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String: 
 // ---- live queries (#1158) ----------------------------------
 
 // A DBScope.live binding's source in the shared live registry names the table
-// its SELECT reads; a write to that table re-runs every binding over it.
+// its SELECT reads; a write to that table re-runs every binding over it, and
+// every binding whose source read it (app.live_reads).
 priv live_source: fn(table: String) -> String Never! { "core.db.live:{table}" }
 
 // The table `sql` reads or writes: the target of SELECT, INSERT, UPDATE or

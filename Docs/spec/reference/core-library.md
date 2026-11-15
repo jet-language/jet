@@ -5462,9 +5462,9 @@ tasks never read or change the process registry. The module source is
 |---|---|---|
 | `live(query, args...) -> Live<T, E>` | binding | Bind `query: fn(args...) -[DB.Read]> T E!` to one argument list. The arguments are checked as a call to `query`, evaluated once and kept by the binding; the same source and arguments return the existing binding. |
 | `subscribe(source, args..., every: Duration? = None) -> Live<T, E>` | binding | Bind a named `source: fn(args...) -[DB.Read, Net, Time]> T E!` to one argument list; with `every`, a read re-runs the source once the interval has passed since its last run. A source that declares another effect is E0740. |
-| `state(binding: Live<T, E>) -> Loadable<T, E>` | state | Read the binding's snapshot: `Loaded(value)` or `Failed(reason)`, running the source first when the binding is new, invalidated, or due to poll. |
+| `state(binding: Live<T, E>) -> Loadable<T, E>` | state | Read the binding's snapshot: `Loaded(value)` or `Failed(reason)`, running the source first when the binding is new, invalidated, or due to poll. Each table the source reads through a `DBScope` while it runs joins the binding's read set. |
 | `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list without running the source. |
-| `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. |
+| `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. For a source whose data the database doesn't track, such as a fetch; a database write already reaches the bindings that read its table. |
 | `watch(socket: WsConn, binding: Live<T, E>) -[Net]>` | — | Send `{"live":"invalidate","binding":<id>}` to the server-side WebSocket `socket` each time `binding` is invalidated, starting with the latest such event when there was one. While the binding is held, the event carries `"after_ms":<n>`: read it again after `n` milliseconds. |
 | `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations and value changes. |
 | `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
@@ -6379,7 +6379,11 @@ scope write (`execute`, `transaction`, `migrate`) to the table it reads, or
 after a rollback that undid one. A write to another table, or one that changed
 no row (an `UPDATE` or `DELETE` that matched nothing), leaves it current and
 its stored result untouched; a `CREATE`, `ALTER` or `DROP` of its table always
-re-runs it. Each invalidation also goes to the WebSocket live hub, reaching
+re-runs it. The same write reaches every `app.live` or `app.subscribe` binding
+whose source read that table through a scope (its read set, which `app.state`
+records while the source runs), with the same rules: a write to another table
+or one that changed no row re-runs nothing, and one inside a transaction
+reaches it at the commit. Each invalidation also goes to the WebSocket live hub, reaching
 only the connections that `app.watch` the binding, and `app.live_stats()`
 counts it as `ws_pushes`. Nothing re-runs a binding but a read: a connection
 that closes stops watching, so a write after that reaches it no longer and

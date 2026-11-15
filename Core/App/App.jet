@@ -19,6 +19,8 @@ use {
     core.reactive.loadable.[Loadable]
     ws: core.net.ws
     core.net.ws.[WsConn]
+    tasks: core.tasks
+    core.tasks.[TaskID]
     rt: jet.runtime.time
     rt_web: jet.runtime.web
     world_rt: jet.runtime.testing
@@ -379,6 +381,8 @@ Live: struct<T, E> {
 // invalidation overtook, and `held_ns` is the monotonic time until which a
 // stale binding serves its stored result (0: none); `every_ns` is the poll
 // interval (0: none) and `ran_ns` the monotonic time of the last run.
+// `reads` is its read set: the other sources (a table's `core.db.live:<table>`)
+// its runs read (`live_reads`), so a write to any of them re-runs it too.
 LiveRecord: struct {
     id: Int
     source: String
@@ -390,6 +394,7 @@ LiveRecord: struct {
     held_ns: Int
     every_ns: Int
     ran_ns: Int
+    reads: [String]
 }
 
 // What `state` reads before it runs a binding: the stored result when it is
@@ -422,14 +427,15 @@ LiveRegistry: struct {
 // what it read may predate that write. Under writes that keep overtaking it, a
 // binding settles: from its second overtaken run in a row, its stale result
 // is served for a hold (live_store) instead of running the source on every
-// read, and its watchers (`watch`) are told when to read it again.
+// read, and its watchers (`watch`) are told when to read it again. While the
+// source runs, the tables it reads join the binding's read set (`live_reads`).
 state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! {
     now: rt.clock_mono_ns()
     seen: live_current(binding.id, now)
     if seen.value == .Val(text) {
         if live_value_state<T, E>(text) == .Val(current) -> return current
     }
-    value: binding.run() ?? {
+    value: live_run(binding) ?? {
         if live_json.to_string<E>(err) == .Ok(encoded) {
             live_store(binding.id, "err:{encoded}", now, Val(seen.generation))
         }
@@ -437,6 +443,19 @@ state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Load
     }
     if live_json.to_string<T>(value) == .Ok(encoded) -> live_store(binding.id, "ok:{encoded}", now, Val(seen.generation))
     Loadable.Loaded(value)
+}
+
+// Runs `binding`'s source as this task's running binding, so the reads it
+// makes join the binding's read set.
+live_run: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> T E! {
+    me: tasks.current_task()
+    live_run_begin(me, binding.id)
+    value: binding.run() ?? {
+        live_run_end(me)
+        return Err(err)
+    }
+    live_run_end(me)
+    Ok(value)
 }
 
 // `socket`, a server-side WebSocket connection, receives
@@ -500,6 +519,71 @@ __live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None)
 
 // One argument's part of a binding's identity.
 __live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
+
+// A binding's read set, for core.db: while a task runs a binding's source,
+// each table it reads joins that binding's read set, so a write to the table
+// re-runs the binding as it re-runs the table's own bindings.
+priv(package) live_reads: module {
+    // Whether this task is running a binding's source, so a database read
+    // it makes belongs to that binding's read set.
+    running: fn() -> Bool Never! { live_running(tasks.current_task()) != None }
+
+    // Adds `source` (a table's `core.db.live:<table>`) to the read set of
+    // the binding this task runs. Recorded before the read runs, so a write
+    // committed after the read always reaches the binding.
+    record: fn(source: String) Never! {
+        id: live_running(tasks.current_task()) ?? return
+        loop {
+            seen: live_cell_load()
+            registry := live_decode(seen) ?? return
+            index: live_index(registry, id) ?? return
+            if registry.records[index].source == source || registry.records[index].reads.contains(source) -> return
+            registry.records[index].reads.push(source.copy())  // copy: a lost race retries with the same source
+            if live_cell_replace(seen, live_encode(registry)) -> return
+        }
+    }
+}
+
+// The bindings whose sources are running now, each with its task; a source
+// that reads another binding stacks that binding on its own.
+LiveRun: struct {
+    task: TaskID
+    id: Int
+}
+
+LiveRunning: struct {
+    runs: [LiveRun]
+}
+
+LIVE_RUNNING: Shared{LiveRunning{runs: [LiveRun]{}}}
+
+live_run_begin: fn(task: TaskID, id: Int) {
+    running := LIVE_RUNNING.guard_edit()
+    running.value.runs.push(LiveRun{task: task, id: id})
+}
+
+live_run_end: fn(task: TaskID) {
+    running := LIVE_RUNNING.guard_edit()
+    at := running.value.runs.len()
+    loop at > 0 {
+        at -= 1
+        if task == running.value.runs[at].task {
+            _: running.value.runs.remove(at, .Slot)
+            return
+        }
+    }
+}
+
+// The binding `task` is running now, the innermost when it runs several.
+live_running: fn(task: TaskID) -> Int? {
+    running := LIVE_RUNNING.guard_edit()
+    at := running.value.runs.len()
+    loop at > 0 {
+        at -= 1
+        if running.value.runs[at].task == task -> return Val(running.value.runs[at].id)
+    }
+    None
+}
 
 LIVE_MAX_QUERIES: 1024
 
@@ -580,7 +664,7 @@ live_register: fn(source: String, key: String, every_ns: Int) -> Int {
                 registry.evictions += 1
             }
             // copy: a lost race retries with the same source and key
-            registry.records.push(LiveRecord{id: found, source: source.copy(), key: key.copy(), value: "", dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: every_ns, ran_ns: 0})
+            registry.records.push(LiveRecord{id: found, source: source.copy(), key: key.copy(), value: "", dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: every_ns, ran_ns: 0, reads: [String]{}})
         }
         if live_cell_replace(seen, live_encode(registry)) -> return found
     }
@@ -675,8 +759,13 @@ live_invalidate: fn(source: String, key: String?) {
         hits := [Int]{}
         events := [String]{}
         loop index in 0..<registry.records.len() {
-            if registry.records[index].source != source -> next
-            if key == .Val(only) && registry.records[index].key != only -> next
+            // An exact-key invalidation names one binding of `source`; a
+            // whole-source one also reaches every binding that read it.
+            if registry.records[index].source == source {
+                if key == .Val(only) && registry.records[index].key != only -> next
+            } else if key != None || !registry.records[index].reads.contains(source) {
+                next
+            }
             registry.records[index].dirty = true
             registry.records[index].generation += 1
             id: registry.records[index].id
@@ -716,8 +805,8 @@ live_index: fn(registry: LiveRegistry, id: Int) -> Int? {
 }
 
 // The cell holds the registry as length-prefixed fields: next id,
-// invalidations, changes, evictions, WebSocket pushes, then ten fields per
-// binding.
+// invalidations, changes, evictions, WebSocket pushes, then eleven fields per
+// binding, the last its read set joined by newlines.
 live_encode: fn(registry: LiveRegistry) -> [U8] {
     out := [U8]{}
     live_put(out, "{registry.next_id}")
@@ -736,6 +825,7 @@ live_encode: fn(registry: LiveRegistry) -> [U8] {
         live_put(out, "{record.held_ns}")
         live_put(out, "{record.every_ns}")
         live_put(out, "{record.ran_ns}")
+        live_put(out, record.reads.join("\n"))
     }
     out
 }
@@ -751,7 +841,7 @@ live_decode: fn(raw: [U8]) -> LiveRegistry? {
         return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, ws_pushes: 0, records: [LiveRecord]{}})
     }
     fields: live_fields(raw) ?? return None
-    if fields.len() < 5 || (fields.len() - 5) % 10 != 0 -> return None
+    if fields.len() < 5 || (fields.len() - 5) % 11 != 0 -> return None
     next_id: Int.parse(fields[0]) ?? return None
     invalidations: Int.parse(fields[1]) ?? return None
     changes: Int.parse(fields[2]) ?? return None
@@ -766,8 +856,9 @@ live_decode: fn(raw: [U8]) -> LiveRegistry? {
         held_ns: Int.parse(fields[at + 7]) ?? return None
         every_ns: Int.parse(fields[at + 8]) ?? return None
         ran_ns: Int.parse(fields[at + 9]) ?? return None
-        records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", generation: generation, overtaken: overtaken, held_ns: held_ns, every_ns: every_ns, ran_ns: ran_ns})
-        at += 10
+        reads: if fields[at + 10] == "" -> [String]{} else -> fields[at + 10].split("\n").to_list()
+        records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", generation: generation, overtaken: overtaken, held_ns: held_ns, every_ns: every_ns, ran_ns: ran_ns, reads: reads})
+        at += 11
     }
     Val(LiveRegistry{next_id: next_id, invalidations: invalidations, changes: changes, evictions: evictions, ws_pushes: ws_pushes, records: records})
 }
@@ -843,7 +934,7 @@ sync: fn(doc_show: String, over: String) -> String Never! {
         if found >= 0 -> registry.records[found].value = value else {
             id: registry.next_id + 1
             registry.next_id = id
-            registry.records.push(LiveRecord{id: id, source: LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: 0, ran_ns: 0})
+            registry.records.push(LiveRecord{id: id, source: LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: 0, ran_ns: 0, reads: [String]{}})
         }
         if live_cell_replace(seen, live_encode(registry)) -> return receipt
     }
