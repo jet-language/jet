@@ -1067,8 +1067,8 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     } else {
         image := x64_link_executable(names, bytes, base, link_threads, debug_info)
         if image.errors.len() > 0 && retry == .Val(inputs_again) -> image = x64_link_executable(names, inputs_again, LINK_RUN_LOW_BASE, link_threads, debug_info)
-        errors = image.errors.copy()
-        undefined = image.undefined.copy()
+        errors = image.errors.move()
+        undefined = image.undefined.move()
         executable = x64_executable_whole(image.bytes.move())
     }
     if trace_sink == .Val(sink) {
@@ -2005,65 +2005,76 @@ jet_cli_build_sbom: fn(file: String, name: String, source: String, binary: Strin
 // `build: fn` generated (`generated`) loaded beside its sources, into
 // .jet/build/`name` and return, so the package build continues with its next
 // target. The snapshot holds the target's whole folder (target: true). The
-// compile's result and snapshot drop on a detached task
-// (jet_cli_compile_release), so the next node starts while they drop; what
-// the compile's scopes still hold drops as they close, in `cli.target.drop`.
+// compile's state drops on a detached task once the image is written
+// (jet_cli_compile_release), so the next node starts while it drops.
 jet_cli_compile_target: fn(file: String, name: String, source: String, sources: [String], generated: [JetDriverGeneratedModule], color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Program, false, true)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    released := false
-    output: if prepared.move() == {
-        .Refused(refusal) -> refusal
+    compiled: if prepared.move() == {
+        .Refused(refusal) -> return refusal
         .Prepared(request, snapshot) -> {
             with_generated := request
             with_generated.generated_modules = generated
             with_generated.target_sources = sources
-            compiled := jet_cli_compile_executable(JetCLIPrepared.Prepared{request: with_generated.move(), snapshot: snapshot}, None, options, None, trace_sink, color)
-            if compiled.move() == {
-                .Refused(refusal) -> refusal
-                .Checked(result, inputs, checked_snapshot) -> {
-                    built: jet_cli_build_result(file, name, source, color, options, invocation, false, false, false, false, result, inputs, checked_snapshot)
-                    if trace_sink == .Val(sink) -> sink.begin("cli.release", "", -1, -1)
-                    jet_cli_compile_release(result, checked_snapshot)
-                    if trace_sink == .Val(sink) -> sink.end("cli.release", -1)
-                    if trace_sink == .Val(sink) -> sink.begin("cli.target.drop", "", -1, -1)
-                    released = true
-                    built
-                }
-            }
+            jet_cli_compile_executable(JetCLIPrepared.Prepared{request: with_generated.move(), snapshot: snapshot}, None, options, None, trace_sink, color)
         }
     }
-    if released && trace_sink == .Val(sink) -> sink.end("cli.target.drop", -1)
-    output
+    // A consuming match holds its payload until the match ends, so the
+    // compile's parts leave it at once: below, `checked` alone owns them.
+    checked: if compiled.move() == {
+        .Refused(refusal) -> return refusal
+        // copy: a second count on the checked rows the native route consumes
+        // from `inputs`, so that route's drops leave them to the release task.
+        .Checked(result, inputs, snapshot) -> JetCLICheckedTarget{result: result, inputs: inputs, rows: inputs.copy(), snapshot: snapshot}
+    }
+    built: jet_cli_build_result(file, name, source, color, options, invocation, false, false, false, false, checked.result, checked.inputs, checked.snapshot)
+    if trace_sink == .Val(sink) -> sink.begin("cli.release", "", -1, -1)
+    jet_cli_compile_release(checked)
+    if trace_sink == .Val(sink) -> sink.end("cli.release", -1)
+    built
+}
+
+// A build target's checked compile, out of its JetCLIExecutableCompiled.
+// `rows` shares the checked rows `inputs` holds until the native route takes
+// them.
+JetCLICheckedTarget: struct {
+    result: JetDriverCompileResult
+    inputs: JetDriverLoweringInputs?
+    rows: JetDriverLoweringInputs?
+    snapshot: JetDriverAuthorizedSourceSnapshot
 }
 
 // What a build target's compile leaves once its image is written: its
-// diagnostics, facts and source snapshot.
+// diagnostics, facts, checked rows and source snapshot.
 JetCLICompileHeld: struct {
     diagnostics: [Diagnostic]
     generated: [SourceFile]
     structure_facts: [StructureFact]
     comptime_values: [SemaComptimeItemValue]
     doc_modules: [JetDriverDocModule]
+    inputs: JetDriverLoweringInputs?
+    rows: JetDriverLoweringInputs?
     snapshot: JetDriverAuthorizedSourceSnapshot
 }
 
-// Drops the rows of a target's `result` and its `snapshot` on a detached
-// task. Drop glue walks every row they hold, and for the compiler's own
-// compile that takes seconds; the package build's next node runs meanwhile.
-// The rest of the result (its trace sink among them) can't cross threads
-// and drops here. A process that exits first hands the pages back to the
-// kernel.
-jet_cli_compile_release: fn(result: &&JetDriverCompileResult, snapshot: &&JetDriverAuthorizedSourceSnapshot) {
-    owned: result.move()
+// Drops what `checked` holds on a detached task. Drop glue walks every row,
+// and the checked rows of the compiler's own compile take about a second
+// to free; the package build's next node runs meanwhile. The rest of the
+// result (its trace sink among them) can't cross threads and drops here.
+// The task runs to its end, so `jet dev` frees each build's state; a process
+// that exits first hands the pages back to the kernel.
+jet_cli_compile_release: fn(checked: &&JetCLICheckedTarget) {
+    owned: checked.move()
     held: JetCLICompileHeld{
-        diagnostics: owned.diagnostics.move(),
-        generated: owned.generated_source_files.move(),
-        structure_facts: owned.structure_facts.move(),
-        comptime_values: owned.comptime_values.move(),
-        doc_modules: owned.doc_modules.move(),
-        snapshot: snapshot.move(),
+        diagnostics: owned.result.diagnostics.move(),
+        generated: owned.result.generated_source_files.move(),
+        structure_facts: owned.result.structure_facts.move(),
+        comptime_values: owned.result.comptime_values.move(),
+        doc_modules: owned.result.doc_modules.move(),
+        inputs: owned.inputs.move(),
+        rows: owned.rows.move(),
+        snapshot: owned.snapshot.move(),
     }
     released: task &&held { held.diagnostics.len() }
     released.detach()

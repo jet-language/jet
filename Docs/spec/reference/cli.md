@@ -907,9 +907,9 @@ symbol collection and the realization of the providers it reaches),
 `native.build` around them for a test harness). A package build (`jet build`
 of a `build: fn`) also traces `build.plan`, the check of its build entry and
 the plan's query, and one `build.step` per batch of its steps, named by the
-steps; a target's compile result drops on a detached task once its image is
-written (`cli.release` is the hand-off), while the next node runs, what the
-compile's scopes still hold drops in `cli.target.drop`, the image is found
+steps; a target's compile state (its result rows, checked rows and source
+snapshot) drops on a detached task once its image is written (`cli.release`
+is the hand-off) while the next node runs, the image is found
 (and copied where a step reads it) in `build.image`, and an
 executable a step runs is copied to its host copy in `build.host`. A step's
 own processes are not jet's, so the span's `proc_cpu_ns` is jet's alone;
