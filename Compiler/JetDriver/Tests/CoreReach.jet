@@ -443,6 +443,51 @@ reach_test_methods: fn(load: JetDriverLoadResult, module_name: String, type_name
     assert_eq(reach_test_functions(timed, "core.math"), [String]{"make"})
 }
 
+// The load of `source` beside `core.math`, whose text is `math`, and
+// `core.text`, whose text is `text`.
+reach_test_load_pair: fn(source: String, math: String, text: String) -> JetDriverLoadResult {
+    request := reach_test_request(source)
+    request.core_sources = [JetDriverCoreSource]{
+        {module_name: "core.math", alias: "core_math", path: "Core/math-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(math)},
+        {module_name: "core.text", alias: "core_text", path: "Core/text-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(text)},
+    }
+    load: jet_driver_load(request)
+    assert(load.complete && !jet_driver_has_errors(load.diagnostics))
+    load
+}
+
+#Test("a Core impl of another module's trait loads only once its type and its trait are both reached") {
+    math: "use {{\n    shape: core.text\n}}\n\nBox: struct {{\n    width: Float\n\n    impl shape.Shape {{\n        area: fn(self) -> Float Never! {{ self.width * self.width }}\n    }}\n}}\n\nmake: fn() -> Box Never! {{ Box{{width: 2.0}} }}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
+    text: "Shape: trait {{\n    area: fn(self) -> Float Never!\n}}\n\nlabel: fn() -> Int Never! {{ 3 }}\n"
+    // The type alone: the impl stays out, and so does the trait's module it
+    // alone would import.
+    typed: reach_test_load_pair("use m: core.math\nrun: fn() {{ print(m.make().width) }}\n", math, text)
+    assert_eq(reach_test_types(typed, "core.math"), [String]{"Box"})
+    assert_eq(reach_test_methods(typed, "core.math", "Box"), [String]{})
+    assert(!reach_test_has_module(typed, "core.text"))
+    // The type and the trait's module: the impl loads.
+    both: reach_test_load_pair("use m: core.math\nuse t: core.text\nrun: fn() {{\n    print(m.make().width)\n    print(t.label())\n}}\n", math, text)
+    assert(reach_test_has_module(both, "core.text"))
+    assert_eq(reach_test_methods(both, "core.math", "Box"), [String]{"shape.Shape.area"})
+    // The trait's module alone: the type, and its impl with it, stay out.
+    traited: reach_test_load_pair("use m: core.math\nuse t: core.text\nrun: fn() {{\n    print(m.plain())\n    print(t.label())\n}}\n", math, text)
+    assert_eq(reach_test_types(traited, "core.math"), [String]{})
+    assert_eq(reach_test_functions(traited, "core.math"), [String]{"plain"})
+}
+
+#Test("a Core type's codec impl loads only once reached code names the codec trait or calls its verb") {
+    text: "Box: struct {{\n    width: Float\n\n    impl Encode {{\n        encode: fn(self) -> Dyn {{ Dyn.Text(\"box\") }}\n    }}\n}}\n\nmake: fn() -> Box Never! {{ Box{{width: 2.0}} }}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
+    typed: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.make().width) }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_methods(typed, "core.math", "Box"), [String]{})
+    called: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.make().encode()) }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_methods(called, "core.math", "Box"), [String]{"Encode.encode"})
+    named: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.make().width) }}\nwrap: fn(value: Encode) -> Encode {{ value }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_methods(named, "core.math", "Box"), [String]{"Encode.encode"})
+    // The verb without the type reaches no impl.
+    untyped: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\nwrap: fn(value: Encode) -> Dyn {{ value.encode() }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_types(untyped, "core.math"), [String]{})
+}
+
 #Test("a routed module's precise family loads with its type, and an imaginary literal reaches Complex") {
     text: "plain: fn() -> Int Never! {{ 1 }}\n\nFraction: struct {{\n    n: Int\n}}\n\n__fraction_add: fn(a: Fraction) -> Fraction Never! {{ a }}\n\nComplex: struct {{\n    re: Float\n}}\n\n__complex_add: fn(a: Complex) -> Complex Never! {{ a }}\n"
     // The two family members are core.math registry members this text owns.
