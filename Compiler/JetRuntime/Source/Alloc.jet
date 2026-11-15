@@ -11,7 +11,9 @@
 // the large-block cache owns lock 216, cached bytes 224 (atomic) and 59 class heads
 // from 256; the slab regions own lock 736, cursor 744, end 752, the
 // free-slab stack 760 and the next region size 768 (alloc_slab_map); words
-// 232 and 240 are the page map's root and lock (ALLOC_PAGE_MAP).
+// 232 and 240 are the page map's root and lock (ALLOC_PAGE_MAP); words 776
+// to 896 are the region window's base, cursor and class stacks
+// (ALLOC_WINDOW).
 // The state page also reserves word 4080 for the execution-end flush lock
 // and word 4088 for ignored raw stdio outputs (the I64/Bool outputs alias).
 // Each 64 KiB slab belongs to one arena and one power-of-two class
@@ -250,39 +252,223 @@ alloc_page_region: fn(address: I64) -> I64 {
     }
 }
 
-// Points every unit of [base, base + bytes) at `record` (0 clears them)
-// under the page lock. False, with no unit written, when a table cannot be
-// mapped.
+// Points every unit of [base, base + bytes) at `record` (0 clears them).
+// A window run's units are written with no lock: the window's span tables
+// exist from its start (alloc_window), and only the run's owner writes its
+// units. Any other range takes the page lock. False, with no unit written,
+// when a table cannot be mapped.
 alloc_page_set: fn(base: I64, bytes: I64, record: I64) -> Bool {
+    if alloc_window_holds(base) {
+        alloc_page_write(base, bytes, record)
+        return true
+    }
     lock: wrapping(alloc_root + ALLOC_PAGE_LOCK)
     alloc_lock(lock)
-    ok := true
-    #Unsafe("the held page lock serializes every table write; a fresh table is zero-filled before the aligned store that publishes it, and the units written lie in spans mapped first") {
+    ok: alloc_page_spans(base, bytes)
+    if ok -> alloc_page_write(base, bytes, record)
+    alloc_unlock(lock)
+    ok
+}
+
+// Maps the root table, and each span table that [base, base + bytes)
+// touches, that is not mapped yet; false when one cannot be mapped. The
+// caller holds the page lock.
+alloc_page_spans: fn(base: I64, bytes: I64) -> Bool {
+    #Unsafe("the caller holds the page lock, which serializes every table write; a fresh table is zero-filled before the aligned store that publishes it") {
         root := os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP))
         if (root == I64{0}) {
             root = alloc_map_try(ALLOC_PAGE_ROOT_BYTES)
-            if (root != I64{0}) { os_store_i64(wrapping(alloc_root + ALLOC_PAGE_MAP), root) }
+            if (root == I64{0}) -> return false
+            os_store_i64(wrapping(alloc_root + ALLOC_PAGE_MAP), root)
         }
-        if (root == I64{0}) { ok = false }
         end: wrapping(base + bytes)
         at := base
-        loop ok && at < end {
+        loop at < end {
             cell: wrapping(root + wrapping((at >> I64{32}) * I64{8}))
             if (os_load_i64(cell) == I64{0}) {
                 span: alloc_map_try(ALLOC_PAGE_SPAN_BYTES)
-                if (span == I64{0}) { ok = false } else { os_store_i64(cell, span) }
+                if (span == I64{0}) -> return false
+                os_store_i64(cell, span)
             }
             at = wrapping((at >> I64{32}) + I64{1}) << I64{32}
         }
-        at = base
-        loop ok && at < end {
+    }
+    true
+}
+
+// Points every unit of [base, base + bytes) at `record`. The range's span
+// tables exist, and its owner alone writes its units.
+alloc_page_write: fn(base: I64, bytes: I64, record: I64) {
+    #Unsafe("the root and span tables of the range are mapped for the process's lifetime, and each unit's aligned word is written only by the range's owner") {
+        root: os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP))
+        end: wrapping(base + bytes)
+        at := base
+        loop at < end {
             span: os_load_i64(wrapping(root + wrapping((at >> I64{32}) * I64{8})))
             os_store_i64(wrapping(span + wrapping((at >> I64{16}).bit_and(I64{65535}) * I64{8})), record)
             at = wrapping(at + ALLOC_PAGE_UNIT)
         }
     }
-    alloc_unlock(lock)
-    ok
+}
+
+// The region window: every region of at most 2^(ALLOC_WINDOW_CLASSES - 1)
+// page-map units (core.mem.Region.reserve, an arena's reservation) takes its
+// units from one reservation of ALLOC_WINDOW_UNITS units at a unit boundary,
+// so a region maps no alignment slack and unmaps none. The window is mapped
+// without access and NORESERVE: it costs address space only. A run of 2^c
+// units serves any region of up to that many units. A fresh run is mapped
+// writable when a region first takes it (one mmap over the run); when a
+// region ends, its pages are dropped (one madvise, which takes the kernel's
+// mapping lock only to read) and its run goes on class c's stack, writable
+// and zero, for the next region of class c to take with no system call. A
+// region's use after its end is the language's fault (core.mem's mapping
+// account), not the hardware's.
+// State word 776 (ALLOC_WINDOW) names the window's base, 0 until the first
+// region. Word 784 (ALLOC_WINDOW_NEXT) counts the units handed out past the
+// window's first ALLOC_WINDOW_LINK_UNITS, which hold one link word per unit
+// and are writable from the start. Class c's stack is word 800 + 8c:
+// [tag << 20 | the top run's first unit], where unit 0 (a link unit) means
+// empty, and each run's link word names the run below it. Every push and pop
+// moves the tag, so a compare-exchange never installs a link that a racing
+// pop and push made stale; no lock is taken. The page map's span tables over
+// the whole window are mapped before its base is published, so a run
+// registers its units with no lock either (alloc_page_set). A larger region,
+// and any region once the window is refused or spent, maps on its own
+// (alloc_reservation_direct).
+ALLOC_WINDOW: I64{776}
+ALLOC_WINDOW_NEXT: I64{784}
+ALLOC_WINDOW_STACKS: I64{800}
+ALLOC_WINDOW_CLASSES: I64{13}
+ALLOC_WINDOW_UNITS: I64{262144}
+ALLOC_WINDOW_BYTES: I64{17179869184}
+ALLOC_WINDOW_LINK_UNITS: I64{32}
+ALLOC_WINDOW_INDEX: I64{1048575}
+ALLOC_WINDOW_TAG: I64{1048576}
+
+// The window's base, mapped on the first call; 0 when the system refuses.
+alloc_window: fn() -> I64 {
+    word: wrapping(alloc_root + ALLOC_WINDOW)
+    kept: sync_load(word)
+    if (kept != I64{0}) -> return kept
+    bytes: wrapping(ALLOC_WINDOW_BYTES + ALLOC_PAGE_UNIT)
+    #Unsafe("a fresh inaccessible NORESERVE mapping aliases nothing; its link units are remapped writable inside it and its span tables mapped before its base is published, and a caller that loses the publication unmaps only its own mapping") {
+        mapping: os_syscall_i64(I64{9}, I64{0}, bytes, I64{0}, I64{16418}, I64{-1}, I64{0})
+        if (mapping < I64{0}) -> return I64{0}
+        base: alloc_align(mapping, ALLOC_PAGE_UNIT)
+        links: os_syscall_i64(I64{9}, base, wrapping(ALLOC_WINDOW_LINK_UNITS * ALLOC_PAGE_UNIT), I64{3}, I64{16434}, I64{-1}, I64{0})
+        lock: wrapping(alloc_root + ALLOC_PAGE_LOCK)
+        alloc_lock(lock)
+        spans: links == base && alloc_page_spans(base, ALLOC_WINDOW_BYTES)
+        alloc_unlock(lock)
+        won: if spans -> sync_cas(word, I64{0}, base) else -> I64{-1}
+        if (won == I64{0}) -> return base
+        _ := os_syscall_i64(I64{11}, mapping, bytes, I64{0}, I64{0}, I64{0}, I64{0})
+        return if (won == I64{-1}) -> I64{0} else -> won
+    }
+}
+
+// Whether `address` lies in the region window.
+alloc_window_holds: fn(address: I64) -> Bool {
+    window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
+    window != I64{0} && address >= window && address < wrapping(window + ALLOC_WINDOW_BYTES)
+}
+
+// The window class of a region of `bytes` (whole units): the least c with
+// 2^c units >= bytes.
+alloc_window_class: fn(bytes: I64) -> I64 Never! {
+    class := I64{0}
+    loop bytes > (ALLOC_PAGE_UNIT << class) {
+        class = wrapping(class + I64{1})
+    }
+    class
+}
+
+// The stack word of window class `class`.
+alloc_window_stack: fn(class: I64) -> I64 Never! {
+    wrapping(alloc_root + wrapping(ALLOC_WINDOW_STACKS + wrapping(class * I64{8})))
+}
+
+// `bytes` (whole units) of the window, writable and zero, or 0: the region
+// is larger than the largest class, the window is refused or spent, or the
+// system refuses a fresh run's pages.
+alloc_window_take: fn(bytes: I64) -> I64 {
+    class: alloc_window_class(bytes)
+    if (class >= ALLOC_WINDOW_CLASSES) -> return I64{0}
+    window: alloc_window()
+    if (window == I64{0}) -> return I64{0}
+    stack: alloc_window_stack(class)
+    unit := I64{0}
+    top := sync_load(stack)
+    loop top.bit_and(ALLOC_WINDOW_INDEX) != (I64{0}) {
+        candidate: top.bit_and(ALLOC_WINDOW_INDEX)
+        below: sync_load(wrapping(window + wrapping(candidate * I64{8})))
+        seen: sync_cas(stack, top, wrapping(wrapping(wrapping(top - candidate) + ALLOC_WINDOW_TAG) + below))
+        if (seen == top) {
+            unit = candidate
+            break
+        }
+        top = seen
+    }
+    if (unit != I64{0}) -> return wrapping(window + wrapping(unit * ALLOC_PAGE_UNIT))
+    size: I64{1} << class
+    next: wrapping(alloc_root + ALLOC_WINDOW_NEXT)
+    at := sync_load(next)
+    loop unit == (I64{0}) {
+        if (at > wrapping(wrapping(ALLOC_WINDOW_UNITS - ALLOC_WINDOW_LINK_UNITS) - size)) -> return I64{0}
+        claimed: sync_cas(next, at, wrapping(at + size))
+        if {
+            claimed == at -> unit = wrapping(ALLOC_WINDOW_LINK_UNITS + at)
+            else -> at = claimed
+        }
+    }
+    address: wrapping(window + wrapping(unit * ALLOC_PAGE_UNIT))
+    // A run the system will not map stays inaccessible and out of the stacks.
+    #Unsafe("the fresh run is this caller's alone, inside the window and inaccessible; the fixed mapping replaces only its own units") {
+        if (os_syscall_i64(I64{9}, address, wrapping(size * ALLOC_PAGE_UNIT), I64{3}, I64{50}, I64{-1}, I64{0}) == address) -> return address
+    }
+    I64{0}
+}
+
+// Puts the run at window unit `unit` on class `class`'s stack.
+alloc_window_push: fn(window: I64, unit: I64, class: I64) {
+    stack: alloc_window_stack(class)
+    link: wrapping(window + wrapping(unit * I64{8}))
+    top := sync_load(stack)
+    loop {
+        sync_store(link, top.bit_and(ALLOC_WINDOW_INDEX))
+        seen: sync_cas(stack, top, wrapping(wrapping(wrapping(top - top.bit_and(ALLOC_WINDOW_INDEX)) + ALLOC_WINDOW_TAG) + unit))
+        if (seen == top) -> return
+        top = seen
+    }
+}
+
+// `bytes` (whole units) mapped on their own at a unit boundary: the slack
+// mapped for the alignment is unmapped again, `head` bytes before the base
+// and the rest after its units. 0 when the system refuses.
+alloc_reservation_direct: fn(bytes: I64) -> I64 {
+    mapping: alloc_map_try(wrapping(bytes + ALLOC_PAGE_UNIT))
+    if (mapping == I64{0}) { return I64{0} }
+    base: alloc_align(mapping, ALLOC_PAGE_UNIT)
+    head: wrapping(base - mapping)
+    if (head != I64{0}) { alloc_unmap(mapping, head) }
+    alloc_unmap(wrapping(base + bytes), wrapping(ALLOC_PAGE_UNIT - head))
+    base
+}
+
+// Ends the `bytes` (whole units) of a region at `base`: a window run's pages
+// are dropped and the run goes back on its class's stack; a region mapped on
+// its own is unmapped. A run whose pages the system would not drop stays
+// out of the stacks.
+alloc_reservation_unmap: fn(base: I64, bytes: I64) {
+    if !alloc_window_holds(base) {
+        alloc_unmap(base, bytes)
+        return
+    }
+    window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
+    #Unsafe("the region has ended, so nothing reads or writes its pages; MADV_DONTNEED drops only its own units inside the window, which read as zero again") {
+        if (os_syscall_i64(I64{28}, base, bytes, I64{4}, I64{0}, I64{0}, I64{0}) != I64{0}) -> return
+    }
+    alloc_window_push(window, wrapping(base - window) >> I64{16}, alloc_window_class(bytes))
 }
 
 // The `core.mem.__region_reserve` route behind core.mem.Region.reserve:
@@ -294,21 +480,17 @@ alloc_page_set: fn(base: I64, bytes: I64, record: I64) -> Bool {
     if (record == I64{0}) -> I64{0} else -> sync_load(record)
 }
 
-// Maps `bytes` of fresh private pages at a page-map unit and registers them
-// under a new record of `record_bytes` ([base 0][units 8], then zero
-// words: a region record's carrier at 16, an arena record's words); answers
-// the record, or 0 when the size is not positive or the system refuses.
+// Maps `bytes` of fresh private pages at a page-map unit (from the region
+// window, else on their own) and registers them under a new record of
+// `record_bytes` ([base 0][units 8], then zero words: a region record's
+// carrier at 16, an arena record's words); answers the record, or 0 when the
+// size is not positive or the system refuses.
 alloc_reservation_map: fn(bytes: I64, record_bytes: I64) -> I64 {
     if (bytes <= I64{0} || bytes > wrapping(ALLOC_PAGE_LIMIT - ALLOC_PAGE_UNIT)) { return I64{0} }
     units: alloc_page_bytes(bytes)
-    mapping: alloc_map_try(wrapping(units + ALLOC_PAGE_UNIT))
-    if (mapping == I64{0}) { return I64{0} }
-    base: alloc_align(mapping, ALLOC_PAGE_UNIT)
-    // The unit of slack mapped for the alignment goes back: `head` bytes
-    // before `base`, the rest after its units.
-    head: wrapping(base - mapping)
-    if (head != I64{0}) { alloc_unmap(mapping, head) }
-    alloc_unmap(wrapping(base + units), wrapping(ALLOC_PAGE_UNIT - head))
+    base := alloc_window_take(units)
+    if (base == I64{0}) { base = alloc_reservation_direct(units) }
+    if (base == I64{0}) { return I64{0} }
     record: alloc_try_validated(record_bytes, I64{8})
     if (record != I64{0}) {
         sync_store(record, base)
@@ -321,7 +503,7 @@ alloc_reservation_map: fn(bytes: I64, record_bytes: I64) -> I64 {
         if alloc_page_set(base, units, record) -> return record
         alloc_free_validated(record, record_bytes, I64{8})
     }
-    alloc_unmap(base, units)
+    alloc_reservation_unmap(base, units)
     I64{0}
 }
 
@@ -337,7 +519,7 @@ alloc_reservation_map: fn(bytes: I64, record_bytes: I64) -> I64 {
         alloc_user_drop(sync_load(wrapping(record + I64{16})))
         alloc_free_validated(record, I64{24}, I64{8})
     }
-    alloc_unmap(address, units)
+    alloc_reservation_unmap(address, units)
 }
 
 // runtime-init: 0
@@ -1526,7 +1708,7 @@ alloc_arena_release: fn(slot: I64) {
     units: sync_load(wrapping(record + I64{8}))
     _ := alloc_page_set(base, units, I64{0})
     alloc_free_validated(record, ALLOC_ARENA_RECORD_BYTES, I64{8})
-    alloc_unmap(base, units)
+    alloc_reservation_unmap(base, units)
 }
 
 // A new arena block's carrier over `outer` for the reservation of `record`

@@ -479,6 +479,57 @@ alloc_test_rows: fn() {
     alloc_cache_flush()
 }
 
+// A region takes its units from the region window, registered in the page
+// map with no lock. An ended run's pages are dropped, and it is the next run
+// of its class. A region larger than the largest class maps on its own,
+// outside the window.
+alloc_test_window: fn() {
+    first: jet_rt_mem_region_reserve(I64{65536})
+    window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
+    end: wrapping(window + ALLOC_WINDOW_BYTES)
+    alloc_test_require(first != I64{0} && window != I64{0} && first >= window && first < end)
+    alloc_test_require(first.bit_and(wrapping(ALLOC_PAGE_UNIT - I64{1})) == I64{0} && alloc_page_region(first) != I64{0})
+    #Unsafe("the region owns its 64 KiB until its release below") {
+        os_store_i64(first, I64{7})
+        os_store_i64(wrapping(first + I64{65528}), I64{9})
+        alloc_test_require(os_load_i64(first) == I64{7} && os_load_i64(wrapping(first + I64{65528})) == I64{9})
+    }
+    two: jet_rt_mem_region_reserve(I64{65537})
+    alloc_test_require(two != I64{0} && two != first && two >= window && two < end)
+    #Unsafe("the region owns its two units until its release below") {
+        os_store_i64(wrapping(two + I64{65536}), I64{5})
+    }
+    jet_rt_mem_region_release(first, I64{65536})
+    alloc_test_require(alloc_page_region(first) == I64{0})
+    again: jet_rt_mem_region_reserve(I64{100})
+    alloc_test_require(again == first && alloc_page_region(again) != I64{0})
+    #Unsafe("the run's pages were dropped at its release, and it stays writable for this region") {
+        alloc_test_require(os_load_i64(again) == I64{0} && os_load_i64(wrapping(again + I64{65528})) == I64{0})
+    }
+    jet_rt_mem_region_release(again, I64{100})
+    jet_rt_mem_region_release(two, I64{65537})
+    largest: ALLOC_PAGE_UNIT << wrapping(ALLOC_WINDOW_CLASSES - I64{1})
+    alone: jet_rt_mem_region_reserve(wrapping(largest + I64{1}))
+    alloc_test_require(alone != I64{0} && (alone < window || alone >= end) && alloc_page_region(alone) != I64{0})
+    jet_rt_mem_region_release(alone, wrapping(largest + I64{1}))
+    alloc_test_require(alloc_page_region(alone) == I64{0})
+    back: jet_rt_mem_region_reserve(I64{131072})
+    alloc_test_require(back == two)
+    #Unsafe("the region owns its two units until its release below") {
+        alloc_test_require(os_load_i64(wrapping(back + I64{65536})) == I64{0})
+    }
+    jet_rt_mem_region_release(back, I64{131072})
+    // Registration and release of a window run take no page lock.
+    lock: wrapping(alloc_root + ALLOC_PAGE_LOCK)
+    alloc_lock(lock)
+    held: jet_rt_mem_region_reserve(I64{65536})
+    registered: held != I64{0} && alloc_page_region(held) != I64{0}
+    jet_rt_mem_region_release(held, I64{65536})
+    alloc_unlock(lock)
+    alloc_test_require(registered && alloc_page_region(held) == I64{0})
+    alloc_cache_flush()
+}
+
 // Probes for AllocCacheWitness.c, the multi-thread cache witness.
 #Export(c) alloc_test_live_blocks: fn(width: I64) -> I64 { alloc_live_blocks(width) }
 
@@ -513,6 +564,7 @@ alloc_tests: fn() {
     alloc_test_zero_marks()
     alloc_test_cache()
     alloc_test_rows()
+    alloc_test_window()
     #Unsafe("the exact success line is two bounded stack words written to stdout") {
         _ := os_write_word_i64(I64{1}, I64{7310503706572385377}, I64{8})
         _ := os_write_word_i64(I64{1}, I64{750815947097601139}, I64{8})
