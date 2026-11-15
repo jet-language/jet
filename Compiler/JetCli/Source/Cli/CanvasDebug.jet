@@ -4,19 +4,19 @@
 // tier. The listener hands each request to the dev loop (CanvasDev.jet),
 // which answers it here, one at a time. The first request builds the entry
 // with this `jet` (`jet build -O0`, as `jet debug` does), opens the image
-// under LLDB at the start of `run` and runs the request's commands; a later
-// request names the session and runs more. A session is bound to the
-// entry's source id and revision: a request for another revision ends it,
-// and a stop must name its source and revision. A refused request leaves
-// every session as it was. Every answer is one bounded jet.canvas.debug
-// document.
+// under Jet's native debugger at the start of `run` and runs the request's
+// commands; a later request names the session and runs more. A session is
+// bound to the entry's source id and revision: a request for another
+// revision ends it, and a stop must name its source and revision. A refused
+// request leaves every session as it was. Every answer is one bounded
+// jet.canvas.debug document.
 use {
     cli_files: core.files
     cli_process: core.process
     cli_sys: core.sys
     core.encoding.[Dyn]
     jet_canvas.[CanvasDebugPlace, CanvasHostEdit, CanvasHostReply, CanvasHostState, canvas_host_debug_place, canvas_machine_output, read_source_without_symlinks, source_revision]
-    jet_debug.[DebugSnapshot, NativeDebugError, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_debug_lldb]
+    jet_debug.[DebugSnapshot, NativeDebugError, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image]
     jet_foundation.[DeepChecks, Span, diagnostic_render, foundation_json_integer, foundation_json_parse, foundation_json_quote]
 }
 
@@ -234,13 +234,11 @@ jet_cli_canvas_debug_unavailable: fn(error: NativeDebugError) -> JetCLICanvasDeb
     jet_cli_canvas_debug_error("diagnostic", diagnostic_render(error.diagnostic(), "", "", false))
 }
 
-// Build `file` as `jet debug` does and open it under LLDB at the start of its
-// `run`: a new session, the `serial`th. A missing LLDB is E2203 before
-// anything is built; a source that does not build answers the build's own
-// report.
+// Build `file` as `jet debug` does and open it under the native debugger at
+// the start of its `run`: a new session, the `serial`th. A source that does
+// not build answers the build's own report.
 jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String, serial: Int) -> JetCLICanvasDebugSession JetCLICanvasDebugError! {
     src: read_source_without_symlinks(file) ?? return Err(jet_cli_canvas_debug_error("io", "couldn't read the debug source: {err.message}"))
-    _: native_debug_lldb() ?? return Err(jet_cli_canvas_debug_unavailable(err))
     scratch: cli_files.temp_dir("jet-canvas-debug") ?? return Err(jet_cli_canvas_debug_error("io", "couldn't create the Canvas debug build directory: {err}"))
     dir: scratch.path
     out_dir: cli_files.join(dir, "out")
@@ -299,7 +297,7 @@ jet_cli_canvas_debug_step: fn(session: &JetCLICanvasDebugSession, input: String)
     Ok()
 }
 
-// End a session's program and LLDB, and delete its image.
+// End a session's program, and delete its image.
 jet_cli_canvas_debug_close: fn(session: &JetCLICanvasDebugSession) {
     session.live.close()
     jet_cli_canvas_debug_remove(session.dir)

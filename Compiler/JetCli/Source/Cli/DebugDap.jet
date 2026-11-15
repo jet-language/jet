@@ -58,13 +58,13 @@ JetCLIDap: struct {
     seq: Int
     stop_on_entry: Bool
     args: [String]
-    // The LLDB breakpoints each source file's `setBreakpoints` placed.
+    // The breakpoints each source file's `setBreakpoints` placed.
     placed: [String:[Int]]
     // The conditions and log messages of the placed breakpoints, by number.
     rules: [Int:JetCLIDapRule]
     launched: Bool
 
-    handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) Never! -[FS, Env, Exec, IO, Time.Wait]> {
+    handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) Never! -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> {
         request := input.move()
         if request.command == {
             "initialize" -> {
@@ -100,7 +100,7 @@ JetCLIDap: struct {
             }
             "threads" -> self.respond(request, "{{\"threads\":[{{\"id\":1,\"name\":\"run\"}}]}}")
             "stackTrace" -> {
-                if !self.launched || session.finished {
+                if !self.launched || !session.alive() {
                     return self.fail(request, "the program is not paused")
                 }
                 if jet_cli_dap_stack(session, entry) == {
@@ -113,7 +113,7 @@ JetCLIDap: struct {
                 self.respond(request, "{{\"scopes\":[{{\"name\":\"Locals\",\"presentationHint\":\"locals\",\"variablesReference\":{frame + 1},\"expensive\":false}}]}}")
             }
             "variables" -> {
-                if !self.launched || session.finished {
+                if !self.launched || !session.alive() {
                     return self.fail(request, "the program is not paused")
                 }
                 if jet_cli_dap_variables(session, jet_cli_dap_int(request.arguments, "variablesReference") - 1) == {
@@ -122,7 +122,7 @@ JetCLIDap: struct {
                 }
             }
             "evaluate" -> {
-                if !self.launched || session.finished {
+                if !self.launched || !session.alive() {
                     return self.fail(request, "the program is not paused")
                 }
                 if jet_cli_dap_evaluate(session, jet_cli_dap_string(request.arguments, "expression"), jet_cli_dap_int(request.arguments, "frameId")) == {
@@ -131,7 +131,7 @@ JetCLIDap: struct {
                 }
             }
             "continue" | "next" | "stepIn" | "stepOut" -> {
-                if !self.launched || session.finished {
+                if !self.launched || !session.alive() {
                     return self.fail(request, "the program is not paused")
                 }
                 self.respond(request, if request.command == "continue" -> "{{\"allThreadsContinued\":true}}" else -> "{{}}")
@@ -210,7 +210,7 @@ JetCLIDap: struct {
 
     // `configurationDone`: run the program from its start, to the start of
     // `run` under `stopOnEntry`.
-    start: fn(&self, session: &NativeSession) -[FS, Exec, IO, Time.Wait]> JetCLIDapStop NativeDebugError! {
+    start: fn(&self, session: &NativeSession) -[FS, Exec, IO, Time.Wait, FFI.Asm]> JetCLIDapStop NativeDebugError! {
         if !self.stop_on_entry {
             first: session.launch(self.args) ?? return Err(err)
             return self.settle(session, first, "c", 0)
@@ -227,7 +227,7 @@ JetCLIDap: struct {
 
     // Run `word` (`c`, `n`, `s` or `f`, as NativeSession.advance takes it)
     // and settle where it stops.
-    run: fn(&self, session: &NativeSession, word: String) -[FS, Exec, IO, Time.Wait]> JetCLIDapStop NativeDebugError! {
+    run: fn(&self, session: &NativeSession, word: String) -[FS, Exec, IO, Time.Wait, FFI.Asm]> JetCLIDapStop NativeDebugError! {
         depth: if word == "c" -> 0 else -> jet_cli_dap_depth(session) ?? return Err(err)
         first: session.advance(word) ?? return Err(err)
         self.settle(session, first, word, depth)
@@ -238,7 +238,7 @@ JetCLIDap: struct {
     // on: a continue continues, and a step goes on to where it would have
     // stopped. A step whose skipped hit was in a call it steps over returns
     // from the call and steps again; a step out returns until it is out.
-    settle: fn(&self, session: &NativeSession, first: NativeStop, word: String, depth: Int) -[FS, Exec, IO, Time.Wait]> JetCLIDapStop NativeDebugError! {
+    settle: fn(&self, session: &NativeSession, first: NativeStop, word: String, depth: Int) -[FS, Exec, IO, Time.Wait, FFI.Asm]> JetCLIDapStop NativeDebugError! {
         stop := first
         returning := false
         loop stop.kind == NativeStopKind.Paused {
@@ -269,7 +269,7 @@ JetCLIDap: struct {
     // (or it has none) and it is not a logpoint. A logpoint whose condition
     // holds logs its message instead. A condition that can't be evaluated,
     // or is not a Bool, stops, and says why.
-    holds: fn(&self, session: &NativeSession, rule: JetCLIDapRule) -[FS, Exec, IO, Time.Wait]> Bool NativeDebugError! {
+    holds: fn(&self, session: &NativeSession, rule: JetCLIDapRule) -[FS, Exec, IO, Time.Wait, FFI.Asm]> Bool NativeDebugError! {
         locals: session.locals() ?? return Err(err)
         if rule.condition == .Val(condition) {
             if jet_cli_dap_condition(condition, locals) == {
@@ -328,7 +328,7 @@ JetCLIDap: struct {
         }
     }
 
-    // A run LLDB could not finish ends the session.
+    // A run the native debugger could not finish ends the session.
     stopped_by: fn(&self, failure: NativeDebugError) Never! -[IO, Time.Wait]> {
         self.event("output", "{{\"category\":\"stderr\",\"output\":{foundation_json_quote("{failure.detail}\n")}}}")
         self.event("terminated", "{{}}")
@@ -351,7 +351,7 @@ JetCLIDap: struct {
 }
 
 // Answer requests until stdin ends or the editor disconnects.
-jet_cli_debug_dap: fn(session: &NativeSession, entry: String) Never! -[FS, Env, Exec, IO, Time.Wait]> {
+jet_cli_debug_dap: fn(session: &NativeSession, entry: String) Never! -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> {
     dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, rules: [Int:JetCLIDapRule]{}, launched: false}
     loop true {
         text: jet_cli_dap_read() ?? break
@@ -500,8 +500,8 @@ jet_cli_dap_depth: fn(session: &NativeSession) -> Int NativeDebugError! {
     Ok(count)
 }
 
-// `stackTrace`: the Jet frames, innermost first, each by its LLDB frame
-// index, which `scopes` and `variables` name it by.
+// `stackTrace`: the Jet frames, innermost first, each by its index in the
+// session's backtrace, which `scopes` and `variables` name it by.
 jet_cli_dap_stack: fn(session: &NativeSession, entry: String) -> String NativeDebugError! {
     frames: session.backtrace() ?? return Err(err)
     base: if entry.starts_with("/") -> dap_files.dirname(entry) else -> dap_files.join(dap_files.cwd() ?? ".", dap_files.dirname(entry))
@@ -514,8 +514,8 @@ jet_cli_dap_stack: fn(session: &NativeSession, entry: String) -> String NativeDe
     Ok("{{\"stackFrames\":[{rows.join(",")}],\"totalFrames\":{rows.len()}}}")
 }
 
-// The locals of frame `frame` (an LLDB frame index). The innermost frame
-// stays selected, as stepping needs.
+// The locals of frame `frame` (an index in the session's backtrace). The
+// innermost frame stays selected, as stepping needs.
 jet_cli_dap_frame_locals: fn(session: &NativeSession, frame: Int) -> [NativeLocal] NativeDebugError! {
     if frame > 0 -> _: session.select_frame(frame) ?? return Err(err)
     locals: session.locals() ?? return Err(err)

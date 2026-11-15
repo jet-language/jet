@@ -126,8 +126,11 @@ evaluate_snapshot: fn(snapshot: DebugSnapshot, expression: String) -> DebugEvalu
     refused: "only bounded read-only Jet local paths can be evaluated"
     parsed: debug_parse_expression(trimmed) ?? return Err(debug_evaluation_error(refused))
     if !debug_is_place(parsed) -> return Err(debug_evaluation_error(refused))
-    root: if parsed == .Ident(name, _, _) -> name else -> {
-        return Err(debug_evaluation_error("nested debugger evaluation is unavailable until the paused backend publishes child facts"))
+    root: if {
+        parsed == .Ident(name, _, _) -> name
+        else -> {
+            return Err(debug_evaluation_error("nested debugger evaluation is unavailable until the paused backend publishes child facts"))
+        }
     }
     loop local in snapshot.locals {
         if local.name == root {
@@ -167,11 +170,11 @@ debug_render_snapshot_locals: fn(values: [ValueSnapshot]) -> String Never! {
 
 // Rust debug_value: typed safe projection of one published local value.
 debug_value: fn(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
-    raw := value.value.trim()
+    raw: value.value.trim()
     if raw == "<optimized out>" || raw == NATIVE_DEBUG_UNAVAILABLE {
         return Err(debug_evaluation_error("local `{value.name}` has no readable value at this stop"))
     }
-    type_name := value.type_name.trim()
+    type_name: value.type_name.trim()
     if debug_scalar_class(type_name) == {
         .Bool -> {
             if raw == "true" -> return Ok(DebugValue.Bool{value: true})
@@ -275,7 +278,7 @@ debug_aggregate_length: fn(raw: String) -> Int Never! {
         }
     }
     inner_text: String.from_bytes(bytes[start..<end]) ?? return 0
-    inner := inner_text.trim()
+    inner: inner_text.trim()
     if inner == "" -> return 0
     depth := 0
     count := 1

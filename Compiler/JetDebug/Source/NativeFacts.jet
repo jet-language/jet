@@ -1,0 +1,379 @@
+// The debug facts `jet debug` reads from the program's own O0 image: the
+// Jet location table (`.debug_jetline`, JetBackend Image/Jetline.jet) for
+// functions, files and lines, and the DWARF the backend writes
+// (JetBackend Image/Dwarf.jet) for each function's parameters and locals,
+// their location lists and their types. The reader knows exactly the
+// abbreviations and forms that writer emits; a unit using any other form
+// ends the read of that unit.
+use jet_backend.[X64DebugEncoding, X64Jetline, link_debug_abbrevs, link_debug_addr, link_debug_form_end, link_debug_le, link_debug_uleb, x64_jetline_parse, x64_jetline_sleb, x64_jetline_text]
+
+// The DW_TAG codes of the DIEs the reader keeps; it skips every other.
+NATIVE_TAG_ENUM: 0x04
+
+NATIVE_TAG_PARAMETER: 0x05
+
+NATIVE_TAG_MEMBER: 0x0d
+
+NATIVE_TAG_POINTER: 0x0f
+
+NATIVE_TAG_COMPILE_UNIT: 0x11
+
+NATIVE_TAG_STRUCT: 0x13
+
+NATIVE_TAG_TYPEDEF: 0x16
+
+NATIVE_TAG_UNION: 0x17
+
+NATIVE_TAG_BASE: 0x24
+
+NATIVE_TAG_ENUMERATOR: 0x28
+
+NATIVE_TAG_SUBPROGRAM: 0x2e
+
+NATIVE_TAG_VARIABLE: 0x34
+
+// One member of a struct or union type: its name, offset and type (a
+// NativeImage.types key).
+NativeMember: struct {
+    name: String
+    offset: Int
+    ty: Int
+}
+
+// One enumerator of an enumeration type.
+NativeEnumerator: struct {
+    name: String
+    value: Int
+}
+
+// A type DIE: its name ("" for an unnamed pointer), byte size and DW_TAG
+// `tag`, one of NATIVE_TAG_BASE, POINTER, STRUCT, UNION, ENUM and TYPEDEF.
+// A base type has its `encoding`; a pointer or typedef its `target` type
+// (-1 for none). A struct's or union's members, or an enumeration's
+// enumerators, are `group`, an index in NativeImage.members or
+// NativeImage.enumerators; a struct without members (an opaque one) has
+// group -1.
+NativeType: struct {
+    name: String
+    size: Int
+    tag: Int
+    encoding: X64DebugEncoding
+    target: Int
+    group: Int
+}
+
+// Whether a DWARF variable is a parameter or a local.
+NativeVariableRole: enum {
+    Parameter
+    Local
+}
+
+// One parameter or local: its name, declaration line, type (a
+// NativeImage.types key) and the offset of its location list in
+// `.debug_loclists`, -1 when it has none. `base` is its unit's base address
+// for offset-pair entries.
+NativeVariable: struct {
+    name: String
+    line: Int
+    ty: Int
+    list: Int
+    base: Int
+    role: NativeVariableRole
+}
+
+// One subprogram: its code [low, high), name and variables in DIE order.
+NativeFunction: struct {
+    low: Int
+    high: Int
+    name: String
+    variables: [NativeVariable]
+}
+
+// The facts of one image. `types` is keyed by the type DIE's offset in
+// `.debug_info`; `members` and `enumerators` hold each struct's, union's and
+// enumeration's in DIE order, as its group names them.
+NativeImage: struct {
+    lines: X64Jetline
+    functions: [NativeFunction]
+    types: [Int:NativeType]
+    members: [[NativeMember]]
+    enumerators: [[NativeEnumerator]]
+    loclists: [U8]
+}
+
+// One range of a variable's location list: [start, end), and the DWARF
+// expression that locates it there, the bytes [from, to) of
+// NativeImage.loclists.
+NativeRange: struct {
+    start: Int
+    end: Int
+    from: Int
+    to: Int
+}
+
+// The facts of the ELF image `elf`; None without a `.debug_jetline`.
+native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
+    table: native_elf_section(elf, ".debug_jetline") ?? return None
+    image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, loclists: native_elf_section(elf, ".debug_loclists") ?? [U8]{}}
+    info: native_elf_section(elf, ".debug_info") ?? return Val(image)
+    abbrev: native_elf_section(elf, ".debug_abbrev") ?? return Val(image)
+    at := 0
+    loop at + 12 <= info.len() {
+        length: link_debug_le(info, at, 4)
+        end: at + 4 + length
+        if length < 8 || end > info.len() -> break
+        native_image_unit(image, info, abbrev, at, end)
+        at = end
+    }
+    Val(image)
+}
+
+// The bytes of the section named `name`; None when the image has none.
+native_elf_section: fn(elf: [U8], name: String) -> [U8]? Never! {
+    headers: link_debug_addr(elf, 40)
+    size: link_debug_le(elf, 58, 2)
+    count: link_debug_le(elf, 60, 2)
+    names_index: link_debug_le(elf, 62, 2)
+    if headers < 0 || size < 64 || names_index < 0 || names_index >= count -> return None
+    names: link_debug_addr(elf, headers + names_index * size + 24)
+    if names < 0 -> return None
+    found := -1
+    loop k in 0..<count {
+        header: headers + k * size
+        at: link_debug_le(elf, header, 4)
+        if at >= 0 && x64_jetline_text(elf, names + at) == name {
+            found = header
+            break
+        }
+    }
+    if found < 0 -> return None
+    offset: link_debug_addr(elf, found + 24)
+    length: link_debug_addr(elf, found + 32)
+    if offset < 0 || length < 0 || offset + length > elf.len() -> return None
+    Val(elf[offset..<offset + length])
+}
+
+// The encoding of DW_ATE `code`: the inverse of the writer's
+// (JetBackend Image/Dwarf.jet).
+native_encoding: fn(code: Int) -> X64DebugEncoding Never! {
+    if code == {
+        0x05 -> X64DebugEncoding.Signed
+        0x04 -> X64DebugEncoding.Float
+        0x02 -> X64DebugEncoding.Bool
+        0x10 -> X64DebugEncoding.Char
+        else -> X64DebugEncoding.Unsigned
+    }
+}
+
+// The attribute values of one DIE the reader uses; a missing number is -1.
+NativeDie: struct {
+    tag: Int
+    offset: Int
+    children: Bool
+    name: String
+    ty: Int
+    low: Int
+    length: Int
+    location: Int
+    size: Int
+    member_offset: Int
+    encoding: Int
+    value: Int
+    line: Int
+}
+
+// The DIEs of the unit at [start, end) of `info`, into `image`.
+native_image_unit: fn(image: &NativeImage, info: [U8], abbrev: [U8], start: Int, end: Int) Never! {
+    version: link_debug_le(info, start + 4, 2)
+    if version != 5 || link_debug_le(info, start + 6, 1) != 1 || link_debug_le(info, start + 7, 1) != 8 {
+        return
+    }
+    table: link_debug_abbrevs(abbrev, link_debug_le(info, start + 8, 4)) ?? return
+    at := start + 12
+    base := 0
+    // The open DIEs with children, innermost last.
+    open := [NativeDie]{}
+    loop at < end {
+        offset: at
+        code: link_debug_uleb(info, at)
+        if code < 0 {
+            return
+        }
+        if code == 0 {
+            if open.pop() == None {
+                return
+            }
+            next
+        }
+        entry: table.entries.get(code) ?? return
+        die := NativeDie{tag: table.tags[entry], offset: offset, children: table.children[entry], name: "", ty: -1, low: -1, length: -1, location: -1, size: -1, member_offset: -1, encoding: -1, value: 0, line: 0}
+        loop k in table.starts[entry]..<table.starts[entry + 1] {
+            form: table.forms[k]
+            value_at: at
+            at = link_debug_form_end(info, at, form)
+            if at < 0 || at > end {
+                return
+            }
+            native_die_attribute(die, table.attributes[k], form, info, value_at, start)
+        }
+        if die.tag == NATIVE_TAG_COMPILE_UNIT && die.low >= 0 -> base = die.low
+        native_image_die(image, die, open, base)
+        if die.children -> open.push(die)
+    }
+}
+
+// Record attribute `attribute` of `die`, a `form` value at `at`.
+native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8], at: Int, unit: Int) Never! {
+    value: if form == {
+        0x08 -> 0
+        0x01 | 0x07 -> link_debug_addr(info, at)
+        0x0b -> link_debug_le(info, at, 1)
+        0x05 -> link_debug_le(info, at, 2)
+        0x06 | 0x17 -> link_debug_le(info, at, 4)
+        0x13 -> unit + link_debug_le(info, at, 4)
+        0x0d -> {
+            cursor := at
+            x64_jetline_sleb(info, cursor)
+        }
+        0x0f -> {
+            cursor := at
+            link_debug_uleb(info, cursor)
+        }
+        else -> 1
+    }
+    if attribute == {
+        0x03 -> die.name = x64_jetline_text(info, at)
+        0x49 -> die.ty = value
+        0x11 -> die.low = value
+        0x12 -> die.length = value
+        0x02 -> die.location = value
+        0x0b -> die.size = value
+        0x38 -> die.member_offset = value
+        0x3e -> die.encoding = value
+        0x1c -> die.value = value
+        0x3b -> die.line = value
+        else -> {}
+    }
+}
+
+// What `die` adds to `image`, nested in the `open` DIEs.
+native_image_die: fn(image: &NativeImage, die: NativeDie, open: [NativeDie], base: Int) Never! {
+    size: if die.size < 0 -> 0 else -> die.size
+    code: die.tag
+    if {
+        code == NATIVE_TAG_BASE -> {
+            image.types[die.offset] = NativeType{name: die.name, size: size, tag: code, encoding: native_encoding(die.encoding), target: -1, group: -1}
+        }
+        code == NATIVE_TAG_POINTER -> {
+            image.types[die.offset] = NativeType{name: die.name, size: 8, tag: code, encoding: X64DebugEncoding.Unsigned, target: die.ty, group: -1}
+        }
+        code == NATIVE_TAG_TYPEDEF -> {
+            image.types[die.offset] = NativeType{name: die.name, size: size, tag: code, encoding: X64DebugEncoding.Unsigned, target: die.ty, group: -1}
+        }
+        code == NATIVE_TAG_STRUCT || code == NATIVE_TAG_UNION -> {
+            group: if die.children -> image.members.len() else -> -1
+            if die.children -> image.members.push([NativeMember]{})
+            image.types[die.offset] = NativeType{name: die.name, size: size, tag: code, encoding: X64DebugEncoding.Unsigned, target: -1, group: group}
+        }
+        code == NATIVE_TAG_ENUM -> {
+            image.types[die.offset] = NativeType{name: die.name, size: size, tag: code, encoding: X64DebugEncoding.Signed, target: -1, group: image.enumerators.len()}
+            image.enumerators.push([NativeEnumerator]{})
+        }
+        code == NATIVE_TAG_MEMBER -> {
+            if open.len() == 0 {
+                return
+            }
+            ty: image.types.get(open[open.len() - 1].offset) ?? return
+            group: if ty.tag == NATIVE_TAG_STRUCT || ty.tag == NATIVE_TAG_UNION -> ty.group else -> -1
+            if group < 0 {
+                return
+            }
+            image.members[group].push(NativeMember{name: die.name, offset: if die.member_offset < 0 -> 0 else -> die.member_offset, ty: die.ty})
+        }
+        code == NATIVE_TAG_ENUMERATOR -> {
+            if open.len() == 0 {
+                return
+            }
+            ty: image.types.get(open[open.len() - 1].offset) ?? return
+            group: if ty.tag == NATIVE_TAG_ENUM -> ty.group else -> -1
+            if group < 0 {
+                return
+            }
+            image.enumerators[group].push(NativeEnumerator{name: die.name, value: die.value})
+        }
+        code == NATIVE_TAG_SUBPROGRAM -> {
+            if die.low < 0 || die.length < 0 {
+                return
+            }
+            image.functions.push(NativeFunction{low: die.low, high: die.low + die.length, name: die.name, variables: [NativeVariable]{}})
+        }
+        code == NATIVE_TAG_PARAMETER || code == NATIVE_TAG_VARIABLE -> {
+            if image.functions.len() == 0 || !native_open_in_function(open) {
+                return
+            }
+            role: if code == NATIVE_TAG_PARAMETER -> NativeVariableRole.Parameter else -> NativeVariableRole.Local
+            image.functions[image.functions.len() - 1].variables.push(NativeVariable{name: die.name, line: die.line, ty: die.ty, list: die.location, base: base, role: role})
+        }
+        else -> {}
+    }
+}
+
+// Whether the open DIEs lie in a subprogram with code.
+native_open_in_function: fn(open: [NativeDie]) -> Bool Never! {
+    loop die in open {
+        if die.tag == NATIVE_TAG_SUBPROGRAM && die.low >= 0 -> return true
+    }
+    false
+}
+
+// The ranges of the location list at `list` (DW_LLE_offset_pair from
+// `base`, DW_LLE_start_length, DW_LLE_base_address, DW_LLE_start_end).
+native_ranges: fn(image: NativeImage, list: Int, base: Int) -> [NativeRange] Never! {
+    ranges := [NativeRange]{}
+    bytes: image.loclists
+    if list < 0 || list >= bytes.len() -> return ranges
+    at := list
+    unit_base := base
+    loop at < bytes.len() {
+        kind: Int{bytes[at]}
+        at += 1
+        start := 0
+        end := 0
+        if kind == {
+            0x00 -> return ranges
+            0x04 -> {
+                start = unit_base + link_debug_uleb(bytes, at)
+                end = unit_base + link_debug_uleb(bytes, at)
+            }
+            0x06 -> {
+                unit_base = link_debug_addr(bytes, at)
+                at += 8
+                next
+            }
+            0x07 -> {
+                start = link_debug_addr(bytes, at)
+                end = link_debug_addr(bytes, at + 8)
+                at += 16
+            }
+            0x08 -> {
+                start = link_debug_addr(bytes, at)
+                at += 8
+                end = start + link_debug_uleb(bytes, at)
+            }
+            else -> return ranges
+        }
+        length: link_debug_uleb(bytes, at)
+        if length < 0 || at + length > bytes.len() -> return ranges
+        ranges.push(NativeRange{start: start, end: end, from: at, to: at + length})
+        at += length
+    }
+    ranges
+}
+
+// The function holding `pc`, else None.
+native_function_at: fn(image: NativeImage, pc: Int) -> NativeFunction? Never! {
+    loop function in image.functions {
+        if pc >= function.low && pc < function.high -> return Val(function)
+    }
+    None
+}

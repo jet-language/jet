@@ -20110,20 +20110,20 @@ DebuggerUnavailable: struct {
         code: "E2203"
         safety_class: .Soundness
         safety_reason: "Without a working debugger session there is no program to step through."
-        expert_path: "none: a working LLDB is installed"
+        expert_path: "none: the program is a native -O0 image this machine can run traced"
         stage: [.Tooling]
-        meaning: "The native `jet debug` backend could not debug this program: LLDB is missing or the native debug session failed"
+        meaning: "The native `jet debug` backend could not debug this program: its image could not be read or run traced, or the native debug session failed"
         detail: true
         no_fix: .Behavior
 
         what: fn(self) -> String { "`jet debug` could not run the native debugger: {self.detail}." }
 
         why: fn(self) -> String {
-            "`jet debug` steps through the real compiled program under LLDB, stopping at breakpoints and showing its frames and locals; without a working LLDB session there is nothing to step through."
+            "`jet debug` runs the real compiled program traced, stopping at breakpoints and showing its frames and locals from the image's own debug information; without a program it can read and run there is nothing to step through."
         }
 
         fix: fn(self) -> String {
-            "Install LLDB (the Jet dev shell provides it) and rerun `jet debug <file>`, or use `jet run <file>` to run the program without the debugger."
+            "Rebuild the program with `jet build -O0` and rerun `jet debug <file>`, or use `jet run <file>` to run the program without the debugger."
         }
     }
 }

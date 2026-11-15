@@ -500,8 +500,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2119 | DeepCheckScopeMalformed | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:360 | the scope is a package name, then `::` and dotted names |
 | E2120 | DeepCheckScopeUnknown | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:368 | the scope names a declaration of this program |
 | E2121 | DeepCheckScopeHoldsNone | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:369 | the scope names declarations that hold deep checks |
-| E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:36 | a working LLDB is installed |
-| E2204 | DebugSessionQuit | Compiler/JetCli/Source/Cli/Debug.jet:126 | let the program run to its end |
+| E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:25 | the program is a native -O0 image this machine can run traced |
+| E2204 | DebugSessionQuit | Compiler/JetCli/Source/Cli/Debug.jet:138 | let the program run to its end |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:322 | the view's owner lives as long as the view |
 | E2307 | StringViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:322 | the string's owner lives as long as the view, or the string is copied |
 | E2389 | UnprovenEntryResolution | Compiler/JetCli/Source/Cli/Inspect.jet:2035 | the entry resolves |

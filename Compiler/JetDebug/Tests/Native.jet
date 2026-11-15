@@ -1,12 +1,11 @@
-// The native debug session: LLDB's stop, frame and local reports read as Jet
-// positions and values, and a real session over a program's O0 native image,
-// which reports skip without LLDB on PATH.
+// The native debug session: values read from a stopped program's memory as
+// Jet values, and a real session over a program's O0 native image, run and
+// stopped by Jet's own debugger.
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NativeBreak, NativeDebugError, NativeLocal, NativeMemory, NativeRead, NativeSession, NativeStopKind, native_debug_build_argv, native_debug_hit_breakpoint, native_debug_locals_of, native_debug_locals_typed, native_debug_parse_frame, native_debug_parse_memory, native_debug_parse_stop, native_debug_parse_values]
+    jet_debug.[NativeBlock, NativeBreak, NativeDebugError, NativeFrame, NativeLocal, NativeMemory, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string]
     jet_foundation.[DeepChecks]
-    jet_testkit.[kit_require_tool]
 }
 
 #Test("the_debug_build_keeps_the_selected_deep_checks") {
@@ -16,133 +15,52 @@ use {
     assert_eq(kept, [String]{"jet", "build", "-O0", "--deep-checks", "--deep-checks=tree", "--deep-checks=tree::run", "--output-dir=out", "prog.jet"})
 }
 
-#Test("frames_name_the_jet_function_file_and_line") {
-    paused: native_debug_parse_frame("    frame #0: 0x00000000004030e7 prog`double(x=1) at prog.jet:2") ?? panic("frame")
-    assert_eq(paused.function, "double")
-    assert_eq(paused.file, "prog.jet")
-    assert_eq(paused.line, 2)
-    selected: native_debug_parse_frame("  * frame #1: 0x0000000000403120 prog`run at prog.jet:10:5") ?? panic("selected frame")
-    assert_eq(selected.function, "run")
-    assert_eq(selected.line, 10)
-    start: native_debug_parse_frame("    frame #3: 0x0000000000403200 prog`__jet_start + 70") ?? panic("start frame")
-    assert_eq(start.function, "__jet_start")
-    assert_eq(start.file, "")
-    assert_eq(start.line, 0)
-    assert(native_debug_parse_frame("(lldb) thread backtrace") == None)
-}
-
-#Test("stops_read_pauses_exits_and_signals") {
-    paused: native_debug_parse_stop("Process 7 stopped\n* thread #1, name = 'prog', stop reason = breakpoint 1.1\n    frame #0: 0x00000000004030e7 prog`run at prog.jet:10") ?? panic("pause")
-    assert(paused.kind == NativeStopKind.Paused)
-    assert_eq(paused.reason, "breakpoint 1.1")
-    frame: paused.frame ?? panic("pause frame")
-    assert_eq(frame.line, 10)
-    exited: native_debug_parse_stop("Process 7 exited with status = 3 (0x00000003)") ?? panic("exit")
-    assert(exited.kind == NativeStopKind.Exited)
-    assert_eq(exited.code, 3)
-    signaled: native_debug_parse_stop("* thread #1, name = 'prog', stop reason = signal SIGSEGV: address not mapped") ?? panic("signal")
-    assert(signaled.kind == NativeStopKind.Signaled)
-    assert_eq(signaled.reason, "SIGSEGV")
-    assert(native_debug_parse_stop("error: invalid process") == None)
-}
-
 #Test("a_breakpoint_stop_names_its_breakpoint") {
-    hit: native_debug_parse_stop("Process 7 stopped\n* thread #1, name = 'prog', stop reason = breakpoint 12.1\n    frame #0: 0x00000000004030e7 prog`run at prog.jet:10") ?? panic("pause")
+    frame: NativeFrame{function: "run", file: "prog.jet", line: 10}
+    hit: NativeStop{kind: NativeStopKind.Paused, reason: "breakpoint 12.1", code: 0, frame: Val(frame)}
     assert_eq(native_debug_hit_breakpoint(hit), Int?{Val(12)})
-    stepped: native_debug_parse_stop("Process 7 stopped\n* thread #1, name = 'prog', stop reason = step over\n    frame #0: 0x00000000004030e7 prog`run at prog.jet:11") ?? panic("step")
+    stepped: NativeStop{kind: NativeStopKind.Paused, reason: "step over", code: 0, frame: Val(frame)}
     assert_eq(native_debug_hit_breakpoint(stepped), Int?{None})
 }
 
 #Test("typed_locals_list_one_a_line_with_the_jet_type") {
-    memory := NativeMemory{}
-    locals: native_debug_locals_of(native_debug_parse_values("(Int) count = 3\n(bool) ok = true"), memory)
+    locals: [NativeLocal]{NativeLocal{name: "count", type_name: "Int", value: "3"}, NativeLocal{name: "ok", type_name: "Bool", value: "true"}}
     assert_eq(native_debug_locals_typed(locals), "count: Int = 3\nok: Bool = true\n")
     assert_eq(native_debug_locals_typed([NativeLocal]{}), "No locals here\n")
 }
 
-#Test("locals_keep_only_values_the_image_describes") {
-    memory := NativeMemory{}
-    locals: native_debug_locals_of(native_debug_parse_values("(Int) count = 3\n(bool) ok = true\n(long) word = -7\n(Aggregate) table = <extracting data from value failed>\n\n(void *) f = 0x00007ffff7f216d8"), memory)
-    assert_eq(locals.len(), 5)
-    assert_eq(locals[0].name, "count")
-    assert_eq(locals[0].type_name, "Int")
-    assert_eq(locals[0].value, "3")
-    assert_eq(locals[1].type_name, "Bool")
-    assert_eq(locals[1].value, "true")
-    assert_eq(locals[2].type_name, "I64")
-    assert_eq(locals[2].value, "-7")
-    assert_eq(locals[3].value, "<Unavailable>")
-    assert_eq(locals[4].value, "<Unavailable>")
-    assert_eq(memory.missing.len(), 0)
-}
-
-#Test("locals_not_yet_bound_are_not_shown") {
-    memory := NativeMemory{}
-    locals: native_debug_locals_of(native_debug_parse_values("(Int) first = 1\n(Int) second = <variable not available>\n\n(Int) third = <variable not available>\n"), memory)
-    assert_eq(locals.len(), 1)
-    assert_eq(locals[0].name, "first")
-}
-
-// The rows `frame variable -T -P 1` prints for a big Int, a String, a list,
-// a struct and a Decimal of an image whose DWARF types them.
-NATIVE_TEST_FRAME: "(Int) big = 4611686018431706648\n(String) name = 0x0000000000000010 {{\n  (unsigned char *) data = 0x0000000000000020 \"hello world\"\n  (long) len = 11\n  (long) cap = 0\n}}\n([Int]) xs = {{\n  (long) len = 3\n  (long) cap = 3\n  (Int *) data = 0x0000000000000040 {{\n    (Int) *data = 1\n  }}\n}}\n(Point) p = {{\n  (Int) x = 3\n  (Int) y = 4\n}}\n(Decimal) d = 0x0000000000000050 {{\n  (Int) coefficient = 1250\n  (long) scale = 2\n}}"
-
-#Test("frame_rows_nest_as_lldb_prints_them") {
-    rows: native_debug_parse_values(NATIVE_TEST_FRAME)
-    assert_eq(rows.len(), 5)
-    assert_eq(rows[1].native_type, "String")
-    assert_eq(rows[1].raw, "0x0000000000000010")
-    assert_eq(rows[1].children.len(), 3)
-    assert_eq(rows[2].native_type, "[Int]")
-    assert_eq(rows[2].children[2].name, "data")
-    assert_eq(rows[2].children[2].children[0].name, "*data")
-    assert_eq(rows[3].children[1].raw, "4")
-    assert_eq(rows[4].name, "d")
-}
-
-#Test("pointer_values_render_after_their_memory_is_read") {
-    rows: native_debug_parse_values(NATIVE_TEST_FRAME)
-    memory := NativeMemory{}
-    first: native_debug_locals_of(rows, memory)
-    assert_eq(first[0].value, "<Unavailable>")
-    assert_eq(first[3].value, "Point{{x: 3, y: 4}}")
-    // The first round asks for the big Int's carrier, the String's header,
-    // the list's elements and the Decimal's handle.
-    assert_eq(memory.missing.len(), 4)
-    reads: [NativeRead]{NativeRead{address: 4318744, size: 8, count: 5}, NativeRead{address: 16, size: 8, count: 2}, NativeRead{address: 64, size: 8, count: 3}, NativeRead{address: 80, size: 8, count: 2}}
-    loop (index, read) in reads {
-        assert_eq(memory.missing[index].address, read.address)
-        assert_eq(memory.missing[index].size, read.size)
-        assert_eq(memory.missing[index].count, read.count)
+// The little-endian bytes of `words`, `size` bytes each.
+native_test_bytes: fn(words: [Int], size: Int) -> [U8] {
+    bytes := [U8]{}
+    loop word in words {
+        loop k in 0..<size -> bytes.push(U8{(word >> (8 * k)).bit_and(255)})
     }
-    memory.reads = reads
-    memory.values = [[Int]?]{Val([Int]{1, 0, 0, 4096, 4}), Val([Int]{32, 11}), Val([Int]{1, 2, 3}), Val([Int]{1250, 2})}
-    second: native_debug_locals_of(rows, memory)
-    assert_eq(second[2].value, "[1, 2, 3]")
-    assert_eq(second[4].value, "12.50")
-    // Then the big Int's limbs and the String's bytes.
-    assert_eq(memory.missing.len(), 2)
-    memory.reads.push(NativeRead{address: 4096, size: 4, count: 4})
-    memory.values.push(Val([Int]{234567890, 345678901, 456789012, 123}))
-    memory.reads.push(NativeRead{address: 32, size: 1, count: 11})
-    memory.values.push(Val(loop byte in "hello world".bytes() -> Int{byte}))
-    third: native_debug_locals_of(rows, memory)
-    assert_eq(memory.missing.len(), 0)
-    assert_eq(third[0].type_name, "Int")
-    assert_eq(third[0].value, "123456789012345678901234567890")
-    assert_eq(third[1].value, "\"hello world\"")
+    bytes
 }
 
-#Test("memory_reads_parse_their_values") {
-    assert_eq(native_debug_parse_memory("(lldb) memory read --size 8 --format d --count 2 --force 4096\n0x001000: 1250\n0x001008: -2", 2), Val([Int]{1250, -2}))
-    assert(native_debug_parse_memory("error: memory read failed for 0x0", 1) == None)
-    assert(native_debug_parse_memory("0x001000: 1", 2) == None)
+#Test("a_big_int_reads_its_carrier_and_limbs") {
+    memory: NativeMemory{trace: None, blocks: [NativeBlock]{NativeBlock{address: 4318744, bytes: native_test_bytes([Int]{1, 0, 0, 4096, 4}, 8)}, NativeBlock{address: 4096, bytes: native_test_bytes([Int]{234567890, 345678901, 456789012, 123}, 4)}}}
+    assert_eq(native_debug_int(7, memory), Int?{Val(7)})
+    assert_eq(native_debug_int(-7, memory), Int?{Val(-7)})
+    assert_eq(native_debug_int(4611686018431706648, memory), Int?{Val(123456789012345678901234567890)})
+    // A carrier the memory does not hold is unavailable.
+    assert_eq(native_debug_int(4611686018427391000, memory), Int?{None})
+}
+
+#Test("strings_and_decimals_read_their_handles") {
+    text: "hello world"
+    memory: NativeMemory{trace: None, blocks: [NativeBlock]{NativeBlock{address: 16, bytes: native_test_bytes([Int]{32, 11, 11}, 8)}, NativeBlock{address: 32, bytes: text.bytes()}, NativeBlock{address: 80, bytes: native_test_bytes([Int]{1250, 2}, 8)}}}
+    assert_eq(native_debug_string(16, memory), String?{Val("\"hello world\"")})
+    assert_eq(native_debug_precise("Decimal", 80, memory), String?{Val("12.50")})
+    assert_eq(native_debug_precise("Fraction", 80, memory), String?{Val("1250/2")})
+    assert_eq(native_debug_string(200, memory), String?{None})
+    assert_eq(native_debug_decimal_text(-5, 3), "-0.005")
 }
 
 #Test("an_unavailable_debugger_is_e2203") {
-    diagnostic: NativeDebugError{detail: "LLDB is not on PATH"}.diagnostic()
+    diagnostic: NativeDebugError{detail: "the program has no Jet debug information"}.diagnostic()
     assert_eq(diagnostic.code, "E2203")
-    assert(diagnostic.what.contains("LLDB is not on PATH"))
+    assert(diagnostic.what.contains("the program has no Jet debug information"))
 }
 
 // The checkout these tests run in: the program is built outside it, so the
@@ -173,7 +91,6 @@ native_test_session: fn(root: String) -> NativeSession {
 NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    count := 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n"
 
 #Test("a_session_pauses_steps_and_reads_the_native_image") {
-    _: kit_require_tool("lldb") ?? return
     scratch: native_test_files.temp_dir("jet-debug-native") ?? panic("scratch: {err}")
     root: scratch.path
     session := native_test_session(root)
@@ -194,6 +111,7 @@ NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
     assert_eq(locals[0].value, "0")
     frames: session.backtrace() ?? panic("backtrace: {err.detail}")
     assert_eq(frames[1].function, "run")
+    assert_eq(frames[1].line, 9)
     session.clear_breakpoints() ?? panic("clear: {err.detail}")
     finished: session.continue_run() ?? panic("continue: {err.detail}")
     assert(finished.kind == NativeStopKind.Exited)
@@ -204,7 +122,6 @@ NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
 }
 
 #Test("run_to_stops_first_at_the_first_breakpoint_reached") {
-    _: kit_require_tool("lldb") ?? return
     scratch: native_test_files.temp_dir("jet-debug-run-to") ?? panic("scratch: {err}")
     root: scratch.path
     session := native_test_session(root)
@@ -216,6 +133,30 @@ NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
     assert(native_debug_hit_breakpoint(first.stop) != None)
     shown: session.command("locals", first.stop, "prog.jet", lines) ?? panic("locals: {err.detail}")
     assert(shown.text.contains("count: Int = 0\n"))
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+#Test("step_enters_a_call_finish_leaves_it_and_next_runs_over_it") {
+    scratch: native_test_files.temp_dir("jet-debug-steps") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root)
+    lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines) ?? panic("run_to: {err.detail}")
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    entered: session.command("s", first.stop, "prog.jet", lines) ?? panic("step: {err.detail}")
+    assert(entered.text.contains("2 |     y: x * 2        <- here\n"), entered.text)
+    assert(entered.text.contains("Locals:  x = 0"), entered.text)
+    inner: session.command("bt", entered.stop, "prog.jet", lines) ?? panic("bt: {err.detail}")
+    assert_eq(inner.text, "#0  double()  at prog.jet:2\n#1  run()  at prog.jet:9\n")
+    left: session.command("f", entered.stop, "prog.jet", lines) ?? panic("finish: {err.detail}")
+    assert(left.text.contains("9 |         count += double(i)        <- here\n"), left.text)
+    over: session.command("n", left.stop, "prog.jet", lines) ?? panic("next: {err.detail}")
+    assert(over.stop.kind == NativeStopKind.Paused)
+    line: (over.stop.frame ?? panic("next frame")).line
+    assert(line == 8 || line == 9, "next stops at the loop or the call, not in double: {line}")
+    rest: session.command("c", over.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("count 2\nProgram finished\n"), rest.text)
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }

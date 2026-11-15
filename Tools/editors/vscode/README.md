@@ -88,9 +88,9 @@ The extension registers the `jet` DAP type. **Jet: Debug File** (or F5 with a
 jet debug --dap <file>
 ```
 
-No shell is inserted between the editor and the executable. LLDB must be on
-`PATH`; the supported native debugging path is Linux and macOS. Debugging
-requires a trusted workspace.
+No shell is inserted between the editor and the executable, and no external
+debugger is needed: `jet debug` runs the program under Jet's own native
+debugger, on Linux x86-64. Debugging requires a trusted workspace.
 
 A launch configuration can pass arguments, a working directory, environment
 overrides, and `stopOnEntry`:
