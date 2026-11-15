@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6851,
-    "rev": 102875,
+    "nextNum": 6857,
+    "rev": 102900,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -67598,21 +67598,22 @@
       "criteria": [
         {
           "n": 2,
-          "text": "Every Core member that had a CORE_CALLS row is declared in Core source; Compiler/Prelude/Core.jet holds no member rows and the generated and hand-written signature tables are deleted. CoreSourceRows --check covers every export, enum and signature, runs in a gate, and a guard fails on any second export or signature table (census F4, F19; was c49, c50).",
+          "text": "Every Core member that has a CORE_CALLS row is declared in Core source, and the compiler's twin of Core's API is deleted in one cutover: Compiler/Prelude/Core.jet's member rows and Registry/CoreCalls.jet, CoreCallRows.jet, CoreCallExtensions.jet, CoreSignatures.jet, CorePlatformSignatures.jet, CoreHostSignatures.jet and CoreValueSignatures.jet (census F4, F19). Proof: `git ls-files Compiler/JetFoundation/Source/Registry | grep -E 'Core(Calls|CallRows|CallExtensions|[A-Za-z]*Signatures)\\.jet'` prints nothing and `jet test tests/guards --filter core_declarations` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T18:55:29.983Z"
+          "at": "2026-11-15T02:25:22.050Z"
         },
         {
           "n": 5,
           "text": "(from #6152 Replace compiler gates on Core host leaves with ordinary vis) No sema branch compares a caller's module name or `<corelib>/` path to allow a call; a grep shows the gates are gone.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:56:07.656Z"
+          "evidence": "Moved to #6851 c1: no Core-only privileges is its own stream; criterion restated with its sites and a grep proof",
+          "at": "2026-11-15T02:25:37.096Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
@@ -67643,39 +67644,39 @@
         },
         {
           "n": 11,
-          "text": "(from #6154 Lower Core calls through host-leaf declarations, not IR rout) RouteHandle.jet, RouteBuiltin.jet and RouteBrowser.jet hold no Core member names; the runtime Route*.jet tables are deleted or keyed by declared symbols.",
+          "text": "IR lowers Core calls through their host-leaf declarations: JetIR's RouteHandle.jet, RouteBuiltin.jet and RouteBrowser.jet hold no Core member names, and the runtime RouteAFont, RouteAGame, RouteBrowser, RouteTerm and RouteWeb tables are deleted or keyed by declared symbols (census F04). Proof: those tables leave tests/guards/closed_lists/baseline.tsv and `jet test tests/guards --filter closed_lists` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T07:56:31.996Z"
+          "at": "2026-11-15T02:25:26.348Z"
         },
         {
           "n": 12,
-          "text": "(from #6154) Codegen for a user call and a Core call to the same jet.runtime function is the same IR shape (an IR dump test).",
+          "text": "A user call and a Core call to the same jet.runtime host leaf lower to the same IR shape. Proof: `jet test Compiler --profile cases --filter host_leaf_user_and_core_lower_alike` (an IR dump comparison).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:58:19.127Z"
+          "at": "2026-11-15T02:25:27.801Z"
         },
         {
           "n": 14,
-          "text": "(from #6155 Bind format, decode, precise math and line loops through pub) CoreReach.jet matches no Core file path or helper name.",
+          "text": "Format selectors, decode, precise math and `loop line in handle.lines()` bind through public traits: JetIR's CoreReach.jet (lines 35-138 at 25f9dee58f) names no Core file path or helper (census F05). Waits on the owner question about trait-bound format and decode (2026-11-06, none drafted). Proof: `git ls-files Compiler/JetIR/Source/CoreReach.jet` prints nothing, or `git grep -n -E 'Core/|__decode_|__stdout_next_line' Compiler/JetIR/Source/CoreReach.jet` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T07:56:47.722Z"
+          "at": "2026-11-15T02:25:29.018Z"
         },
         {
           "n": 15,
-          "text": "(from #6155 Bind format, decode, precise math and line loops through pub) A user type implements each trait and works with the language form (format selector, decode, line loop); an example has golden output on every tier.",
+          "text": "A user type implements each of those traits and works with the language form: a format selector, decode, precise math and a line loop. Waits on the same owner question. Proof: `jet test Compiler --profile golden --filter Types/Traits/LanguageFormTraits` passes on o0, o1 and o2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T07:56:49.933Z"
+          "at": "2026-11-15T02:25:30.177Z"
         },
         {
           "n": 17,
@@ -67805,21 +67806,21 @@
         },
         {
           "n": 38,
-          "text": "(from #6163 Build core.build and the fn build host on the public compile) BuildAdapter.jet dispatches no member-name strings; JetBuildSession is either deleted or a public library package.",
+          "text": "core.build runs on the public compiler library: Driver/BuildAdapter.jet (lines 36-81) dispatches no Build or BuildPlan member-name strings, and JetBuildSession is deleted or becomes a public library package (census F16). Proof: BuildAdapter.jet's member-name list leaves tests/guards/closed_lists/baseline.tsv and `jet test tests/guards --filter closed_lists` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T07:58:46.510Z"
+          "at": "2026-11-15T02:25:31.547Z"
         },
         {
           "n": 39,
-          "text": "(from #6163 Build core.build and the fn build host on the public compile) A user package can write a build helper with the same API core.build uses (example with golden output).",
+          "text": "A user package writes a build helper with the same API core.build uses. Proof: `jet test Compiler --profile golden --filter Metaprogramming/BuildTime/UserBuildHelper` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T07:58:48.232Z"
+          "at": "2026-11-15T02:25:32.741Z"
         },
         {
           "n": 42,
@@ -67859,39 +67860,39 @@
         },
         {
           "n": 46,
-          "text": "(was #6255) No source-owned to_array/to_* conversion remains in core.math, and callers are migrated",
+          "text": "core.math keeps no source-owned scalar conversion that `Type{value}` spells (D-FLOAT-INT1=A): `to_float` is removed and its callers write `Float{x}`. The SIMD `from_array`/`to_array` bridges stay, because D-SIMD1 and D-SIMD2 (ratified) require them. Proof: `git grep -n 'to_float: fn' Core/Math` prints nothing and `jet test Compiler --profile golden --filter Math` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:25:02.230Z"
+          "at": "2026-11-15T02:25:34.291Z"
         },
         {
           "n": 48,
-          "text": "Single-source census F1 (Docs/audits/2026-11-05-single-source-census.md): Effects each Core call performs. One hand-written home: Effect rows on the Core declarations. Fix: gen: build CoreCallRows from the parsed Core signatures; delete the JS effect lists; make the row hold a set of effects, not one. Drift check: CoreSourceRows/ledger `--check` fails when a row's effect set differs from the declared effect row. Drifted on 2026-11-05: Yes. `Core/Jobs/Jobs.jet:126` declares `fn queue() -[DB, Env, FS, Time]>`, but `CoreCallRows.jet:1278` has `effect_kind: Val(Effect.DB)`. The row type can hold only one effect, so the other three are lost Effort L. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "text": "Each Core call carries the full effect set its Core declaration writes: the call row holds a set of effects, built from the parsed Core signature, and the JS effect lists are deleted. Today Core/Jobs/Jobs.jet:126 declares `fn queue() -[DB, Env, FS, Time]>` but CoreCallRows.jet:1278 keeps only Effect.DB (census F1, Docs/audits/2026-11-05-single-source-census.md). Proof: `jet test Compiler --profile cases --filter core_call_effect_set` shows all four effects for jobs.queue.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T15:30:08.091Z"
+          "at": "2026-11-15T02:25:23.264Z"
         },
         {
           "n": 52,
-          "text": "D-CORE-LOWER1=A, entry half: the entry package's own unreached bodies follow dead_code=remove. Every entry root (jobs, C exports, CLI commands, callbacks and other roots) is kept, and an unreached entry function is not lowered (a build-trace or IR test, plus a case for each root kind). Split from c17, whose dependency half lands in TlsLead-6151c17.",
+          "text": "D-CORE-LOWER1=A, entry half: the entry package's own unreached bodies follow dead_code=remove. Every entry root (jobs, C exports, CLI commands, callbacks and other roots) is kept, and an unreached entry function is not lowered. It is met when the ffi and export case lines pass (they were red from 4 selfhost_terminators jet_lexer cases broken by ScriptAPI-7 and a musl race in cffi concurrent-bridges). Proof: `jet test Compiler --profile cases --filter core_lower_entry_roots` (a case per root kind).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T22:17:35.074Z"
+          "at": "2026-11-15T02:25:35.704Z"
         },
         {
           "n": 53,
-          "text": "D-EMBED-TOOLCHAIN1=A, table cutover part 2: the five Core-declaration tables (CoreSourceOwned, EnumRows, StructureRows, the EnumPayload tail, CoreCallRows) are computed at build time from toolchain: reads, and their copies and generator modes are deleted. The declaration parser lives in one package, and the generator copy is deleted. The walked and data-named reads use computed embed_file and find paths under D-EMBED-WALK1=A (on dev: tests/ui/comptime_embed_*computed*). The comptime cost of CoreCallRows (896 KB) is measured against the generator run and recorded. (moved from #5072 c28)",
+          "text": "D-EMBED-TOOLCHAIN1=A table cutover, part 2: the five Core-declaration tables (CoreSourceOwned, EnumRows, StructureRows, the EnumPayload tail, CoreCallRows) are computed at build time from toolchain: reads, their copies and generator modes are deleted, and the declaration parser lives in one package. Walked and data-named reads use computed embed_file and find paths (D-EMBED-WALK1=A). The comptime cost of CoreCallRows (896 KB) against the generator run is recorded in the card log. Proof: the five generated files are absent from `git ls-files Compiler` and `jet test Compiler --profile ui --filter comptime_embed_` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:09:28.682Z"
+          "at": "2026-11-15T02:25:24.868Z"
         }
       ],
       "refs": [],
@@ -67902,8 +67903,8 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-13T02:10:21.500Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:25:37.096Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 53
     },
     {
@@ -80329,6 +80330,60 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T11:07:29.396Z"
+        },
+        {
+          "n": 4,
+          "text": "Diagnostic, the only finding carrier, gains `tier` and `structured_fix`, while `fix` stays literal help text (NEW-D-LINT-DECL1=A). Proof: `jet test Compiler --profile ui --filter lint_structured_fix` and `jet fix` applies the structured fix in `jet test Compiler --profile cases --filter jet_fix_applies_structured_fix`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:13.440Z"
+        },
+        {
+          "n": 5,
+          "text": "A package lint is a checked compile-event subscriber over resolved calls: the NoPrintInLib example fires only on the resolved print symbol inside the opted-in library (NEW-D-LINT-DECL1=A). Proof: `jet test Compiler --profile golden --filter Packages/NoPrintInLib` passes on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:14.705Z"
+        },
+        {
+          "n": 6,
+          "text": "`syntax.rewrite` takes resolved callable identities, keeps argument subtrees, and refuses a rewrite whose argument or return types are incompatible (NEW-D-LINT-DECL1=A). Proof: `jet test Compiler --profile ui --filter rewrite_incompatible_refused`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:16.023Z"
+        },
+        {
+          "n": 7,
+          "text": "Importing a package never turns its lints on; a root enables the package's lint group once, and a dependent's import stays silent (NEW-D-LINT-DECL1=A). A program with no attached lint hook emits no dispatch code (D-HOOK-ONE1). Proof: `jet test Compiler --profile cases --filter package_lint_import_silent`, which also checks the IR has no hook dispatch.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:17.221Z"
+        },
+        {
+          "n": 8,
+          "text": "A package marker refuses code with its own declared diagnostic, and `jet explain package.Name` prints that diagnostic's what/why/fix text. Proof: `jet test Compiler --profile ui --filter package_marker_own_diagnostic` and `jet test Compiler --profile cases --filter explain_package_diagnostic`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:18.355Z"
+        },
+        {
+          "n": 9,
+          "text": "A library author retires an API with `#Deprecated(…)` carrying a replacement body, and `jet fix` inlines it at every call so users migrate in one run. Proof: `jet test Compiler --profile cases --filter jet_fix_inlines_deprecated_replacement`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:19.560Z"
         }
       ],
       "refs": [],
@@ -80342,9 +80397,9 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:41.377Z",
-      "updated": "2026-11-14T06:21:31.317Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3
+      "updated": "2026-11-15T02:25:19.560Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 9
     },
     {
       "id": "c0uhfjtt",
@@ -98842,6 +98897,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:10:41.959Z"
+        },
+        {
+          "n": 11,
+          "text": "The Compiler value's method list is generated from Core declarations: Compiler/JetEval/Source/CompilerValueMethods.jet no longer lists records and fields by hand, so a new field on `CompilerChecked` appears with no evaluator edit. Proof: `jet test Compiler --profile cases --filter compiler_value_new_field_visible`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:20.775Z"
         }
       ],
       "refs": [],
@@ -98856,8 +98920,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:41.959Z",
-      "updated": "2026-11-15T02:18:23.687Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T02:25:20.775Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 11
     },
     {
       "id": "c07ywjvi",
@@ -99258,6 +99323,528 @@
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:45.678Z",
       "updated": "2026-11-15T02:10:45.678Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0e6znz4",
+      "num": 6851,
+      "title": "Core gets no privilege a package lacks: host-leaf gates, per-domain call checks, Core-only constructs, #Unsafe and lexing",
+      "body": "Destination: Core is ordinary Jet that uses only mechanisms any package can use (Docs/spec/philosophy.md, pillar 5). Today sema lets Core do things a package cannot: it gates host leaves on the caller's module name, keeps a hand-written checker per Core domain, accepts constructs only in Core files, exempts Core from the #Unsafe secret rules, and lexes and parses Core with its own rules.\n\nWhy it matters: a third-party library must be able to do what Core does, and every privilege is a second rule that tools copy and drift on.\n\nSources: findings F02, F03, F07, F08 and F14 of Docs/audits/2026-10-29-language-is-a-library-census.md (line numbers at dev 25f9dee58f). Split from #6151, which keeps the Core-declaration and twin-table work. D-HOST-LEAF1=E (runtime is an ordinary library, #6615). Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4).\n\nOwner gate (2026-11-06, recorded on #6151): package-private `__` helpers (the lexing criteria) wait for one plain owner question; none is drafted yet.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No sema branch compares a caller's module name or `<corelib>/` path to allow a host-leaf call (Sema/Calls/Core.jet:1143-1172 and 1268-1272, Sema/Calls/Data.jet:777 at 25f9dee58f: __stdio_*, __loader_new, __coerce_*, the CSV leaves and the global Shared constructor). The E0510 host-leaf gates in Calls/Core.jet go with #6615 c5. Proof: `git grep -n -E 'corelib>/|caller_module == \"core' Compiler/JetSema/Source/Sema/Calls` prints nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.533Z"
+        },
+        {
+          "n": 2,
+          "text": "A user package calling one of the former Core-only leaves gets the ordinary visibility diagnostic. Proof: `jet test Compiler --profile ui --filter core_leaf_ordinary_visibility`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.534Z"
+        },
+        {
+          "n": 3,
+          "text": "The Http.jet and HttpRouting.jet checkers in Sema/Calls move to Core declarations and are deleted; every diagnostic code they raised keeps its UI snapshot. Proof: `git ls-files Compiler/JetSema/Source/Sema/Calls/Http.jet Compiler/JetSema/Source/Sema/Calls/HttpRouting.jet` prints nothing and `jet test tests/guards --filter diagnostics_coverage` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.534Z"
+        },
+        {
+          "n": 4,
+          "text": "The Services.jet and TaskGroups.jet checkers in Sema/Calls move to Core declarations and are deleted; every code they raised keeps its UI snapshot. Proof: `git ls-files` for both files prints nothing and `jet test tests/guards --filter diagnostics_coverage` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.534Z"
+        },
+        {
+          "n": 5,
+          "text": "The StreamHandles.jet, ProcessHandles.jet, TimeHandles.jet and UiHandles.jet checkers in Sema/Calls move to Core declarations and are deleted; every code they raised keeps its UI snapshot. Proof: `git ls-files` for the four files prints nothing and `jet test tests/guards --filter diagnostics_coverage` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.534Z"
+        },
+        {
+          "n": 6,
+          "text": "The Hardware.jet, Data.jet and Geometry.jet checkers in Sema/Calls move to Core declarations and are deleted; every code they raised keeps its UI snapshot. Proof: `git ls-files` for the three files prints nothing and `jet test tests/guards --filter diagnostics_coverage` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.534Z"
+        },
+        {
+          "n": 7,
+          "text": "A user package that declares an API of the same shape as one moved domain gets the same call checks. Proof: `jet test Compiler --profile golden --filter Packages/DeclaredCallChecks` passes on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.534Z"
+        },
+        {
+          "n": 8,
+          "text": "No construct is legal only in Core: the record-literal, IOOperation/IOContext owner-annotation, private native type, protected type name and core_private_seam branches (Sema/Expressions/Constructors.jet:402, Sema/FailureLaw.jet:549-555, Registration/Items.jet:3509-3510, Calls/Methods.jet:1345, TypeRelations.jet:888, Calls/Core.jet:271 at 25f9dee58f) are gone. Proof: `git grep -n 'corelib>/' Compiler/JetSema/Source/Sema/Expressions Compiler/JetSema/Source/Sema/Registration Compiler/JetSema/Source/Sema/TypeRelations.jet` prints nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.534Z"
+        },
+        {
+          "n": 9,
+          "text": "A user package writing one of those constructs gets the same result as Core with the same visibility spelling, or the ordinary visibility diagnostic. Proof: `jet test Compiler --profile ui --filter core_construct_ordinary_visibility`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.534Z"
+        },
+        {
+          "n": 10,
+          "text": "Core follows the #Unsafe and secret rules: no sema branch exempts a core.* caller from E0510 (Sema/Expressions/Places.jet:752-760) or E0112, and wrapping a generic formal in ExpiringSecret (FailureLaw.jet:631) and the three-argument ExpiringSecret.new (Calls/Static.jet:871) are open to any package or removed. Proof: `jet test Compiler --profile ui --filter secret_read_requires_unsafe` passes and `git grep -n -E 'starts_with\\(\"core\\.' Compiler/JetSema/Source/Sema/Expressions/Places.jet Compiler/JetSema/Source/Sema/FailureLaw.jet` prints nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.534Z"
+        },
+        {
+          "n": 11,
+          "text": "The driver picks Core's lexer settings and parse job without testing for Core (Driver/MarkerGroups.jet:222, Lexer/Terminators.jet:558-560, Driver/Loader.jet:3489-3497 and 3525 at 25f9dee58f). Waits on the owner question about package-private `__` helpers. Proof: `git grep -n -E 'is_core|corelib' Compiler/JetDriver/Source/Driver/Loader.jet Compiler/JetDriver/Source/Driver/MarkerGroups.jet Compiler/JetLexer/Source/Lexer/Terminators.jet` prints nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.534Z"
+        },
+        {
+          "n": 12,
+          "text": "A package-private `__` helper behaves the same in a user package and in Core: an outside use is refused with the same diagnostic. Waits on the same owner question. Proof: `jet test Compiler --profile ui --filter private_helper_outside_use`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:07.534Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "library"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:25:07.534Z",
+      "updated": "2026-11-15T02:25:07.534Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0sdz4q0",
+      "num": 6852,
+      "title": "Copy, resource, typestate, effect, sink and layout facts come from declarations, not Core names",
+      "body": "Destination: the checker reads copy, resource, typestate, effect and sink facts, and IR reads runtime-handle layout, from the declaration of a type or function. No compiler file keeps a list of Core type or module names to decide them.\n\nWhy it matters: a package type declared the same way as a Core type must get the same facts, and every name list drifts from Core (census F1 found Core/Jobs/Jobs.jet `queue() -[DB, Env, FS, Time]>` reduced to Effect.DB).\n\nSources: findings F06, F11 and F12 of Docs/audits/2026-10-29-language-is-a-library-census.md (line numbers at dev 25f9dee58f); D-CORE-LOWER1=A (lowering). Split from #6151.\n\nStarting point for the taint criteria: an unlanded, unreviewed rework saved from lane TlsLead-3-6151 (on 73739ba7c3) at $JET_SCRATCH_ROOT/lanes/Main/tls-unlanded/TlsLead-3-6151.patch (35 files: Sema/Taint.jet, ProveReplay.jet, CoreSourceRows.jet; deletes JetFoundation/Data/Syntax/Sinks.jet).\n\nOwner gate (2026-11-06, recorded on #6151): the declaration-facts criteria and the layout criterion each wait for one plain owner question; none is drafted yet.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Copy, resource and typestate facts come from declarations: Sema/Ownership/Copy.jet (298-307, 597, 697), Sema/Ownership/Crossings.jet (225) and Sema/Typestate.jet (67-68, Task join and detach) hold no Core type-name lists. Waits on the owner question about declaration facts. Proof: those lists leave tests/guards/closed_lists/baseline.tsv and `jet test tests/guards --filter closed_lists` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:08.392Z"
+        },
+        {
+          "n": 2,
+          "text": "A user type declared like a Core type gets the same copy, resource and typestate facts. Waits on the same owner question. Proof: `jet test Compiler --profile cases --filter declared_copy_resource_typestate_facts`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:08.392Z"
+        },
+        {
+          "n": 3,
+          "text": "A Core call's effects and credential-sink class come from its declaration: sema_taint_core_effect and sema_taint_credential_sink (Sema/Taint.jet:240-300 at 25f9dee58f, also read by Cli/ProveReplay.jet) are deleted. Proof: `git grep -n -E 'sema_taint_core_effect|sema_taint_credential_sink' Compiler` prints nothing and `jet test Compiler --profile ui --filter taint` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:08.392Z"
+        },
+        {
+          "n": 4,
+          "text": "`jet inspect` shows the same effects for a Core call and a user call with the same declaration. Proof: `jet test Compiler --profile cases --filter inspect_effects_core_and_user_match`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:08.392Z"
+        },
+        {
+          "n": 5,
+          "text": "IR decides runtime-handle layout without `<corelib>/` key-prefix tests (BuildTypes.jet, about 14 sites, for example lines 33, 399, 547, 561, 598 and 3384), so a package type gets the same layout rule. Waits on the owner question about layout. Proof: `git grep -c 'corelib>/' Compiler/JetIR/Source/BuildTypes.jet` prints 0 and `jet test Compiler --profile golden --filter Types` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:08.392Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "library"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:25:08.392Z",
+      "updated": "2026-11-15T02:25:08.392Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c06r6neu",
+      "num": 6853,
+      "title": "Open vocabularies: the compiler reads Core members as trait impls, never by name (D-EXTEND-ARCH1)",
+      "body": "Destination: every compiler list that holds a Core member becomes a Core trait that any package implements with `impl Member.Trait` and trait constants (for example `impl TOML.Format { name: \"TOML\" }`). Core impls are pre-generated (D-OPENTABLE1); package impls are read once per build, only when imported. No compiler file recognizes a Core member by name.\n\nWhy it matters: a third-party database head, file format, unit or protocol must get the same powers as Core's without a compiler release.\n\nDecision: D-EXTEND-ARCH1=A. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 6.1-6.3 (rules, the per-layer table, the checked-text worked example) and section 8 (the closed-list guard, landed as tests/guards/closed_lists.jet in 912fae1170). Each vocabulary that moves shrinks tests/guards/closed_lists/baseline.tsv.\n\nDone so far: Core's SQL, HTML, Sh, URL, DateTime and Path are CheckedText impls and TypedHeadKind is gone (549b47e704); CheckedText keeps holes as typed values with Hole and build (9afa7da76b, D-TEXTHEAD-HOLES1).\n\nOwner gate: growing public enums (a marker requiring an `else` arm) has no ballot; recorded in the owner-gates list.\n\nSplit from #6202 (the research card).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No compiler file recognizes a Core checked-text head by name: the `name == \"SQL\"` tests at Facts/Checked.jet:127 and Sema/Statements.jet:7492 (dev 72a8142651) are gone. Proof: `git grep -n 'name == \"SQL\"' Compiler` prints nothing and `jet test Compiler --profile golden --filter Text/CheckedText` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:09.260Z"
+        },
+        {
+          "n": 2,
+          "text": "A package head `Cypher{\"... {age} ...\"}` binds `age` as a value like Core's SQL, and its failing check is reported in the package's name at the user's line. Proof: `jet test Compiler --profile golden --filter Packages/CypherHead` passes on o0, o1 and o2, and `jet test Compiler --profile ui --filter package_head_check_fails`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:09.260Z"
+        },
+        {
+          "n": 3,
+          "text": "Codec formats are a Core trait: `#Rename`'s format menu (Prelude/Markers.jet `Rename(json, cbor, csv, toml, yaml, xml, args, env, db, layout)`) reads the trait's impls, so a MessagePack package works with `#Rename(msgpack: \"…\")` and the data loaders. Proof: `jet test Compiler --profile golden --filter Packages/MsgpackRename`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:09.260Z"
+        },
+        {
+          "n": 4,
+          "text": "String format selectors get their meaning from a trait: StrFormat (AST/Expressions.jet) and its TStrFormat mirror are gone, and a package selector formats a hole with no compiler change. Proof: `git grep -n 'StrFormat' Compiler` prints nothing and `jet test Compiler --profile golden --filter Packages/FormatSelector` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:09.260Z"
+        },
+        {
+          "n": 5,
+          "text": "Byte and budget suffixes are Core unit families: one `#UnitFamily` declaration per suffix family replaces the lexer and budget suffix lists, and a package family (for example `hop`) works the same way. Proof: the suffix lists leave tests/guards/closed_lists/baseline.tsv and `jet test Compiler --profile golden --filter Units` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:09.260Z"
+        },
+        {
+          "n": 6,
+          "text": "Core protocol traits are declared in the Prelude and the compiler's table is generated from them (OWNED_TRAITS via Tools/agent/OwnedTraitRows.jet): no compiler file spells a protocol trait name outside the generated table. Proof: `jet test tests/guards --filter closed_lists` passes with no protocol-trait name list in its baseline.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:09.260Z"
+        },
+        {
+          "n": 7,
+          "text": "Growing public enums: adding a member to an enum carrying the growth marker breaks no caller, because a match on it from outside its package needs an `else` arm. Waits on an owner choice (no ballot). Proof: `jet test Compiler --profile ui --filter growing_enum_requires_else`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:09.260Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "library",
+        "declarative"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:25:09.261Z",
+      "updated": "2026-11-15T02:25:09.261Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0lidgow",
+      "num": 6854,
+      "title": "Taint kinds, effect roots, devices and schedulers come from declared rows and providers",
+      "body": "Destination: policy, taint, accelerator devices and schedulers read declared rows and providers, so a package adds a taint kind, an effect root, a device or a scheduler with no compiler or policy-code edit.\n\nWhy it matters: these four vocabularies are closed lists in the compiler today (TaintKind in Core/Compiler/Lang.jet with three copies of the taint tags; the policy key and gate lists in Policy/; the device names in Registry/CoreValueSignatures.jet; the scheduler choice). The four built-in tags themselves become Prelude structs on #6849 c6.\n\nDecisions: D-EXTEND-ARCH1=A, D-HOST-CAPS1 (package hardware kinds), D-ACCEL-LIB1 (device interface), D-CORE-PROVIDER1 (provider traits). Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 4.9, 4.28, 4.31 and 6.2.\n\nSplit from #6202.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A package declares a taint kind and its sinks as rows, and the checker enforces it at those sinks. Proof: `jet test Compiler --profile ui --filter package_taint_kind_sink`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:10.153Z"
+        },
+        {
+          "n": 2,
+          "text": "Authority policy reads declared effect roots, not a name list: a package's new effect root is governed by `authority:` rules with no policy-code edit. Proof: `jet test Compiler --profile cases --filter policy_governs_package_effect_root`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:10.153Z"
+        },
+        {
+          "n": 3,
+          "text": "Device names come from accelerator providers and hardware kinds: core_value_fixed_signature (Registry/CoreValueSignatures.jet) names no device, and an NPU test package adds a device with no compiler edit. Proof: `jet test Compiler --profile golden --filter Packages/NpuDevice`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:10.153Z"
+        },
+        {
+          "n": 4,
+          "text": "A target profile selects a package scheduler provider, with no per-call cost. Proof: `jet test Compiler --profile cases --filter target_selects_package_scheduler` (it checks the IR of a spawn is unchanged).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:10.153Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "library",
+        "declarative"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:25:10.153Z",
+      "updated": "2026-11-15T02:25:10.153Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c00fktgk",
+      "num": 6855,
+      "title": "Packages extend the editor, formatter, debugger and law tests through declared hooks",
+      "body": "Destination: a package that adds a block marker, a container type or an open trait also teaches the tools about it through declared hooks: editor stages, a formatter stage for block bodies, a Core DebugView trait and law tests that `jet test` runs.\n\nWhy it matters: without hooks, every package feature needs a change to the LSP, the formatter or the debugger.\n\nDecisions: D-HOOK-STAGES1=A (the compiler and tool moments packages may hook), D-HOOK-ONE1 (an unattached hook emits nothing), D-EXTEND-ARCH1=A rule 3 (laws travel with the interface), D-CORE-LAWS1. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 4.17-4.20 and 6.2.\n\nSplit from #6202.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A package block marker gets completion, semantic tokens and inlay hints through `#On(lsp.…)` stages, with no LSP code change. Proof: `jet test Compiler --profile cases --filter lsp_package_marker_stages`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:11.055Z"
+        },
+        {
+          "n": 2,
+          "text": "`jet fmt` formats a `#SQL { … }` body through a package `#On(fmt.block)` hook and leaves the surrounding Jet code untouched. Proof: `jet test Compiler --profile cases --filter fmt_block_package_hook`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:11.055Z"
+        },
+        {
+          "n": 3,
+          "text": "The debugger has one scalar-name source (today debug_scalar_class in Debug/Snapshot.jet and the safe_value and jet_type_name lists in Inferior.jet), and a package ring buffer shows its items through a Core `DebugView` impl. Proof: `jet test Compiler --profile cases --filter debug_view_package_ring_buffer`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:11.055Z"
+        },
+        {
+          "n": 4,
+          "text": "`jet test` on a package whose impl of an open Core trait breaks one of the trait's laws fails and names the law. Proof: `jet test Compiler --profile cases --filter law_kit_names_broken_law`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:11.055Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "tooling",
+        "declarative"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:25:11.055Z",
+      "updated": "2026-11-15T02:25:11.055Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0ho9o8j",
+      "num": 6856,
+      "title": "Build tools, package sources and JetOS options are package providers",
+      "body": "Destination: a foreign build tool, a package registry or service preset, and a JetOS module option are each one package implementing a provider trait or declaring rows, not an edit to the build session, Jetpack or JetOS.\n\nWhy it matters: today Session.jet:664 names cmake, make, gradle, npm and cargo; Jetpack's ServicePresetKind has 43 presets and its provider list sits in four places that disagree (#6217); JetOS options render from a closed table (OptionsRendering.jet:117).\n\nDecisions: D-EXTEND-ARCH1=A, D-CORE-PROVIDER1, D-INFRA1. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 4.24, 4.25, 4.29 and 6.2 (`b.toolchain`, `b.action`, a Jetpack provider trait). Frozen cards #470 (JetOS option merge law) and #323 (JetOS option schema) cover nearby ground and are not touched.\n\nSplit from #6202.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A Meson provider package implements `b.toolchain` and builds a Meson project from `fn build` with no build-session change; Session.jet names no foreign build tool. Proof: `jet test Compiler --profile cases --filter build_toolchain_package_provider`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:12.098Z"
+        },
+        {
+          "n": 2,
+          "text": "Jetpack reads package sources and service presets through one provider trait: a new registry or preset is one package, and the four provider lists (RefSpec.jet, ProviderFamily.jet, Syntax.jet, ProviderFacts.jet) become one declared home. Proof: `jet test Compiler --profile cases --filter jetpack_provider_package`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:12.098Z"
+        },
+        {
+          "n": 3,
+          "text": "JetOS module options are package declarations with a stated merge law: two packages set one option and the result follows the law. Proof: `jet test Compiler --profile cases --filter jetos_option_merge_law`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:25:12.098Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "build",
+        "jetpack",
+        "declarative"
+      ],
+      "goals": [
+        "G7"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:25:12.098Z",
+      "updated": "2026-11-15T02:25:12.098Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -204677,6 +205264,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:25:37.096Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0w1wcfc",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T02:25:35.705Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#52: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: D-CORE-LOWER1=A, entry half: the entry package's own unreached bodies follow dead_code=remove. Every entry root (jobs, C exports, CLI commands, callbacks and other roots) is kept, and an unreached ent"
+    },
+    {
+      "at": "2026-11-15T02:25:34.291Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#46: D-FLOAT-INT1=A unblocks the scalar conversions (BoardPlanner 2026-11-09); the SIMD bridges are kept by ratified D-SIMD1/D-SIMD2 (Main 2026-11-12).; was: (was #6255) No source-owned to_array/to_* conversion remains in core.math, and callers are migrated"
+    },
+    {
+      "at": "2026-11-15T02:25:32.741Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#39: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6163 Build core.build and the fn build host on the public compile) A user package can write a build helper with the same API core.build uses (example with golden output)."
+    },
+    {
+      "at": "2026-11-15T02:25:31.547Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#38: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6163 Build core.build and the fn build host on the public compile) BuildAdapter.jet dispatches no member-name strings; JetBuildSession is either deleted or a public library package."
+    },
+    {
+      "at": "2026-11-15T02:25:30.177Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#15: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6155 Bind format, decode, precise math and line loops through pub) A user type implements each trait and works with the language form (format selector, decode, line loop); an example has golden"
+    },
+    {
+      "at": "2026-11-15T02:25:29.019Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#14: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6155 Bind format, decode, precise math and line loops through pub) CoreReach.jet matches no Core file path or helper name."
+    },
+    {
+      "at": "2026-11-15T02:25:27.801Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#12: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6154) Codegen for a user call and a Core call to the same jet.runtime function is the same IR shape (an IR dump test)."
+    },
+    {
+      "at": "2026-11-15T02:25:26.348Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#11: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (from #6154 Lower Core calls through host-leaf declarations, not IR rout) RouteHandle.jet, RouteBuiltin.jet and RouteBrowser.jet hold no Core member names; the runtime Route*.jet tables are deleted or"
+    },
+    {
+      "at": "2026-11-15T02:25:24.868Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#53: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: D-EMBED-TOOLCHAIN1=A, table cutover part 2: the five Core-declaration tables (CoreSourceOwned, EnumRows, StructureRows, the EnumPayload tail, CoreCallRows) are computed at build time from toolchain: r"
+    },
+    {
+      "at": "2026-11-15T02:25:23.264Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#48: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: Single-source census F1 (Docs/audits/2026-11-05-single-source-census.md): Effects each Core call performs. One hand-written home: Effect rows on the Core declarations. Fix: gen: build CoreCallRows fro"
+    },
+    {
+      "at": "2026-11-15T02:25:22.050Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w1wcfc",
+      "note": "#2: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: Every Core member that had a CORE_CALLS row is declared in Core source; Compiler/Prelude/Core.jet holds no member rows and the generated and hand-written signature tables are deleted. CoreSourceRows -"
+    },
+    {
+      "at": "2026-11-15T02:25:20.775Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0r6d7ja",
+      "note": "#11 The Compiler value's method list is generated from Core decl"
+    },
+    {
+      "at": "2026-11-15T02:25:19.560Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fymc7l",
+      "note": "#9 A library author retires an API with `#Deprecated(…)` carryi"
+    },
+    {
+      "at": "2026-11-15T02:25:18.355Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fymc7l",
+      "note": "#8 A package marker refuses code with its own declared diagnost"
+    },
+    {
+      "at": "2026-11-15T02:25:17.221Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fymc7l",
+      "note": "#7 Importing a package never turns its lints on; a root enables"
+    },
+    {
+      "at": "2026-11-15T02:25:16.023Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fymc7l",
+      "note": "#6 `syntax.rewrite` takes resolved callable identities, keeps a"
+    },
+    {
+      "at": "2026-11-15T02:25:14.705Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fymc7l",
+      "note": "#5 A package lint is a checked compile-event subscriber over re"
+    },
+    {
+      "at": "2026-11-15T02:25:13.440Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fymc7l",
+      "note": "#4 Diagnostic, the only finding carrier, gains `tier` and `stru"
+    },
+    {
+      "at": "2026-11-15T02:25:12.098Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0ho9o8j",
+      "note": "Build tools, package sources and JetOS options are package providers"
+    },
+    {
+      "at": "2026-11-15T02:25:11.055Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c00fktgk",
+      "note": "Packages extend the editor, formatter, debugger and law tests through declared hooks"
+    },
+    {
+      "at": "2026-11-15T02:25:10.153Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0lidgow",
+      "note": "Taint kinds, effect roots, devices and schedulers come from declared rows and providers"
+    },
+    {
+      "at": "2026-11-15T02:25:09.261Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c06r6neu",
+      "note": "Open vocabularies: the compiler reads Core members as trait impls, never by name (D-EXTEND-ARCH1)"
+    },
+    {
+      "at": "2026-11-15T02:25:08.392Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0sdz4q0",
+      "note": "Copy, resource, typestate, effect, sink and layout facts come from declarations, not Core names"
+    },
+    {
+      "at": "2026-11-15T02:25:07.534Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0e6znz4",
+      "note": "Core gets no privilege a package lacks: host-leaf gates, per-domain call checks, Core-only constructs, #Unsafe and lexing"
+    },
     {
       "at": "2026-11-15T02:18:55.381Z",
       "by": "TowerKeeper-1",
