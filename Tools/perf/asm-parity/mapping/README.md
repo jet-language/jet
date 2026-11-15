@@ -7,7 +7,10 @@ every region's size.
 `ref.S` is the machine ceiling. It does the same work with one `mmap` and one
 `munmap` per pass, and keeps the one check a mapping needs: the refusal test
 on mmap's result, at its smallest. A refused mapping exits 70, as Jet's panic
-does.
+does. Like Jet's region, each mapping is registered in a page map: a flat
+table of one word per 64 KiB unit of the 47-bit address space, mapped once
+NORESERVE at start. Map stores the base at the mapping's unit, and unmap
+clears it, one store each.
 
 The cell is a memory kernel cell (its `kernel` entry in `../cells.json`). Its
 release row (O2) must satisfy Jet / ceiling <= 1.00 in both cycles and code
@@ -27,7 +30,9 @@ heap allocator, which the `allocfree` cell measures, so it does not count
 here.
 
 The reference's uses are every line of its two calls: the arguments, the
-syscalls, the check and the refusal exit. On Jet's side, the reserve line
+syscalls, the check, the refusal exit, and the page map's store and clear.
+The table's own mapping runs once at start, as a runtime maps its page map
+before the first region, so it is not a use. On Jet's side, the reserve line
 and the close line count everything they lower to, the panic included.
 
 This cell is a measurement first: on the runtime it was written against, Jet
