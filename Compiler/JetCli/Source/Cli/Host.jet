@@ -2006,12 +2006,14 @@ jet_cli_build_sbom: fn(file: String, name: String, source: String, binary: Strin
 // .jet/build/`name` and return, so the package build continues with its next
 // target. The snapshot holds the target's whole folder (target: true). The
 // compile's result and snapshot drop on a detached task
-// (jet_cli_compile_release), so the next node starts while they drop.
+// (jet_cli_compile_release), so the next node starts while they drop; what
+// the compile's scopes still hold drops as they close, in `cli.target.drop`.
 jet_cli_compile_target: fn(file: String, name: String, source: String, sources: [String], generated: [JetDriverGeneratedModule], color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Program, false, true)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    if prepared.move() == {
+    released := false
+    output: if prepared.move() == {
         .Refused(refusal) -> refusal
         .Prepared(request, snapshot) -> {
             with_generated := request
@@ -2025,11 +2027,15 @@ jet_cli_compile_target: fn(file: String, name: String, source: String, sources: 
                     if trace_sink == .Val(sink) -> sink.begin("cli.release", "", -1, -1)
                     jet_cli_compile_release(result, checked_snapshot)
                     if trace_sink == .Val(sink) -> sink.end("cli.release", -1)
+                    if trace_sink == .Val(sink) -> sink.begin("cli.target.drop", "", -1, -1)
+                    released = true
                     built
                 }
             }
         }
     }
+    if released && trace_sink == .Val(sink) -> sink.end("cli.target.drop", -1)
+    output
 }
 
 // What a build target's compile leaves once its image is written: its

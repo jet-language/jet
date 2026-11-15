@@ -548,22 +548,12 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
         if !wants_host -> return built
         return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
     }
-    // The image is where jet_cli_compile_target wrote it: under the source's
-    // root (its package, else its folder) unless `output_dir` is absolute.
-    source_dir: jet_cli_parent(cli_files.realpath(source_path) ?? source_path) ?? root
-    cache := WorkspaceDeclarationCache.new()
-    source_root := source_dir.copy()
-    if jet_cli_find_package_root_checked(cache, source_dir) == .Ok(found) && found == .Val(package_root) -> source_root = package_root.copy()
-    written: build_options_value(target_options, "output_dir")
-    image_dir: if { written == "" -> "{source_root}/.jet/build" written.starts_with("/") -> written.copy() else -> "{source_root}/{written}" }
-    image: cli_files.join(image_dir, row.name)
-    if needs.images.contains(target) {
-        copies_dir: jet_cli_entry_join(root, BUILD_SESSION_IMAGE_DIR)
-        copied: cli_files.join(copies_dir, row.name)
-        cli_files.create_dir_all(copies_dir) ?? return jet_cli_build_failed("couldn't create `{copies_dir}` for the images steps read: {err}", jet_cli_why("E2105"), "make `{copies_dir}` writable", color)
-        cli_files.copy2(image, copied) ?? return jet_cli_build_failed("couldn't copy `{row.name}`'s image `{image}` to `{copied}`, where a step reads it: {err}", jet_cli_why("E2105"), "make `{copies_dir}` writable", color)
-        cli_files.set_mode(copied, 493) ?? return jet_cli_build_failed("couldn't make `{copied}` executable: {err}", jet_cli_why("E2105"), "make `{copies_dir}` writable", color)
-    }
+    if trace_sink == .Val(sink) -> sink.begin("build.image", row.name, -1, -1)
+    image: jet_cli_build_target_image(source_path, row.name, target_options, root)
+    copies_dir: jet_cli_entry_join(root, BUILD_SESSION_IMAGE_DIR)
+    refused: if needs.images.contains(target) -> jet_cli_build_step_image(image, row.name, copies_dir) else -> None
+    if trace_sink == .Val(sink) -> sink.end("build.image", -1)
+    if refused == .Val(problem) -> return jet_cli_build_failed(problem, jet_cli_why("E2105"), "make `{copies_dir}` writable", color)
     if !wants_host -> return built
     if cross -> return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
     tool: cli_files.join(host_dir, row.name)
@@ -576,6 +566,29 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     if trace_sink == .Val(sink) -> sink.end("build.host", -1)
     cli_files.set_mode(tool, 493) ?? return jet_cli_build_failed("couldn't make the host copy `{tool}` executable: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
     built
+}
+
+// Where target `name`'s image from `source_path` was written under
+// `options`: under the source's root (its package, else its folder) unless
+// `output_dir` is absolute.
+jet_cli_build_target_image: fn(source_path: String, name: String, options: BuildOptions, root: String) -> String {
+    source_dir: jet_cli_parent(cli_files.realpath(source_path) ?? source_path) ?? root
+    cache := WorkspaceDeclarationCache.new()
+    source_root := source_dir.copy()
+    if jet_cli_find_package_root_checked(cache, source_dir) == .Ok(found) && found == .Val(package_root) -> source_root = package_root.copy()
+    written: build_options_value(options, "output_dir")
+    image_dir: if { written == "" -> "{source_root}/.jet/build" written.starts_with("/") -> written.copy() else -> "{source_root}/{written}" }
+    cli_files.join(image_dir, name)
+}
+
+// Copy target `name`'s `image` into `copies_dir` (.jet/build/image), where a
+// step reads it; what went wrong when it can't.
+jet_cli_build_step_image: fn(image: String, name: String, copies_dir: String) -> String? {
+    copied: cli_files.join(copies_dir, name)
+    cli_files.create_dir_all(copies_dir) ?? return Val("couldn't create `{copies_dir}` for the images steps read: {err}")
+    cli_files.copy2(image, copied) ?? return Val("couldn't copy `{name}`'s image `{image}` to `{copied}`, where a step reads it: {err}")
+    cli_files.set_mode(copied, 493) ?? return Val("couldn't make `{copied}` executable: {err}")
+    None
 }
 
 // The options target `row` builds with: a target on its own toolchain
