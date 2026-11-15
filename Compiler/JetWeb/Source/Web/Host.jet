@@ -753,7 +753,10 @@ const SYSCALLS = {
     return file.position;
   },
   9: (h, address, length, protection, flags, fd, offset) => h.map(length, flags, fd, offset),
-  10: () => 0,
+  // Linear memory never runs as code: PROT_EXEC is refused, so the runtime
+  // never calls a stub it mapped (Fault.jet trace_text, Alloc.jet
+  // alloc_check_start) through the function table.
+  10: (h, address, length, protection) => ((protection & 4) !== 0 ? -E.ACCES : 0),
   11: (h, address, length) => h.unmap(address, length),
   12: () => -E.NOMEM,
   13: (h, signal, action, old) => {

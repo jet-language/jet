@@ -1,7 +1,9 @@
 # The web build of the out-of-width draw stops as `jet run` does: the page
-# prints byte for byte the native report and exits 70. Which code that
-# report carries is runtime_e1003_is_a_stop_with_exit_70_on_every_hosted_tier's
-# to pin.
+# prints the stop report and exits 70. Which code that report carries is
+# runtime_e1003_is_a_stop_with_exit_70_on_every_hosted_tier's to pin. The
+# stop is raised inside Core, so its `-->` line names the user's call where
+# the image keeps a location table (`jet run`: main.jet:5). The web page
+# keeps none and cannot walk its frames, so it names the Core site.
 fixture: runtime_e1003_web_uses_the_same_stop_metadata_and_exit_70.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -10,11 +12,12 @@ requires: tool:node
 step native: jet run main.jet
 exit: 70
 stdout: empty
-stderr: nonempty # the bytes are compared against the web page below; the registered report is the hosted-tier case's
+stderr: ~ "\n  --> main.jet:5\n" # the user's call that reached Core
 step: jet build --target web main.jet
 exit: 0
 step: node app.js
 cwd: .jet/build
 exit: 70
 stdout: empty
-stderr: == native
+stderr: ~ "\n  --> <corelib>/Core/Math/Random.jet:" # no location table on the web: the Core site
+stderr: !~ "trapped" # the stop leaves by its stop path, not a wasm trap
