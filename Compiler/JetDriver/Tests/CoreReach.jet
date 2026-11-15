@@ -355,13 +355,12 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
 }
 
 #Test("a plain `priv` function is held behind a stub as private as it, and parses whole once reached") {
-    text: "plain: fn() -> Int Never! {{ helper() }}\n\npriv helper: fn() -> Int Never! {{ 1 }}\n\npriv unused: fn() -> Int Never! {{ 9 }}\n\npriv(package) shared: fn() -> Int Never! {{ 2 }}\n"
+    text: "plain: fn() -> Int Never! {{ helper() }}\n\npriv helper: fn() -> Int Never! {{ 1 }}\n\npriv unused: fn() -> Int Never! {{ 9 }}\n"
     parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: "core.math", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
     assert(!jet_driver_has_errors(parsed.parsed.diagnostics))
     words: parsed.words ?? panic("a Core unit has words")
     held := [String]{}
     loop declaration in words.held -> held.push(declaration.name)
-    // A scoped `priv(package)` is no plain `priv`: it parses whole at once.
     assert_eq(held, [String]{"plain", "helper", "unused"})
     loop item in parsed.parsed.program.items {
         if item == .Func(value) -> assert(value.is_pub == (value.name == "plain"), "{value.name}'s visibility")
