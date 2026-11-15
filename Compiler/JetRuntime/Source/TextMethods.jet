@@ -143,12 +143,12 @@ text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
 #Export(c) jet_text_parse_split_once: fn(value: I64, separator: I64, item0: I64, item1: I64, item2: I64) {
     found: rt_text_find(value, separator, I64{0}, false)
     if (found < I64{0}) {
-        #Unsafe("item0 lends the C-ABI tuple's one writable Bool byte") { os_store_u8(item0, I64{0}) }
+        rt_text_put(item0, I64{0})
         rt_text_store(item1, jet_rt_string_clone(value))
         rt_text_store(item2, jet_rt_string_builder_new())
         return
     }
-    #Unsafe("item0 lends the C-ABI tuple's one writable Bool byte") { os_store_u8(item0, I64{1}) }
+    rt_text_put(item0, I64{1})
     rt_text_store(item1, rt_text_slice(value, I64{0}, found))
     rt_text_store(item2, rt_text_slice(value, found + rt_text_len(separator), rt_text_len(value)))
 }

@@ -1,12 +1,10 @@
 // Native DataEvent hand carrier; DataABI.jet owns all tags and offsets. The
 // Rust original derives Clone/PartialEq; the Rust original defines ctor/getter
 // ownership. Bytes borrows on get and consumes on new.
-data_event_word: fn(address: I64) -> I64 {
-    #Unsafe("address borrows an initialized word in a live native DataEvent or List") { return os_load_i64(address) }
-}
-data_event_store: fn(address: I64, value: I64) {
-    #Unsafe("address owns a writable word in a native DataEvent") { os_store_i64(address, value) }
-}
+// Reads borrow an initialized word of a live native DataEvent or List; writes
+// own a word of a native DataEvent. RawWords.jet performs the access.
+data_event_word: fn(address: I64) -> I64 { rt_text_word(address) }
+data_event_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 data_event_new: fn(kind: I64, payload: I64) -> I64 {
     event: jet_rt_alloc(DATA_EVENT_BYTES, I64{8})
     data_event_store(wrapping(event + DATA_EVENT_TAG), kind)

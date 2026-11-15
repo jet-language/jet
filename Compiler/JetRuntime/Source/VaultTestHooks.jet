@@ -19,9 +19,10 @@ vault_test_backup_config := I64{0}
     sync_store(destructor, I64{1})
     sync_store(wrapping(destructor + I64{8}), destructor_code)
     sync_store(wrapping(destructor + I64{16}), I64{0})
+    backup_mutex: jet_rt_alloc(I64{8}, I64{8})
     #Unsafe("written under the TLS registry mutex") {
         vault_test_destructor = destructor_code
-        vault_test_backup_mutex = jet_rt_alloc(I64{8}, I64{8})
+        vault_test_backup_mutex = backup_mutex
     }
     sync_store(vault_test_backup_mutex, I64{0})
     #Unsafe("written under the TLS registry mutex") {

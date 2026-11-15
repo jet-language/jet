@@ -4,29 +4,18 @@
 // String/Vec Rust layout is read here. These exports replace the corresponding
 // Rust exports when E2 cuts the pack over.
 
-trap_word: fn(address: I64) -> I64 {
-    #Unsafe("the caller borrows an initialized word of a live JetText or static require descriptor") {
-        return os_load_i64(address)
-    }
-}
+// Word reads borrow an initialized word of a live JetText or static require
+// descriptor; byte reads borrow one initialized byte of a live UTF-8 carrier.
+// Word writes own eight bytes of a scratch mapping or allocated JetText
+// storage; byte writes own one byte of the allocated debug-text buffer.
+// RawWords.jet performs the access.
+trap_word: fn(address: I64) -> I64 { rt_text_word(address) }
 
-trap_byte: fn(address: I64) -> I64 {
-    #Unsafe("the caller borrows exactly one initialized byte of a live UTF-8 carrier") {
-        return os_load_u8(address)
-    }
-}
+trap_byte: fn(address: I64) -> I64 { rt_text_byte(address) }
 
-trap_store: fn(address: I64, value: I64) {
-    #Unsafe("the caller owns eight writable bytes in a scratch mapping or allocated JetText storage") {
-        os_store_i64(address, value)
-    }
-}
+trap_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 
-trap_put: fn(address: I64, value: I64) {
-    #Unsafe("address is one writable byte in the allocated debug-text buffer; value is a byte") {
-        os_store_u8(address, value)
-    }
-}
+trap_put: fn(address: I64, value: I64) { rt_text_put(address, value) }
 
 trap_syscall: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
     #Unsafe("audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor") {

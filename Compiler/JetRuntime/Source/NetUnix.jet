@@ -216,10 +216,8 @@ net_unix_send_fds_once: fn(stream: I64, data: I64, length: I64, fds: I64, count:
         net_store_uint(wrapping(scratch + I64{84}), I64{4}, I64{1})
         at := I64{0}
         loop at < count {
-            word := I64{0}
-            #Unsafe("fds lends count initialized exact Int words") {
-                word = os_load_i64(wrapping(fds + at * I64{8}))
-            }
+            // `fds` lends `count` initialized exact Int words.
+            word: rt_text_word(wrapping(fds + at * I64{8}))
             descriptor: host_descriptor_number(host_native_int(word))
             if (descriptor < I64{0}) {
                 _ := net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("unix send failed: a descriptor is closed")), I64{0}, error)

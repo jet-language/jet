@@ -6,31 +6,24 @@
 // the Jet IntHazard domain owns final-owner retirement. Private
 // arithmetic workspaces have refs1 and never enter an atomic carrier slot.
 
-int_load: fn(address: I64) -> I64 {
-    #Unsafe("borrow an initialized word in a live exact-Int carrier") {
-        return os_load_i64(address)
-    }
-}
+// Word reads borrow an initialized word of a live exact-Int carrier; word
+// writes own a word of a uniquely owned exact-Int workspace. A limb is four
+// little-endian bytes of a limb buffer, read without touching its neighbours
+// and written only when the buffer is uniquely owned. RawWords.jet performs
+// the access.
+int_load: fn(address: I64) -> I64 { rt_text_word(address) }
 
-int_store: fn(address: I64, value: I64) {
-    #Unsafe("write an initialized word in a uniquely owned exact-Int workspace") {
-        os_store_i64(address, value)
-    }
-}
+int_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 
 int_u32: fn(address: I64) -> I64 {
-    #Unsafe("borrow four initialized bytes in a live limb buffer; no adjacent limb is read") {
-        return os_load_u8(address).bit_or((os_load_u8(wrapping(address + I64{1})) << I64{8})).bit_or((os_load_u8(wrapping(address + I64{2})) << I64{16})).bit_or((os_load_u8(wrapping(address + I64{3})) << I64{24}))
-    }
+    rt_text_byte(address).bit_or((rt_text_byte(wrapping(address + I64{1})) << I64{8})).bit_or((rt_text_byte(wrapping(address + I64{2})) << I64{16})).bit_or((rt_text_byte(wrapping(address + I64{3})) << I64{24}))
 }
 
 int_put_u32: fn(address: I64, value: I64) {
-    #Unsafe("write four bytes in a uniquely owned limb buffer; value is an unsigned 32-bit limb") {
-        os_store_u8(address, value.bit_and(I64{255}))
-        os_store_u8(wrapping(address + I64{1}), (value >> I64{8}).bit_and(I64{255}))
-        os_store_u8(wrapping(address + I64{2}), (value >> I64{16}).bit_and(I64{255}))
-        os_store_u8(wrapping(address + I64{3}), (value >> I64{24}).bit_and(I64{255}))
-    }
+    rt_text_put(address, value.bit_and(I64{255}))
+    rt_text_put(wrapping(address + I64{1}), (value >> I64{8}).bit_and(I64{255}))
+    rt_text_put(wrapping(address + I64{2}), (value >> I64{16}).bit_and(I64{255}))
+    rt_text_put(wrapping(address + I64{3}), (value >> I64{24}).bit_and(I64{255}))
 }
 
 int_inline: fn(value: I64) -> Bool Never! {
@@ -430,10 +423,9 @@ INT_OPTION_NONE: I64{4611686018427387904}
         if (refs <= I64{0} || refs == I64{9223372036854775807}) {
             jet_rt_unreachable(I64{0}, I64{0})
         }
-        old := I64{0}
-        #Unsafe("the caller holds an existing owner; atomic retain cannot race final-owner retirement") {
-            old = os_cas_i64(node, refs, refs + I64{1})
-        }
+        // The caller holds an existing owner, so this atomic retain cannot
+        // race final-owner retirement.
+        old: sync_cas(node, refs, refs + I64{1})
         if old == refs -> return value
     }
 }
@@ -451,10 +443,9 @@ INT_OPTION_NONE: I64{4611686018427387904}
         refs: int_load(node)
         if (refs <= I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
         next_refs: refs - I64{1}
-        old := I64{0}
-        #Unsafe("the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement") {
-            old = os_cas_i64(node, refs, next_refs)
-        }
+        // The caller consumes one owner; the atomic decrement publishes refs0
+        // before shared-domain retirement.
+        old: sync_cas(node, refs, next_refs)
         if old != refs -> next
         if (next_refs == I64{0}) {
             #Unsafe("the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement") {

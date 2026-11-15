@@ -53,13 +53,12 @@
 // share one stream failure (0, -errno or HOST_WRITE_ZERO) per operation and
 // differ only in how they report it.
 host_stdio_text_failure: fn(text: I64, newline: Bool, stderr: Bool, flush: Bool) -> I64 {
-    #Unsafe("text lends an E4 header and its bytes for this synchronous write; writev borrows its own stack LF") {
-        bytes: os_load_i64(text)
-        length: os_load_i64(wrapping(text + I64{8}))
-        if !stderr -> return host_stdout_write(bytes, length, newline, flush)
-        if newline -> return host_stderr_line(bytes, length)
-        return host_stderr_write(bytes, length)
-    }
+    // `text` lends an E4 header and its bytes for this synchronous write.
+    bytes: rt_text_data(text)
+    length: rt_text_len(text)
+    if !stderr -> return host_stdout_write(bytes, length, newline, flush)
+    if newline -> return host_stderr_line(bytes, length)
+    host_stderr_write(bytes, length)
 }
 
 // `bytes` lends `length` packed (RT_HOST_U8_STRIDE) U8 elements.
@@ -79,17 +78,17 @@ host_stdio_flush_failure: fn(stderr: Bool) -> I64 {
 
 // Kernel errno and a separate WriteZero fact, for runtime-internal callers.
 host_stdio_facts: fn(failure: I64, errno: I64, write_zero: I64) {
-    #Unsafe("the caller lends the tuple's exact-Int word and Bool byte outputs") {
-        os_store_i64(errno, if (failure < I64{0} && failure != HOST_WRITE_ZERO) -> wrapping(I64{0} - failure) else -> I64{0})
-        os_store_u8(write_zero, if (failure == HOST_WRITE_ZERO) -> I64{1} else -> I64{0})
-    }
+    // The caller lends the tuple's exact-Int word and Bool byte outputs.
+    rt_text_store(errno, if (failure < I64{0} && failure != HOST_WRITE_ZERO) -> wrapping(I64{0} - failure) else -> I64{0})
+    rt_text_put(write_zero, if (failure == HOST_WRITE_ZERO) -> I64{1} else -> I64{0})
 }
 
 // Core term's Option<String> route carrier: 1 and an owned cause in `some`
 // on failure, 0 and `some` untouched on success.
 host_stdio_option_cause: fn(failure: I64, some: I64) -> I64 {
     if (failure == I64{0}) -> return I64{0}
-    #Unsafe("some lends the route's zeroed Text out slot") { os_store_i64(some, host_stdio_cause(failure)) }
+    // `some` lends the route's zeroed Text out slot.
+    rt_text_store(some, host_stdio_cause(failure))
     I64{1}
 }
 

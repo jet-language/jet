@@ -11,9 +11,8 @@ comptime_root := I64{0}
 // runtime-init: 3 when comptime_root
 #Export(c) jet_rt_comptime_init: fn() {
     if (comptime_root != I64{0}) -> return
-    #Unsafe("runtime-init runs before any other thread exists") {
-        comptime_root = jet_rt_alloc(COMPTIME_ROOT_BYTES, I64{8})
-    }
+    root: jet_rt_alloc(COMPTIME_ROOT_BYTES, I64{8})
+    #Unsafe("runtime-init runs before any other thread exists") { comptime_root = root }
     thread_zero(comptime_root, COMPTIME_ROOT_BYTES)
     sync_store(wrapping(comptime_root + I64{40}), I64{1})
 }

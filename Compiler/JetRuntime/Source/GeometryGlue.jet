@@ -1,11 +1,9 @@
 // Derived field order. GeometryABI.jet alone owns offsets; Float lanes are f64,
 // frames raw i64.
-geometry_word: fn(address: I64) -> I64 {
-    #Unsafe("borrows an initialized aligned word inside a live native geometry carrier") { return os_load_i64(address) }
-}
-geometry_store: fn(address: I64, value: I64) {
-    #Unsafe("owns a writable aligned word in a fresh native geometry carrier") { os_store_i64(address, value) }
-}
+// Reads borrow an initialized aligned word of a live native geometry carrier;
+// writes own a word of a fresh one. RawWords.jet performs the access.
+geometry_word: fn(address: I64) -> I64 { rt_text_word(address) }
+geometry_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 geometry_clone: fn(value: I64, bytes: I64) -> I64 {
     result: jet_rt_alloc(bytes, I64{8})
     coll_copy(value, result, bytes)

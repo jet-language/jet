@@ -1070,9 +1070,8 @@ SCHEDULER_STAT_BYTES: I64{512}
 // runtime-init: 3 when scheduler_root
 #Export(c) jet_rt_scheduler_init: fn() {
     if (scheduler_root != I64{0}) -> return
-    #Unsafe("runtime-init runs before any other thread exists") {
-        scheduler_root = jet_rt_alloc(SCHEDULER_ROOT_BYTES, I64{8})
-    }
+    root: jet_rt_alloc(SCHEDULER_ROOT_BYTES, I64{8})
+    #Unsafe("runtime-init runs before any other thread exists") { scheduler_root = root }
     thread_zero(scheduler_root, SCHEDULER_ROOT_BYTES)
 }
 

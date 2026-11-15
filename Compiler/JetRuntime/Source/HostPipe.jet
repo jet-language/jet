@@ -161,10 +161,8 @@ pipe_output_name: fn() -> I64 {
         }
         end := pos
         loop end < filled {
-            byte := I64{0}
-            #Unsafe("the FD72 lock protects this initialized refill-buffer byte") {
-                byte = os_load_u8(wrapping(buffer + end))
-            }
+            // The FD72 lock protects this initialized refill-buffer byte.
+            byte: rt_text_byte(wrapping(buffer + end))
             end = wrapping(end + I64{1})
             if (byte == I64{10}) {
                 done = true

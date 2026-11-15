@@ -231,7 +231,8 @@ net_route_numeric: fn(host: I64, port: I64, rows: I64, length: I64) -> Bool {
     }
     name: fd_c_path(host)
     if (scope_at < size) {
-        #Unsafe("the owned terminated host copy truncates at its validated scope suffix") { os_store_u8(wrapping(name + scope_at), I64{0}) }
+        // The owned terminated host copy truncates at its validated scope suffix.
+        rt_text_put(wrapping(name + scope_at), I64{0})
     }
     address: jet_rt_alloc(I64{56}, I64{8})
     thread_zero(address, I64{56})
@@ -552,7 +553,8 @@ net_route_option_get: fn(stream: I64, operation: I64, level: I64, option: I64, o
     jet_rt_free(scratch, I64{40}, I64{8})
     if (result < I64{0}) -> return net_route_errno(operation, I64{0}, code, error)
     if flag {
-        #Unsafe("output lends the C ABI bool result byte, not an eight-byte word") { os_store_u8(output, if (value != I64{0}) -> I64{1} else -> I64{0}) }
+        // `output` lends the C ABI bool result byte, not an eight-byte word.
+        rt_text_put(output, if (value != I64{0}) -> I64{1} else -> I64{0})
     } else { net_put(output, I64{0}, value) }
     I64{1}
 }

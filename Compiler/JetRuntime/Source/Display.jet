@@ -4,29 +4,15 @@
 // flt2dec Dragon supplies the shortest digits. Today's JetDisplay, JetShow and
 // JetDebug for f64 all use Rust's Debug spelling.0 for integral decimals, and
 // exponent notation outside [1e-4, 1e16).
-display_word: fn(address: I64) -> I64 {
-    #Unsafe("borrows an initialized aligned word in an E4 header, exact-Int node or owned formatter workspace") {
-        return os_load_i64(address)
-    }
-}
-
-display_store: fn(address: I64, value: I64) {
-    #Unsafe("writes an aligned word in an exclusively owned formatter workspace or fresh E4 header") {
-        os_store_i64(address, value)
-    }
-}
-
-display_byte: fn(address: I64) -> I64 {
-    #Unsafe("reads one initialized byte in an owned formatter digit buffer or borrowed exact-Int limb") {
-        return os_load_u8(address)
-    }
-}
-
-display_put: fn(address: I64, value: I64) {
-    #Unsafe("writes one byte in an exclusively owned formatter buffer; value is in 0..255") {
-        os_store_u8(address, value)
-    }
-}
+// Word reads borrow an initialized aligned word of an E4 header, exact-Int
+// node or owned formatter workspace; word writes own one of a formatter
+// workspace or fresh E4 header. Byte reads borrow a formatter digit or
+// exact-Int limb byte; byte writes own one formatter buffer byte, a value in
+// 0..255. RawWords.jet performs the access.
+display_word: fn(address: I64) -> I64 { rt_text_word(address) }
+display_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
+display_byte: fn(address: I64) -> I64 { rt_text_byte(address) }
+display_put: fn(address: I64, value: I64) { rt_text_put(address, value) }
 
 display_new: fn(length: I64) -> I64 { rt_text_with_length(length, length) }
 

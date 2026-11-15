@@ -37,14 +37,13 @@ net_resolve_rows: fn(host: I64, port: I64, rows_out: I64, length_out: I64, error
     // exact InvalidInput meaning at this foreign-string boundary.
     length: rt_text_len(host)
     at := I64{0}
-    #Unsafe("host lends length E4 bytes; outputs lend their writable pointer/count words") {
-        loop at < length {
-            if (os_load_u8(wrapping(rt_text_data(host) + at)) == I64{0}) {
-                os_store_i64(error_out, net_resolve_error(I64{1}, I64{0}, I64{0}, host_resolver_nul()))
-                return I64{0}
-            }
-            at = at + I64{1}
+    // `host` lends `length` E4 bytes and `error_out` its writable word.
+    loop at < length {
+        if (rt_text_byte(wrapping(rt_text_data(host) + at)) == I64{0}) {
+            rt_text_store(error_out, net_resolve_error(I64{1}, I64{0}, I64{0}, host_resolver_nul()))
+            return I64{0}
         }
+        at = at + I64{1}
     }
     jet_rt_world_reject_uncontrolled(I64{1})
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -55,7 +54,7 @@ net_resolve_rows: fn(host: I64, port: I64, rows_out: I64, length_out: I64, error
     }
     name: jet_rt_alloc(length + I64{1}, I64{1})
     rt_text_bytes_copy(name, rt_text_data(host), length)
-    #Unsafe("name owns a trailing NUL byte") { os_store_u8(wrapping(name + length), I64{0}) }
+    rt_text_put(wrapping(name + length), I64{0})
     errno: jet_rt_alloc(I64{8}, I64{8})
     status: net_lookup(name, length, port.bit_and(I64{65535}), false, I64{-1}, rows_out, length_out, errno)
     code: net_word(errno, I64{0})

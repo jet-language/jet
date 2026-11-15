@@ -6,12 +6,10 @@
 // pointers; the builder compares keys, clones results and drops what an
 // eviction hands back. Every call but lock/unlock and stats (which takes the
 // lock itself) runs with the cell's mutex held.
-memo_word: fn(address: I64) -> I64 {
-    #Unsafe("address borrows an aligned word of a live memo cell or its entry array") { return os_load_i64(address) }
-}
-memo_put: fn(address: I64, value: I64) {
-    #Unsafe("address is an aligned word of a memo cell or entry array the caller's lock owns") { os_store_i64(address, value) }
-}
+// Reads borrow an aligned word of a live memo cell or its entry array; writes
+// hold the cell's lock. RawWords.jet performs the access.
+memo_word: fn(address: I64) -> I64 { rt_text_word(address) }
+memo_put: fn(address: I64, value: I64) { rt_text_store(address, value) }
 
 #Export(c) jet_rt_memo_lock: fn(cell: I64) { sync_mutex_lock(cell) }
 

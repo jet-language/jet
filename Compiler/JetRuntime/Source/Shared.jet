@@ -458,9 +458,8 @@ shared_registered := I64{0}
 // runtime-init: 3 when shared_registered
 #Export(c) jet_rt_shared_init: fn() {
     if (shared_registered == I64{0}) {
-        #Unsafe("runtime-init runs before any other thread exists") {
-            shared_registered = jet_rt_alloc(I64{16}, I64{8})
-        }
+        registered: jet_rt_alloc(I64{16}, I64{8})
+        #Unsafe("runtime-init runs before any other thread exists") { shared_registered = registered }
         sync_store(shared_registered, I64{0})
         sync_store(wrapping(shared_registered + I64{8}), I64{1})
     }

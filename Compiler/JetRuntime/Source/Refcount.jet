@@ -27,23 +27,15 @@
 RC_ZERO_MARK: I64{4611686018427387904}
 RC_OWNER_BITS: I64{4611686018427387903}
 
-rc_load: fn(count: I64) -> I64 {
-    #Unsafe("count addresses the aligned prefix word of a live refcounted block the caller holds") {
-        return os_load_i64(count)
-    }
-}
+// `count` addresses the aligned prefix word of a live refcounted block the
+// caller holds a reference to (for rc_store, one it just allocated and still
+// owns exclusively). Sync.jet's atomic words perform the access; rc_add is
+// its LOCK XADD.
+rc_load: fn(count: I64) -> I64 { sync_load(count) }
 
-rc_store: fn(count: I64, value: I64) {
-    #Unsafe("count addresses the aligned prefix word of a block the caller just allocated and still owns exclusively") {
-        os_store_i64(count, value)
-    }
-}
+rc_store: fn(count: I64, value: I64) { sync_store(count, value) }
 
-rc_add: fn(count: I64, delta: I64) -> I64 {
-    #Unsafe("LOCK XADD on the aligned prefix word of a live refcounted block; the caller's reference keeps it live") {
-        return os_fetch_add_i64(count, delta)
-    }
-}
+rc_add: fn(count: I64, delta: I64) -> I64 { sync_add(count, delta) }
 
 // Publishes the first owner of a freshly allocated block.
 rc_init: fn(count: I64) { rc_store(count, I64{1}) }
@@ -67,9 +59,7 @@ rc_init: fn(count: I64) { rc_store(count, I64{1}) }
         // every earlier owner's LOCK XADD published (x86-64 loads are not
         // reordered with later loads or stores), so their writes are seen
         // before the caller frees.
-        #Unsafe("count addresses the aligned prefix word of a live refcounted block whose only reference the caller holds") {
-            os_store_i64(count, wrapping(word - I64{1}))
-        }
+        rc_store(count, wrapping(word - I64{1}))
         return true
     }
     rc_add(count, I64{-1}).bit_and(RC_OWNER_BITS) == I64{1}
@@ -87,9 +77,7 @@ rc_mark_zero: fn(count: I64) {
     loop {
         word: rc_load(count)
         if (word < I64{0} || word.bit_and(RC_ZERO_MARK) != I64{0}) -> return
-        #Unsafe("LOCK CMPXCHG on the aligned prefix word of a live refcounted block; the caller's reference keeps it live") {
-            if (os_cas_i64(count, word, word.bit_or(RC_ZERO_MARK)) == word) -> return
-        }
+        if (sync_cas(count, word, word.bit_or(RC_ZERO_MARK)) == word) -> return
     }
 }
 

@@ -15,28 +15,6 @@ rt_static_text: fn(_literal: String) -> I64 {
     I64{0}
 }
 
-rt_text_word: fn(address: I64) -> I64 {
-    #Unsafe("address borrows an initialized word in a live text or iterator header") {
-        return os_load_i64(address)
-    }
-}
-
-rt_text_store: fn(address: I64, value: I64) {
-    #Unsafe("address is an exclusively owned writable header word") { os_store_i64(address, value) }
-}
-
-rt_text_byte: fn(address: I64) -> I64 {
-    #Unsafe("address borrows an initialized byte inside the caller's live buffer") {
-        return os_load_u8(address)
-    }
-}
-
-rt_text_put: fn(address: I64, value: I64) {
-    #Unsafe("address is one exclusively owned writable byte and value is a byte") {
-        os_store_u8(address, value)
-    }
-}
-
 rt_text_data: fn(value: I64) -> I64 { rt_text_word(value) }
 
 rt_text_len: fn(value: I64) -> I64 { rt_text_word(wrapping(value + I64{8})) }

@@ -1,10 +1,8 @@
 // Private native TimeGlueABI carriers; source Core Instant is generator-owned.
-time_glue_word: fn(address: I64) -> I64 {
-    #Unsafe("borrows an initialized aligned word inside a native time carrier") { return os_load_i64(address) }
-}
-time_glue_store: fn(address: I64, value: I64) {
-    #Unsafe("owns a writable aligned word inside a fresh native time carrier") { os_store_i64(address, value) }
-}
+// Reads borrow an initialized aligned word of a native time carrier; writes
+// own a word of a fresh one. RawWords.jet performs the access.
+time_glue_word: fn(address: I64) -> I64 { rt_text_word(address) }
+time_glue_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 time_glue_clone: fn(value: I64, bytes: I64) -> I64 {
     result: jet_rt_alloc(bytes, I64{8})
     coll_copy(value, result, bytes)

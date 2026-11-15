@@ -1,11 +1,9 @@
 // ScalarReflectABI owns private native offsets. Existing ReflectOf Lower calls
 // (8ea460c24/1bd5abce0) stay unchanged; constructors consume nested handles.
-scalar_reflect_word: fn(address: I64) -> I64 {
-    #Unsafe("borrows an initialized aligned word in a live scalar/reflection carrier") { return os_load_i64(address) }
-}
-scalar_reflect_store: fn(address: I64, value: I64) {
-    #Unsafe("owns a writable aligned word in a native scalar/reflection carrier") { os_store_i64(address, value) }
-}
+// Reads borrow an initialized aligned word of a live scalar or reflection
+// carrier; writes own a word of one. RawWords.jet performs the access.
+scalar_reflect_word: fn(address: I64) -> I64 { rt_text_word(address) }
+scalar_reflect_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 scalar_reflect_clone: fn(value: I64, bytes: I64) -> I64 {
     result: jet_rt_alloc(bytes, I64{8})
     coll_copy(value, result, bytes)

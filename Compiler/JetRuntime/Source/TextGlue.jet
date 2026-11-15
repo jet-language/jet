@@ -1,11 +1,9 @@
 // TextGlueABI owns private layouts. CAbiRoutes9527-9542/11800-11809/
 // 12089-12098/12117-12126: borrowed Text ctor/getters clone E4 owners.
-text_glue_word: fn(address: I64) -> I64 {
-    #Unsafe("borrows an initialized aligned word in a live native text diagnostic") { return os_load_i64(address) }
-}
-text_glue_store: fn(address: I64, value: I64) {
-    #Unsafe("owns a writable aligned word in a fresh native text diagnostic") { os_store_i64(address, value) }
-}
+// Reads borrow an initialized aligned word of a live native text diagnostic;
+// writes own a word of a fresh one. RawWords.jet performs the access.
+text_glue_word: fn(address: I64) -> I64 { rt_text_word(address) }
+text_glue_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 text_error_new: fn(message: I64) -> I64 {
     result: jet_rt_alloc(TEXT_ERROR_BYTES, I64{8})
     text_glue_store(wrapping(result + TEXT_ERROR_MESSAGE), jet_rt_string_clone(message))

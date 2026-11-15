@@ -15,9 +15,8 @@ observe_channels_code := I64{0}
 // runtime-init: 4 when observe_root,observe_task_key
 #Export(c) jet_rt_observe_init: fn() {
     if (observe_root != I64{0}) -> return
-    #Unsafe("runtime-init runs before any other thread exists") {
-        observe_root = jet_rt_alloc(I64{136}, I64{8})
-    }
+    root: jet_rt_alloc(I64{136}, I64{8})
+    #Unsafe("runtime-init runs before any other thread exists") { observe_root = root }
     thread_zero(observe_root, I64{136})
     sync_store(wrapping(observe_root + I64{8}), I64{2})
     sync_store(wrapping(observe_root + I64{16}), I64{1})

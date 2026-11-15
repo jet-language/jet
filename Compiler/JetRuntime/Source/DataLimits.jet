@@ -1,12 +1,10 @@
 // Native hand carriers, never Rust layouts. DataABI.jet owns the offsets. The
 // Rust originals derive Clone/PartialEq. Ctor Int args are borrowed and checked
 // by CAbi.native; Int getters return fresh owners. Data's encoding is consumed.
-data_limits_word: fn(address: I64) -> I64 {
-    #Unsafe("address borrows an initialized word in a live native limits carrier") { return os_load_i64(address) }
-}
-data_limits_store: fn(address: I64, value: I64) {
-    #Unsafe("address owns a writable word in a native limits carrier or getter out slot") { os_store_i64(address, value) }
-}
+// Reads borrow an initialized word of a live native limits carrier; writes own
+// a word of one or of a getter out slot. RawWords.jet performs the access.
+data_limits_word: fn(address: I64) -> I64 { rt_text_word(address) }
+data_limits_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 #Export(c) jet_rt_handle_clone_encoding_limits: fn(value: I64) -> I64 {
     result: jet_rt_alloc(ENCODING_LIMITS_BYTES, I64{8})
     coll_copy(value, result, ENCODING_LIMITS_BYTES)

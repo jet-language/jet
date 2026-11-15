@@ -33,23 +33,16 @@ http_body_require: fn(condition: Bool) {
     jet_rt_panic_message(message, I64{22})
 }
 
-http_body_word: fn(address: I64) -> I64 {
-    #Unsafe("borrows an initialized word in the live body, chunks, closure, List or E4 allocation") {
-        return os_load_i64(address)
-    }
-}
+// Reads borrow an initialized word of the live body, chunks, closure, List or
+// E4 allocation; writes own the word or hold the body's transition lock for
+// that state field. RawWords.jet performs the access.
+http_body_word: fn(address: I64) -> I64 { rt_text_word(address) }
 
-http_body_store: fn(address: I64, value: I64) {
-    #Unsafe("owns the word, or holds the body's transition lock for this state field") {
-        os_store_i64(address, value)
-    }
-}
+http_body_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 
-http_body_cas: fn(address: I64, expected: I64, desired: I64) -> I64 {
-    #Unsafe("atomic refcount, take/close flag or transition lock in a live body allocation") {
-        return os_cas_i64(address, expected, desired)
-    }
-}
+// An atomic refcount, take/close flag or transition lock in a live body
+// allocation; Sync.jet's compare-exchange performs it.
+http_body_cas: fn(address: I64, expected: I64, desired: I64) -> I64 { sync_cas(address, expected, desired) }
 
 http_body_zero: fn(size: I64) -> I64 {
     pointer: jet_rt_alloc(size, I64{8})
@@ -368,9 +361,8 @@ http_body_list: fn(count: I64) -> I64 {
         byte := I64{0}
         if {
             (kind == I64{-1} || kind == I64{1}) -> {
-                #Unsafe("the source holds count initialized UTF8 or raw reader bytes") {
-                    byte = os_load_u8(wrapping(source + at))
-                }
+                // The source holds `count` initialized UTF-8 or raw reader bytes.
+                byte = rt_text_byte(wrapping(source + at))
             }
             else -> byte = host_u8_get(source, at)
         }

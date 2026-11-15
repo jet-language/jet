@@ -112,9 +112,8 @@ logical_environment_drop: fn(root: I64) {
 // the startup index it reads never changes, so a later seed holds the same
 // pairs, and a program that never reads the environment never copies it.
 logical_environment_startup: fn() {
-    #Unsafe("host argument registration is single-threaded and precedes user code") {
-        logical_env_root = jet_rt_alloc(LOGICAL_ENVIRONMENT_BYTES, I64{8})
-    }
+    root: jet_rt_alloc(LOGICAL_ENVIRONMENT_BYTES, I64{8})
+    #Unsafe("host argument registration is single-threaded and precedes user code") { logical_env_root = root }
     thread_zero(logical_env_root, LOGICAL_ENVIRONMENT_BYTES)
 }
 

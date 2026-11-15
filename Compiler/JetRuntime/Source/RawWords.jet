@@ -1,0 +1,28 @@
+// The runtime's raw word and byte access. Runtime code that reads or writes a
+// native layout (text headers and buffers, exact-Int carriers, Dyn trees,
+// glue carriers, formatter workspaces, C-ABI out slots) reaches its words and
+// bytes through these four; each caller states at its own site which live
+// storage the address lends or owns. The allocator, the atomics and the OS
+// layer keep their own leaves. The `rt_text_` prefix is historical: the text
+// header was the first layout these served.
+rt_text_word: fn(address: I64) -> I64 {
+    #Unsafe("address borrows an initialized aligned word in a live native layout the caller holds") {
+        return os_load_i64(address)
+    }
+}
+
+rt_text_store: fn(address: I64, value: I64) {
+    #Unsafe("address is an aligned word of native storage the caller owns or holds the lock for") { os_store_i64(address, value) }
+}
+
+rt_text_byte: fn(address: I64) -> I64 {
+    #Unsafe("address borrows an initialized byte inside the caller's live buffer") {
+        return os_load_u8(address)
+    }
+}
+
+rt_text_put: fn(address: I64, value: I64) {
+    #Unsafe("address is one exclusively owned writable byte and value is a byte") {
+        os_store_u8(address, value)
+    }
+}
