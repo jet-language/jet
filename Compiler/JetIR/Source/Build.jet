@@ -964,6 +964,7 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{module_name: "core.mem", name: "stream_store", intrinsic: IRRuntimeIntrinsic.StreamStore},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "__ptr_offset", intrinsic: IRRuntimeIntrinsic.PtrOffset},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "__ptr_byte_offset", intrinsic: IRRuntimeIntrinsic.PtrByteOffset},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "__view_from_raw", intrinsic: IRRuntimeIntrinsic.ViewFromRaw},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "copy", intrinsic: IRRuntimeIntrinsic.MemCopy},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "fill", intrinsic: IRRuntimeIntrinsic.MemFill},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "alloc_raw", intrinsic: IRRuntimeIntrinsic.AllocRaw},
@@ -991,7 +992,8 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> [String:IRRuntimeIntrinsic] Never
 }
 
 // A bitcast reads its one scalar; a core.mem layout, access, pointer or
-// block operation is generic over the one type its call instantiates, the
+// block operation is generic over the one type its call instantiates, a raw
+// View over its element and owner types, the
 // raw heap pair is not, a region's reserve reads its size and its release
 // the address and size, and a context block's take reads its size and
 // align, its give and room the address.
@@ -1000,6 +1002,7 @@ ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) ->
         .FloatBits -> ir_bitcast_signature(function, true)
         .FloatFromBits -> ir_bitcast_signature(function, false)
         .TypeSize | .ListCapacity | .ListReserveExact | .VolatileRead | .VolatileWrite | .StreamStore | .PtrOffset | .PtrByteOffset | .MemCopy | .MemFill -> function.generic_params.len() == 1
+        .ViewFromRaw -> function.generic_params.len() == 2
         .AllocRaw | .FreeRaw -> function.generic_params.len() == 0
         .RegionReserve | .ContextGive | .ContextRoom -> ir_intrinsic_signature(function, 1)
         .RegionRelease | .ContextTake -> ir_intrinsic_signature(function, 2)

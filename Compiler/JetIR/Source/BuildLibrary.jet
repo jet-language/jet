@@ -56,6 +56,7 @@ IRRuntimeIntrinsic: enum {
     // (Build.jet IR_CORE_INTRINSICS): the List stride, a List's capacity,
     // an exact List reserve, a volatile load or store, a streaming store,
     // a raw pointer's step by elements or by bytes, a raw block copy or fill;
+    // a View over raw elements, at its element and owner type arguments;
     // and, with no type argument, a raw heap allocation and its release, a
     // region's reserve and release of fresh pages, and `context.allocator`'s
     // take, give and room of a block.
@@ -67,6 +68,7 @@ IRRuntimeIntrinsic: enum {
     StreamStore
     PtrOffset
     PtrByteOffset
+    ViewFromRaw
     MemCopy
     MemFill
     AllocRaw
@@ -704,7 +706,8 @@ ir_address_target_signature: fn(function: FnBody, arity: Int) -> Bool Never! {
 // the fault report the linker writes; a core.mem operation is its inline
 // lowering (BuildRoutes.jet ir_core_list_leaf, ir_core_stream_store,
 // ir_core_region, BuildSentry.jet ir_core_volatile, ir_core_mem_block,
-// ir_core_alloc_raw and ir_core_free_raw, BuildExpr.jet ir_core_ptr_step).
+// ir_core_alloc_raw and ir_core_free_raw, BuildExpr.jet ir_core_ptr_step and
+// ir_core_view_from_raw).
 ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRuntimeIntrinsic, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     float_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "type Float")
@@ -720,6 +723,7 @@ ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRu
         .StreamStore -> ir_core_stream_store(m, p, b, ir_intrinsic_nodes(args), type_args, span)
         .PtrOffset -> ir_core_ptr_step(m, p, b, false, ir_intrinsic_nodes(args), type_args, span)
         .PtrByteOffset -> ir_core_ptr_step(m, p, b, true, ir_intrinsic_nodes(args), type_args, span)
+        .ViewFromRaw -> ir_core_view_from_raw(m, p, b, ir_intrinsic_nodes(args), type_args, span)
         .MemCopy -> ir_core_mem_block(m, p, b, "copy", ir_intrinsic_nodes(args), type_args, span)
         .MemFill -> ir_core_mem_block(m, p, b, "fill", ir_intrinsic_nodes(args), type_args, span)
         .AllocRaw -> ir_core_alloc_raw(m, p, b, ir_intrinsic_nodes(args), span)

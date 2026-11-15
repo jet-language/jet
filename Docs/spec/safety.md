@@ -234,15 +234,15 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1530,
+  "total": 1537,
   "counts": {
     "Compiler": 791,
-    "Core": 183,
+    "Core": 182,
     "Docs": 10,
     "Examples": 42,
     "Jetpack": 8,
     "Tools": 6,
-    "tests": 490
+    "tests": 498
   },
   "regions": [
     {
@@ -6506,98 +6506,91 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 94,
-      "column": 13,
-      "reason": "`window`'s caller vouched for `count` live Ts at `start`, and `k` is inside them"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Mem/Mem.jet",
-      "line": 103,
-      "column": 13,
-      "reason": "`window`'s caller vouched for `count` live Ts at `start`, and `k` is inside them"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Mem/Mem.jet",
-      "line": 112,
+      "line": 82,
       "column": 1,
-      "reason": "`pointer` names `len` live, aligned Ts that outlive every use of the window"
+      "reason": "`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 151,
+      "line": 89,
+      "column": 1,
+      "reason": "`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Mem/Mem.jet",
+      "line": 128,
       "column": 1,
       "reason": "`pointer` and the T `count` elements past it lie in one live allocation"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 155,
+      "line": 132,
       "column": 1,
       "reason": "`pointer` and the address `bytes` past it lie in one live allocation"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 164,
+      "line": 141,
       "column": 1,
       "reason": "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 168,
+      "line": 145,
       "column": 1,
       "reason": "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 188,
+      "line": 165,
       "column": 9,
       "reason": "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 196,
+      "line": 173,
       "column": 5,
       "reason": "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 227,
+      "line": 204,
       "column": 13,
       "reason": "the region mapped these pages at reserve, and no block of it is used after close"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 260,
+      "line": 237,
       "column": 9,
       "reason": "`next`'s bytes now belong to this block, so its release duty is this block's"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 287,
+      "line": 264,
       "column": 5,
       "reason": "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 292,
+      "line": 269,
       "column": 9,
       "reason": "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 341,
+      "line": 318,
       "column": 9,
       "reason": "the block's bytes went back to the allocator that served them"
     },
@@ -8301,6 +8294,27 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
       "line": 5,
       "column": 5,
       "reason": "the window covers exactly the tuple's four Ints, which outlive it"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet",
+      "line": 10,
+      "column": 9,
+      "reason": "`base` names `count` live I64s while the capability lives"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "the block is used only through this capability and released once by `release`"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet",
+      "line": 27,
+      "column": 5,
+      "reason": "`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once"
     },
     {
       "package": "tests",
@@ -10495,6 +10509,27 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "tests",
+      "file": "tests/ui/E3113_package_without_kernel_files/run.jet",
+      "line": 6,
+      "column": 1,
+      "reason": "the caller releases the storage with `free_raw`, exactly once"
+    },
+    {
+      "package": "tests",
+      "file": "tests/ui/E3113_raw_memory_outside_kernel/kernel.jet",
+      "line": 4,
+      "column": 1,
+      "reason": "the caller releases the storage with `free_raw`, exactly once"
+    },
+    {
+      "package": "tests",
+      "file": "tests/ui/E3113_raw_memory_outside_kernel/run.jet",
+      "line": 5,
+      "column": 1,
+      "reason": "the caller releases the storage with `free_raw`, exactly once"
+    },
+    {
+      "package": "tests",
       "file": "tests/ui/audited_gate_ladder_forbidden/run.jet",
       "line": 3,
       "column": 5,
@@ -10866,6 +10901,20 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     },
     {
       "package": "tests",
+      "file": "tests/ui/ownership/raw_window_read_after_its_owner_is_released.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "the cells hold no resource, so spending them frees nothing"
+    },
+    {
+      "package": "tests",
+      "file": "tests/ui/ownership/raw_window_read_after_its_owner_is_released.jet",
+      "line": 18,
+      "column": 5,
+      "reason": "the window covers exactly the two Int fields, which `cells` keeps"
+    },
+    {
+      "package": "tests",
       "file": "tests/ui/secrets_expiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet",
       "line": 13,
       "column": 9,
@@ -10964,13 +11013,13 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 791 |
-| Core | 183 |
+| Core | 182 |
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 6 |
-| tests | 490 |
-| **total** | **1530** |
+| tests | 498 |
+| **total** | **1537** |
 
 ### Regions
 
@@ -11870,20 +11919,19 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Core | Core/Mem/Mem.jet | 57:1 | "`to` names `count` live, aligned, writable `T`s that hold no value to drop" |
 | Core | Core/Mem/Mem.jet | 65:1 | "the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once" |
 | Core | Core/Mem/Mem.jet | 71:1 | "`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after" |
-| Core | Core/Mem/Mem.jet | 94:13 | "`window`'s caller vouched for `count` live Ts at `start`, and `k` is inside them" |
-| Core | Core/Mem/Mem.jet | 103:13 | "`window`'s caller vouched for `count` live Ts at `start`, and `k` is inside them" |
-| Core | Core/Mem/Mem.jet | 112:1 | "`pointer` names `len` live, aligned Ts that outlive every use of the window" |
-| Core | Core/Mem/Mem.jet | 151:1 | "`pointer` and the T `count` elements past it lie in one live allocation" |
-| Core | Core/Mem/Mem.jet | 155:1 | "`pointer` and the address `bytes` past it lie in one live allocation" |
-| Core | Core/Mem/Mem.jet | 164:1 | "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved" |
-| Core | Core/Mem/Mem.jet | 168:1 | "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again" |
-| Core | Core/Mem/Mem.jet | 188:9 | "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close" |
-| Core | Core/Mem/Mem.jet | 196:5 | "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live" |
-| Core | Core/Mem/Mem.jet | 227:13 | "the region mapped these pages at reserve, and no block of it is used after close" |
-| Core | Core/Mem/Mem.jet | 260:9 | "`next`'s bytes now belong to this block, so its release duty is this block's" |
-| Core | Core/Mem/Mem.jet | 287:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
-| Core | Core/Mem/Mem.jet | 292:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
-| Core | Core/Mem/Mem.jet | 341:9 | "the block's bytes went back to the allocator that served them" |
+| Core | Core/Mem/Mem.jet | 82:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives" |
+| Core | Core/Mem/Mem.jet | 89:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative" |
+| Core | Core/Mem/Mem.jet | 128:1 | "`pointer` and the T `count` elements past it lie in one live allocation" |
+| Core | Core/Mem/Mem.jet | 132:1 | "`pointer` and the address `bytes` past it lie in one live allocation" |
+| Core | Core/Mem/Mem.jet | 141:1 | "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved" |
+| Core | Core/Mem/Mem.jet | 145:1 | "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again" |
+| Core | Core/Mem/Mem.jet | 165:9 | "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close" |
+| Core | Core/Mem/Mem.jet | 173:5 | "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live" |
+| Core | Core/Mem/Mem.jet | 204:13 | "the region mapped these pages at reserve, and no block of it is used after close" |
+| Core | Core/Mem/Mem.jet | 237:9 | "`next`'s bytes now belong to this block, so its release duty is this block's" |
+| Core | Core/Mem/Mem.jet | 264:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
+| Core | Core/Mem/Mem.jet | 269:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
+| Core | Core/Mem/Mem.jet | 318:9 | "the block's bytes went back to the allocator that served them" |
 | Core | Core/Net/Net.jet | 172:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
 | Core | Core/Net/Net.jet | 178:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
 | Core | Core/Net/Net.jet | 184:5 | "read the native IP address discriminant" |
@@ -12127,6 +12175,9 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | tests | tests/cases/unsafe_and_runtime/a_raw_pointer_steps_by_elements_or_bytes.fixture/past.jet | 6:5 | "the step runs one Int past the local cell, so the sentry stops the read" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/main.jet | 5:5 | "the window covers exactly the tuple's four Ints, which outlive it" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/past.jet | 5:5 | "the window covers exactly the tuple's four Ints, which outlive it" |
+| tests | tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet | 10:9 | "`base` names `count` live I64s while the capability lives" |
+| tests | tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet | 17:5 | "the block is used only through this capability and released once by `release`" |
+| tests | tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet | 27:5 | "`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once" |
 | tests | tests/cases/unsafe_and_runtime/a_sentry_fault_names_the_access_and_the_range.fixture/steps.jet | 5:5 | "the second read steps one Int past the tuple, so the sentry stops it there" |
 | tests | tests/cases/unsafe_and_runtime/an_optional_raw_pointer_is_none_when_null.fixture/main.jet | 12:5 | "each pointer names the live local cell, or is null and never read" |
 | tests | tests/cases/unsafe_and_runtime/deref_place_lends_the_pointee_to_a_write_parameter.fixture/main.jet | 15:5 | "c lives in place until `run` returns" |
@@ -12440,6 +12491,9 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | tests | tests/run/FailureFoundation/TransactOSStop.jet | 33:5 | "the stop runs the shared cleanup boundary" |
 | tests | tests/run/PatternsAndFields/FixedSizeListWidensAtCoreCall.jet | 5:5 | "fixed signature vector" |
 | tests | tests/run/UnsafeAndRuntime/MemFromAddrDirect.jet | 11:5 | "the borrowed value is live in the caller and the pointer never escapes" |
+| tests | tests/ui/E3113_package_without_kernel_files/run.jet | 6:1 | "the caller releases the storage with `free_raw`, exactly once" |
+| tests | tests/ui/E3113_raw_memory_outside_kernel/kernel.jet | 4:1 | "the caller releases the storage with `free_raw`, exactly once" |
+| tests | tests/ui/E3113_raw_memory_outside_kernel/run.jet | 5:1 | "the caller releases the storage with `free_raw`, exactly once" |
 | tests | tests/ui/audited_gate_ladder_forbidden/run.jet | 3:5 | "the organization policy refuses this audited escape" |
 | tests | tests/ui/cffi_out_pointer_requires_unsafe.jet | 14:1 | "the local slot remains live for the complete C call" |
 | tests | tests/ui/changeset_a_failed_handler_publishes_none.jet | 24:25 | "generated" |
@@ -12493,6 +12547,8 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | tests | tests/ui/lowlevel_volatile_write_wrong_value.jet | 6:5 | "slot is live and pointer never escapes" |
 | tests | tests/ui/meta_ladder_add_never_authorizes_unsafe.jet | 7:13 | "generated" |
 | tests | tests/ui/module_write_from_fn_is_e0111.jet | 11:5 | "this program starts no task, so nothing else writes `raw`" |
+| tests | tests/ui/ownership/raw_window_read_after_its_owner_is_released.jet | 11:5 | "the cells hold no resource, so spending them frees nothing" |
+| tests | tests/ui/ownership/raw_window_read_after_its_owner_is_released.jet | 18:5 | "the window covers exactly the two Int fields, which `cells` keeps" |
 | tests | tests/ui/secrets_expiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet | 13:9 | "attempt to discard a loan" |
 | tests | tests/ui/unsafe_and_runtime/volatile_write_emit_is_byte_exact/run.jet | 2:1 | "UART TX register is mapped by the target machine" |
 | tests | tests/ui/unsafe_block_after_statement_parse_error.jet | 8:5 | "target outlives the read in this frame" |
@@ -12637,9 +12693,7 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file": "Core/Mem/Mem.jet", "function": "close", "proof": "Unmaps only a region that `reserve` mapped (`mapped` is false for `adopt`), at the address and length reserve recorded. `close` takes the Region (`&&self`), so the pages are unmapped once and no later call names them. A Block left over holds an address and a size, not a borrow; its bytes are reachable only through an #Unsafe pointer whose caller vouches that the region is still open."},
   {"file": "Core/Mem/Mem.jet", "function": "join", "proof": "The gate only consumes `next`, a #SingleUse Block, after the neighbor check (Mem.jet:177) has stopped with a panic unless `next` starts where this block ends. This block's size then grows over exactly `next`'s bytes, so those bytes keep one owner and one release. No memory is read or written."},
   {"file": "Core/Mem/Mem.jet", "function": "__allocator_handler", "proof": "A reserved `__` name: only the compiler's lowering of a `#Context(allocator: a)` block calls it, never user code. It takes the address of `allocator`, a place that block borrows for its whole extent. The closure follows that address only when the runtime calls it inside the block (JetRuntime Alloc.jet alloc_user_call), while the borrow keeps the allocator live, in place and borrowed by nothing else. Op 1 rebuilds exactly the Block that op 0 answered, at its address and size."},
-  {"file": "Core/Mem/Mem.jet", "function": "release", "proof": "The method of __ContextAllocator, the stateless allocator behind `context.allocator`. `block` moves in (`&&Block`), and __context_give hands its address back to the allocator that served it. The gate then only consumes that #SingleUse Block, so the bytes are released once and no copy of the block lives on. No memory is read or written."},
-  {"file": "Core/Mem/Mem.jet", "function": "get", "proof": "The Index read of Window<T>. Window's `start` and `count` are priv fields (Mem.jet:83-84), so the only Window outside the module is one `window` built, an #Unsafe function whose caller vouches for `count` live, aligned Ts at `start` that outlive every use of the window (:112); a negative length becomes an empty window. The gate (:94-96) reads element `k` only after :93 returned None for k < 0 or k >= count, so it reads inside the vouched range, and the sentry still checks the raw read's liveness and alignment."},
-  {"file": "Core/Mem/Mem.jet", "function": "set", "proof": "The IndexMut write of Window<T>. As for `get`, a Window comes only from the #Unsafe `window` (:112), whose caller vouches for `count` live, aligned Ts at `start`. The gate (:103-105) writes element `k` only after :102 stopped with a panic for k < 0 or k >= count, so it writes inside the vouched range, and the sentry still checks the raw write's liveness and alignment."}
+  {"file": "Core/Mem/Mem.jet", "function": "release", "proof": "The method of __ContextAllocator, the stateless allocator behind `context.allocator`. `block` moves in (`&&Block`), and __context_give hands its address back to the allocator that served it. The gate then only consumes that #SingleUse Block, so the bytes are released once and no copy of the block lives on. No memory is read or written."}
 ]
 ```
 <!-- unsafe-abstractions:end -->

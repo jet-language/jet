@@ -1,0 +1,39 @@
+// A capability's View, read after the capability is released, is refused:
+// the View lives no longer than the `owner` its kernel named.
+use core.mem
+
+#SingleUse Words: struct {
+    priv base: Int
+    priv count: Int
+
+    view: fn(self) -> View<I64> Never! from self {
+        #Unsafe("`base` names `count` live I64s while the capability lives") {
+            mem.window(self, mem.Ptr<I64>.from_addr(self.base), self.count)
+        }
+    }
+}
+
+acquire: fn(count: Int) -> Words? {
+    #Unsafe("the block is used only through this capability and released once by `release`") {
+        if mem.alloc_raw(count * 8, 8) == .Val(bytes) {
+            mem.fill(bytes.cast<I64>(), I64{7}, count)
+            return .Val(Words{base: mem.address_of(bytes.*), count: count})
+        }
+    }
+    .None
+}
+
+release: fn(words: &&Words) {
+    #Unsafe("`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once") {
+        mem.free_raw(mem.Ptr<U8>.from_addr(words.base))
+        consume(words)
+    }
+}
+
+run: fn() {
+    words := acquire(4) ?? panic("no memory")
+    v: words.view()
+    print(v[0])
+    release(words)
+    print(v[0])
+}

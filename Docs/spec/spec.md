@@ -3220,15 +3220,16 @@ through a kept copy of the pointer is a located R0802 fault. See
 `tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.case`.
 (D-RAWPTR2=A)
 
-`mem.window(p, len)` gives a `mem.Window<T>`, a checked window over the `len`
-`T`s at `p`; a `len` below zero gives an empty window. `w.len()` is its
-length. `w[i]` reads element `i` and `w[i] = v` writes it, through the
-`Index` and `IndexMut` hooks, and `w.get(i)` is `None` past either end. An
-`i` outside `0..<w.len()` stops the run before any byte is touched: a read
-with the hook's index miss, a write with a panic naming the index. The
-window keeps `p` unchanged, so its accesses are raw accesses that the memory
-sentry still checks for liveness and alignment. `mem.window` is E3101
-outside `#Unsafe`, while using the window it gives is not. See
+`mem.window(owner, p, len)` gives a `View<T>` over the `len` `T`s at `p`,
+tied to `owner` as a declared view is tied to its source (`-> View<T> from
+owner`); a `len` below zero gives an empty View. It reads like any View:
+`w.len()` is its length, `w[i]` reads element `i` and stops the run when `i`
+is outside `0..<w.len()`, and `w.get(i)` is `None` there. An index the type
+proves in bounds is a bare load. The View cannot be read after `owner` is
+moved, consumed or closed (E0212), nor leave the scope that holds `owner`
+(E2305), so a kernel names the handle that owns the memory and every View it
+hands out ends with that handle. `mem.window` is E3101 outside `#Unsafe`,
+while reading the View it gives is not. See
 `tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.case`.
 (D-RAWPTR2=A)
 

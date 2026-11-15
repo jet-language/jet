@@ -2803,6 +2803,37 @@ ir_core_ptr_step: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, bytes: Bool, arg
     result
 }
 
+// `mem.window(owner, p, n)` (core.mem `__view_from_raw<T, O>`): the View header
+// over the `n` Ts at `p`, as a List window's is ({length, no buffer, first
+// element}), so a read of it is an ordinary View read. Nothing is checked or
+// called here: the Core caller clamps `n`, and `owner` ties the View's life to
+// it in sema only, so it is not evaluated.
+ir_core_view_from_raw: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+    if type_args.len() != 2 || args.len() != 3 {
+        return ir_fail_slot(b, span, "a raw View without its checked element and owner types and arguments")
+    }
+    view_ty: Type.Apply{name: "View", args: [Type]{type_args[0].copy()}}
+    row: ir_value_type(m, p, view_ty) ?? return ir_type_fail(b, span, view_ty)
+    pointer: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || pointer < 0 -> return -1
+    count: ir_expr(m, p, b, args[2])
+    if ir_failed(b) || count < 0 -> return -1
+    length: ir_native_index(m, b, count, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, count)
+    // The header stores words, not pointers (Lint.jet IR_LINT_NUMERIC).
+    word_row: ir_word_row(m)
+    first: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Copy, first, pointer, -1, -1, b.line)
+    view: ir_temp(m, b, row)
+    ir_emit(b.f, IROp.StackAddress, view, 24, 8, -1, b.line)
+    ir_emit(b.f, IROp.Store, -1, view, 0, length, b.line)
+    none: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, view, 8, none, b.line)
+    ir_emit(b.f, IROp.Store, -1, view, 16, first, b.line)
+    view
+}
+
 // `consume(x)` (a Drop of `x.move()`, a move to nowhere): the value's cleanup runs
 // now. An owned variable's binding stops owning it, so its scope-end drop
 // does not run a second time; a fresh value closes (ir_close_fresh) and drops
@@ -7889,9 +7920,8 @@ ir_view_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: I
     source: ir_expr(m, p, b, receiver)
     if ir_failed(b) || source < 0 -> return -1
     element_row: ir_list_item(m, p, b, source) ?? return ir_fail_slot(b, span, "a view of {ir_type_name(receiver_ty)}")
-    // copy: `args[0]` stays in the read parameter `args`; the optional range owns this one
     bounds: if args.len() == {
-        1 -> ir_slice_bounds(m, p, b, args[0], args[0], Val(args[0].copy()), false, span)
+        1 -> ir_slice_bounds(m, p, b, args[0], args[0], Val(args[0]), false, span)
         2 -> ir_slice_bounds(m, p, b, args[0], args[1], None, false, span)
         else -> {
             return ir_fail_slot(b, span, "a view with {args.len()} bounds")

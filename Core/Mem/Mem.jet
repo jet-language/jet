@@ -72,45 +72,23 @@ Pin: struct<T> {}
     core.mem.free_raw(pointer)
 }
 
-// A checked window over `count` Ts at a raw pointer (`window`). `w[i]` is
-// element `i` and `w[i] = v` writes it; an index outside `0..<w.len()`
-// stops the run (a read with the Index hook's miss, a write with a panic)
-// before any byte is touched. Each access is a raw access under the
-// window's own gate, so the sentry still checks liveness and alignment.
-// The fields are private, so a Window comes only from `window`, whose
-// caller vouches for the `count` Ts at `start`.
-Window: struct<T> {
-    priv start: *T
-    priv count: Int
-
-    len: fn(self) -> Int { self.count }
-
-    impl Index {
-        Key: Int
-        Value: T
-
-        get: fn(self, k: Int) -> T? {
-            if k < 0 || k >= self.count -> return None
-            #Unsafe("`window`'s caller vouched for `count` live Ts at `start`, and `k` is inside them") {
-                return Val(__ptr_offset<T>(self.start, k).*)
-            }
-        }
-    }
-
-    impl IndexMut {
-        set: fn(&self, k: Int, v: T) {
-            if k < 0 || k >= self.count -> panic("window index {k} is outside 0..<{self.count}")
-            #Unsafe("`window`'s caller vouched for `count` live Ts at `start`, and `k` is inside them") {
-                volatile_write<T>(__ptr_offset<T>(self.start, k), v)
-            }
-        }
-    }
+// The `View<T>` over the `count` Ts at `pointer`, which lives no longer than
+// `owner`: sema ties the View to `owner` as it ties any declared view to its
+// source, so the View cannot be read after `owner` is moved, consumed or
+// closed, nor leave the scope that holds `owner`. A kernel hands out its
+// storage this way, naming the handle that owns it. A `count` below zero is
+// an empty View. Reads are ordinary View reads: an index the type proves in
+// bounds is a bare load, any other one compare against the length.
+#[Inline(Always), Unsafe("`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives")]
+window: fn<T, O>(owner: O, pointer: *T, count: Int) -> View<T> Never! from owner {
+    __view_from_raw<T, O>(owner, pointer, if count < 0 -> 0 else -> count)
 }
 
-// The checked window over the `len` Ts at `pointer`; a `len` below zero is
-// an empty window.
-#Unsafe("`pointer` names `len` live, aligned Ts that outlive every use of the window") window: fn<T>(pointer: *T, len: Int) -> Window<T> Never! {
-    Window<T>{start: pointer, count: if len < 0 -> 0 else -> len}
+// The bare View header `window` builds: no check and no call. A compiler
+// intrinsic, as the List layout operations below are. Reserved `__` name,
+// never public.
+#Unsafe("`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative") __view_from_raw: fn<T, O>(owner: O, pointer: *T, count: Int) -> View<T> Never! from owner {
+    __view_from_raw<T, O>(owner, pointer, count)
 }
 
 // `dst = value`, written without filling the cache where the target has a

@@ -12,8 +12,8 @@ run: fn() {
             third: ints.offset(2).*
             print("third: {third}")
             mem.copy(ints, ints.offset(2), 1)
-            readings := mem.window(ints, 4)
-            readings[3] = third * 6
+            mem.volatile_write(ints.offset(3), third * 6)
+            readings: mem.window(bytes, ints, 4)
             print("window: {readings[0]} {readings[1]} {readings[2]} {readings[3]} of {readings.len()}")
             mem.free_raw(bytes)
         } else { print("the heap refused 32 bytes") }

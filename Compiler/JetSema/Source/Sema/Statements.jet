@@ -3542,9 +3542,12 @@ sema_stmt_local_view_facts_inner: fn(expr: Expr, scopes: SemaScopeTable, state: 
         }
         // A `trim`/`after`/`before` window on a `String` name stored straight
         // into an aggregate field borrows that name (Rust `view_call_sources`).
+        // Any other call filling a view-typed field keeps the owners its view
+        // points into, as the same call returned bare does.
         .MethodCall(_, _, _, _, _, _, _) -> {
             if !aggregate -> return [SemaCallReturnViewFact]{}
-            places: sema_string_view_call_sources(expr, scopes, state)
+            places := sema_string_view_call_sources(expr, scopes, state)
+            if places.len() == 0 && sema_stmt_view_field_value(expr, context) -> places = sema_ownership_places_from_expr_in_state(expr, scopes, state)
             if places.len() == 0 -> return [SemaCallReturnViewFact]{}
             return [SemaCallReturnViewFact]{SemaCallReturnViewFact{slot: [String]{}, access: AccessConvention.Read, places: places, sources: [ViewSourcePath]{}}}
         }
