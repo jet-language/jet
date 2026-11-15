@@ -447,7 +447,7 @@ sema_copy_site_refuse_resource_copy: fn(value: TExpr, environment: SemaScopeEnvi
     fix: sema_copy_site_in_place_fix(value, scopes) ?? return true
     facts: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if !facts.complete || !facts.holds_resource -> return true
-    diagnostics.push(sema_error("E0211", value.span, "`{type_name(value.ty)}` can't be copied out of the place it is read from", "it holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource", fix))
+    diagnostics.push(sema_error("E0211", value.span, "`{type_name(value.ty)}` can't be copied out of the place it is read from", sema_copy_place_duty_why(value.ty, environment, program), fix))
     false
 }
 

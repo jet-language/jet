@@ -296,7 +296,7 @@ sema_expression_list_check_clone: fn(element: Type, span: Span, environment: Sem
     effect_name := sema_copy_effect_name(facts)
     if effect_name != None -> context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
     if !facts.accepted {
-        diagnostic := sema_copy_diagnostic(facts, span)
+        diagnostic := sema_copy_refusal(facts, span, environment, program)
         if diagnostic != None {
             diagnostics.push(diagnostic ?? sema_error("E0211", span, "`{type_name(element)}` can't be copied", "list spread clones each element while building the result", "spread values whose elements support `Clone`"))
         }

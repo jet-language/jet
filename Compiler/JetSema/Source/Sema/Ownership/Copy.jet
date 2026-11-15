@@ -176,6 +176,7 @@ SemaCopySccMember: struct {
     declared: [Type]
     distinct: Bool
     resource: Bool
+    single_use: Bool
     complete: Bool
 }
 
@@ -754,16 +755,17 @@ sema_copy_nominal_facts: fn(
     resource := resource_impl.value
     if !resource_impl.known -> complete = false
     if module_is_core(nominal.symbol.module_identity) && sema_copy_named_is_builtin_resource(nominal.symbol.name) -> resource = true
+    single_use: sema_copy_nominal_single_use(nominal)
     distinct: nominal.kind == SemaRegistrationNominalKind.Distinct
     declared_types := sema_copy_nominal_declared_types(nominal, bindings, graph)
-    result := sema_copy_nominal_combine(actual, declared_types, distinct, resource, complete, graph, table, caller, generic_params, walk)
+    result := sema_copy_nominal_combine(actual, declared_types, distinct, resource, single_use, complete, graph, table, caller, generic_params, walk)
     _ := walk.active.pop()
     if walk.table {
         _ := walk.path_ids.pop()
         _ := walk.path_keys.pop()
         _ := walk.path_index.pop()
         self_loop: walk.path_self.pop() ?? false
-        member := SemaCopySccMember{key: finished_key, index: index, actual: actual, declared: declared_types.move(), distinct: distinct, resource: resource, complete: complete}
+        member := SemaCopySccMember{key: finished_key, index: index, actual: actual, declared: declared_types.move(), distinct: distinct, resource: resource, single_use: single_use, complete: complete}
         return sema_copy_scc_finish(member, result, self_loop, outer_tainted, outer_low, graph, table, caller, generic_params, walk)
     }
     walk.finished[finished_key] = Val(SemaCopyWalkRow{facts: result, tainted: walk.tainted})
@@ -771,12 +773,16 @@ sema_copy_nominal_facts: fn(
     result
 }
 
-// A nominal's facts from its declared part types and its own capabilities.
+// A nominal's facts from its declared part types and its own capabilities. A
+// `#SingleUse` nominal closes nothing, so it is no resource, but its one duty
+// has one owner just as a resource's cleanup does: it never copies, and a
+// value holding one holds a duty, so it is never copied out of a place either.
 sema_copy_nominal_combine: fn(
     actual: Type,
     declared_types: [Type],
     distinct: Bool,
     resource: Bool,
+    single_use: Bool,
     complete_parts: Bool,
     graph: SemaRegistrationGraph?,
     table: SemaCopyFactsTable,
@@ -789,7 +795,7 @@ sema_copy_nominal_combine: fn(
     clock := false
     dynamic_loan := false
     complete := complete_parts
-    holds := resource
+    holds := resource || single_use
     loop declared in declared_types {
         nested: sema_copy_type_facts(declared, graph, table, caller, generic_params, walk)
         cloneable = cloneable && nested.cloneable
@@ -800,7 +806,7 @@ sema_copy_nominal_combine: fn(
         holds = holds || nested.holds_resource
     }
     if distinct -> cloneable = true
-    if resource -> cloneable = false
+    if resource || single_use -> cloneable = false
     SemaCopyTypeFacts{
         copyable: sema_copy_copyable_scalar(actual),
         cloneable: cloneable,
@@ -887,7 +893,7 @@ sema_copy_scc_finish: fn(
     loop changed {
         changed = false
         loop member_index in 0..<members.len() {
-            facts: sema_copy_nominal_combine(members[member_index].actual, members[member_index].declared, members[member_index].distinct, members[member_index].resource, members[member_index].complete, graph, table, caller, generic_params, walk)
+            facts: sema_copy_nominal_combine(members[member_index].actual, members[member_index].declared, members[member_index].distinct, members[member_index].resource, members[member_index].single_use, members[member_index].complete, graph, table, caller, generic_params, walk)
             if walk.finished[members[member_index].key] == .Val(previous) {
                 if !sema_copy_facts_same(previous.facts, facts) {
                     walk.finished[members[member_index].key] = Val(SemaCopyWalkRow{facts: facts, tainted: false})
@@ -1190,6 +1196,80 @@ sema_copy_fork_parts: fn(nominal: SemaRegistrationNominal, ty: Type, graph: Sema
         if variant.payload_type == .Val(payload) -> parts.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, payload), bindings))
     }
     parts
+}
+
+// A struct or enum declared `#SingleUse`.
+sema_copy_nominal_single_use: fn(nominal: SemaRegistrationNominal) -> Bool Never! {
+    if nominal.source == .SourceAST(item) {
+        if item == .Struct(definition) -> return definition.is_single_use
+        if item == .Enum(definition) -> return definition.is_single_use
+    }
+    false
+}
+
+// The most type instances one sema_copy_holds_single_use walk visits.
+SEMA_COPY_SINGLE_USE_WALK: 256
+
+// Whether a value of `ty` is or holds a `#SingleUse` value at any depth: a
+// field, an enum payload, an element or an entry. A type argument counts
+// where the nominal's parts hold it (sema_copy_fork_parts substitutes it).
+// `seen` holds each instance walked once; a nominal whose parts grow its own
+// arguments without end (`Node<T>` holding a `Node<[T]>`) stops at
+// SEMA_COPY_SINGLE_USE_WALK instances.
+sema_copy_holds_single_use: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int, seen: &[String]) -> Bool {
+    if ty == {
+        .Named(_) | .Apply(_, _) -> {
+            row: sema_copy_fork_row_at(ty, graph, caller) ?? return false
+            nominal: graph.modules[row.module_index].nominals[row.row]
+            if sema_copy_nominal_single_use(nominal) -> return true
+            shown: type_name(ty)
+            if seen.contains(shown) || seen.len() >= SEMA_COPY_SINGLE_USE_WALK -> return false
+            seen.push(shown)
+            loop part in sema_copy_fork_parts(nominal, ty, Val(graph)) {
+                if sema_copy_holds_single_use(part, graph, caller, seen) -> return true
+            }
+            false
+        }
+        .List(inner) | .FixedList(inner, _) | .Option(inner) -> sema_copy_holds_single_use(inner, graph, caller, seen)
+        .Result(ok, err) -> sema_copy_holds_single_use(ok, graph, caller, seen) || sema_copy_holds_single_use(err, graph, caller, seen)
+        .Map(key, _, value) -> sema_copy_holds_single_use(key, graph, caller, seen) || sema_copy_holds_single_use(value, graph, caller, seen)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_copy_holds_single_use(field.ty, graph, caller, seen) -> return true
+            }
+            false
+        }
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// `sema_copy_holds_single_use` from a checked scope.
+sema_copy_holds_single_use_in: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    graph: program.registration_graph ?? return false
+    seen := [String]{}
+    sema_copy_holds_single_use(ty, graph, sema_type_module_row(graph, environment.module_identity), seen)
+}
+
+// A refused copy's diagnostic. A value that is or holds a `#SingleUse` value
+// is refused for its duty, whatever else it holds.
+sema_copy_refusal: fn(facts: SemaCopyFacts, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic? {
+    if facts.accepted || !facts.complete -> return None
+    if !sema_copy_holds_single_use_in(facts.source, environment, program) -> return sema_copy_diagnostic(facts, span)
+    shown: type_name(facts.source)
+    fix: "move it instead with `.move()`; a second one has to come from wherever this one came from"
+    if program.registration_graph == .Val(graph) {
+        if sema_copy_fork_row_at(facts.source, graph, sema_type_module_row(graph, environment.module_identity)) == .Val(row) {
+            if sema_copy_nominal_single_use(graph.modules[row.module_index].nominals[row.row]) -> return Val(sema_error("E0211", span, "`{shown}` can't be copied", "`{shown}` is `#SingleUse`: it carries one duty that has to be done exactly once, and a copy would let that duty be done twice", fix))
+        }
+    }
+    Val(sema_error("E0211", span, "`{shown}` can't be copied", "it holds a `#SingleUse` value, which carries one duty that has to be done exactly once, and a copy would let that duty be done twice", fix))
+}
+
+// Why a value holding a duty can't be copied out of its place: the duty is a
+// resource's cleanup or a `#SingleUse` value's job.
+sema_copy_place_duty_why: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String {
+    if sema_copy_holds_single_use_in(ty, environment, program) -> return "it holds a `#SingleUse` value, whose one duty has one owner; this position takes an owned value, so the copy and the place would both owe that duty"
+    "it holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource"
 }
 
 sema_copy_diagnostic: fn(facts: SemaCopyFacts, span: Span) -> Diagnostic? {
