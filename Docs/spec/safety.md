@@ -237,14 +237,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1375,
+  "total": 1376,
   "counts": {
     "Compiler": 630,
     "Core": 174,
     "Docs": 10,
     "Examples": 42,
     "Jetpack": 8,
-    "Tools": 7,
+    "Tools": 8,
     "tests": 504
   },
   "regions": [
@@ -6346,6 +6346,13 @@ file in a `Tests/` tree. The ratchet refuses either.
       "reason": "the block holds the source, the target and the moved bytes, LARGEST bytes and their room each, every offset stays inside its room, and the block is freed once after the passes"
     },
     {
+      "package": "Tools",
+      "file": "Tools/perf/asm-parity/memfill/run.jet",
+      "line": 54,
+      "column": 5,
+      "reason": "the block holds LARGEST bytes and their room, every fill stays inside it, and the block is freed once after the passes"
+    },
+    {
       "package": "tests",
       "file": "tests/cases/backend_ice/fixtures/asm_rail/rail.jet",
       "line": 10,
@@ -9886,9 +9893,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
-| Tools | 7 |
+| Tools | 8 |
 | tests | 504 |
-| **total** | **1375** |
+| **total** | **1376** |
 
 ### Regions
 
@@ -10765,6 +10772,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 90:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
 | Tools | Tools/packaging/NativeCCompiler.jet | 68:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
 | Tools | Tools/perf/asm-parity/memcopy/run.jet | 63:5 | "the block holds the source, the target and the moved bytes, LARGEST bytes and their room each, every offset stays inside its room, and the block is freed once after the passes" |
+| Tools | Tools/perf/asm-parity/memfill/run.jet | 54:5 | "the block holds LARGEST bytes and their room, every fill stays inside it, and the block is freed once after the passes" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 44:5 | "call the leaf the build refuses" |
