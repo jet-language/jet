@@ -8299,10 +8299,12 @@ ir_window_subject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, pla
 // operations borrow the cell in its place, so a copy would be a second cell
 // the owner never sees. Sema admits that borrow in a task only for a
 // `task.group` child the cell outlives (sema_taskgroup_check_lambda_captures).
-// Any other capture is a copy the box owns until its
-// release helper drops it; an escaping lambda's writes stay in that copy,
-// which outlives the frame. A task body owns its copies instead
-// (ir_lambda_box).
+// Any other capture is a copy the box owns until its release helper drops
+// it; an escaping lambda's writes stay in that copy, which outlives the
+// frame. A capture the lambda takes (`&&name`, or one with no clone an
+// escaping lambda captures) is the variable's own value instead, which the
+// variable gives up, so the release helper closes and drops it once. A task
+// body owns its captures instead (ir_lambda_box).
 //
 // The lambda's function is keyed by its enclosing function, its own source
 // span and its occurrence there: the merge shares functions by key, and the
@@ -8321,6 +8323,7 @@ ir_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyL
 ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyLambda, task_body: Bool, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     captures := [IRCaptureSlot]{}
+    takes := [Bool]{}
     offset := if task_body -> IR_TASK_STARTED + 8 else -> 24
     loop (index, capture) in lambda.captures {
         binding: ir_lookup_binding(b, capture.source) ?? ir_lookup_binding(b, capture.local.name) ?? return ir_fail_slot(b, span, "capture of unknown local {capture.source}")
@@ -8343,7 +8346,13 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
             }
         }
         body_owned: task_body && !by_ref && owned_row < 0
-        close: if body_owned -> ir_close_glue(m, p, b, value_row, false, span) else -> -1
+        // A capture the lambda takes (`&&name`, or one with no clone an
+        // escaping lambda captures) is the variable's own value, which the
+        // box or the task body then closes in the variable's place. A cell
+        // the variable does not own (a write parameter's) is never taken.
+        taken: moved && !by_ref && owned_row < 0 && (binding.indirect < 0 || binding.owned)
+        takes.push(taken)
+        close: if body_owned || taken -> ir_close_glue(m, p, b, value_row, false, span) else -> -1
         if ir_failed(b) -> return -1
         captures.push(IRCaptureSlot{name: capture.local.name, offset: offset, row: value_row, by_ref: by_ref, owned_row: owned_row, body_owned: body_owned, close: close})
         offset += size
@@ -8359,24 +8368,29 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
         } else {
             // A capture copies the variable, which stays its own owner;
             // the box owns the copy: a materialized window's own List of
-            // its elements, read through the window's header. A value a
-            // task body takes (`task &&name`) moves into the box instead:
-            // the variable stops owning and closing it, so the body alone
-            // ends it. An escaping closure's box is the heap's and outlives
-            // the block, so the copy moves there (BuildMove.jet).
+            // its elements, read through the window's header. A value the
+            // lambda takes moves into the box instead: the variable stops
+            // owning and closing it, so the box (or a task body) alone ends
+            // it (ir_own copies any value its variable does not own). An
+            // escaping closure's box is the heap's and outlives the block,
+            // so the copy moves there (BuildMove.jet).
             captured: ir_read_binding(m, b, binding)
-            taken: slot.body_owned && ir_owned_binding(b, captured) && (lambda.capture_facts.moved.contains(capture.source) || lambda.capture_facts.moved.contains(capture.local.name))
+            taken: takes[index]
             kept := if {
                 taken -> captured
                 slot.owned_row >= 0 -> ir_lambda_owned_window(m, p, b, captured, slot.owned_row, span)
                 m.types[b.f.slot_type[captured]].kind == .Aggregate -> ir_copy_value(m, p, b, captured, span)
                 else -> captured
             }
-            if taken {
-                moving: b.moving
-                b.moving = captured
-                kept = ir_own(m, p, b, captured)
-                b.moving = moving
+            if {
+                !taken -> {}
+                binding.indirect >= 0 -> ir_lambda_take_cell(m, p, b, source, binding, captured)
+                else -> {
+                    moving: b.moving
+                    b.moving = captured
+                    kept = ir_own(m, p, b, captured)
+                    b.moving = moving
+                }
             }
             if ir_failed(b) -> return -1
             ir_store_at(m, p, b, boxed, slot.offset, kept)
@@ -8420,6 +8434,19 @@ ir_lambda_owned_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, window: In
     source: ir_temp(m, b, list_row)
     ir_emit(b.f, IROp.Copy, source, window, -1, -1, b.line)
     ir_list_clone(m, p, b, source, element_row, list_row)
+}
+
+// The value `captured` read from the frame cell of variable `name`
+// (`binding`, a variable a closure of the body writes) moved into a lambda's
+// box: the cell is zeroed where its drop then ends nothing (ir_zeroable), so
+// its scope end and a later assignment leave the box's value alone; any
+// other cell's variable stops owning it.
+ir_lambda_take_cell: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, binding: IRBinding, captured: Int) Never! {
+    b.fresh[captured] = true
+    if ir_zeroable(m, p, binding.indirect) -> return ir_zero_drops(m, p, b, binding.slot, 0, binding.indirect)
+    index := b.bindings.len() - 1
+    loop index >= 0 && (b.bindings[index].name != name || b.bindings[index].slot != binding.slot) -> index -= 1
+    if index >= 0 -> ir_set_own_state(b, index, IROwnState{owned: false})
 }
 
 // Moves the variable `name` into a frame cell and rebinds it to the cell's

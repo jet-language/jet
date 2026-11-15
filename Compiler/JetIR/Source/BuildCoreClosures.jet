@@ -152,12 +152,12 @@ ir_closure_box: fn(m: &IRModule, b: &IRBuilder, row: Int, bytes: Int, captures: 
     boxed
 }
 
-// The release helper of a box of `bytes` bytes with `captures`: drops each
-// capture the box owns as an aggregate's glue drops its members
-// (ir_glue_drops), never a held place, then frees the box. A capture the
-// body owns ends with the body; when the body never started, the helper
-// closes and drops it as the body's scope end would have. One per capture
-// shape.
+// The release helper of a box of `bytes` bytes with `captures`: closes each
+// capture the box took from its variable and drops each capture the box
+// owns as an aggregate's glue drops its members (ir_glue_drops), never a
+// held place, then frees the box. A capture the body owns ends with the
+// body; when the body never started, the helper closes and drops it as the
+// body's scope end would have. One per capture shape.
 ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> Int Never! {
     owned := [IRCaptureSlot]{}
     unstarted := [IRCaptureSlot]{}
@@ -170,9 +170,10 @@ ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> I
             next
         }
         dropped: if capture.owned_row >= 0 -> capture.owned_row else -> capture.row
-        if capture.by_ref || !ir_glue_drops(m, dropped) -> next
-        key = "{key}|{capture.offset}:{ir_row_key(m, dropped)}"
-        owned.push(IRCaptureSlot{name: capture.name.copy(), offset: capture.offset, row: dropped, by_ref: false})
+        if capture.by_ref || (capture.close < 0 && !ir_glue_drops(m, dropped)) -> next
+        closes: if capture.close >= 0 -> "!" else -> ""
+        key = "{key}|{capture.offset}:{ir_row_key(m, dropped)}{closes}"
+        owned.push(IRCaptureSlot{name: capture.name.copy(), offset: capture.offset, row: dropped, by_ref: false, close: capture.close})
     }
     key = "{key}>"
     known: name_rows_value(m.function_rows, key) ?? -1
@@ -198,7 +199,8 @@ ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> I
     }
     loop capture in owned {
         value: ir_load_at(m, a, boxed, capture.offset, capture.row)
-        ir_emit(a.f, IROp.Drop, -1, value, -1, -1, a.line)
+        if capture.close >= 0 -> ir_close_call(a, capture.close, value)
+        if ir_glue_drops(m, capture.row) -> ir_emit(a.f, IROp.Drop, -1, value, -1, -1, a.line)
     }
     size: ir_word_const(m, a, ir_align8(bytes))
     ir_free(m, a, boxed, size)
