@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106078,
+    "rev": 106080,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101756,11 +101756,11 @@
         {
           "n": 3,
           "text": "One memory kernel module holds the only implementations of those memory actions, as a small set of typed primitives, each with stated preconditions and typed capabilities that callers cannot forge, so that most preconditions are type-enforced. Sema refuses a raw memory action anywhere outside the kernel with a registered error (what, why and fix text plus a UI snapshot). User #Unsafe code reaches raw memory only by calling kernel primitives. Proof: `jet test Compiler --profile ui --filter raw_memory_outside_kernel` and `jet test tests/guards --filter memory_kernel_single_home`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:47:36.818Z"
+          "evidence": "dev 3410ca0816 (guard landed a2218d7759), batch compiler p162, 2026-11-15 04:35: jet test tests/guards --filter memory_kernel_single_home -> 4 passed, 0 failed (Core/Mem/Mem.jet declares each raw memory primitive exactly once with its precondition in its #Unsafe gate; no other compiler, Core or Jetpack source declares one; every .Kernel([...]) entry is a real path; the unsafe ratchet's count of raw memory regions outside a kernel stays zero). jet test Compiler --profile ui --filter raw_memory_outside_kernel -> PASS tests/ui/E3113_raw_memory_outside_kernel (registered error with what/why/fix and snapshot).",
+          "at": "2026-11-15T09:32:43.970Z"
         },
         {
           "n": 4,
@@ -101774,11 +101774,11 @@
         {
           "n": 5,
           "text": "Codegen emits raw memory instructions for checked code only through the kernel's lowering rows. Accesses that sema already proves safe (checked indexing, owned fields) stay ordinary loads and stores and need no kernel call. Proof: `jet test tests/guards --filter raw_memory_lowering_rows`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:47:37.691Z"
+          "evidence": "dev 3410ca0816 (guard landed 624e058aa1), batch compiler p162, 2026-11-15 04:35: jet test tests/guards --filter raw_memory_lowering_rows -> 4 passed, 0 failed. The guard is a closed census: the IR builder calls the runtime's raw memory routines only from named rows (List buffer, map slots, boxed value, the core.mem IR_CORE_INTRINSICS rows, at least 10), each with its exact call count; a new raw call outside the rows fails, a row whose calls are gone fails; checked index and field accesses are plain loads and stores, never a row.",
+          "at": "2026-11-15T09:32:45.097Z"
         },
         {
           "n": 6,
@@ -101870,7 +101870,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T08:55:39.242Z",
+      "updated": "2026-11-15T09:32:45.097Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -217816,6 +217816,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T09:32:45.097Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oo8eeq",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T09:32:43.970Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oo8eeq",
+      "note": "#3"
+    },
     {
       "at": "2026-11-15T09:27:19.133Z",
       "by": "Main",
