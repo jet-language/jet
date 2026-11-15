@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106052,
+    "rev": 106057,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -43298,11 +43298,11 @@
         {
           "n": 18,
           "text": "A written failure contract is a ceiling: a body that can fail outside it is a registered error naming the extra failure, `Never!` denies failure, and `Err` inside the contract keeps it open (D-FAIL-PUBSIG1=A, D-FAIL-EFFECT1=A: failure sets follow the effect law). Proof: `jet test Compiler --profile ui --filter failure_contract_ceiling_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:42:05.324Z"
+          "evidence": "GoalsA-1-3-failure-ceiling landed 27016b2b72 (a written failure contract is a ceiling: Err keeps it open, and Never! refuses a returned Err). on batch compiler p156 (dev aa5f5f1bba), 2026-11-15 02:03: jet test Compiler --profile ui --filter failure_contract_ceiling_ PASS 3; DiagnosticRows --check passed.",
+          "at": "2026-11-15T07:03:52.049Z"
         },
         {
           "n": 19,
@@ -43388,7 +43388,7 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-15T06:37:31.006Z",
+      "updated": "2026-11-15T07:03:52.049Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -60544,6 +60544,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "p156 gate (dev aa5f5f1bba, 2026-11-15 01:57): compiler build wall 37.82 s (p155 37.32), cpu 141.9 s (+15.5%), parallel 6.0, peak 5541 MiB (p155 5924, -6.5%), instructions -0.8%. Regression: the main package's comptime phase went 2.04 -> 4.31 s with no growth in its traced sub-phases. InspectBuild check, A/B median of 3: p155 9.82 s / 4069 MiB, p156 11.25 s / 4089 MiB (+14.6% wall). Suspect: G5 a568b242df (Prelude rows as #run constants built by the real parser); owner PrecompiledCore-4, top item."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Plan for owner-order steps 2-5 (Speed-3, 2026-11-15 01:45, against p154: parallel 5.2, peak 5791 MiB, wall 41.25 s; InspectBuild check 4042 MiB / 11.0 s). Step 2 (c6) route: every remaining parallel phase needs tasks to share the checked graph read-only, which is ratified D-TASK-WINDOW1 A, built by #6066 c11 (open). Main assigned #6066 c11 to Speed-3 as the step-2 route, ahead of step 3. Step 3 (c7, #5910 c62): id keys (DeclTable by SymbolID, NameRows to ids in about 6-8 SUBs, FnBody keys) remove duplicated text worth a few hundred MiB; reaching under 1 GB needs the #6842 arena kernel and flat AST/IR. Step 4 (c8, fused pipeline) has no route until steps 2 and 3. Step 5: #5910 c6 met; #5479 c2 is one Throughput.jet SUB (per-phase budget table). #5910 c46's comptime-conditional use needs a design and a ballot."
         },
         {
@@ -60965,7 +60970,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T06:35:09.933Z",
+      "updated": "2026-11-15T07:03:52.961Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -96786,11 +96791,11 @@
         {
           "n": 12,
           "text": "Phase 2 of landing local values before demand: a Core local value whose pass is refused today (core.math, which refuses `s`, `hex` and `digits`, so sema.local_values_refused=3) lands at its owner like a user one, so refused is 0 for any program reaching core.math. Proof: comptime_diff/a_local_value_over_derived_equality_and_a_codec_lands_in_its_owners and its sibling from 66fa119730 pin sema.local_values_refused=0 again, then pass at o0 with JET_RECHECK_VERIFY=1.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T02:18:22.285Z"
+          "evidence": "GoalsB-5-6759-c12 landed aa5f5f1bba (the JET_RECHECK_VERIFY full recheck stands in the same Core functions from the image's Core seal as the finalization it checks; the false mismatch came from the seal being consumed before the verifier ran). on batch compiler p156 (dev aa5f5f1bba), 2026-11-15 02:03: JET_RECHECK_VERIFY=1 jet test Compiler --profile cases --filter comptime_diff/a_local_value_over PASS 6 ERROR 0 (p150-p155: PASS 2 ERROR 4); comptime_diff PASS 154 KF 3. Both named cases pin no sema.local_values_refused.",
+          "at": "2026-11-15T07:03:51.130Z"
         },
         {
           "n": 13,
@@ -96828,7 +96833,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-15T06:55:17.130Z",
+      "updated": "2026-11-15T07:03:51.130Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -104797,11 +104802,11 @@
         {
           "n": 2,
           "text": "A live query that reads no caller-dependent input shares one result among all subscribers with the same arguments. Proof: `jet test Compiler --profile cases --filter web_app/live_query_shared_result`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:54:10.299Z"
+          "evidence": "GoalsB-5-23r2 landed b0acab4afa (proof case: a live query that reads no caller-dependent input shares one result). on batch compiler p156 (dev aa5f5f1bba), 2026-11-15 02:03: jet test Compiler --profile cases --filter web_app/live_query_shared_result PASS 1 (it failed on p155, which lacked 22r2).",
+          "at": "2026-11-15T07:03:50.222Z"
         },
         {
           "n": 3,
@@ -104869,11 +104874,11 @@
         {
           "n": 10,
           "text": "A read-only parameter passed to app.live or app.invalidate is copied or borrowed by the lowering, not moved. Today (p153) the repro (a live source fn count(project: String), with bind and refresh taking project: String) reports E0120 ReadOnlyValueNotOwned at both call sites, and its fix names the compiler temporary __jet_live_N_0, a name the user never wrote. Proof: a case where jet check passes and jet run prints loaded 3; the case live_rerun_overtaken drops its project.copy() workaround.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T06:14:38.705Z"
+          "evidence": "GoalsB-5-22r2 landed dcf8af1eb2 (app.live, subscribe, push and invalidate take a read-only parameter as an argument with no E0120; Live.jet back to 19 copies). on batch compiler p156 (dev aa5f5f1bba), 2026-11-15 02:03: jet test Compiler --profile cases --filter live_calls_read_a_read_only_argument PASS 1; the copy ledger ceiling holds (guards 171/0).",
+          "at": "2026-11-15T07:03:49.304Z"
         },
         {
           "n": 11,
@@ -104897,7 +104902,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-15T06:47:27.327Z",
+      "updated": "2026-11-15T07:03:50.222Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -218410,6 +218415,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T07:03:52.961Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T07:03:52.049Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-15T07:03:51.130Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ssy5wy",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T07:03:50.222Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00cqn1l",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T07:03:49.304Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00cqn1l",
+      "note": "#10"
+    },
     {
       "at": "2026-11-15T06:55:17.130Z",
       "by": "Main",
