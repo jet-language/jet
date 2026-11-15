@@ -75,7 +75,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
 #Test("perf capture keeps observed IO spans, locks and allocations causal") {
     live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: live}}
-    capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, "x86_64-unknown-linux-gnu", Val(U64{30})) ?? panic(err.message)
+    capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", Val(U64{30})) ?? panic(err.message)
     assert_eq(capture.io.len(), 1)
     assert_eq(capture.io[0].start_ns, U64{10})
     assert_eq(capture.io[0].end_ns, U64{20})
@@ -91,7 +91,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     assert_eq(capture.samples[0].duration_ns, U64{30})
     assert_eq(capture.native[0].observed_at_ns, U64{20})
     assert_eq(capture.profile.window_wall_ns, Val(U64{50}))
-    attached: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    attached: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     assert_eq(attached.samples[0].duration_ns, U64{50})
     toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
     hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
@@ -99,7 +99,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     _: verify_jettrace(bytes) ?? panic(err.message)
 }
 #Test("perf capture without observations keeps the source and records no samples") {
-    capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     assert_eq(capture.source_maps.len(), 1)
     assert_eq(capture.profile.status, "no_samples")
     assert_eq(capture.profile.window_status, "unavailable")
@@ -110,7 +110,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     other := live
     other.revision = "different"
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: other}}
-    if jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, "test", None) == {
+    if jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "test", None) == {
         .Err(_) -> {}
         .Ok(_) -> panic("accepted mixed observation revisions")
     }
