@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6952,
-    "rev": 105100,
+    "rev": 105110,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75485,7 +75485,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -75494,6 +75494,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Split and closed 2026-11-15 by TowerKeeper-1. c2 met by decision (D-FFI-PRIMS1, D-FFI-PLACE1, D-FFI-EXPORT3 ratified). The design stays in Docs/proposals/ffi-perfect-boundary-2026-10-31.md. New cards: #6945 C ABI shapes, #6946 C boundary types, #6947 callbacks, #6948 foreign facts and C++, #6949 binding-cache resolver, #6950 language binders, #6951 Rust crates. Sandbox rows moved to #6930, WIT export to #6906, the PowerShell binder row to #6942. Known-failing rows that cited #6366 should cite these cards."
+        },
         {
           "at": "2026-11-12",
           "by": "Main",
@@ -75560,10 +75565,10 @@
           "n": 1,
           "text": "A proposal in Docs/proposals covers the full design (calling into and being called from C, C++, Rust, Zig, Swift, Objective-C, Java/Kotlin, C#, Python, JS/wasm, GPU kernels and OS ABIs), comparing every major existing FFI with sourced evidence, and states the primitives layer, the wrapper layer, safety (I1), ownership, errors, callbacks, threads, layout, build and binding generation.",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "Docs/proposals/ffi-perfect-boundary-2026-10-30.md (MemDesign-1.patch): ten testable goals; state of the art for C, C++, Rust, Zig, Swift, Objective-C, Java/Kotlin, C#, Python, JS/wasm, GPU kernels and OS ABIs with sources (section 10); primitives layer (L0), boundary contract (L1), readers/writers (L2), wrapper layer (L3); cross-cutting rules for safety (I1), ownership, errors, callbacks, threads, layout, build and binding generation (section 8).",
-          "at": "2026-10-30T22:10:36.032Z"
+          "evidence": "dev 9e420c58ae added Docs/proposals/ffi-perfect-boundary-2026-10-31.md (v2, replacing the 2026-10-30 proposal), covering every language named, the primitives and wrapper layers, safety, ownership, errors, callbacks, threads, layout, build and binding generation. Proof: git ls-files Docs/proposals/ffi-perfect-boundary-2026-10-31.md on dev.",
+          "at": "2026-11-15T04:59:03.959Z"
         },
         {
           "n": 2,
@@ -75628,10 +75633,10 @@
           "n": 11,
           "text": "(was #5984) (was #5943) core.plugin __authority_to_wire core-call row is missing: CoreCalls.jet self-test fails, sema boundary would panic",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: w9b and w11 (queue3.out, same output) `jet test` of CoreCalls.jet: \"authority boundary stays on plugin load argument one: pass\", \"raw pointer layout uses the selected target without pointee layout: pass\", \"2 passed, 0 failed, 0 skipped\" exit 0",
-          "at": "2026-10-31T19:52:17.680Z"
+          "evidence": "dev 797d14d15b (2026-10-29) carries the core.plugin __authority_to_wire core-call row (now Compiler/JetFoundation/Source/Registry/CoreCallExtensions.jet:33, used at CoreCalls.jet:127); CardClose-1 verdict 2026-10-31: jet test of CoreCalls.jet printed 2 passed, 0 failed, exit 0.",
+          "at": "2026-11-15T04:59:46.889Z"
         },
         {
           "n": 12,
@@ -75657,10 +75662,10 @@
           "n": 14,
           "text": "tests/cases/cffi/generated_c_nominals_share_the_imported_signature_owner.case passes: jet check loads the .jet/bindings/c cache so p.Point and p.echo resolve through one alias, and its known-failing row is removed",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "a1357816c2: tests/cases/cffi/generated_c_nominals_share_the_imported_signature_owner.case PASS: testkit now stages the fixture's .jet/bindings/c cache (retired pub dropped from its Point); known-failing row removed",
-          "at": "2026-11-05T02:13:22.131Z"
+          "evidence": "dev a1357816c2: tests/cases/cffi/generated_c_nominals_share_the_imported_signature_owner.case PASS; the testkit stages the fixture's .jet/bindings/c cache; known-failing row removed.",
+          "at": "2026-11-15T04:59:05.085Z"
         },
         {
           "n": 15,
@@ -75675,11 +75680,12 @@
         {
           "n": 16,
           "text": "(was #351) Syntax gap: audit/complete D-PLUGIN1 + D-DEP-WASM1 plugin target Proof: a syntax-registry row and a golden for the isolated package kind, spelled `target: sandbox` since D-ONCE-SANDBOX1=A retired `target: plugin` (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:31:00.146Z"
+          "evidence": "Moved to #6930 c12: sandbox package kind belongs on #6930",
+          "at": "2026-11-15T04:58:16.864Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
@@ -75822,11 +75828,12 @@
         {
           "n": 37,
           "text": "D-WIT-EXPORT2=A: Wasm component export against a pinned WIT world, with type pairing and canonical-ABI diagnostics. Proof: `jet test Compiler --profile cases --filter wit_export` passes, with a UI snapshot for each canonical-ABI diagnostic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:21:47.092Z"
+          "evidence": "Moved to #6906 c5: component exports belong with #6906",
+          "at": "2026-11-15T04:58:20.357Z",
+          "closure": "obsolete"
         },
         {
           "n": 38,
@@ -75871,20 +75878,22 @@
         {
           "n": 42,
           "text": "A `targets: [sandbox]` manifest entry builds a wasm component, or the manifest refuses it with a registered error. Today Jetpack's manifest model accepts it (Jetpack/PackageModel/Source/Manifest/Blocks/Targets.jet:236 on dev 72a8142651) and the compiler has no sandbox build target. Proof: `jet test Compiler --profile cases --filter manifest_target_sandbox`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:40:26.949Z"
+          "evidence": "Moved to #6930 c13: sandbox package kind belongs on #6930",
+          "at": "2026-11-15T04:58:18.153Z",
+          "closure": "obsolete"
         },
         {
           "n": 43,
           "text": "Examples/Modules/Packages/SandboxMathKit builds mathkit.wasm from SandboxSource during its own build instead of loading a committed binary, so no example ships a prebuilt guest. Proof: `git ls-files '*.wasm' -- Examples` prints nothing and `jet test Compiler --profile golden --filter Modules/Packages/SandboxMathKit` passes on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:40:28.147Z"
+          "evidence": "Moved to #6930 c14: sandbox package kind belongs on #6930",
+          "at": "2026-11-15T04:58:19.264Z",
+          "closure": "obsolete"
         },
         {
           "n": 44,
@@ -75907,9 +75916,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:48.265Z",
-      "updated": "2026-11-15T04:58:15.462Z",
+      "updated": "2026-11-15T04:59:48.768Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 44
+      "criteriaLastN": 44,
+      "completedAt": "2026-11-15T04:59:48.768Z"
     },
     {
       "id": "c0ov7lce",
@@ -111544,7 +111554,7 @@
       "id": "c04wn01h",
       "num": 6950,
       "title": "Language binders run real foreign code: Python, JavaScript, Lua, Ruby, Perl, PHP, R, Go, COBOL and Octave",
-      "body": "Destination: each ratified language binder (D-FFI-PY1, -JS1, -LUA1, -RUBY1, -PERL1, -PHP1, -R1, -GO1, -COBOL1, -OCTAVE1) is a Jet package implementing trait Language (D-FFI-LANG1=A, #6519), generates its `.jet/bindings/<lang>/` module, and runs real foreign code with its ratified host model. PowerShell is #6942.\n\nSource: the #6366 known-failing rows for the *_bind and sidecar cases. Each needs the binding-cache resolver ({FOREIGNROOTS}).",
+      "body": "Destination: each ratified language binder (D-FFI-PY1, -JS1, -LUA1, -RUBY1, -PERL1, -PHP1, -R1, -GO1, -COBOL1, -OCTAVE1) is a Jet package implementing trait Language (D-FFI-LANG1=A, #6519), generates its `.jet/bindings/<lang>/` module, and runs real foreign code with its ratified host model. PowerShell is #6942.\n\nSource: the #6366 known-failing rows for the *_bind and sidecar cases. Each needs the binding-cache resolver (#6949).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -111661,7 +111671,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:35.988Z",
-      "updated": "2026-11-15T04:57:35.988Z",
+      "updated": "2026-11-15T04:58:35.982Z",
       "updatedBy": "TowerKeeper-1"
     },
     {
@@ -215749,6 +215759,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:59:48.768Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0rkebo4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T04:59:46.889Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0rkebo4",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T04:59:05.085Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0rkebo4",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T04:59:03.959Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0rkebo4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T04:58:35.983Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c04wn01h",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T04:58:21.347Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0rkebo4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:58:20.357Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0rkebo4",
+      "note": "#37"
+    },
+    {
+      "at": "2026-11-15T04:58:19.264Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0rkebo4",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-15T04:58:18.153Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0rkebo4",
+      "note": "#42"
+    },
+    {
+      "at": "2026-11-15T04:58:16.865Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0rkebo4",
+      "note": "#16"
+    },
     {
       "at": "2026-11-15T04:58:15.462Z",
       "by": "TowerKeeper-1",
