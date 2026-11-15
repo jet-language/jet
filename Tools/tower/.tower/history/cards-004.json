@@ -100823,6 +100823,78 @@
       "completedAt": "2026-11-12T11:08:41.159Z",
       "questions": [],
       "retiredAt": "2026-11-15T11:09:27.071Z"
+    },
+    {
+      "id": "c0pcddhe",
+      "num": 6611,
+      "title": "Passing a read parameter to a method's owning argument copies silently, while a plain call reports E0201",
+      "body": "Found by SyntaxOwner during the #6586 sweep (2026-11-06, dev 529e9d9ddd). With a read parameter `item: [Int]`, `rows.push(item)` is accepted silently: the list is copied into the owning argument. Passing the same value to a plain function whose parameter owns it, `keep(bag)`, reports E0201 MissingMoveMarker. One meaning must have one mechanism (I8): an owning argument position needs the same move or copy rule whether it belongs to a method call or a plain call, and sema decides it (I3).\n\nSettled by the owner ruling of 2026-11-06 (A, calls never copy; card log): method owning arguments are take parameters, so a read parameter or a later-used name gives E0201/E0209 unless written .copy(). The cutover is the sema rule plus a collect-all codemod inserting .copy(), in one commit.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Both criteria are met."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Follow-up on c78da98b1b: the a0_030 candidate also rejects Core sites that the compiler build never reaches (Core/App/App.jet:307,310,312; Core/Web/Storage/Local.jet:22 and Session.jet:22; Core/Web/Browser.jet:1428), which broke 4 golden examples at o0-o2.  only reaches Core bodies a program calls (an import-everything probe, even with JET_DEBUG_LOWER_ALL=1, reports nothing), so no tool today can census a sema rule change across all of Core. Main is sweeping every Examples/ and tests/run program with the candidate s2 and lands one batch fix."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-06: A, calls never copy. Method owning arguments (push/add/extend…) are take parameters like keep(item): a read parameter or later-used name gives E0201/E0209 unless written .copy(). This follows D-CALLSITE-MARK2=A ('a call never copies on its own'). Cutover: the sema rule plus a collect-all codemod inserting .copy() (>=958 sites at census), in one commit. [item] and Box{items: item} are not covered by this ruling."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Per the owner ruling of 2026-11-06 (A, calls never copy; D-CALLSITE-MARK2=A): a UI fixture shows `rows.push(item)` on a read parameter `item: [Int]` and `keep(item)` with an owning parameter both report E0201, a later use of a passed name reports E0209, and both pass when written `item.copy()`; the collect-all codemod inserts `.copy()` at every existing site in the same commit. `[item]` and `Box{items: item}` are outside this ruling.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G6Meta-91 landed on dev 30da4aef91 (the codemod is c78da98b1b): the ui row tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet passes 1/1 on seed-b13 ($JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G6Meta-91/1.out).",
+          "at": "2026-11-12T11:08:42.747Z"
+        },
+        {
+          "n": 2,
+          "text": "A tests/cases row covers method calls, plain calls, operator hooks and trailing blocks with an owning argument taken from a read parameter, and passes with the admitted jet.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G6Meta-93 landed on dev b9687be981: tests/cases/ownership/read_param_owning_argument_is_one_rule_in_every_call_form.case passes 1/1 on seed-b13 (method, plain, operator-hook body and code-argument forms report E0201; the .copy() program checks clean and prints 5). Output: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G6Meta-93/1.out.",
+          "at": "2026-11-12T11:26:58.230Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "syntax",
+        "ownership",
+        "sema"
+      ],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T19:23:08.815Z",
+      "updated": "2026-11-12T11:27:06.548Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-12T11:27:06.548Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T11:29:21.210Z"
     }
   ]
 }

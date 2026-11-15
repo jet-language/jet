@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6976,
-    "rev": 106121,
+    "nextNum": 6977,
+    "rev": 106125,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -86711,76 +86711,6 @@
       "criteriaLastN": 16
     },
     {
-      "id": "c0pcddhe",
-      "num": 6611,
-      "title": "Passing a read parameter to a method's owning argument copies silently, while a plain call reports E0201",
-      "body": "Found by SyntaxOwner during the #6586 sweep (2026-11-06, dev 529e9d9ddd). With a read parameter `item: [Int]`, `rows.push(item)` is accepted silently: the list is copied into the owning argument. Passing the same value to a plain function whose parameter owns it, `keep(bag)`, reports E0201 MissingMoveMarker. One meaning must have one mechanism (I8): an owning argument position needs the same move or copy rule whether it belongs to a method call or a plain call, and sema decides it (I3).\n\nSettled by the owner ruling of 2026-11-06 (A, calls never copy; card log): method owning arguments are take parameters, so a read parameter or a later-used name gives E0201/E0209 unless written .copy(). The cutover is the sema rule plus a collect-all codemod inserting .copy(), in one commit.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "Both criteria are met."
-        },
-        {
-          "at": "2026-11-07",
-          "by": "Main",
-          "text": "Follow-up on c78da98b1b: the a0_030 candidate also rejects Core sites that the compiler build never reaches (Core/App/App.jet:307,310,312; Core/Web/Storage/Local.jet:22 and Session.jet:22; Core/Web/Browser.jet:1428), which broke 4 golden examples at o0-o2.  only reaches Core bodies a program calls (an import-everything probe, even with JET_DEBUG_LOWER_ALL=1, reports nothing), so no tool today can census a sema rule change across all of Core. Main is sweeping every Examples/ and tests/run program with the candidate s2 and lands one batch fix."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-06: A, calls never copy. Method owning arguments (push/add/extend…) are take parameters like keep(item): a read parameter or later-used name gives E0201/E0209 unless written .copy(). This follows D-CALLSITE-MARK2=A ('a call never copies on its own'). Cutover: the sema rule plus a collect-all codemod inserting .copy() (>=958 sites at census), in one commit. [item] and Box{items: item} are not covered by this ruling."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Per the owner ruling of 2026-11-06 (A, calls never copy; D-CALLSITE-MARK2=A): a UI fixture shows `rows.push(item)` on a read parameter `item: [Int]` and `keep(item)` with an owning parameter both report E0201, a later use of a passed name reports E0209, and both pass when written `item.copy()`; the collect-all codemod inserts `.copy()` at every existing site in the same commit. `[item]` and `Box{items: item}` are outside this ruling.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G6Meta-91 landed on dev 30da4aef91 (the codemod is c78da98b1b): the ui row tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet passes 1/1 on seed-b13 ($JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G6Meta-91/1.out).",
-          "at": "2026-11-12T11:08:42.747Z"
-        },
-        {
-          "n": 2,
-          "text": "A tests/cases row covers method calls, plain calls, operator hooks and trailing blocks with an owning argument taken from a read parameter, and passes with the admitted jet.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G6Meta-93 landed on dev b9687be981: tests/cases/ownership/read_param_owning_argument_is_one_rule_in_every_call_form.case passes 1/1 on seed-b13 (method, plain, operator-hook body and code-argument forms report E0201; the .copy() program checks clean and prints 5). Output: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G6Meta-93/1.out.",
-          "at": "2026-11-12T11:26:58.230Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "syntax",
-        "ownership",
-        "sema"
-      ],
-      "goals": [
-        "G10"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T19:23:08.815Z",
-      "updated": "2026-11-12T11:27:06.548Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-12T11:27:06.548Z"
-    },
-    {
       "id": "c0a8z3u0",
       "num": 6612,
       "title": "Tool symbol paths use `.`, not `::`: inspect, find, semindex, docs and the impact selector",
@@ -113632,6 +113562,69 @@
       "updated": "2026-11-15T11:21:08.208Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c07py9jv",
+      "num": 6976,
+      "title": "Shrink #Unsafe beyond memory: one typed syscall table, safe once-only runtime state, and no per-call regions for host leaves",
+      "body": "After the memory kernel (#6842) the inventory (jet Tools/agent/UnsafeRatchet.jet --inventory, p175) shows 842 #Unsafe regions in Compiler, the runtime, Core and Jetpack, and 0 outside the kernel files perform a raw memory action. 506 are not memory actions. By a first sort: about 160 runtime call sites each spell a raw Linux syscall (os_syscall_i64) inside their own region; about 52 write process-wide runtime state during start-up ('runs before any other thread exists'); about 48 are Core calls to private runtime host leaves; about 37 manage Secret zeroizing owners; 26 call crypto expert primitives; about 200 are unclassified. About 336 are raw memory actions inside the kernel files themselves. This card cuts the non-memory regions at their roots, so each unsafe fact is stated once in an audited home instead of at every call site.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The inventory's 'other' class is split into named classes (syscall, start-up state, host leaf, secret owner, crypto expert, and any further class the code shows), so no region is unclassified. Proof: jet Tools/agent/UnsafeRatchet.jet --inventory prints 0 under other, and its test pins one region per class.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:29:22.413Z"
+        },
+        {
+          "n": 2,
+          "text": "Syscalls: the OS layer has one typed wrapper per Linux syscall the runtime uses, each holding the only #Unsafe region for that syscall with its contract stated once. Runtime call sites call the wrappers and hold no region of their own. Proof: git grep -n os_syscall_i64 -- Compiler/JetRuntime outside the OS-layer wrapper file is empty, the inventory's syscall count equals the number of distinct syscalls, and the runtime fragment cases pass on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:29:23.344Z"
+        },
+        {
+          "n": 3,
+          "text": "Start-up state: runtime state written once before other threads exist goes through one audited once-only primitive, so its writers hold no region. Proof: the inventory's start-up-state count is 1, and the runtime fragment cases pass on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:29:24.265Z"
+        }
+      ],
+      "refs": [
+        "6842",
+        "6615",
+        "6851"
+      ],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T11:29:21.054Z",
+      "updated": "2026-11-15T11:29:24.265Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -217527,6 +217520,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T11:29:24.265Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07py9jv",
+      "note": "#3 Start-up state: runtime state written once before other thre"
+    },
+    {
+      "at": "2026-11-15T11:29:23.344Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07py9jv",
+      "note": "#2 Syscalls: the OS layer has one typed wrapper per Linux sysca"
+    },
+    {
+      "at": "2026-11-15T11:29:22.413Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07py9jv",
+      "note": "#1 The inventory's 'other' class is split into named classes (s"
+    },
+    {
+      "at": "2026-11-15T11:29:21.054Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c07py9jv",
+      "note": "Shrink #Unsafe beyond memory: one typed syscall table, safe once-only runtime state, and no per-call regions for host leaves"
+    },
     {
       "at": "2026-11-15T11:21:21.639Z",
       "by": "Main",
