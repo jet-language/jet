@@ -15,11 +15,11 @@
 // (Request.jet jet_cli_trace_sink), so the build's `core-embed` step shows it
 // in the build's trace (BuildExecute.jet jet_cli_build_step_traces).
 use {
+    embed_crypto: core.crypto
     embed_files: core.files
     embed_time: core.time
     jet_backend.[x64_executable_add_parts]
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
-    jet_foundation.[sha256_bytes, sha256_hex_bytes]
     jet_pkg_model.[JET_VERSION]
 }
 
@@ -75,5 +75,7 @@ jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriver
     JetDriverVerbOutput{stdout: "embed: {out}: {JET_CLI_RUNTIME_PART_FILES.len()} runtime parts from {runtime_dir}, identity {identity}, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// The sha256 of an executable's bytes, as a jet's identity names it.
-jet_cli_image_digest: fn(bytes: [U8]) -> String Never! { sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()])) }
+// The sha256 of an executable's bytes, as a jet's identity names it. Core's
+// digest runs on the host's SHA extensions where they exist, and the build's
+// `core-embed` step digests two executables of hundreds of megabytes.
+jet_cli_image_digest: fn(bytes: [U8]) -> String Never! { embed_crypto.sha256(bytes).hex() }
