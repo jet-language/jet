@@ -7,11 +7,13 @@
 // calls. The generated decode of a struct with a block returns
 // `T.validate(decoded)` (sema_serde_items_struct_decode_body).
 use jet_foundation.[
+    ASTTables,
     AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     Diagnostic,
     Expr,
+    ExprNode,
     Func,
     ImplConstValue,
     ImplDef,
@@ -25,6 +27,7 @@ use jet_foundation.[
     StructDef,
     Type,
     AST_EMPTY_CALL_ARG_FLAGS,
+    ast_expr,
     ast_func,
     ast_visit_expr,
     core_record_field,
@@ -49,12 +52,12 @@ SemaValidateRule: struct {
 // Rust `process_validate_blocks`: one generated impl per struct with a
 // non-empty block, after the written items. A block with a malformed rule
 // reports it and generates nothing.
-sema_validate_blocks: fn(items: &[Item], diagnostics: &[Diagnostic]) {
+sema_validate_blocks: fn(tables: ASTTables, items: &[Item], diagnostics: &[Diagnostic]) {
     generated := [Item]{}
     loop index in 0..<items.len() {
         if items[index] == .Struct(definition) {
             if definition.validate_block.len() == 0 -> next
-            implementation: sema_validate_impl(definition, diagnostics) ?? next
+            implementation: sema_validate_impl(tables, definition, diagnostics) ?? next
             generated.push(Item.Impl{value: implementation})
         }
     }
@@ -62,7 +65,7 @@ sema_validate_blocks: fn(items: &[Item], diagnostics: &[Diagnostic]) {
 }
 
 // Rust `synthesize_validate_impl`.
-sema_validate_impl: fn(definition: StructDef, diagnostics: &[Diagnostic]) -> ImplDef? {
+sema_validate_impl: fn(tables: ASTTables, definition: StructDef, diagnostics: &[Diagnostic]) -> ImplDef? {
     fields := [String:Bool]{}
     loop field in definition.fields -> fields[field.name] = true
     rules := [SemaValidateRule]{}
@@ -73,7 +76,7 @@ sema_validate_impl: fn(definition: StructDef, diagnostics: &[Diagnostic]) -> Imp
         }
     }
     if !valid -> return None
-    Val(sema_validate_build(definition, rules, definition.validate_span ?? definition.name_span))
+    Val(sema_validate_build(tables, definition, rules, definition.validate_span ?? definition.name_span))
 }
 
 // Rust `extract_check_rule`: `check(condition, at: field, message)` with a
@@ -125,10 +128,10 @@ sema_validate_e0354: fn(name: String, span: Span) -> Diagnostic Never! {
 // rule names is bound to `value.<field>` in the rules' own block, so the
 // rules and messages read exactly those fields and `value` stays the
 // parameter after the block.
-sema_validate_build: fn(definition: StructDef, rules: [SemaValidateRule], span: Span) -> ImplDef {
+sema_validate_build: fn(tables: ASTTables, definition: StructDef, rules: [SemaValidateRule], span: Span) -> ImplDef {
     fields := [String:Bool]{}
     loop field in definition.fields -> fields[field.name] = true
-    referenced: sema_validate_referenced_fields(rules, fields)
+    referenced: sema_validate_referenced_fields(tables, rules, fields)
     checks := [Stmt]{}
     loop name in referenced {
         checks.push(sema_serde_items_binding(name, None, sema_serde_items_field_read(SEMA_VALIDATE_VALUE, name, span), false, span))
@@ -163,18 +166,18 @@ sema_validate_build: fn(definition: StructDef, rules: [SemaValidateRule], span: 
 
 // The struct fields the rules' conditions and messages name, in order of
 // first reference.
-sema_validate_referenced_fields: fn(rules: [SemaValidateRule], fields: [String:Bool]) -> [String] {
+sema_validate_referenced_fields: fn(tables: ASTTables, rules: [SemaValidateRule], fields: [String:Bool]) -> [String] {
     found := [String]{}
     // Each visit is written at its call, where it takes the visitor's effect row.
     loop rule in rules {
-        ast_visit_expr(rule.cond, fn(expression: Expr) { sema_validate_note_name(fields, found, expression) })
-        ast_visit_expr(rule.message, fn(expression: Expr) { sema_validate_note_name(fields, found, expression) })
+        ast_visit_expr(tables, rule.cond, fn(expression: ExprNode) { sema_validate_note_name(tables, fields, found, expression) })
+        ast_visit_expr(tables, rule.message, fn(expression: ExprNode) { sema_validate_note_name(tables, fields, found, expression) })
     }
     found
 }
 
-sema_validate_note_name: fn(fields: [String:Bool], found: &[String], expression: Expr) Never! -[Mem.Alloc]> {
-    if expression == .Ident(name, _, _) {
+sema_validate_note_name: fn(tables: ASTTables, fields: [String:Bool], found: &[String], expression: ExprNode) Never! -[Mem.Alloc]> {
+    if ast_expr(tables, expression) == .Ident(name, _, _) {
         if fields.get(name) == None || found.contains(name) {
             return
         }

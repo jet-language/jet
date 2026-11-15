@@ -3,7 +3,7 @@
 use {
     jet_canvas.[Projection, canvas_graph_projection, json_bool, json_optional_str, json_str, json_strs, snippet, span_json]
     jet_driver.[JetDriverDocModule]
-    jet_foundation.[DerivationRecord, Expr, Func, ImportDecl, Item, NameDeclaration, NameLedger, NamedType, Span, TraitDef, TraitMethodSig, ast_visit_body, derivation_record_json, expr_span, foundation_byte_text, name_facts_leaf, name_ledger_display_path, name_ledger_display_path_at, name_ledger_visible, type_name]
+    jet_foundation.[ASTTables, DerivationRecord, ExprNode, Func, ImportDecl, Item, NameDeclaration, NameLedger, NamedType, Span, TraitDef, TraitMethodSig, ast_expr, ast_expr_span, ast_visit_body, derivation_record_json, foundation_byte_text, name_facts_leaf, name_ledger_display_path, name_ledger_display_path_at, name_ledger_visible, type_name]
     jet_semindex.[SemAnchor, SemDef, SemIndex, SemOutput, SemRef, SemStateGraph]
 }
 
@@ -190,43 +190,43 @@ canvas_game_fact_json: fn(fact: CanvasGameFact) -> String {
 // source order.
 canvas_game_facts: fn(source_id: String, src: String, entry_module: JetDriverDocModule) -> [CanvasGameFact] {
     facts := [CanvasGameFact]{}
-    collect_game_items(entry_module.items, source_id, src, facts)
+    collect_game_items(entry_module.tables, entry_module.items, source_id, src, facts)
     facts.sort_by(fn(left: CanvasGameFact, right: CanvasGameFact) { (left.source_span.start <=> right.source_span.start).then(left.source_span.end <=> right.source_span.end) })
     facts
 }
 
-collect_game_items: fn(items: [Item], source_id: String, src: String, out: &[CanvasGameFact]) {
+collect_game_items: fn(tables: ASTTables, items: [Item], source_id: String, src: String, out: &[CanvasGameFact]) {
     loop item in items {
         if item == .Func(function) {
-            ast_visit_body(function.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
+            ast_visit_body(tables, function.body, fn(expression: ExprNode) { note_game_call(tables, out, source_id, src, expression) }, true)
         } else if item == .Struct(structure) {
             loop method in structure.methods {
-                ast_visit_body(method.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
+                ast_visit_body(tables, method.body, fn(expression: ExprNode) { note_game_call(tables, out, source_id, src, expression) }, true)
             }
         } else if item == .Impl(implementation) {
             loop method in implementation.methods {
-                ast_visit_body(method.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
+                ast_visit_body(tables, method.body, fn(expression: ExprNode) { note_game_call(tables, out, source_id, src, expression) }, true)
             }
         } else if item == .CodeModule(module_value) {
-            if module_value.body == .Val(body) -> collect_game_items(body, source_id, src, out)
+            if module_value.body == .Val(body) -> collect_game_items(tables, body, source_id, src, out)
         }
     }
 }
 
 // Records `expression` when it is `….assets.image(path)`,
 // `….assets.sound(path)` or `.component<T>()` / `.component(value)`.
-note_game_call: fn(out: &[CanvasGameFact], source_id: String, src: String, expression: Expr) {
-    if expression == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) {
-        source_span: game_method_call_span(src, receiver, method_span)
+note_game_call: fn(tables: ASTTables, out: &[CanvasGameFact], source_id: String, src: String, expression: ExprNode) {
+    if ast_expr(tables, expression) == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) {
+        source_span: game_method_call_span(tables, src, receiver, method_span)
         operation := ""
         field := ""
         value_source := ""
         field_span := Span?{None}
-        if (method == "image" || method == "sound") && game_assets_receiver(receiver) {
+        if (method == "image" || method == "sound") && game_assets_receiver(tables, receiver) {
             if args.len() == 0 {
                 return
             }
-            span: expr_span(args[0].expr)
+            span: ast_expr_span(tables, args[0].expr)
             operation = "scene.assets.{method}"
             field = "path"
             value_source = snippet(src, span)
@@ -239,7 +239,7 @@ note_game_call: fn(out: &[CanvasGameFact], source_id: String, src: String, expre
                 value_source = type_name(written)
                 field_span = game_type_name_span(src, source_span, method_span, value_source)
             } else if args.len() > 0 {
-                span: expr_span(args[0].expr)
+                span: ast_expr_span(tables, args[0].expr)
                 value_source = snippet(src, span)
                 field_span = Val(span)
             } else {
@@ -264,22 +264,24 @@ note_game_call: fn(out: &[CanvasGameFact], source_id: String, src: String, expre
     }
 }
 
-game_assets_receiver: fn(expr: Expr) -> Bool {
-    if expr == .Field(_, name, _, _) -> return name == "assets"
-    if expr == .Paren(inner, _, _) -> return game_assets_receiver(inner)
+game_assets_receiver: fn(tables: ASTTables, expr: ExprNode) -> Bool {
+    view: ast_expr(tables, expr)
+    if view == .Field(_, name, _, _) -> return name == "assets"
+    if view == .Paren(inner, _, _) -> return game_assets_receiver(tables, inner)
     false
 }
 
-game_receiver_start: fn(expr: Expr) -> Int {
-    if expr == .Field(base, _, _, _) -> return game_receiver_start(base)
-    if expr == .Paren(base, _, _) -> return game_receiver_start(base)
-    expr_span(expr).start
+game_receiver_start: fn(tables: ASTTables, expr: ExprNode) -> Int {
+    view: ast_expr(tables, expr)
+    if view == .Field(base, _, _, _) -> return game_receiver_start(tables, base)
+    if view == .Paren(base, _, _) -> return game_receiver_start(tables, base)
+    ast_expr_span(tables, expr).start
 }
 
 // From the receiver chain's first byte through the call's closing paren.
-game_method_call_span: fn(src: String, receiver: Expr, method_span: Span) -> Span {
+game_method_call_span: fn(tables: ASTTables, src: String, receiver: ExprNode, method_span: Span) -> Span {
     close: call_close_after(src, method_span.end) ?? return method_span
-    Span{start: game_receiver_start(receiver), end: close}
+    Span{start: game_receiver_start(tables, receiver), end: close}
 }
 
 // The byte just past the `)` that closes the first `(` at or after `from`;

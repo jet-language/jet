@@ -927,11 +927,11 @@ jet_cli_codemod_parse_pattern: fn(atoms: [JetCLICodemodAtom], class: String) -> 
     if lexed.diagnostics.len() > 0 {
         return Err(jet_cli_codemod_error("AST pattern failed compiler lexing after capture substitution"))
     }
-    parsed: parse_generated_source(wrapped.bytes())
+    parsed := parse_generated_source(wrapped.bytes())
     if parsed.diagnostics.len() > 0 {
         return Err(jet_cli_codemod_error("AST pattern produced parser teaching diagnostics"))
     }
-    pattern_module := JetDriverDocModule{path: "<codemod-pattern>", physical_path: "<codemod-pattern>", alias: "pattern", source: wrapped.copy(), items: parsed.program.items.copy(), block_spans: parsed.program.block_spans.copy(), imports: parsed.program.imports.copy()}
+    pattern_module := JetDriverDocModule{path: "<codemod-pattern>", physical_path: "<codemod-pattern>", alias: "pattern", source: wrapped.copy(), items: parsed.program.items.copy(), block_spans: parsed.program.block_spans.copy(), imports: parsed.program.imports.copy(), tables: parsed.program.tables.move()}
     index: semindex_build([JetDriverDocModule]{pattern_module}, jet_cli_effect_projection(jet_cli_policy_authority([String]{}, None)))
     root := -1
     width := -1

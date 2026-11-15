@@ -1,6 +1,6 @@
 // Rust GateLedger unit cases, plus source projection through production visitors.
 use {
-    jet_foundation.[Expr, GateEntry, GateKind, GateLedger, GateSet, NameFacts, NameLedger, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span, StructureFact, StructureFactKind, ast_visit_statement, gate_kind_parse, gate_kind_policy_key, gate_ledger_push, gate_ledger_sort, gate_source_entry, name_ledger_from_facts]
+    jet_foundation.[ExprNode, GateEntry, GateKind, GateLedger, GateSet, NameFacts, NameLedger, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span, StructureFact, StructureFactKind, ast_stmt, ast_visit_statement, gate_kind_parse, gate_kind_policy_key, gate_ledger_push, gate_ledger_sort, gate_source_entry, name_ledger_from_facts]
     jet_parser.[parse_source]
     jet_sema.[SemaGateContext, SemaGateModule, SemaGateVisitor, UnsafeGateInspection, sema_gate_append_structure, sema_gate_checked_raw, sema_gate_checked_text_names, sema_gate_ledger_collect, sema_gate_policy_diagnostics, sema_unsafe_inspect]
 }
@@ -38,13 +38,14 @@ gate_test_callback_borrow: fn(rows: [SemaGateModule], projected: GateLedger) Nev
     inspection: sema_unsafe_inspect(rows, GateSet{})
     context: Shared{SemaGateContext{checked_text_types: [String:Bool]{}, unsafe_gates: inspection.gates}}
     seed: gate_test_entry(GateKind.TrustGrant, "seed", 0)
-    wrapped := SemaGateVisitor{source: "app.jet", ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}
-    reference := SemaGateVisitor{source: "app.jet", ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}
+    tables: rows[0].program.tables
+    wrapped := SemaGateVisitor{source: "app.jet", tables: tables, ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}
+    reference := SemaGateVisitor{source: "app.jet", tables: tables, ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}
     loop item in rows[0].program.items {
         if item == .Func(function) {
             loop statement in function.body {
-                ast_visit_statement(statement, fn(expression: Expr) { wrapped.visit(expression) }, false)
-                if statement == .Val(binding) -> reference.visit(binding.init)
+                ast_visit_statement(tables, statement, fn(expression: ExprNode) { wrapped.visit(expression) }, false)
+                if ast_stmt(tables, statement) == .Val(binding) -> reference.visit(binding.init)
             }
         }
     }

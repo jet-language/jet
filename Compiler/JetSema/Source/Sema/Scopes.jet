@@ -5,6 +5,7 @@ use jet_foundation.[
     symbol_local_keys_find,
     AccessConvention,
     AST_NODE_GENERATED,
+    ASTTables,
     ArithmeticPolicyFact,
     BodyExpr,
     BodyNode,
@@ -672,6 +673,8 @@ SemaScopeEnvironment: struct {
     fixed_length_write_params: [String]{[String]{}}
     // The module's `debug(…)` call texts, from the parser.
     debug_sites: [DebugTraceSite]{[DebugTraceSite]{}}
+    // The module's AST tables, from the parser: its nodes' handles index them.
+    tables: ASTTables{ASTTables{}}
     // The enclosing named callable being checked; panic and propagation
     // locations name it (Rust `capture_panic_loc` `fn_name`).
     function_name: String{""}
@@ -1357,6 +1360,7 @@ sema_scope_environment_enter_module: fn(environment: &SemaScopeEnvironment, prog
         environment.comptime_body_values = comptime_body_values.move()
         environment.else_arms = graph.modules[module_index].program.else_arms
         environment.debug_sites = graph.modules[module_index].program.debug_sites
+        environment.tables = graph.modules[module_index].program.tables
         environment.function_name = ""
         return
     }
@@ -1384,6 +1388,7 @@ sema_scope_environment_enter_probe_module: fn(environment: &SemaScopeEnvironment
         environment.comptime_body_values = comptime_body_values.move()
         environment.else_arms = [ElseArmSpan]{}
         environment.debug_sites = graph.modules[module_index].program.debug_sites
+        environment.tables = graph.modules[module_index].program.tables
         environment.function_name = ""
         return true
     }
@@ -1405,6 +1410,18 @@ sema_scope_caller_index: fn(environment: SemaScopeEnvironment, graph: SemaRegist
         return Val(row)
     }
     sema_registration_module_index(graph, environment.module_identity)
+}
+
+// The AST tables of the module that declares a node: the environment's own
+// for its module, else that module's from the graph. None when no graph
+// registers the module.
+sema_scope_module_tables: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID) -> ASTTables? Never! {
+    if module_identity == environment.module_identity -> return Val(environment.tables)
+    if program.registration_graph == .Val(graph) {
+        module_index: sema_registration_module_index(graph, module_identity) ?? return None
+        return Val(graph.modules[module_index].program.tables)
+    }
+    None
 }
 
 sema_scope_environment_boxed_edge: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: SymbolID, edge: String) -> Bool Never! {

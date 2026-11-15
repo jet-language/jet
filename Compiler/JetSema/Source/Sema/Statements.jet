@@ -2,6 +2,7 @@
 // control-flow constructs whose checked tree carries no registry-owned facts.
 use jet_foundation.[
     AST_NODE_GENERATED,
+    ASTTables,
     AccessConvention,
     ArithmeticOperation,
     BinOp,
@@ -15,6 +16,7 @@ use jet_foundation.[
     DiagnosticFixSafety,
     EffectRowEntry,
     Expr,
+    ExprNode,
     IndexKind,
     LValue,
     Lambda,
@@ -41,6 +43,7 @@ use jet_foundation.[
     PlaceAccess,
     Span,
     Stmt,
+    StmtNode,
     SwitchArm,
     Symbol,
     SymbolID,
@@ -75,6 +78,8 @@ use jet_foundation.[
     ViewSourcePath,
     ViewSourceProjection,
     ast_binding,
+    ast_expr,
+    ast_stmt,
     AST_EMPTY_CALL_ARG_FLAGS,
     ast_visit_body,
     ast_visit_statement,
@@ -799,7 +804,7 @@ sema_stmt_lint_walk_filter: fn(var: String, collection: Expr, body: [Stmt], envi
             return
         }
         facts := SemaStmtWalkFacts{path_uses: 0, path_bases: [Int]{}, variable_uses: [Int]{}, fallback_exit: false}
-        ast_visit_statement(body[index], fn(expression: Expr) { sema_stmt_note_walk_use(facts, var, expression) }, true)
+        ast_visit_statement(environment.tables, body[index], fn(expression: ExprNode) { sema_stmt_note_walk_use(facts, var, ast_expr(environment.tables, expression)) }, true)
         if facts.fallback_exit {
             return
         }
@@ -1966,11 +1971,11 @@ sema_stmt_check_through: fn(arms: [SwitchArm], index: Int, else_body: [Stmt]?, t
     }
     if index + 1 < arms.len() {
         names := [BindName]{}
-        ast_visit_expr(arms[index + 1].cond, fn(value: Expr) { sema_stmt_through_bound_names(value, names) })
+        ast_visit_expr(environment.tables, arms[index + 1].cond, fn(value: ExprNode) { sema_stmt_through_bound_names(ast_expr(environment.tables, value), names) })
         if names.len() > 0 {
             scan := SemaStmtThroughScan{names: [String]{}, found: None}
             loop bound in names -> scan.names.push(bound.name)
-            ast_visit_body(arms[index + 1].body, fn(value: Expr) { sema_stmt_through_note_read(scan, value) }, false)
+            ast_visit_body(environment.tables, arms[index + 1].body, fn(value: ExprNode) { sema_stmt_through_note_read(scan, ast_expr(environment.tables, value)) }, false)
             if scan.found == .Val(read) {
                 diagnostics.push(sema_error("E1127", read.span, "`{read.name}` is bound by this arm, so an arm before it cannot run on into it", "`#Through` on the arm before runs this body without testing this arm's pattern, so `{read.name}` holds no value then", "remove `#Through` from the arm before, or read the value without the pattern binding"))
                 return false
@@ -5031,12 +5036,12 @@ sema_stmt_refutable_loop_labels: fn(nested_labels: [String], label: NamedSpan?) 
 // E0513: a `loop i := start, cond { … }` whose condition reads the mutable
 // header binding while neither the body nor the step writes it, and whose
 // body can return to the condition, re-tests unchanged state.
-sema_stmt_check_state_loop_unchanged: fn(init: Binding, cond: Expr, step: Stmt?, body: [Stmt], label: NamedSpan?, diagnostics: &[Diagnostic]) Never! {
-    if !init.mutable || init.name.is_empty() || !sema_stmt_expr_mentions(cond, init.name) || sema_stmt_state_body_writes(body, init.name) {
+sema_stmt_check_state_loop_unchanged: fn(tables: ASTTables, init: Binding, cond: Expr, step: Stmt?, body: [Stmt], label: NamedSpan?, diagnostics: &[Diagnostic]) Never! {
+    if !init.mutable || init.name.is_empty() || !sema_stmt_expr_mentions(tables, cond, init.name) || sema_stmt_state_body_writes(tables, body, init.name) {
         return
     }
     if step == .Val(step_statement) {
-        if sema_stmt_state_writes(step_statement, init.name) {
+        if sema_stmt_state_writes(tables, step_statement, init.name) {
             return
         }
     }
@@ -5053,9 +5058,9 @@ SemaStmtNameScan: struct {
     found: Bool
 }
 
-sema_stmt_expr_mentions: fn(expression: Expr, name: String) -> Bool Never! {
+sema_stmt_expr_mentions: fn(tables: ASTTables, expression: ExprNode, name: String) -> Bool Never! {
     scan := SemaStmtNameScan{name: name, found: false}
-    ast_visit_expr(expression, fn(value: Expr) { sema_stmt_note_name_mention(scan, value) })
+    ast_visit_expr(tables, expression, fn(value: ExprNode) { sema_stmt_note_name_mention(scan, ast_expr(tables, value)) })
     scan.found
 }
 
@@ -5065,9 +5070,9 @@ sema_stmt_note_name_mention: fn(scan: &SemaStmtNameScan, value: Expr) Never! {
     }
 }
 
-sema_stmt_state_body_writes: fn(body: [Stmt], name: String) -> Bool Never! {
+sema_stmt_state_body_writes: fn(tables: ASTTables, body: [StmtNode], name: String) -> Bool Never! {
     loop statement in body {
-        if sema_stmt_state_writes(statement, name) -> return true
+        if sema_stmt_state_writes(tables, statement, name) -> return true
     }
     false
 }
@@ -5075,13 +5080,14 @@ sema_stmt_state_body_writes: fn(body: [Stmt], name: String) -> Bool Never! {
 // Rust statement_writes_name: an assignment rooted at `name` anywhere in the
 // statement, or an expression that writes it (a write place or argument, a
 // method call on it, or an assignment inside a lambda, `if` or fallback body).
-sema_stmt_state_writes: fn(statement: Stmt, name: String) -> Bool Never! {
-    if statement == .Assign(target, _, _, _) {
+sema_stmt_state_writes: fn(tables: ASTTables, statement: StmtNode, name: String) -> Bool Never! {
+    view: ast_stmt(tables, statement)
+    if view == .Assign(target, _, _, _) {
         if sema_stmt_lvalue_root_is(target, name) -> return true
     }
-    if sema_stmt_state_nested_writes(statement, name) -> return true
+    if sema_stmt_state_nested_writes(tables, view, name) -> return true
     scan := SemaStmtNameScan{name: name, found: false}
-    ast_visit_statement(statement, fn(value: Expr) { sema_stmt_note_state_write(scan, value) }, true)
+    ast_visit_statement(tables, statement, fn(value: ExprNode) { sema_stmt_note_state_write(tables, scan, ast_expr(tables, value)) }, true)
     scan.found
 }
 
@@ -5093,32 +5099,36 @@ sema_stmt_lvalue_root_is: fn(target: LValue, name: String) -> Bool Never! {
     }
 }
 
-sema_stmt_state_nested_writes: fn(statement: Stmt, name: String) -> Bool Never! {
+sema_stmt_state_nested_writes: fn(tables: ASTTables, statement: Stmt, name: String) -> Bool Never! {
     if statement == {
-        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> return sema_stmt_state_body_writes(body, name)
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> return sema_stmt_state_body_writes(tables, body, name)
         .CountedLoop(_, _, step, body, _, _, _) -> {
             if step == .Val(step_statement) {
-                if sema_stmt_state_writes(step_statement, name) -> return true
+                if sema_stmt_state_writes(tables, step_statement, name) -> return true
             }
-            return sema_stmt_state_body_writes(body, name)
+            return sema_stmt_state_body_writes(tables, body, name)
         }
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
             loop arm in arms {
-                if sema_stmt_state_body_writes(arm.body, name) -> return true
+                if sema_stmt_state_body_writes(tables, arm.body, name) -> return true
             }
-            if else_body == .Val(fallback) -> return sema_stmt_state_body_writes(fallback, name)
+            if else_body == .Val(fallback) {
+                return sema_stmt_state_body_writes(tables, fallback, name)
+            }
             return false
         }
         .ComptimeIf(_, _, then_body, else_body, _, _) -> {
-            if sema_stmt_state_body_writes(then_body, name) -> return true
-            if else_body == .Val(fallback) -> return sema_stmt_state_body_writes(fallback, name)
+            if sema_stmt_state_body_writes(tables, then_body, name) -> return true
+            if else_body == .Val(fallback) {
+                return sema_stmt_state_body_writes(tables, fallback, name)
+            }
             return false
         }
         .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> return false
     }
 }
 
-sema_stmt_note_state_write: fn(scan: &SemaStmtNameScan, value: Expr) Never! {
+sema_stmt_note_state_write: fn(tables: ASTTables, scan: &SemaStmtNameScan, value: Expr) Never! {
     if scan.found {
         return
     }
@@ -5141,18 +5151,18 @@ sema_stmt_note_state_write: fn(scan: &SemaStmtNameScan, value: Expr) Never! {
         }
         .Lambda(lambda, _) -> {
             if lambda.body == .Block(body) {
-                if sema_stmt_state_body_writes(body, scan.name) -> scan.found = true
+                if sema_stmt_state_body_writes(tables, body, scan.name) -> scan.found = true
             }
         }
         .If(_, then_body, _, else_body, _, _, _) -> {
-            if sema_stmt_state_body_writes(then_body, scan.name) || sema_stmt_state_body_writes(else_body, scan.name) {
+            if sema_stmt_state_body_writes(tables, then_body, scan.name) || sema_stmt_state_body_writes(tables, else_body, scan.name) {
                 scan.found = true
             }
         }
         .OrFallback(_, fallback, _, _, _) -> {
             if fallback == {
                 .Block(body, _, _) -> {
-                    if sema_stmt_state_body_writes(body, scan.name) -> scan.found = true
+                    if sema_stmt_state_body_writes(tables, body, scan.name) -> scan.found = true
                 }
                 .Panic(_, args) -> {
                     if sema_stmt_args_write_name(args, scan.name) -> scan.found = true
@@ -6718,11 +6728,11 @@ sema_stmt_uninit_fill_loop: fn(state: &SemaOwnershipState, scopes: SemaScopeTabl
 // value holds no branch or fallback that could leave the pass before the
 // write. When the index is a variable the loop body could change, the value
 // holds no call or lambda either.
-sema_stmt_uninit_fill_write: fn(statement: Stmt, index_name: String, index_mutable: Bool) -> String? {
+sema_stmt_uninit_fill_write: fn(tables: ASTTables, statement: Stmt, index_name: String, index_mutable: Bool) -> String? {
     if statement == .Assign(target, op, _, value) {
         if op != None -> return None
         leaves := [Bool]{}
-        ast_visit_expr(value, fn(expression: Expr) { sema_stmt_uninit_fill_note_exit(leaves, expression, index_mutable) })
+        ast_visit_expr(tables, value, fn(expression: ExprNode) { sema_stmt_uninit_fill_note_exit(leaves, ast_expr(tables, expression), index_mutable) })
         if leaves.len() > 0 -> return None
         if target == .Index(base, index, _, _) && base == .Ident(root, _, _) && index == .Ident(name, _, _) {
             if name == index_name && root != index_name -> return Val(root)
@@ -6752,7 +6762,7 @@ sema_stmt_uninit_fill_bound: fn(condition: Expr, index_name: String) -> Int? {
 
 // `loop index in 0..<count { root[index] = value … }`: the index is fixed
 // for each pass, and no `break` cuts the passes short.
-sema_stmt_uninit_fill_range: fn(state: &SemaOwnershipState, scopes: SemaScopeTable, index_name: String, start: Expr, end: Expr, step: Expr?, exclusive: Bool, body: [Stmt]) Never! {
+sema_stmt_uninit_fill_range: fn(tables: ASTTables, state: &SemaOwnershipState, scopes: SemaScopeTable, index_name: String, start: Expr, end: Expr, step: Expr?, exclusive: Bool, body: [Stmt]) Never! {
     if state.uninit.len() == 0 || step != None || body.len() == 0 {
         return
     }
@@ -6760,7 +6770,7 @@ sema_stmt_uninit_fill_range: fn(state: &SemaOwnershipState, scopes: SemaScopeTab
         if sema_stmt_refutable_loop_body_can_break(body) {
             return
         }
-        root: sema_stmt_uninit_fill_write(body[0], index_name, false) ?? return
+        root: sema_stmt_uninit_fill_write(tables, body[0], index_name, false) ?? return
         sema_stmt_uninit_fill_loop(state, scopes, root, if exclusive -> last else -> last + 1)
     }
 }
@@ -6769,7 +6779,7 @@ sema_stmt_uninit_fill_range: fn(state: &SemaOwnershipState, scopes: SemaScopeTab
 // the same loop as `index := 0` then `loop index < count { root[index] =
 // value; index += 1 }`: the body is only the write (and the step), so the
 // index changes nowhere else.
-sema_stmt_uninit_fill_counted: fn(state: &SemaOwnershipState, scopes: SemaScopeTable, start: Binding, condition: Expr, step: Stmt?, body: [Stmt]) Never! {
+sema_stmt_uninit_fill_counted: fn(tables: ASTTables, state: &SemaOwnershipState, scopes: SemaScopeTable, start: Binding, condition: Expr, step: Stmt?, body: [Stmt]) Never! {
     if state.uninit.len() == 0 {
         return
     }
@@ -6784,7 +6794,7 @@ sema_stmt_uninit_fill_counted: fn(state: &SemaOwnershipState, scopes: SemaScopeT
         if !stepped {
             return
         }
-        root: sema_stmt_uninit_fill_write(body[0], start.name, true) ?? return
+        root: sema_stmt_uninit_fill_write(tables, body[0], start.name, true) ?? return
         sema_stmt_uninit_fill_loop(state, scopes, root, count)
     }
 }
@@ -10078,7 +10088,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         if !sema_stmt_close_loop_value_frame(context, loop_frame_index, nested.value, state, loop_fork, false, true, environment, program, diagnostics) {
                             valid = false
                         }
-                        sema_stmt_uninit_fill_range(state, scopes, var, start_expr, end_expr, step_expr, exclusive, body)
+                        sema_stmt_uninit_fill_range(environment.tables, state, scopes, var, start_expr, end_expr, step_expr, exclusive, body)
                         if {
                             !valid -> complete = false
                             else -> {
@@ -10335,7 +10345,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                     }
                 }
                 init_tree := sema_stmt_check_binding(init, init_lambda_escapes, environment, program, scopes, state, tail_store, context, diagnostics)
-                sema_shared_access_lint_busy_wait(cond, body, scopes, diagnostics)
+                sema_shared_access_lint_busy_wait(environment.tables, cond, body, scopes, diagnostics)
                 cond_tree := sema_check_expression(cond, None, environment, program, scopes, state, tail_store, context, diagnostics)
                 cond_valid := cond_tree != None
                 if cond_tree != None && sema_stmt_condition_type(cond_tree) != Type.Bool {
@@ -10363,9 +10373,9 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 if !sema_stmt_close_loop_value_frame(context, loop_frame_index, nested.value, state, loop_fork, true, true, environment, program, diagnostics) {
                     loop_scope_valid = false
                 }
-                sema_stmt_uninit_fill_counted(state, scopes, init, cond, step, body)
+                sema_stmt_uninit_fill_counted(environment.tables, state, scopes, init, cond, step, body)
                 // The unchanged-state check runs once the statement is checked.
-                sema_stmt_check_state_loop_unchanged(init, cond, step, body, label, diagnostics)
+                sema_stmt_check_state_loop_unchanged(environment.tables, init, cond, step, body, label, diagnostics)
                 if {
                     init_tree == None || !cond_valid || !nested.complete || !step_valid || !loop_scope_valid -> {
                         complete = false
@@ -10386,7 +10396,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 }
             }
             .While(condition, body, span, arrow_body, label) -> {
-                sema_shared_access_lint_busy_wait(condition, body, scopes, diagnostics)
+                sema_shared_access_lint_busy_wait(environment.tables, condition, body, scopes, diagnostics)
                 // `loop items.pop() == .Val(item) { … }` binds the payload for
                 // each pass, checked as `loop { if items.pop() == .Val(item) { … }
                 // else { break } }` so the pattern test runs before every pass.
@@ -10432,10 +10442,10 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                             loop_scope_valid = false
                         }
                         if index > 0 && statements[index - 1] == .Val(previous) {
-                            sema_stmt_uninit_fill_counted(state, scopes, previous, condition, None, body)
+                            sema_stmt_uninit_fill_counted(environment.tables, state, scopes, previous, condition, None, body)
                         }
                         if nested.complete && loop_scope_valid {
-                            sema_single_use_note_drain(state, condition, body, scopes)
+                            sema_single_use_note_drain(environment.tables, state, condition, body, scopes)
                         }
                         if {
                             !nested.complete || !loop_scope_valid -> complete = false

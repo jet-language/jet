@@ -15,6 +15,7 @@ use jet_foundation.[
     Diagnostic,
     Effect,
     Expr,
+    ASTTables,
     ExternFn,
     Field,
     Func,
@@ -245,6 +246,8 @@ SemaTaintSnapshot: struct {
 SemaTaintFlowState: struct {
     catalog: SemaTaintCatalog
     module_identity: ModuleID
+    // The AST tables of the module walked now.
+    tables: ASTTables{ASTTables{}}
     bindings: [SemaTaintBindingFact]
     // The scope (SemaTaintModuleScope) of each module the state walked,
     // built on its first walk and read by every later one: its row by module
@@ -1263,7 +1266,7 @@ sema_taint_tags_of: fn(state: &SemaTaintFlowState, expression: Expr) -> [String]
         // A left-leaning chain (`a + b + c …`) costs no stack per operator.
         .Binary(_, left, right, _, _) -> {
             tags := [String]{}
-            loop operand in expr_binary_operands(left, right) {
+            loop operand in expr_binary_operands(state.tables, left, right) {
                 sema_taint_union(tags, sema_taint_tags_of(state, operand))
             }
             return tags
@@ -2366,8 +2369,12 @@ sema_taint_crossing_walk: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlow
     // The walked module's scope replaces the caller's, which comes back
     // after the walk; a walk in the caller's own module keeps it.
     saved_scope: state.scope_at
+    saved_tables: state.tables
     if module_identity.id != state.module_identity.id {
         state.scope_at = sema_taint_scope_row(graph, state, module_identity)
+        if sema_registration_module_index(graph, module_identity) == .Val(walked_index) {
+            state.tables = graph.modules[walked_index].program.tables
+        }
     }
     saved_fixed: state.fixed_tags.copy()
     saved_bindings: state.bindings.copy()
@@ -2422,6 +2429,7 @@ sema_taint_crossing_walk: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlow
     }
     state.module_identity = saved_module
     state.scope_at = saved_scope
+    state.tables = saved_tables
     state.fixed_tags = saved_fixed
     state.bindings = saved_bindings
     state.diagnostics = saved_diagnostics
@@ -2694,7 +2702,7 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
         // A left-leaning chain (`a + b + c …`) costs no stack per operator.
         .Binary(_, left, right, _, _) -> {
             sema_taint_check_binary_chain(state, expression)
-            loop operand in expr_binary_operands(left, right) {
+            loop operand in expr_binary_operands(state.tables, left, right) {
                 sema_taint_check_expr(graph, state, operand)
             }
         }
@@ -3306,6 +3314,7 @@ sema_taint_finish_body: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSt
 sema_taint_check_module: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_index: Int, found: &[Diagnostic]) {
     state.masked = [Span]{}
     state.module_identity = graph.modules[module_index].module_identity
+    state.tables = graph.modules[module_index].program.tables
     state.scope_at = sema_taint_scope_row(graph, state, graph.modules[module_index].module_identity)
     state.fixed_tags = sema_taint_fixed_tags(graph, state.catalog, state.module_identity)
     loop item in graph.modules[module_index].program.items {

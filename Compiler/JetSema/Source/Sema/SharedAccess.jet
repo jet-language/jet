@@ -4,6 +4,7 @@
 // the callback argument is tagged with CallArgFlags.shared_access_desugar so
 // retired user-written Shared.read/edit spelling cannot reach this route.
 use jet_foundation.[
+    ASTTables,
     AST_NODE_GENERATED,
     AccessConvention,
     BinOp,
@@ -11,6 +12,7 @@ use jet_foundation.[
     Diagnostic,
     EffectRowEntry,
     Expr,
+    ExprNode,
     LValue,
     Lambda,
     LambdaBody,
@@ -21,6 +23,7 @@ use jet_foundation.[
     Stmt,
     Type,
     ast_binding,
+    ast_expr,
     AST_EMPTY_CALL_ARG_FLAGS,
     ast_empty_lambda_meta,
     ast_visit_body,
@@ -513,10 +516,10 @@ sema_shared_access_place_call_transaction: fn(expr: Expr, environment: SemaScope
 // that polls a field of a `Shared` handle, with no wait point, sleep, channel
 // receive, or write to the polled field in its body, spins a core. Runs on the
 // parsed condition and body before they are checked.
-sema_shared_access_lint_busy_wait: fn(condition: Expr, body: [Stmt], scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+sema_shared_access_lint_busy_wait: fn(tables: ASTTables, condition: Expr, body: [Stmt], scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     handles := [String]{}
     members := [String]{}
-    ast_visit_expr(condition, fn(expression: Expr) { sema_shared_access_note_field_read(handles, members, expression) })
+    ast_visit_expr(tables, condition, fn(expression: ExprNode) { sema_shared_access_note_field_read(handles, members, ast_expr(tables, expression)) })
     poll := -1
     loop index in 0..<handles.len() {
         if sema_shared_access_name_is_shared(handles[index], scopes) {
@@ -528,7 +531,7 @@ sema_shared_access_lint_busy_wait: fn(condition: Expr, body: [Stmt], scopes: Sem
         return
     }
     blocking := false
-    ast_visit_body(body, fn(expression: Expr) { sema_shared_access_note_blocking_call(blocking, expression) }, true)
+    ast_visit_body(tables, body, fn(expression: ExprNode) { sema_shared_access_note_blocking_call(blocking, ast_expr(tables, expression)) }, true)
     if blocking || sema_shared_access_statements_write_field(body, handles[poll], members[poll]) {
         return
     }

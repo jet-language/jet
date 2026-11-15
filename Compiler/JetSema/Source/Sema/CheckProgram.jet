@@ -2226,7 +2226,7 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
         loop diagnostic in job_diagnostics -> diagnostics.push(diagnostic)
         complete = false
     }
-    loop diagnostic in sema_scope_members_check(source_program.items) {
+    loop diagnostic in sema_scope_members_check(source_program.tables, source_program.items) {
         diagnostics.push(diagnostic)
     }
     environment := sema_scope_environment_init(module_none(), "", module_name, source_file, SemaSourceOrigin.Snapshot, source_segments, local_declarations)
@@ -2236,6 +2236,7 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
     program.symbols = symbols.move()
     environment.else_arms = source_program.else_arms
     environment.debug_sites = source_program.debug_sites
+    environment.tables = source_program.tables
     environment.fixed_length_write_params = sema_fixed_length_write_params(source_program.items)
 
     item_index = 0
@@ -3661,12 +3662,12 @@ sema_check_registration_module_program: fn(environment: SemaScopeEnvironment, pr
             module_result.incomplete_reasons.push("invalid job names")
         }
         // `check`: structural `.member { … }` checks in every mode.
-        loop diagnostic in sema_scope_members_check(graph.modules[module_index].program.items) {
+        loop diagnostic in sema_scope_members_check(graph.modules[module_index].program.tables, graph.modules[module_index].program.items) {
             module_result.diagnostics.push(diagnostic)
         }
         // `infer_module_footprints`: a stated receiver footprint names stored
         // fields and covers its body (E0231).
-        loop diagnostic in sema_footprint_check(graph.modules[module_index].program.items) {
+        loop diagnostic in sema_footprint_check(graph.modules[module_index].program.tables, graph.modules[module_index].program.items) {
             module_result.diagnostics.push(diagnostic)
         }
         // Typestate declarations are bundle-wide; collect that view only for
@@ -3883,7 +3884,7 @@ sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, progr
                 if checked_test.function == .Val(function) {
                     module_result.injected_function_keys.push(function.key)
                     module_result.functions.push(function)
-                    module_result.tests.push(checked_test_artifact_fact(environment.module_identity, module_text(graph.module_table, environment.module_identity), test, graph.modules[module_index].source))
+                    module_result.tests.push(checked_test_artifact_fact(environment.tables, environment.module_identity, module_text(graph.module_table, environment.module_identity), test, graph.modules[module_index].source))
                 }
             }
         }

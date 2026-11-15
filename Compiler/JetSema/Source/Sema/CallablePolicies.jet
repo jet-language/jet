@@ -1,6 +1,6 @@
 // Checked package settings become ordinary wrapper
 // functions and the existing TFnValueKind.Policy carrier. No backend policy.
-use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, MARKER_ALLOW, MARKER_CONTEXT_KEY, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NamedSpan, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_key_text]
+use jet_foundation.[ASTTables, AccessConvention, Call, Diagnostic, Expr, ExprNode, Func, Item, MARKER_ALLOW, MARKER_CONTEXT_KEY, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NamedSpan, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_expr, ast_func, ast_visit_statement, symbol_key_text]
 
 sema_policy_builtin: fn(name: String) -> Bool Never! {
     name == "cache" || name == "retry" || name == "trace" || name == "registration" || name == "route"
@@ -44,8 +44,8 @@ sema_policy_note_use: fn(names: &[NamedSpan], name: String, span: Span) Never! {
 SemaPolicyUses: struct {
     uses: [String:[NamedSpan]]
 
-    visit: fn(&self, expression: Expr) Never! {
-        if expression == .Call(call, _) && call.name == "apply" && call.args.len() > 0 {
+    visit: fn(&self, tables: ASTTables, expression: ExprNode) Never! {
+        if ast_expr(tables, expression) == .Call(call, _) && call.name == "apply" && call.args.len() > 0 {
             if call.args[call.args.len() - 1].expr == .Ident(target, _, _) {
                 names := self.uses.get(target) ?? [NamedSpan]{}
                 loop index in 0..<(call.args.len() - 1) {
@@ -62,12 +62,12 @@ SemaPolicyUses: struct {
 // Registration runs this after inline-module lifting, before signature and
 // body passes, so generated wrappers receive exactly the ordinary checks.
 sema_policy_materialize: fn(program: &Program, declarations: [UserPolicyDecl], module_identity: String, source_file: String, origin: SemaSourceOrigin, segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) {
-    generated: sema_policy_wrappers(program.items, declarations, module_identity, source_file, origin, segments, diagnostics)
+    generated: sema_policy_wrappers(program.tables, program.items, declarations, module_identity, source_file, origin, segments, diagnostics)
     loop item in generated -> program.items.push(item)
 }
 
 // The policy wrappers `items` call for; each item is read in place.
-sema_policy_wrappers: fn(items: [Item], declarations: [UserPolicyDecl], module_identity: String, source_file: String, origin: SemaSourceOrigin, segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> [Item] {
+sema_policy_wrappers: fn(tables: ASTTables, items: [Item], declarations: [UserPolicyDecl], module_identity: String, source_file: String, origin: SemaSourceOrigin, segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> [Item] {
     uses := [String:[NamedSpan]]{}
     loop item in items {
         if item == .Func(function) {
@@ -78,7 +78,7 @@ sema_policy_wrappers: fn(items: [Item], declarations: [UserPolicyDecl], module_i
             }
             visitor := SemaPolicyUses{uses: uses.move()}
             loop statement in function.body {
-                ast_visit_statement(statement, fn(expression: Expr) { visitor.visit(expression) }, true)
+                ast_visit_statement(tables, statement, fn(expression: ExprNode) { visitor.visit(tables, expression) }, true)
             }
             uses = visitor.uses.move()
         }

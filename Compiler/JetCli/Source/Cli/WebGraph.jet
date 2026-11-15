@@ -4,8 +4,8 @@
 // as written; no user code runs and no source text is searched.
 use {
     jet_driver.[JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK]
-    jet_foundation.[AppRouteRoot, CallArg, Expr, Field, Func, Item, Marker, Span, StructDef, Type, UnOp, WebPartitionMarker]
-    jet_foundation.[app_entry_run_fn, app_route_file_address, ast_visit_body, diagnostic_column_at, diagnostic_line_at, failure_contract_of_function, owned_trait_codec_marker, sha256_bytes, sha256_hex, type_name]
+    jet_foundation.[ASTTables, AppRouteRoot, CallArg, Expr, ExprNode, Field, Func, Item, Marker, Span, StructDef, Type, UnOp, WebPartitionMarker]
+    jet_foundation.[app_entry_run_fn, app_route_file_address, ast_expr, ast_visit_body, diagnostic_column_at, diagnostic_line_at, failure_contract_of_function, owned_trait_codec_marker, sha256_bytes, sha256_hex, type_name]
     jet_sema.[sema_app_canonical_route_path, sema_app_route_parts, sema_app_route_static_parts, sema_app_routes_overlap]
     jet_semindex.[semindex_function_key, semindex_sorted_unique]
 }
@@ -1297,7 +1297,8 @@ JetCLIWebUses: struct {
     images: [JetCLIWebImage]
 }
 
-jet_cli_web_note_use: fn(uses: &JetCLIWebUses, expression: Expr, modules: [JetDriverDocModule], functions: [Func], source: String) {
+jet_cli_web_note_use: fn(tables: ASTTables, uses: &JetCLIWebUses, node: ExprNode, modules: [JetDriverDocModule], functions: [Func], source: String) {
+    expression: ast_expr(tables, node)
     if jet_cli_web_query(expression, source) == .Val(fact) -> uses.queries.push(fact)
     if jet_cli_web_store(expression, source) == .Val(fact) -> uses.stores.push(fact)
     if expression == .Call(call, _) && (call.name == "form" || call.name == "web.form" || call.name == "core.web.form") {
@@ -1319,10 +1320,17 @@ jet_cli_web_note_use: fn(uses: &JetCLIWebUses, expression: Expr, modules: [JetDr
     }
 }
 
+// Each user module's functions are walked over that module's AST tables, in
+// jet_cli_web_user_functions order.
 jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], graph: &JetCLIWebGraph) {
     uses := JetCLIWebUses{queries: [JetCLIWebQuery]{}, stores: [JetCLIWebStore]{}, forms: [JetCLIWebForm]{}, images: [JetCLIWebImage]{}}
-    loop function in functions {
-        ast_visit_body(function.body, fn(expression: Expr) { jet_cli_web_note_use(uses, expression, modules, functions, function.name) }, true)
+    loop doc_module in modules {
+        if doc_module.alias != "" -> next
+        module_functions := [Func]{}
+        jet_cli_web_collect_functions(doc_module.items, module_functions)
+        loop function in module_functions {
+            ast_visit_body(doc_module.tables, function.body, fn(expression: ExprNode) { jet_cli_web_note_use(doc_module.tables, uses, expression, modules, functions, function.name) }, true)
+        }
     }
     queries := uses.queries
     stores := uses.stores

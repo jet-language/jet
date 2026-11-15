@@ -19,7 +19,7 @@ use {
     json: core.encoding.json
     files: core.files
     jet_parser.[parse_source]
-    jet_foundation.[Expr, ast_visit_body]
+    jet_foundation.[ASTTables, ExprNode, ast_expr, ast_visit_body]
 }
 
 GENERATOR_SEED: "2342"
@@ -523,8 +523,8 @@ validate_productions: fn(rows: [Production]) -> [String] Never! {
     problems
 }
 
-note_call: fn(names: &[String], expression: Expr) Never! {
-    if expression == .Call(call, _) -> names.push(call.name.copy())
+note_call: fn(tables: ASTTables, names: &[String], expression: ExprNode) Never! {
+    if ast_expr(tables, expression) == .Call(call, _) -> names.push(call.name.copy())
 }
 
 // Typed holes, a parse with no error, `run: fn`, loops that only iterate,
@@ -551,7 +551,7 @@ validate_program: fn(program: Generated) -> [String] Never! {
         if item == .Func(function) {
             if function.name == "run" -> run_found = true
             calls := [String]{}
-            ast_visit_body(function.body, fn(expression: Expr) { note_call(calls, expression) }, true)
+            ast_visit_body(tree.tables, function.body, fn(expression: ExprNode) { note_call(tree.tables, calls, expression) }, true)
             if calls.contains(function.name) {
                 problems.push("{id}: `{function.name}` calls itself, so it may not end")
             }

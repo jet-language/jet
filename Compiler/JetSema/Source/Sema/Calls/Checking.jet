@@ -6,6 +6,7 @@
 // SemaCallDefaultValue first.
 use {
     jet_foundation.[
+        ASTTables,
         AccessConvention,
         BinderRef,
         CallArg,
@@ -14,6 +15,7 @@ use {
         DiagnosticCryptoMisuseReason,
         DiagnosticStructured,
         Expr,
+        ExprNode,
         Func,
         InternalTag,
         Lambda,
@@ -28,7 +30,9 @@ use {
         TLetTy,
         Type,
         AST_EMPTY_CALL_ARG_FLAGS,
+        ast_expr,
         ast_lambda_single_expr_span,
+        ast_stmt,
         ast_visit_expr,
         ast_visit_statement,
         diagnostic_registry_row,
@@ -373,7 +377,7 @@ sema_call_c_callback_unsafe: fn(argument: Expr, environment: SemaScopeEnvironmen
             function: sema_http_route_find_function(environment, program, scopes, name) ?? return false
             return !sema_call_foreign_thread_safe_func(function.declaration)
         }
-        .Lambda(lambda, _) -> return !sema_call_foreign_thread_safe_lambda(lambda) || sema_call_lambda_captures_local(lambda, scopes)
+        .Lambda(lambda, _) -> return !sema_call_foreign_thread_safe_lambda(lambda) || sema_call_lambda_captures_local(environment.tables, lambda, scopes)
         .Field(base, _, _, _) -> {
             if base == .Ident(name, _, _) {
                 index: sema_scope_resolve_index(scopes, name) ?? return false
@@ -396,19 +400,20 @@ sema_call_c_callback_context_read: fn(argument: Expr, environment: SemaScopeEnvi
     reads := [SemaCallContextReadSite]{}
     if argument == .Ident(name, _, _) {
         function: sema_http_route_find_function(environment, program, scopes, name) ?? return None
+        tables: sema_scope_module_tables(environment, program, function.symbol.module_identity) ?? return None
         loop parameter in function.declaration.params -> inner.push(parameter.name)
         loop statement in function.declaration.body {
-            ast_visit_statement(statement, fn(expression: Expr) { sema_call_note_context_read(reads, expression) }, false)
+            ast_visit_statement(tables, statement, fn(expression: ExprNode) { sema_call_note_context_read(tables, reads, expression) }, false)
         }
     } else if argument == .Lambda(lambda, _) {
         loop parameter in lambda.params -> inner.push(parameter.name)
         if lambda.body == {
             .Expr(value) -> {
-                ast_visit_expr(value, fn(expression: Expr) { sema_call_note_context_read(reads, expression) })
+                ast_visit_expr(environment.tables, value, fn(expression: ExprNode) { sema_call_note_context_read(environment.tables, reads, expression) })
             }
             .Block(body) -> {
                 loop statement in body {
-                    ast_visit_statement(statement, fn(expression: Expr) { sema_call_note_context_read(reads, expression) }, false)
+                    ast_visit_statement(environment.tables, statement, fn(expression: ExprNode) { sema_call_note_context_read(environment.tables, reads, expression) }, false)
                 }
             }
         }
@@ -433,12 +438,13 @@ SemaCallContextReadSite: struct {
     member: String
 }
 
-sema_call_note_context_read: fn(reads: &[SemaCallContextReadSite], expression: Expr) {
-    if expression == .Field(base, member, _, _) {
+sema_call_note_context_read: fn(tables: ASTTables, reads: &[SemaCallContextReadSite], expression: ExprNode) {
+    view: ast_expr(tables, expression)
+    if view == .Field(base, member, _, _) {
         if base == .Ident(root, _, _) {
             reads.push(SemaCallContextReadSite{root: root, member: member})
         }
-    } else if expression == .MethodCall(receiver, method, _, _, _, args, _) {
+    } else if view == .MethodCall(receiver, method, _, _, _, args, _) {
         if method == "get" && args.len() == 1 && receiver == .Ident(root, _, _) && args[0].expr == .Ident(key, _, _) {
             reads.push(SemaCallContextReadSite{root: root, member: "get({key})"})
         }
@@ -453,26 +459,26 @@ sema_call_c_callback_context_error: fn(member: String, argument: Expr) -> Diagno
 
 // A C callback lambda is capture-free: no name it reads, other than its own
 // parameters and bindings, may be a local of the enclosing function.
-sema_call_lambda_captures_local: fn(lambda: Lambda, scopes: SemaScopeTable) -> Bool {
+sema_call_lambda_captures_local: fn(tables: ASTTables, lambda: Lambda, scopes: SemaScopeTable) -> Bool {
     inner := (loop parameter in lambda.params -> parameter.name)
     names := [String]{}
     if lambda.body == {
         .Expr(value) -> {
-            ast_visit_expr(value, fn(expression: Expr) { sema_call_note_ident(names, expression) })
+            ast_visit_expr(tables, value, fn(expression: ExprNode) { sema_call_note_ident(tables, names, expression) })
         }
         .Block(body) -> {
             loop statement in body {
-                if statement == {
+                if ast_stmt(tables, statement) == {
                     .Val(binding) -> {
                         inner.push(binding.name)
-                        ast_visit_expr(binding.init, fn(expression: Expr) { sema_call_note_ident(names, expression) })
+                        ast_visit_expr(tables, binding.init, fn(expression: ExprNode) { sema_call_note_ident(tables, names, expression) })
                     }
                     .Expr(value) -> {
-                        ast_visit_expr(value, fn(expression: Expr) { sema_call_note_ident(names, expression) })
+                        ast_visit_expr(tables, value, fn(expression: ExprNode) { sema_call_note_ident(tables, names, expression) })
                     }
                     .Return(value, _) -> {
                         if value == .Val(returned) {
-                            ast_visit_expr(returned, fn(expression: Expr) { sema_call_note_ident(names, expression) })
+                            ast_visit_expr(tables, returned, fn(expression: ExprNode) { sema_call_note_ident(tables, names, expression) })
                         }
                     }
                     .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
@@ -489,8 +495,8 @@ sema_call_lambda_captures_local: fn(lambda: Lambda, scopes: SemaScopeTable) -> B
     false
 }
 
-sema_call_note_ident: fn(names: &[String], expression: Expr) {
-    if expression == .Ident(name, _, _) -> names.push(name.copy())
+sema_call_note_ident: fn(tables: ASTTables, names: &[String], expression: ExprNode) {
+    if ast_expr(tables, expression) == .Ident(name, _, _) -> names.push(name.copy())
 }
 
 sema_call_foreign_thread_safe_func: fn(func: Func) -> Bool Never! {

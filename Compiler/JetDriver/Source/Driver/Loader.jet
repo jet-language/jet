@@ -4,7 +4,9 @@ use {
     jet_foundation.[
         AppRouteFile,
         AppRouteRoot,
-        Expr,
+        ASTTables,
+        ExprNode,
+        ast_expr,
         ast_visit_body,
         authority_parse_right,
         BUILTIN_METHOD_ROWS,
@@ -6841,19 +6843,19 @@ jet_driver_app_route_names: fn(program: Program) -> [String] {
     names := [String]{}
     loop item in program.items {
         if item == .Func(function) {
-            ast_visit_body(function.body, fn(expression: Expr) { jet_driver_note_app_route_name(names, expression) }, false)
+            ast_visit_body(program.tables, function.body, fn(expression: ExprNode) { jet_driver_note_app_route_name(program.tables, names, expression) }, false)
         }
     }
-    ast_visit_body(program.script_body, fn(expression: Expr) { jet_driver_note_app_route_name(names, expression) }, false)
+    ast_visit_body(program.tables, program.script_body, fn(expression: ExprNode) { jet_driver_note_app_route_name(program.tables, names, expression) }, false)
     names
 }
 
-jet_driver_note_app_route_name: fn(names: &[String], expression: Expr) {
-    if expression == .MethodCall(_, method, _, _, _, args, _) {
+jet_driver_note_app_route_name: fn(tables: ASTTables, names: &[String], expression: ExprNode) {
+    if ast_expr(tables, expression) == .MethodCall(_, method, _, _, _, args, _) {
         if method != "routes" || args.len() != 1 {
             return
         }
-        if args[0].expr == .Str(parts, _, _) {
+        if ast_expr(tables, args[0].expr) == .Str(parts, _, _) {
             text := ""
             loop part in parts {
                 if part == .Lit(value) -> text = "{text}{value}" else {

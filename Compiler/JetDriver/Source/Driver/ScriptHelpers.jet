@@ -106,7 +106,7 @@ jet_driver_script_reach: fn(load: JetDriverLoadResult) -> JetDriverScriptReach N
         calls := [[Int]]{}
         loop item in load.modules[loaded_index].program.items {
             if item == .Func(function) && sema_script_function(function) {
-                uses := sema_script_function_uses(function, locals, functions)
+                uses := sema_script_function_uses(load.modules[loaded_index].program.tables, function, locals, functions)
                 hides := [String]{}
                 loop local in locals {
                     // copy: the entry keeps its locals; the row owns its own

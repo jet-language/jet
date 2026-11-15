@@ -7,6 +7,7 @@
 // imports runtime code uses at all: a user module that only compile-time
 // code reaches, however it was imported, stays out of the shipped program.
 use jet_foundation.[
+    ASTTables,
     BindName,
     Binding,
     CallArg,
@@ -39,6 +40,8 @@ use jet_foundation.[
 ]
 
 SemaComptimeUseScan: struct {
+    // The AST tables of the scanned module.
+    tables: ASTTables
     // Every name the module's imports bind.
     import_locals: [String:Bool]
     // The names a `#run use` binds -> its `#run ` prefix, the span
@@ -262,7 +265,7 @@ sema_comptime_use_scan_module: fn(graph: SemaRegistrationGraph, module_index: In
 
 sema_comptime_use_scan_for: fn(graph: SemaRegistrationGraph, module_index: Int, own_callees: [[String:Bool]]) -> SemaComptimeUseScan {
     module_row: graph.modules[module_index]
-    scan := SemaComptimeUseScan{import_locals: [String:Bool]{}, comptime_locals: [String:Span]{}, comptime_callees: own_callees[module_index].copy(), source: [U8]{}, bound: [String:Bool]{}, wrap: None, pending: [SemaComptimeUseReference]{}, runtime_names: [String:Bool]{}, diagnostics: [Diagnostic]{}}
+    scan := SemaComptimeUseScan{tables: module_row.program.tables, import_locals: [String:Bool]{}, comptime_locals: [String:Span]{}, comptime_callees: own_callees[module_index].copy(), source: [U8]{}, bound: [String:Bool]{}, wrap: None, pending: [SemaComptimeUseReference]{}, runtime_names: [String:Bool]{}, diagnostics: [Diagnostic]{}}
     sema_comptime_use_bind_imports(module_row.program.imports, scan)
     loop import in module_row.imports {
         target: sema_registration_module_index(graph, import.target_module_identity) ?? next
@@ -718,7 +721,7 @@ sema_comptime_use_expr: fn(expression: Expr, scan: &SemaComptimeUseScan) {
         }
         // A long `a + b + c …` chain is read in one frame.
         .Binary(_, left, right, _, _) -> {
-            loop operand in expr_binary_operands(left, right) {
+            loop operand in expr_binary_operands(scan.tables, left, right) {
                 sema_comptime_use_expr(operand, scan)
             }
         }

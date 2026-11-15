@@ -18,7 +18,7 @@ LSPFixtureChecker: struct {
             modules := [JetDriverDocModule]{}
             diagnostics := [Diagnostic]{}
             loop overlay in overlays {
-                parsed: parse_source(overlay.source.bytes())
+                parsed := parse_source(overlay.source.bytes())
                 alias: lsp_fixture_alias(overlay.path)
                 modules.push(
                     JetDriverDocModule{
@@ -29,6 +29,7 @@ LSPFixtureChecker: struct {
                         items: parsed.program.items.copy(),
                         block_spans: parsed.program.block_spans.copy(),
                         imports: parsed.program.imports.copy(),
+                        tables: parsed.program.tables.move(),
                         module_name: alias,
                     },
                 )

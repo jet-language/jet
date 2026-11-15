@@ -3,7 +3,7 @@
 // types the script's own statements give them, which only a check of the
 // generated `run: fn` (sema_script_entry) knows, and a parameter is `&` when
 // a check of the function's body finds it written.
-use jet_foundation.[AST_NODE_GENERATED, AccessConvention, BodyTree, Diagnostic, Expr, FnBody, Func, Item, Span, TFuncKind, TLocal, TTypeDef, Type, ast_visit_body, body_node, body_stmt, checked_builtin_mutates_receiver, compiler_transfer_rows, diagnostic_with_label, name_table_sized]
+use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, Diagnostic, Expr, ExprNode, FnBody, Func, Item, Span, TFuncKind, TLocal, TTypeDef, Type, ast_expr, ast_visit_body, body_node, body_stmt, checked_builtin_mutates_receiver, compiler_transfer_rows, diagnostic_with_label, name_table_sized]
 
 // A script variable as the script's own statements bind it: its checked type,
 // and whether it is a `:=` binding a function may change.
@@ -227,9 +227,9 @@ sema_script_functions: fn(items: [Item]) -> [String] Never! {
 // The script variables among `locals` that the body of `function` names, in
 // the order it first names them, and the rows of the script functions it
 // calls or names. A name `function` binds itself is its own.
-sema_script_function_uses: fn(function: Func, locals: [String], functions: [String]) -> SemaScriptUses Never! {
+sema_script_function_uses: fn(tables: ASTTables, function: Func, locals: [String], functions: [String]) -> SemaScriptUses Never! {
     uses := SemaScriptUses{variables: [String]{}, functions: [Int]{}}
-    ast_visit_body(function.body, fn(expression: Expr) { sema_script_note_use(uses, locals, functions, function, expression) }, true)
+    ast_visit_body(tables, function.body, fn(expression: ExprNode) { sema_script_note_use(uses, locals, functions, function, ast_expr(tables, expression)) }, true)
     uses
 }
 
@@ -297,7 +297,7 @@ sema_script_unbound_variable: fn(declared: Span, name: String, call_span: Span, 
     module_index: sema_registration_module_index(graph, environment.module_identity) ?? return sema_unknown_name_in(name, call_span, scopes)
     items: graph.modules[module_index].program.items
     helper: sema_script_function_at(items, declared) ?? return sema_unknown_name_in(name, call_span, scopes)
-    chain: sema_script_chain(items, graph.modules[module_index].program.entry_locals, helper, name)
+    chain: sema_script_chain(graph.modules[module_index].program.tables, items, graph.modules[module_index].program.entry_locals, helper, name)
     through: if chain.len() == 0 -> "" else -> " through {sema_script_chain_text(chain)}"
     in_lines: sema_script_lines_hold(items, call_span)
     what: if in_lines -> "`{helper}` needs `{name}`, which the script hasn't set yet here" else -> "`{helper}` needs the script's `{name}`, which isn't bound here"
@@ -333,13 +333,13 @@ sema_script_function_at: fn(items: [Item], declared: Span) -> String? Never! {
 // The script functions through which `helper` reaches `name`, along the
 // fewest calls: from the one it calls to the one whose body names `name`.
 // Empty when `helper` names it itself.
-sema_script_chain: fn(items: [Item], locals: [String], helper: String, name: String) -> [String] Never! {
+sema_script_chain: fn(tables: ASTTables, items: [Item], locals: [String], helper: String, name: String) -> [String] Never! {
     functions: sema_script_functions(items)
     uses := [SemaScriptUses]{}
     hides := [Bool]{}
     loop item in items {
         if item == .Func(function) && sema_script_function(function) {
-            uses.push(sema_script_function_uses(function, locals, functions))
+            uses.push(sema_script_function_uses(tables, function, locals, functions))
             hides.push(sema_script_function_hides(function, name))
         }
     }

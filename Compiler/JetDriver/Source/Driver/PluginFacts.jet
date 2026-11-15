@@ -8,7 +8,7 @@
 // has no interface, so calls through its handle don't resolve.
 use {
     plugin_facts_files: core.files
-    jet_foundation.[Expr, Program, ast_visit_body]
+    jet_foundation.[ASTTables, ExprNode, Program, ast_expr, ast_visit_body]
     jet_plugin.[jet_plugin_component_exports]
     jet_sema.[SemaPluginComponent, SemaPluginInterfaceFacts, SemaRegistrationModuleInput, sema_plugin_interface_facts]
 }
@@ -40,36 +40,36 @@ jet_driver_plugin_facts: fn(request: JetDriverCompileRequest, inputs: [SemaRegis
 jet_driver_plugin_artifacts: fn(artifacts: &[String], program: Program) {
     loop item in program.items {
         if item == .Func(function) {
-            ast_visit_body(function.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+            ast_visit_body(program.tables, function.body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
         }
         if item == .Test(test) {
-            ast_visit_body(test.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+            ast_visit_body(program.tables, test.body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
         }
         if item == .Impl(block) {
             loop method in block.methods {
-                ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+                ast_visit_body(program.tables, method.body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
             }
         }
         if item == .Struct(record) {
             loop method in record.methods {
-                ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+                ast_visit_body(program.tables, method.body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
             }
         }
         if item == .Enum(choice) {
             loop method in choice.methods {
-                ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+                ast_visit_body(program.tables, method.body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
             }
         }
     }
-    ast_visit_body(program.script_body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+    ast_visit_body(program.tables, program.script_body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
 }
 
-jet_driver_note_plugin_artifact: fn(artifacts: &[String], expression: Expr) {
-    if expression == .MethodCall(_, method, _, _, _, args, _) {
+jet_driver_note_plugin_artifact: fn(tables: ASTTables, artifacts: &[String], expression: ExprNode) {
+    if ast_expr(tables, expression) == .MethodCall(_, method, _, _, _, args, _) {
         if method != "load" || args.len() == 0 {
             return
         }
-        if args[0].expr == .Str(parts, _, _) {
+        if ast_expr(tables, args[0].expr) == .Str(parts, _, _) {
             text := ""
             loop part in parts {
                 if part == .Lit(value) -> text = "{text}{value}" else {

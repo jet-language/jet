@@ -22,11 +22,13 @@ use jet_foundation.[
     Diagnostic,
     EnumLitArg,
     Expr,
+    ExprNode,
     Lambda,
     LValue,
     Span,
     SymbolKind,
     Type,
+    ast_expr,
     ast_visit_expr,
     expr_source_span,
     expr_span,
@@ -316,7 +318,7 @@ sema_shared_cycle_fresh_name: fn(name: String, owner: String, allowed: [Span], e
 sema_shared_cycle_lambda_fresh: fn(value: Expr, lambda: Lambda, owner: String, allowed: [Span], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState) -> Bool {
     parameters := (loop parameter in lambda.params -> parameter.name)
     named := [Expr]{}
-    ast_visit_expr(value, fn(expression: Expr) { sema_shared_cycle_note_ident(named, expression) })
+    ast_visit_expr(environment.tables, value, fn(expression: ExprNode) { sema_shared_cycle_note_ident(named, ast_expr(environment.tables, expression)) })
     loop expression in named {
         if expression == .Ident(name, _, _) {
             if parameters.contains(name) -> next

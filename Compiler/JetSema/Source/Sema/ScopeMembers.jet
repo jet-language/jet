@@ -1,7 +1,9 @@
 use jet_foundation.[
+    ASTTables,
     AppliedRuleApplication,
     Diagnostic,
     Expr,
+    ExprNode,
     Item,
     MarkerDecl,
     ModuleID,
@@ -13,6 +15,7 @@ use jet_foundation.[
     TAppliedRuleArgumentMenu,
     TAppliedRuleCatalog,
     Type,
+    ast_expr,
     ast_visit_statement,
     type_name,
 ]
@@ -256,9 +259,9 @@ sema_scope_members_vocabulary: fn(marker: String) -> [String]? Never! {
 // `check`: a dot member is legal only as a direct statement of a
 // member-declaring marker block (E0614/E0616), never nested (E0618) and never
 // in an ordinary function or method body (E0615).
-sema_scope_members_check: fn(items: [Item]) -> [Diagnostic] {
+sema_scope_members_check: fn(tables: ASTTables, items: [Item]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
-    sema_scope_members_check_assertionless_tests(items, diagnostics)
+    sema_scope_members_check_assertionless_tests(tables, items, diagnostics)
     loop item in items {
         if item == {
             .Test(test) -> { sema_scope_members_check_marker_body("Test", test.body, diagnostics) }
@@ -298,12 +301,12 @@ sema_scope_members_check: fn(items: [Item]) -> [Diagnostic] {
 // `assert`/`assert_eq` or `expect(…).snapshot` is L2901. The walk reads every
 // expression the body holds, nested blocks and lambdas included, as Rust's
 // `statements_have_assertion` does.
-sema_scope_members_check_assertionless_tests: fn(items: [Item], diagnostics: &[Diagnostic]) {
+sema_scope_members_check_assertionless_tests: fn(tables: ASTTables, items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == .Test(test) {
             found := false
             loop statement in test.body {
-                ast_visit_statement(statement, fn(expression: Expr) { sema_scope_members_note_assertion(found, expression) }, true)
+                ast_visit_statement(tables, statement, fn(expression: ExprNode) { sema_scope_members_note_assertion(tables, found, expression) }, true)
             }
             if !found {
                 diagnostics.push(sema_lint("L2901", test.span, "This #Test block has no assertions.", "A test with no assertions cannot find bugs because it always passes.", "Add at least one assertion, or remove the test if it only exercises compilation."))
@@ -312,8 +315,8 @@ sema_scope_members_check_assertionless_tests: fn(items: [Item], diagnostics: &[D
     }
 }
 
-sema_scope_members_note_assertion: fn(found: &Bool, expression: Expr) Never! {
-    if expression == {
+sema_scope_members_note_assertion: fn(tables: ASTTables, found: &Bool, expression: ExprNode) Never! {
+    if ast_expr(tables, expression) == {
         .Call(call, _) -> {
             if call.name == "assert" || call.name == "assert_eq" -> found = true
         }

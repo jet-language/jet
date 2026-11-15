@@ -4,7 +4,7 @@
 use {
     jet_canvas.[is_space_byte, line_after, line_start, lvalue_span, pattern_arm_edit_span, snippet, stmt_execution_anchor, stmt_is_terminal, switch_was_classic_if]
     jet_driver.[JetDriverDocModule, jet_driver_apply_edits, jet_driver_has_errors]
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Expr, Func, Item, Span, Stmt, SwitchArm, TextEdit, ast_visit_body, expr_span, foundation_byte_text, type_name]
+    jet_foundation.[ASTTables, DIAGNOSTIC_ERROR, Diagnostic, Expr, ExprNode, Func, Item, Span, Stmt, StmtNode, SwitchArm, TextEdit, ast_expr, ast_expr_span, ast_visit_body, expr_span, foundation_byte_text, type_name]
     jet_lsp.[LSPChecker, LSPOverlay]
     jet_parser.[jet_format_source, jfmt_is_subjectless_guard, jfmt_stmt_span, jfmt_uses_classic_if_spelling]
     jet_semindex.[SemIndex]
@@ -701,8 +701,9 @@ statement_contains_span: fn(stmts: [Stmt], node_span: Span) -> Bool Never! {
 // ---- Multi-input lists ----
 
 apply_append_multi_input: fn(checker: LSPChecker, path: String, src: String, node_span: Span, element: String) -> String Err! {
-    func: checked_func_containing_span(checker, path, src, node_span)
-    list: find_list_literal(func.body, node_span)
+    checked: checked_source(checker, path, src)
+    func: find_func_containing_span(checked.modules[checked.at].items, node_span) ?? return Err(edit_error("not_found", "Canvas source node no longer belongs to a function"))
+    list: find_list_literal(checked.modules[checked.at].tables, func.body, node_span)
     if !list.found -> return Err(edit_error("not_found", "Canvas multi-input node no longer exists"))
     if node_span.start < 0 || node_span.end > src.count_bytes() || node_span.start > node_span.end {
         return Err(edit_error("bad_request", "Canvas multi-input source span is stale"))
@@ -721,8 +722,9 @@ apply_append_multi_input: fn(checker: LSPChecker, path: String, src: String, nod
 }
 
 apply_remove_multi_input_element: fn(checker: LSPChecker, path: String, src: String, node_span: Span, element_span: Span) -> String Err! {
-    func: checked_func_containing_span(checker, path, src, node_span)
-    list: find_list_literal(func.body, node_span)
+    checked: checked_source(checker, path, src)
+    func: find_func_containing_span(checked.modules[checked.at].items, node_span) ?? return Err(edit_error("not_found", "Canvas source node no longer belongs to a function"))
+    list: find_list_literal(checked.modules[checked.at].tables, func.body, node_span)
     if !span_listed(list.items, element_span) -> return Err(edit_error("not_found", "Canvas multi-input element no longer exists"))
     remove: comma_separated_remove_span(src, node_span, element_span)
     changed: jet_driver_apply_edits(src, [TextEdit]{edit(remove, "")}) ?? return Err(edit_error("overlap", "Canvas multi-input delete overlapped"))
@@ -730,18 +732,18 @@ apply_remove_multi_input_element: fn(checker: LSPChecker, path: String, src: Str
 }
 
 // The list literal at `node_span` in `body`, with its element spans.
-find_list_literal: fn(body: [Stmt], node_span: Span) -> ListScan Never! {
+find_list_literal: fn(tables: ASTTables, body: [StmtNode], node_span: Span) -> ListScan Never! {
     scan := ListScan{node_span: node_span, found: false, items: [Span]{}}
-    ast_visit_body(body, fn(expression: Expr) { note_list_literal(scan, expression) }, true)
+    ast_visit_body(tables, body, fn(expression: ExprNode) { note_list_literal(tables, scan, expression) }, true)
     scan
 }
 
-note_list_literal: fn(scan: &ListScan, expression: Expr) Never! {
+note_list_literal: fn(tables: ASTTables, scan: &ListScan, expression: ExprNode) Never! {
     if scan.found -> return
-    if expression == .ListLit(elements, span, _) {
+    if ast_expr(tables, expression) == .ListLit(elements, span, _) {
         if !same_span(span, scan.node_span) -> return
         scan.found = true
-        loop element in elements -> scan.items.push(expr_span(element))
+        loop element in elements -> scan.items.push(ast_expr_span(tables, element))
     }
 }
 
@@ -824,12 +826,6 @@ checked_func_for_graph: fn(checker: LSPChecker, path: String, src: String, graph
     name_span: graph_id_name_span(graph_id) ?? return Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
     checked: checked_source(checker, path, src)
     found: find_func_by_name_span(checked.modules[checked.at].items, name_span) ?? return Err(edit_error("not_found", "Canvas graph no longer exists"))
-    Ok(found)
-}
-
-checked_func_containing_span: fn(checker: LSPChecker, path: String, src: String, span: Span) -> CanvasFunc Err! {
-    checked: checked_source(checker, path, src)
-    found: find_func_containing_span(checked.modules[checked.at].items, span) ?? return Err(edit_error("not_found", "Canvas source node no longer belongs to a function"))
     Ok(found)
 }
 

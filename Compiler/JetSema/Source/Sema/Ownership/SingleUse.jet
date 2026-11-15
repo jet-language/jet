@@ -14,16 +14,19 @@
 // over `type_requires_owned_iteration`); a bare task's job is `join`, so its
 // undone duty is L1101 rather than E0140.
 use jet_foundation.[
+    ASTTables,
     AccessConvention,
     BinOp,
     Call,
     Diagnostic,
     Expr,
+    ExprNode,
     Span,
     Stmt,
     Symbol,
     Type,
     UnOp,
+    ast_expr,
     ast_visit_statement,
     expr_span,
 ]
@@ -270,7 +273,7 @@ sema_single_use_leave_scope: fn(scopes: &SemaScopeTable, state: &SemaOwnershipSt
 // `xs` is empty. Each popped element's duty passed to the binding that popped
 // it, so `xs` owes nothing. A body that refills `xs`, hands it elsewhere or
 // may break keeps the duty (E0140 at scope end).
-sema_single_use_note_drain: fn(state: &SemaOwnershipState, condition: Expr, body: [Stmt], scopes: SemaScopeTable) {
+sema_single_use_note_drain: fn(tables: ASTTables, state: &SemaOwnershipState, condition: Expr, body: [Stmt], scopes: SemaScopeTable) {
     receiver: sema_single_use_drained_receiver(condition) ?? return
     if receiver == .Ident(name, span, _) {
         if sema_stmt_refutable_loop_body_can_break(body) {
@@ -278,7 +281,7 @@ sema_single_use_note_drain: fn(state: &SemaOwnershipState, condition: Expr, body
         }
         drain := SemaSingleUseDrain{name: name, mentions: 0, reads: 0, pops: 0}
         loop statement in body {
-            ast_visit_statement(statement, fn(expression: Expr) { drain.visit(expression) }, true)
+            ast_visit_statement(tables, statement, fn(expression: ExprNode) { drain.visit(tables, expression) }, true)
         }
         if drain.pops == 0 || drain.mentions != drain.reads {
             return
@@ -336,8 +339,8 @@ SemaSingleUseDrain: struct {
     reads: Int
     pops: Int
 
-    visit: fn(&self, expression: Expr) Never! {
-        if expression == {
+    visit: fn(&self, tables: ASTTables, expression: ExprNode) Never! {
+        if ast_expr(tables, expression) == {
             .Ident(mentioned, _, _) -> {
                 if mentioned == self.name -> self.mentions += 1
             }

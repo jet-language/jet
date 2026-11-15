@@ -15,7 +15,7 @@
 //
 // The receiver's type comes from the function's checked body: the type of the
 // receiver's node in its expression-type column.
-use jet_foundation.[BodyTree, Diagnostic, Expr, Func, Item, Name, NameTable, OrFallback, Pattern, Span, Stmt, SwitchArm, Type, body_tree_new, checked_expr_type_id, expr_binary_operands, expr_span, name_count, name_find, name_index, name_intern, name_table_sized, name_text]
+use jet_foundation.[ASTTables, BodyTree, Diagnostic, Expr, Func, Item, Name, NameTable, OrFallback, Pattern, Span, Stmt, SwitchArm, Type, body_tree_new, checked_expr_type_id, expr_binary_operands, expr_span, name_count, name_find, name_index, name_intern, name_table_sized, name_text]
 
 SEMA_STATE_TASK: "Task"
 
@@ -103,6 +103,8 @@ SemaStateNeed: struct {
 // (E0307), and the findings. `locals` interns the module's local names; the
 // facts are columns by their ids.
 SemaStateWalk: struct {
+    // The AST tables of the walked module.
+    tables: ASTTables
     table: SemaStateTable
     locals: NameTable
     current: SemaStateFacts
@@ -204,7 +206,7 @@ sema_typestate_check_module: fn(graph: SemaRegistrationGraph, table: SemaStateTa
             open_switches.push(span.copy())
         }
     }
-    walk := SemaStateWalk{table: table.copy(), locals: name_table_sized(64), current: sema_state_no_facts(), ended: false, exits: [SemaStateFacts]{}, open_switches: open_switches, typed: false, diagnostics: [Diagnostic]{}}
+    walk := SemaStateWalk{tables: graph.modules[registration].program.tables, table: table.copy(), locals: name_table_sized(64), current: sema_state_no_facts(), ended: false, exits: [SemaStateFacts]{}, open_switches: open_switches, typed: false, diagnostics: [Diagnostic]{}}
     loop item in graph.modules[registration].program.items {
         if item == {
             .Func(function) -> { sema_state_check_function(walk, function, module_row.functions) }
@@ -966,7 +968,7 @@ sema_state_expr: fn(walk: &SemaStateWalk, tree: BodyTree, value: Expr) Never! {
             if context == .Val(note) -> sema_state_expr(walk, tree, note)
         }
         .Binary(_, left, right, _, _) -> {
-            loop operand in expr_binary_operands(left, right) {
+            loop operand in expr_binary_operands(walk.tables, left, right) {
                 sema_state_expr(walk, tree, operand)
             }
         }

@@ -51,8 +51,8 @@ TTestLawVisitor: struct {
     relation: [String]
     surfaces: [String]
 
-    visit: fn(&self, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
-        if expression == {
+    visit: fn(&self, tables: ASTTables, expression: ExprNode) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
+        if ast_expr(tables, expression) == {
             .Call(call, _) -> {
                 if call.name == "assert" || call.name == "assert_eq" {
                     self.relation.push(checked_test_call_text(self.source, call.name_span.start, call.name_span.end))
@@ -62,7 +62,7 @@ TTestLawVisitor: struct {
             }
             .MethodCall(receiver, method, method_span, _, _, _, _) -> {
                 expected := false
-                if receiver == .Call(inner, _) {
+                if ast_expr(tables, receiver) == .Call(inner, _) {
                     if inner.name == "expect" {
                         expected = true
                         self.relation.push(checked_test_call_text(self.source, inner.name_span.start, method_span.end))
@@ -185,8 +185,8 @@ checked_test_name_byte: fn(byte: U8) -> Bool Never! {
 }
 
 // The law of the property test `test` (#6015 c5), read from its module's
-// `source` text.
-checked_test_law: fn(test: TestDef, source: String) -> TTestLawFact Never! {
+// `source` text and AST `tables`.
+checked_test_law: fn(tables: ASTTables, test: TestDef, source: String) -> TTestLawFact Never! {
     bytes: source.bytes()
     precondition := [String]{}
     loop clause in test.pre -> precondition.push(checked_test_marker_text(bytes, clause.span.start))
@@ -194,15 +194,16 @@ checked_test_law: fn(test: TestDef, source: String) -> TTestLawFact Never! {
     loop parameter in test.params -> partitions.push("{parameter.name}: {type_name(parameter.ty)}")
     visitor := TTestLawVisitor{source: bytes, relation: [String]{}, surfaces: [String]{}}
     loop statement in test.body {
-        ast_visit_statement(statement, fn(expression: Expr) { visitor.visit(expression) }, false)
+        ast_visit_statement(tables, statement, fn(expression: ExprNode) { visitor.visit(tables, expression) }, false)
     }
     visitor.surfaces.sort()
     TTestLawFact{precondition: precondition, partitions: partitions, relation: visitor.relation, surfaces: visitor.surfaces}
 }
 
 // The checked fact of `test` in the module `module_identity`, whose identity
-// text is `module_text` and whose source text is `source`.
-checked_test_artifact_fact: fn(module_identity: ModuleID, module_text: String, test: TestDef, source: String) -> TTestFact Never! {
+// text is `module_text`, whose source text is `source` and whose AST tables
+// are `tables`.
+checked_test_artifact_fact: fn(tables: ASTTables, module_identity: ModuleID, module_text: String, test: TestDef, source: String) -> TTestFact Never! {
     parameters := [TTestParamFact]{}
     index := 0
     loop parameter in test.params {
@@ -234,6 +235,6 @@ checked_test_artifact_fact: fn(module_identity: ModuleID, module_text: String, t
         contract_generated: false,
         eligibility: None,
         generation_unavailable_reason: None,
-        law: if test.params.len() == 0 -> None else -> Val(checked_test_law(test, source)),
+        law: if test.params.len() == 0 -> None else -> Val(checked_test_law(tables, test, source)),
     }
 }
