@@ -5213,6 +5213,26 @@ untagged. Unknown wire keys ignored by default;
 `?`-chaining accessors (`.field(name)`, `.at(i)`, `.int()`, `.text()`, …).
 YAML parser is std-only, YAML 1.2 core incl. anchors.
 
+**D-CODABLE-OPTIONS1 = A** *(ratified 2026-10-01)*: the serialization
+markers are options on `#Codable`. On a type, `#Codable` alone derives both
+codecs; `only: .Encode` or `only: .Decode` derives one and refuses the other;
+`unknown: .Deny` refuses a decoded key the struct doesn't declare (E2412);
+`tag: .External` (the default), `.Field("kind")` or `.None` sets how an enum
+names its case. Because the tag is one option, an enum can no longer ask for
+two tag forms at once. The bare word `published` pins a struct's wire shape for
+schema snapshots and migrations (E0910). On a field, `#Codable(.Skip)` leaves
+it off the wire and `#Codable(.Flatten)` splices a struct field's keys into the
+enclosing object (E2408). `#!Codable` stays the refusal, and `#Rename` and
+`#Redact` stay separate markers. The option `from: .Base` was retired by
+D-CODABLE-DISTINCT1, under which a distinct type codes as its base with no
+marker. The old markers are unknown (E0927) and get no teaching diagnostic:
+`#Encode`, `#Decode`, `#DenyUnknownFields`, `#Discriminant`, `#Untagged`,
+`#PublishedSchema`, `#Skip`, `#Flatten` and `#CodableAsBase`. `#!Encode` and
+`#!Decode` are E0931, because `Encode` and `Decode` are no longer
+auto-derive markers. The codable-options1 plan in `Compiler/Migrations`
+rewrites old source. It reports `#!Encode`/`#!Decode` for a hand choice:
+`#!Codable` when the type writes its codec by hand, else the `only:` option.
+
 **D-RENAME-CASE1 = A** *(Shipped, #4284 c16 / #4300)*: `#Rename` is the one
 wire-rename marker. Its first argument is a string or a `NamingCase`
 (`.Camel`, `.Snake`, `.Pascal`, `.Kebab`, `.Screaming`). A string renames one
