@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6968,
-    "rev": 105775,
+    "rev": 105800,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60865,30 +60865,30 @@
         },
         {
           "n": 8,
-          "text": "Plan step 3, fused per-function pipeline: each function goes parse -> check -> lower -> select -> encode while its data is still in cache, with no whole-program intermediate copy, and a direct executable image writer replaces the object-then-link path. Gate: at most 1.5 µs of CPU per line and at least 20M lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
+          "text": "Plan step 3, fused per-function pipeline: each function goes parse -> check -> lower -> select -> encode while its data is still in cache, with no whole-program intermediate copy, and a direct executable image writer replaces the object-then-link path. Gate: at most 1.5 µs of CPU per line and at least 20M lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens). Proof: the c1 cell receipt (`jet Tools/perf/compile-throughput/Throughput.jet`, cold and uncached, n=3 median).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:23:19.753Z"
+          "at": "2026-11-15T05:37:55.828Z"
         },
         {
           "n": 9,
-          "text": "Plan step 4, the compiler compiled well. Starts only once the language is mostly stable (the major syntax, semantics and Core churn is done), so tuning isn't wiped out by later cutovers: Jet's own release code generation (register allocation, inlining, bounds-check hoisting, SIMD selection) and a SIMD lexer at 1 GB/s or more close the gap to hand-written machine code on the compiler's five hottest loops, each with an asm-parity ceiling cell (Tools/perf/asm-parity). Every gain is general, applies to all generated code (owner, 2026-10-23), and is proven on a second program. Gate: at most 1 µs of CPU per line and at least 30M lines/s end to end, which is c3. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
+          "text": "Plan step 4, the compiler compiled well. Starts only once the language is mostly stable (the major syntax, semantics and Core churn is done), so tuning isn't wiped out by later cutovers: Jet's own release code generation (register allocation, inlining, bounds-check hoisting, SIMD selection) and a SIMD lexer at 1 GB/s or more close the gap to hand-written machine code on the compiler's five hottest loops, each with an asm-parity ceiling cell (Tools/perf/asm-parity). Every gain is general, applies to all generated code (owner, 2026-10-23), and is proven on a second program. Gate: at most 1 µs of CPU per line and at least 30M lines/s end to end, which is c3. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens). Proof: the c1 cell receipt (`jet Tools/perf/compile-throughput/Throughput.jet`, cold and uncached, n=3 median). and `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate` for the hot-loop cells.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:23:22.092Z"
+          "at": "2026-11-15T05:37:56.754Z"
         },
         {
           "n": 10,
-          "text": "[#2520] Measure duplicated generic instances as a percentage of backend time on phase-1 units. Only above 15%, give each instance exactly one deterministic placement. If the trigger is conclusively unmet, close as not needed with the measurement. (moved from #2514 c6)",
+          "text": "Duplicated generic instances are measured as a percentage of backend time on phase-1 units; only above 15% does each instance get exactly one deterministic placement, and if the trigger is conclusively unmet the criterion closes with the measurement. Proof: a committed backend-time receipt with the duplicate share.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:52:47.257Z"
+          "at": "2026-11-15T05:37:57.727Z"
         },
         {
           "n": 11,
@@ -60907,7 +60907,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T05:37:54.745Z",
+      "updated": "2026-11-15T05:37:57.727Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G11"
@@ -75469,129 +75469,129 @@
         },
         {
           "n": 2,
-          "text": "Runtime startup and print pull in only what the program uses: a program that never spawns tasks, allocates or formats links none of that machinery, by liveness and lazy initialization, with one meaning on o0, o1 and o2 (I9) and no change to panic or error behavior.",
+          "text": "Runtime startup and print pull in only what the program uses: a program that never spawns tasks, allocates or formats links none of that machinery, by liveness and lazy initialization, with one meaning on o0, o1 and o2 (I9) and no change to panic or error behavior. Proof: `jet test Compiler --profile cases --filter size/runtime_pay_for_use` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T16:05:37.116Z"
+          "at": "2026-11-15T05:37:58.679Z"
         },
         {
           "n": 3,
-          "text": "Jet's default build (jet build, no size flags) of hello and of every required perf workload is strictly smaller than each peer's smallest output for the same program (Zig ReleaseSmall stripped, C musl static -Os stripped, Rust opt-level=z stripped, Go -ldflags=-s -w, Odin -o:size), measured on the same machine; o0 (jet run/jet dev output) and --release are smaller still or equal, never larger.",
+          "text": "Jet's default build (jet build, no size flags) of hello and of every required perf workload is strictly smaller than each peer's smallest output for the same program (Zig ReleaseSmall stripped, C musl static -Os stripped, Rust opt-level=z stripped, Go -ldflags=-s -w, Odin -o:size), measured on the same machine; o0 (jet run/jet dev output) and --release are smaller still or equal, never larger. Proof: `node Tools/gauntlet/harness/run.mjs` binary_bytes column shows Jet strictly smallest in every required cell, O0 and --release included.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T16:09:35.719Z"
+          "at": "2026-11-15T05:37:59.606Z"
         },
         {
           "n": 4,
-          "text": "Final binary size is a required metric in every required perf cell of the canonical manifest, and the gate fails any cell where Jet's default build is not strictly smaller than every peer; a hello-world cell and a small CLI cell are among them.",
+          "text": "Final binary size is a required metric in every required perf cell of the canonical manifest, and the gate fails any cell where Jet's default build is not strictly smaller than every peer; a hello-world cell and a small CLI cell are among them. Proof: `node --test Tools/gauntlet/harness/measurement-manifest.test.mjs` passes with binary size required in every cell.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T16:09:36.623Z"
+          "at": "2026-11-15T05:38:00.534Z"
         },
         {
           "n": 5,
-          "text": "The size win comes from the root design (pay-for-what-you-use runtime, lazy runtime initialization, liveness through every runtime and Core layer, no unconditional startup machinery), with no hello-world special case, no per-program flags, no stripping or compression tricks that peers are denied, and no change to panic, error, safety or I9 behavior; the receipt shows the same mechanism shrinking a non-trivial program.",
+          "text": "The size win comes from the root design (pay-for-what-you-use runtime, lazy runtime initialization, liveness through every runtime and Core layer, no unconditional startup machinery), with no hello-world special case, no per-program flags, no stripping or compression tricks that peers are denied, and no change to panic, error, safety or I9 behavior; the receipt shows the same mechanism shrinking a non-trivial program. Proof: a committed receipt showing the same mechanism shrinking hello and a non-trivial program.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T16:09:37.434Z"
+          "at": "2026-11-15T05:38:01.466Z"
         },
         {
           "n": 6,
-          "text": "For every program in the size corpus (hello, one program per required perf cell, and every landed #5072 tool twin, each with a hand-written, optimized x86-64 assembly reference committed beside it that delivers the same features, fault reporting included), the default jet build holds only the code the program reaches: its size is at most the assembly reference size (Jet/ceiling at most 1.00 in bytes). Every byte category above the reference is listed with the root that keeps it and the card that removes it.",
+          "text": "For every program in the size corpus (hello, one program per required perf cell, and every landed #5072 tool twin, each with a hand-written, optimized x86-64 assembly reference committed beside it that delivers the same features, fault reporting included), the default jet build holds only the code the program reaches: its size is at most the assembly reference size (Jet/ceiling at most 1.00 in bytes). Every byte category above the reference is listed with the root that keeps it and the card that removes it. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate` size columns, with the byte-category table committed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T18:44:36.126Z"
+          "at": "2026-11-15T05:38:02.489Z"
         },
         {
           "n": 7,
-          "text": "(was #4919) (was #4689) jet run aborts with 'jet-compiler has overflowed its stack' on small valid programs (fuzz finding; jet check and emit pass)",
+          "text": "The fuzz-found small valid programs that made `jet run` abort with 'jet-compiler has overflowed its stack' (while `jet check` and emit passed) compile and run on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter fuzz/compiler_stack_overflow_repros`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:10:03.641Z"
+          "at": "2026-11-15T05:38:03.422Z"
         },
         {
           "n": 8,
-          "text": "(was #4919) (was #4768) Jet linker: dynamic linking for the D-OS-FLOOR1 glibc path (PT_INTERP/DT_NEEDED plus bundled glibc stubs) for the hosted CLI.",
+          "text": "The Jet linker links dynamically for the D-OS-FLOOR1 glibc path (PT_INTERP and DT_NEEDED plus bundled glibc stubs) for the hosted CLI. Proof: `jet test Compiler --profile cases --filter linker/dynamic_glibc_hosted_cli`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:09:20.404Z"
+          "at": "2026-11-15T05:38:04.337Z"
         },
         {
           "n": 9,
-          "text": "(was #4919) (was #4964) Native jet runs the compiler on the 8 MiB main stack (deep recursion overflows unless ulimit -s is raised)",
+          "text": "Native jet runs the compiler on a stack sized for deep recursion, so deep programs compile without raising `ulimit -s` above the 8 MiB default. Proof: `jet test Compiler --profile cases --filter compiler/deep_recursion_default_ulimit`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:10:05.236Z"
+          "at": "2026-11-15T05:38:05.220Z"
         },
         {
           "n": 10,
-          "text": "(was #4919) (was #5467) Runtime threads reserve 192 MiB of stack each: right default for user programs?",
+          "text": "The default stack reservation of runtime threads is set from measurement (the deepest stack in the corpus plus a recorded margin) instead of a fixed 192 MiB, and a deep-recursion program still reports a clean stack overflow on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter runtime/thread_stack_default`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:10:06.066Z"
+          "at": "2026-11-15T05:38:06.099Z"
         },
         {
           "n": 12,
-          "text": "(was #6017) A local perf gate builds hello with the smallest-size build profile, records binary size and the median start time over 50 runs on the reference Linux x86-64 machine, and fails when size exceeds 200 KB or start exceeds 5 ms.",
+          "text": "A local perf gate builds hello with the smallest-size build profile, records binary size and the median start time over 50 runs on the reference Linux x86-64 machine, and fails when size exceeds 200 KB or start exceeds 5 ms. Proof: `jet Tools/perf/budget/check/run.jet` receipt on the reference machine.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:09:21.241Z"
+          "at": "2026-11-15T05:38:07.002Z"
         },
         {
           "n": 13,
-          "text": "(was #6017) The thresholds live in one table in the binary-size budget doc, and the job reads them from there.",
+          "text": "The thresholds live in one table in the binary-size budget doc, and the job reads them from there. Proof: the thresholds are one table in Docs/spec/reference/binary-size.md and `git grep -n -E \"200 ?KB|5 ms\" -- Tools/perf/budget` finds no second copy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:10:13.622Z"
+          "at": "2026-11-15T05:38:07.943Z"
         },
         {
           "n": 14,
-          "text": "(was #6017) Until both thresholds pass, the job runs in report mode and logs size and start time on this card for each change; it turns blocking in the change that first passes both.",
+          "text": "Until both thresholds pass, the job runs in report mode and logs size and start time on this card for each change; it turns blocking in the change that first passes both. Proof: this card logs a size and start row for each change until the job turns blocking.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:10:14.503Z"
+          "at": "2026-11-15T05:38:08.926Z"
         },
         {
           "n": 15,
-          "text": "(was #4155) [#4258] Known-value module constants fold to IR constants. Larger aggregates get static storage once. Only #Static stays addressable.",
+          "text": "Known-value module constants fold to IR constants. Larger aggregates get static storage once. Only #Static stays addressable. Proof: `jet test Compiler --profile cases --filter ir/module_constants_fold`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:09:22.083Z"
+          "at": "2026-11-15T05:38:09.909Z"
         },
         {
           "n": 16,
-          "text": "(was #4155) [#4317] Generated codec decoders are compact (out-of-line or table-driven), with no unnecessary recursive-edge boxing and the format preserved. Size and time receipts compare against 15.9 MB / 154 bodies.",
+          "text": "Generated codec decoders are compact (out-of-line or table-driven), with no unnecessary recursive-edge boxing and the format preserved. Size and time receipts compare against 15.9 MB / 154 bodies. Proof: `jet test Compiler --profile golden --filter codec` and a committed size and time receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:10:18.433Z"
+          "at": "2026-11-15T05:38:10.830Z"
         },
         {
           "n": 17,
@@ -75604,48 +75604,48 @@
         },
         {
           "n": 18,
-          "text": "(was #5476) With no kept program, cache or incremental state, `jet run hello.jet` (a fresh process, nothing reused from an earlier run) shows a lower mean than `luajit hello.lua` under `hyperfine -N --warmup 3 --runs 30` on the same host (Jet/LuaJIT < 1.00); the final target is at or below one exec plus a compile of the user code only (the hand-written ELF hello is 0.155 ms on the reference host). Baselines 2026-11-08 (a0_037): cold 17.8 ms, luajit 0.58 ms, lua 0.75 ms, Jet AOT binary 0.175 ms.",
+          "text": "With no kept program, cache or incremental state, `jet run hello.jet` (a fresh process, nothing reused from an earlier run) shows a lower mean than `luajit hello.lua` under `hyperfine -N --warmup 3 --runs 30` on the same host (Jet/LuaJIT < 1.00); the final target is at or below one exec plus a compile of the user code only (the hand-written ELF hello is 0.155 ms on the reference host). Baselines 2026-11-08 (a0_037): cold 17.8 ms, luajit 0.58 ms, lua 0.75 ms, Jet AOT binary 0.175 ms. Proof: a committed hyperfine receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T11:17:54.688Z"
+          "at": "2026-11-15T05:38:11.766Z"
         },
         {
           "n": 19,
-          "text": "(was #5476) Peak RSS of `jet run hello.jet` with no kept program or cache (GNU time %M, median of 10) is below `lua hello.lua` on the same host.",
+          "text": "Peak RSS of `jet run hello.jet` with no kept program or cache (GNU time %M, median of 10) is below `lua hello.lua` on the same host. Proof: a committed GNU time receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T11:17:55.532Z"
+          "at": "2026-11-15T05:38:12.733Z"
         },
         {
           "n": 20,
-          "text": "(was #5476) After a one-line edit to a 30-line script that uses core.files and core.regex, `jet run` prints its first output sooner than `python3` runs the equivalent script (hyperfine with a prepare step that applies the edit; Jet/Python < 1.00), with no kept program, cache or incremental state: an edited run costs what any run costs.",
+          "text": "After a one-line edit to a 30-line script that uses core.files and core.regex, `jet run` prints its first output sooner than `python3` runs the equivalent script (hyperfine with a prepare step that applies the edit; Jet/Python < 1.00), with no kept program, cache or incremental state: an edited run costs what any run costs. Proof: a committed hyperfine receipt with the prepare step.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T11:17:56.406Z"
+          "at": "2026-11-15T05:38:13.676Z"
         },
         {
           "n": 21,
-          "text": "(was #5949 c16) Script startup beats Lua: on one host, the same-run median of `jet run hello.jet` and of `jet run` after an edit are each below lua 5.4 hello.lua, by design rather than by reusing a kept program or incremental state (owner 2026-11-08: do not rely on incremental compilation or caching to win; the final target is the hand-written machine-code ceiling). Baselines in the #6328 log, 2026-11-08.",
+          "text": "Script startup beats Lua: on one host, the same-run median of `jet run hello.jet` and of `jet run` after an edit are each below lua 5.4 hello.lua, by design rather than by reusing a kept program or incremental state (owner 2026-11-08: do not rely on incremental compilation or caching to win; the final target is the hand-written machine-code ceiling). Baselines in the #6328 log, 2026-11-08. Proof: a committed same-run receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T11:12:43.152Z"
+          "at": "2026-11-15T05:38:14.650Z"
         },
         {
           "n": 22,
-          "text": "Core and Prelude ship precompiled inside the jet binary: checked interfaces and machine code produced when jet is built, part of the toolchain identity and immutable (no runtime cache, nothing to invalidate). `jet run` reads, scans and re-checks no Core or Prelude source: strace -c of `jet run hello.jet` shows no statx/openat/getdents64 on the toolchain tree, and the cold user time for hello is spent on the user code. One meaning on o0/o1/o2 (I9).",
+          "text": "Core and Prelude ship precompiled inside the jet binary: checked interfaces and machine code produced when jet is built, part of the toolchain identity and immutable (no runtime cache, nothing to invalidate). `jet run` reads, scans and re-checks no Core or Prelude source: strace -c of `jet run hello.jet` shows no statx/openat/getdents64 on the toolchain tree, and the cold user time for hello is spent on the user code. One meaning on o0/o1/o2 (I9). Proof: a committed `strace -c` receipt of `jet run hello.jet` and `jet test Compiler --profile golden` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T11:17:57.374Z"
+          "at": "2026-11-15T05:38:15.578Z"
         },
         {
           "n": 23,
@@ -75658,30 +75658,30 @@
         },
         {
           "n": 24,
-          "text": "Once the no-cache `jet run` beats the kept-program path on every ScriptBench workload, the kept-program cache (Compiler/JetCli ScriptCache: keep slots, background full builds, the stdin entry cache) is removed in one cutover, with every caller, case, doc and setting migrated; `jet run` has one launch path.",
+          "text": "Once the no-cache `jet run` beats the kept-program path on every ScriptBench workload, the kept-program cache (Compiler/JetCli ScriptCache: keep slots, background full builds, the stdin entry cache) is removed in one cutover, with every caller, case, doc and setting migrated; `jet run` has one launch path. Proof: `git grep -n ScriptCache -- Compiler` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T11:17:59.140Z"
+          "at": "2026-11-15T05:38:16.627Z"
         },
         {
           "n": 25,
-          "text": "Embedded runtime size and call speed (#6386): (was #6023) The runtime a host links for a guest that uses only core.text and core.math is smaller than the Lua 5.4.7 interpreter (329,248 bytes), and 10M host-to-guest calls of a small function finish faster than `lua_pcall` on the equivalent Lua function (Jet/Lua < 1.00). (was #6386 c19)",
+          "text": "Embedded runtime size and call speed (#6386): The runtime a host links for a guest that uses only core.text and core.math is smaller than the Lua 5.4.7 interpreter (329,248 bytes), and 10M host-to-guest calls of a small function finish faster than `lua_pcall` on the equivalent Lua function (Jet/Lua < 1.00). Proof: `node Tools/gauntlet/harness/run.mjs --entry embed-runtime` shows no loss.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:51:13.886Z"
+          "at": "2026-11-15T05:38:17.884Z"
         },
         {
           "n": 26,
-          "text": "Web page size and first output (#5201): The w06 page's shipped code (gzip) is smaller than the esbuild-minified TypeScript version of the same program and than Pyodide's, and it reaches first output sooner than Pyodide (Jet/peer < 1.00, numbers logged). (was #5201 c3)",
+          "text": "Web page size and first output (#5201): The w06 page's shipped code (gzip) is smaller than the esbuild-minified TypeScript version of the same program and than Pyodide's, and it reaches first output sooner than Pyodide (Jet/peer < 1.00, numbers logged). Proof: `node Tools/gauntlet/harness/run.mjs --entry w06-web` shows no loss.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:51:37.490Z"
+          "at": "2026-11-15T05:38:19.315Z"
         },
         {
           "n": 27,
@@ -75800,8 +75800,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T05:36:24.081Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:38:19.315Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 38
     },
     {
@@ -217600,6 +217600,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:38:19.315Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#26: proof; was: Web page size and first output (#5201): The w06 page's shipped code (gzip) is smaller than the esbuild-minified TypeScript version of the same program and than Pyodide's, and it reaches first output s"
+    },
+    {
+      "at": "2026-11-15T05:38:17.884Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#25: proof; was: Embedded runtime size and call speed (#6386): (was #6023) The runtime a host links for a guest that uses only core.text and core.math is smaller than the Lua 5.4.7 interpreter (329,248 bytes), and 10M"
+    },
+    {
+      "at": "2026-11-15T05:38:16.627Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#24: proof; was: Once the no-cache `jet run` beats the kept-program path on every ScriptBench workload, the kept-program cache (Compiler/JetCli ScriptCache: keep slots, background full builds, the stdin entry cache) i"
+    },
+    {
+      "at": "2026-11-15T05:38:15.578Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#22: proof; was: Core and Prelude ship precompiled inside the jet binary: checked interfaces and machine code produced when jet is built, part of the toolchain identity and immutable (no runtime cache, nothing to inva"
+    },
+    {
+      "at": "2026-11-15T05:38:14.650Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#21: proof; was: (was #5949 c16) Script startup beats Lua: on one host, the same-run median of `jet run hello.jet` and of `jet run` after an edit are each below lua 5.4 hello.lua, by design rather than by reusing a ke"
+    },
+    {
+      "at": "2026-11-15T05:38:13.676Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#20: proof; was: (was #5476) After a one-line edit to a 30-line script that uses core.files and core.regex, `jet run` prints its first output sooner than `python3` runs the equivalent script (hyperfine with a prepare "
+    },
+    {
+      "at": "2026-11-15T05:38:12.733Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#19: proof; was: (was #5476) Peak RSS of `jet run hello.jet` with no kept program or cache (GNU time %M, median of 10) is below `lua hello.lua` on the same host."
+    },
+    {
+      "at": "2026-11-15T05:38:11.766Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#18: proof; was: (was #5476) With no kept program, cache or incremental state, `jet run hello.jet` (a fresh process, nothing reused from an earlier run) shows a lower mean than `luajit hello.lua` under `hyperfine -N -"
+    },
+    {
+      "at": "2026-11-15T05:38:10.830Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#16: proof; was: (was #4155) [#4317] Generated codec decoders are compact (out-of-line or table-driven), with no unnecessary recursive-edge boxing and the format preserved. Size and time receipts compare against 15.9 "
+    },
+    {
+      "at": "2026-11-15T05:38:09.909Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#15: proof; was: (was #4155) [#4258] Known-value module constants fold to IR constants. Larger aggregates get static storage once. Only #Static stays addressable."
+    },
+    {
+      "at": "2026-11-15T05:38:08.926Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#14: proof; was: (was #6017) Until both thresholds pass, the job runs in report mode and logs size and start time on this card for each change; it turns blocking in the change that first passes both."
+    },
+    {
+      "at": "2026-11-15T05:38:07.943Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#13: proof; was: (was #6017) The thresholds live in one table in the binary-size budget doc, and the job reads them from there."
+    },
+    {
+      "at": "2026-11-15T05:38:07.002Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#12: proof; was: (was #6017) A local perf gate builds hello with the smallest-size build profile, records binary size and the median start time over 50 runs on the reference Linux x86-64 machine, and fails when size e"
+    },
+    {
+      "at": "2026-11-15T05:38:06.099Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#10: strip debris; turn the question into an outcome with proof; was: (was #4919) (was #5467) Runtime threads reserve 192 MiB of stack each: right default for user programs?"
+    },
+    {
+      "at": "2026-11-15T05:38:05.220Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#9: strip debris; outcome and proof; was: (was #4919) (was #4964) Native jet runs the compiler on the 8 MiB main stack (deep recursion overflows unless ulimit -s is raised)"
+    },
+    {
+      "at": "2026-11-15T05:38:04.337Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#8: strip debris; proof; was: (was #4919) (was #4768) Jet linker: dynamic linking for the D-OS-FLOOR1 glibc path (PT_INTERP/DT_NEEDED plus bundled glibc stubs) for the hosted CLI."
+    },
+    {
+      "at": "2026-11-15T05:38:03.422Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#7: strip debris; outcome and proof; was: (was #4919) (was #4689) jet run aborts with 'jet-compiler has overflowed its stack' on small valid programs (fuzz finding; jet check and emit pass)"
+    },
+    {
+      "at": "2026-11-15T05:38:02.489Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#6: proof; was: For every program in the size corpus (hello, one program per required perf cell, and every landed #5072 tool twin, each with a hand-written, optimized x86-64 assembly reference committed beside it tha"
+    },
+    {
+      "at": "2026-11-15T05:38:01.466Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#5: proof; was: The size win comes from the root design (pay-for-what-you-use runtime, lazy runtime initialization, liveness through every runtime and Core layer, no unconditional startup machinery), with no hello-wo"
+    },
+    {
+      "at": "2026-11-15T05:38:00.534Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#4: proof; was: Final binary size is a required metric in every required perf cell of the canonical manifest, and the gate fails any cell where Jet's default build is not strictly smaller than every peer; a hello-wor"
+    },
+    {
+      "at": "2026-11-15T05:37:59.606Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#3: proof; was: Jet's default build (jet build, no size flags) of hello and of every required perf workload is strictly smaller than each peer's smallest output for the same program (Zig ReleaseSmall stripped, C musl"
+    },
+    {
+      "at": "2026-11-15T05:37:58.679Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#2: proof; was: Runtime startup and print pull in only what the program uses: a program that never spawns tasks, allocates or formats links none of that machinery, by liveness and lazy initialization, with one meanin"
+    },
+    {
+      "at": "2026-11-15T05:37:57.727Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c031o59x",
+      "note": "#10: strip debris; proof; was: [#2520] Measure duplicated generic instances as a percentage of backend time on phase-1 units. Only above 15%, give each instance exactly one deterministic placement. If the trigger is conclusively un"
+    },
+    {
+      "at": "2026-11-15T05:37:56.754Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c031o59x",
+      "note": "#9: proof; was: Plan step 4, the compiler compiled well. Starts only once the language is mostly stable (the major syntax, semantics and Core churn is done), so tuning isn't wiped out by later cutovers: Jet's own rel"
+    },
+    {
+      "at": "2026-11-15T05:37:55.828Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c031o59x",
+      "note": "#8: proof; was: Plan step 3, fused per-function pipeline: each function goes parse -> check -> lower -> select -> encode while its data is still in cache, with no whole-program intermediate copy, and a direct executa"
+    },
     {
       "at": "2026-11-15T05:37:54.745Z",
       "by": "TowerKeeper-1",
