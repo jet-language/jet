@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6969,
-    "rev": 105825,
+    "nextNum": 6974,
+    "rev": 105850,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77460,93 +77460,100 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A perf corpus with a hand-written optimized x86-64 assembly reference per program, plus a measurement harness (cycles and instructions, perf stat best of N on a pinned CPU), is committed under Tools/perf and listed in the canonical perf manifest.",
+          "text": "Tools/perf/asm-parity holds the perf corpus (one program per required perf cell plus the codegen kernels), each with a hand-written optimized x86-64 reference (ref.S) and the harness measuring cycles and instructions (perf stat, best of N, pinned CPU), and the canonical perf manifest lists it. Proof: `git ls-files Tools/perf/asm-parity` lists a ref.S for every cells.json program, and `node --test Tools/gauntlet/harness/measurement-manifest.test.mjs` passes with the asm-parity rows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T00:36:56.186Z"
+          "at": "2026-11-15T05:42:01.389Z"
         },
         {
           "n": 2,
-          "text": "For every corpus program, `jet build` (default flags) runs within 1.10x of its assembly reference in cycles, with identical output; any program over that bound has a named codegen root on a card.",
+          "text": "For every corpus program, `jet build` (default flags) runs within 1.10x of its assembly reference in cycles, with identical output; any program over that bound has a named codegen root on a card. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate` shows every program at or under 1.10x cycles.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T00:36:57.805Z"
+          "at": "2026-11-15T05:42:02.455Z"
         },
         {
           "n": 3,
-          "text": "The perf gate fails any corpus program over the bound, and a plan document (Docs/proposals) names the codegen and runtime design changes, with modelled gains, that close the gap without per-program tricks.",
+          "text": "The perf gate fails any corpus program over the bound, and a plan document (Docs/proposals) names the codegen and runtime design changes, with modelled gains, that close the gap without per-program tricks. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate` exits non-zero on a program over the bound, and `git ls-files \"Docs/proposals/*asm-ceiling*\"` names the plan.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T00:36:59.001Z"
+          "at": "2026-11-15T05:42:03.691Z"
         },
         {
           "n": 4,
           "text": "(was #5925) probe instructions per byte/element recorded before and after each step; FIXED_POINT; goldens; self-compile A/B.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:10:22.381Z"
+          "evidence": "Merged into #6414 c15: before-and-after instruction counts are c15 method",
+          "at": "2026-11-15T05:42:07.700Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
           "text": "(was #5925) (was #5064) Optimizer verification: O0 as reference semantics for every IR optimization pass",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:10:23.319Z"
+          "evidence": "Moved to #6971 c1: optimizer pipeline",
+          "at": "2026-11-15T05:42:09.713Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
           "text": "(was #5925) (was #5471) Packed list element strides: [Bool]/[U8] at 1 byte, [I32] at 4 (today 8)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:10:24.235Z"
+          "evidence": "Moved to #6969 c1: data representation",
+          "at": "2026-11-15T05:42:10.697Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
           "text": "(was #5925) (was #5473) Fieldless enum ==/compare lowers to a 3852-instruction derived compare chain; use a tag compare",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:10:25.217Z"
+          "evidence": "Moved to #6970 c1: hot code shape",
+          "at": "2026-11-15T05:42:11.720Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
           "text": "(was #5925) (was #5475) Reference counts are always atomic (rc_add): non-atomic unless shared",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:10:26.151Z"
+          "evidence": "Moved to #6969 c2: data representation",
+          "at": "2026-11-15T05:42:13.161Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
           "text": "(was #5469) Option of a scalar is heap-boxed: pop/get/first/last allocate on every call",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:10:29.011Z"
+          "evidence": "Moved to #6969 c3: data representation",
+          "at": "2026-11-15T05:42:14.104Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
           "text": "(was #5919) a micro program with flat allocation counts for an aggregate capture; FIXED_POINT; goldens; same-generation self-compile A/B.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:10:31.786Z"
+          "evidence": "Moved to #6969 c4: data representation",
+          "at": "2026-11-15T05:42:15.042Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
@@ -77586,12 +77593,12 @@
         },
         {
           "n": 15,
-          "text": "Work backwards from hand-optimized machine code (owner direction 2026-11-11). A kernel catalog covers each common code shape: counted and iterator loops, list sum and map, text scan and compare, struct copy and move, enum match, option and error return, hash lookup, bounds-checked index, call and return, allocation and drop. Each kernel has a small Jet program and a hand-written, maximally optimized x86-64 reference that does the same work with the same safety checks. For each kernel, a checker compares the hot code that `jet build` emits with the reference: instruction count, spills, loads and stores, checks, and calls. Every extra instruction is named with its root (bounds check not hoisted, value spilled, copy not elided, loop not vectorized, call not inlined, or atomic reference count). Each root is fixed once, in the general lowering, never per kernel, and is proved on a second program that uses the feature differently. Each kernel then gets a machine-code golden that pins the emitted hot loop at O1 and O2, so a regression fails the gate. The gate fails any kernel whose emitted hot code is over its reference in instructions or cycles. Every new codegen feature adds its kernel and reference before it lands.",
+          "text": "Work backwards from hand-optimized machine code (owner direction 2026-11-11). A kernel catalog covers each common code shape: counted and iterator loops, list sum and map, text scan and compare, struct copy and move, enum match, option and error return, hash lookup, bounds-checked index, call and return, allocation and drop. Each kernel has a small Jet program and a hand-written, maximally optimized x86-64 reference that does the same work with the same safety checks. For each kernel, a checker compares the hot code that `jet build` emits with the reference: instruction count, spills, loads and stores, checks, and calls. Every extra instruction is named with its root (bounds check not hoisted, value spilled, copy not elided, loop not vectorized, call not inlined, or atomic reference count). Each root is fixed once, in the general lowering, never per kernel, and is proved on a second program that uses the feature differently. Each kernel then gets a machine-code golden that pins the emitted hot loop at O1 and O2, so a regression fails the gate. The gate fails any kernel whose emitted hot code is over its reference in instructions or cycles. Every new codegen feature adds its kernel and reference before it lands. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate` over the catalog cells and `jet test Compiler --profile golden --filter codegen_kernels` (machine-code goldens at O1 and O2), with instructions per element recorded before and after each step.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T19:17:32.506Z"
+          "at": "2026-11-15T05:42:04.664Z"
         },
         {
           "n": 17,
@@ -77677,11 +77684,12 @@
         {
           "n": 30,
           "text": "(was #6205) An inspect corpus of hot kernels shows code at least as tight as clang -O2 (no spills in register-resident loops, no redundant copies or checks), with tests that fail on regression",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:26:51.265Z"
+          "evidence": "Merged into #6414 c15: c15 pins every hot kernel with machine-code goldens against a hand-written reference",
+          "at": "2026-11-15T05:42:08.662Z",
+          "closure": "obsolete"
         },
         {
           "n": 31,
@@ -77721,12 +77729,12 @@
         },
         {
           "n": 35,
-          "text": "Every G10 kernel beats Rust (Jet/Rust < 1.00, same run) and is measured against the best hand-written assembly for the workload, with the gap to that ceiling reported per kernel and closed largest-first (owner order 2026-10-31).",
+          "text": "Every kernel of the c15 catalog beats Rust (Jet/Rust < 1.00, same run) and is measured against its hand-written assembly ceiling, with the gap to that ceiling reported per kernel and closed largest-first (owner order 2026-10-31). Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate` ceiling columns and the Rust column of the same run.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:27:23.395Z"
+          "at": "2026-11-15T05:42:05.741Z"
         },
         {
           "n": 36,
@@ -77901,12 +77909,12 @@
         },
         {
           "n": 57,
-          "text": "End metric: startup is as fast as physically possible: exec-to-exit cycles and instructions of the hello and taskfile cells match their asm-parity references within noise. (moved from #6533 c2)",
+          "text": "End metric: startup is as fast as physically possible: exec-to-exit cycles and instructions of the hello and taskfile cells match their asm-parity references within noise. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate --cells hello,taskfile`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:01:36.351Z"
+          "at": "2026-11-15T05:42:06.701Z"
         }
       ],
       "refs": [],
@@ -77917,8 +77925,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-13T02:10:28.344Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:42:15.042Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 57
     },
     {
@@ -104695,6 +104703,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T05:41:40.937Z"
+        },
+        {
+          "n": 9,
+          "text": "The WebSocket live hub sends an invalidation only to connections holding a subscription it affects, whose caller passed that source's policy. No event, live or replayed on join, carries another caller's encoded key, and a WebSocket route that reads no live query receives no live event. Proof: `jet test Compiler --profile cases --filter web_app/live_hub_events_reach_only_admitted_subscribers` (a two-account case plus an unrelated route).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:42.103Z"
         }
       ],
       "refs": [],
@@ -104709,9 +104726,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-15T05:41:40.937Z",
+      "updated": "2026-11-15T05:41:42.103Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c0ems7zb",
@@ -112665,6 +112682,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T05:19:38.317Z"
+        },
+        {
+          "n": 13,
+          "text": "The pinned report reproduces every current Jet loss with the frozen task, hostile input, selected peer, toolchain, sample policy, tolerance, and source boundary unchanged. Proof: `node --test Tools/gauntlet/harness/standings.test.mjs` reproduction cases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:55.517Z"
+        },
+        {
+          "n": 14,
+          "text": "Every applicable native, cross-target, O0, O1, O2, normal and hostile execution row still produces the frozen observable result with separate artifact and output receipts. Proof: `node --test Tools/gauntlet/harness/run.test.mjs`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:56.615Z"
+        },
+        {
+          "n": 15,
+          "text": "The release gate passes with zero unowned losses; any remaining loss names a live narrower Tower card and keeps the release claim false. Proof: `node --test Tools/gauntlet/harness/status.test.mjs` unowned-loss cases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:57.831Z"
+        },
+        {
+          "n": 16,
+          "text": "A frozen workload manifest covers systems, service, CLI, library, compute, embedded and cross-platform tasks against the best compiled peer, with the same inputs, versions and source boundary. Reports cover the ten metrics plus the unsafe/audit burden. Proof runs on Linux, macOS and Windows, native and cross where applicable. Removal canaries make false greens fail. The release gate cannot pass with an unowned loss, and a fresh reviewer verifies fairness. Proof: `node --test Tools/gauntlet/harness/measurement-manifest.test.mjs` and the Linux, macOS and Windows receipts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:58.993Z"
+        },
+        {
+          "n": 17,
+          "text": "The ratified surface/plain performance contract, paired-program manifest and strict loss/missing-evidence gate are implemented, with a test that fails on a missing or losing pair. Proof: `node --test Tools/gauntlet/harness/run.test.mjs` paired-program cases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:42:00.282Z"
         }
       ],
       "refs": [],
@@ -112678,8 +112740,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:38.317Z",
-      "updated": "2026-11-15T05:25:11.338Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T05:42:00.282Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 17
     },
     {
       "id": "c02tlmeh",
@@ -113926,6 +113989,421 @@
       "needsAcceptance": false,
       "created": "2026-11-15T05:39:10.355Z",
       "updated": "2026-11-15T05:39:10.355Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0pwthed",
+      "num": 6969,
+      "title": "Data costs what it should: packed list strides, non-atomic unshared reference counts, unboxed scalar options and allocation-free aggregate captures",
+      "body": "Destination: `[Bool]` and `[U8]` lists store one byte per element and `[I32]` four; reference counts are atomic only for values shared across tasks; an Option of a scalar is never heap-boxed; and capturing an aggregate in a closure allocates a flat count.\n\nWhy: representation overheads multiply through every program; a hand-written version pays none of them.\n\nDecisions: AGENTS.md performance gate; owner hold 2026-11-11 (architecture and regression fixes first, no small tuning during language churn), so each fix goes in the general representation, proven on a second program.\n\nSource: split from #6414 (run time against hand-written assembly) on 2026-11-15 by TowerKeeper-1. The rows came from #5925 (#5471, #5475), #5469 and #5919.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`[Bool]` and `[U8]` lists store 1 byte per element and `[I32]` 4 bytes (today 8), with identical output on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter layout/packed_list_strides`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:50.756Z"
+        },
+        {
+          "n": 2,
+          "text": "Reference counts are non-atomic unless the value is shared across tasks (today rc_add is always atomic), with task-sharing goldens unchanged. Proof: `jet test Compiler --profile cases --filter rc/nonatomic_unless_shared` and `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate --cells allocfree`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:50.756Z"
+        },
+        {
+          "n": 3,
+          "text": "An Option of a scalar is not heap-boxed: pop, get, first and last on a list of scalars allocate nothing. Proof: `jet test Compiler --profile cases --filter alloc/option_scalar_no_box`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:50.756Z"
+        },
+        {
+          "n": 4,
+          "text": "Capturing an aggregate in a closure allocates a flat count as the aggregate grows, with goldens unchanged and the self-compile fixed point held. Proof: `jet test Compiler --profile cases --filter alloc/aggregate_capture_flat`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:50.756Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "codegen",
+        "performance",
+        "memory"
+      ],
+      "goals": [
+        "G13"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T05:41:50.756Z",
+      "updated": "2026-11-15T05:41:50.756Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c05y3url",
+      "num": 6970,
+      "title": "Hot loops emit what a hand-writer would: tag compares, no entry uniqueness test, range-only slices, cheap appends, two-instruction stop polls and no frame traffic",
+      "body": "Destination: the hot code `jet build` emits for common shapes matches a hand-written version: fieldless enum compare is a tag compare; a borrowed list parameter does no uniqueness test on entry; slicing touches only its range; interpolated append is cheaper than Rust; a loop stop poll costs at most 2 hot instructions; and loops with at most 9 live general values touch no stack frame.\n\nWhy: these shapes sit inside nearly every hot loop; each extra instruction is paid on every iteration.\n\nDecisions: AGENTS.md performance gate; owner hold 2026-11-11 (no small tuning during language churn), so each fix is general and proven on a second program.\n\nSource: split from #6414 (run time against hand-written assembly) on 2026-11-15 by TowerKeeper-1. The rows came from #5925 (#5473), #6362, #6363, #6472 and #6478.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Equality and compare on a fieldless enum lower to a tag compare (today a 3852-instruction derived compare chain), on O1 and O2. Proof: `jet test Compiler --profile golden --filter codegen/fieldless_enum_tag_compare`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:51.725Z"
+        },
+        {
+          "n": 2,
+          "text": "A & list parameter passed an exclusively owned list does no uniqueness test or copy on entry at o2 (emitted code shows none), copy-on-write meaning unchanged, and k6343/axpy.jet within the gate's band against C. Proof: `jet test Compiler --profile cases --filter codegen/borrowed_list_param_no_uniqueness_test` and the k6343 axpy cell.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:51.725Z"
+        },
+        {
+          "n": 3,
+          "text": "Slicing touches only the requested range and does not copy the whole text; k6342/slice_loop.jet is faster than Rust (Jet/Rust < 1.00, no parity band) and meets its asm-parity ceiling, output unchanged on o0, o1 and o2. Proof: `jet test Compiler --profile cases --filter codegen/slice_touches_range` and `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate` for the k6342 slice_loop cell.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:51.725Z"
+        },
+        {
+          "n": 4,
+          "text": "Building a string by repeated interpolated append (`s += \"{i % 10}\"`, 10k times) costs less than the Rust equivalent at o2 (Jet/Rust < 1.00) (today about 470 cycles and 2,800 instructions per append, 5.27M cycles in total against Rust 6.39M for the whole slice_loop program). Proof: the k6342 slice_loop cell in the same run as Rust.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:51.725Z"
+        },
+        {
+          "n": 5,
+          "text": "Default build: a loop's stop poll costs at most 2 hot instructions per iteration, with the poll call out of line (objdump of the asm-parity hot loops). Proof: `jet test Compiler --profile cases --filter codegen/stop_poll_two_instructions`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:51.725Z"
+        },
+        {
+          "n": 6,
+          "text": "Default build: the crc16 fast loop, the regex DFA step loop and find_paired have zero [rbp-*] (frame) accesses inside the loop body when at most 9 general values are live (objdump of the asm-parity images). Proof: `jet test Compiler --profile cases --filter codegen/hot_loop_no_frame_access`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:51.725Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "codegen",
+        "performance"
+      ],
+      "goals": [
+        "G13"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T05:41:51.726Z",
+      "updated": "2026-11-15T05:41:51.726Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0lpm2b4",
+      "num": 6971,
+      "title": "One verified optimizer pipeline: O0 is the reference, passes are canonical and deterministic, stale facts fail closed, and adaptive rebuild is opt-in",
+      "body": "Destination: one target-neutral, ordered IR optimization pipeline produces deterministic canonical bytes and stores its facts once; every pass is checked against O0 as reference semantics; stale or malformed facts fail closed; and adaptive rebuild from a run record (D-ADAPTIVE-TIER1=B) exists as an opt-in.\n\nWhy: optimization is only worth having if it never changes meaning; a single canonical pipeline is also what makes speed work repeatable.\n\nDecisions: D-ADAPTIVE-TIER1=B (opt-in, owner ruling); I9.\n\nSource: split from #6414 (run time against hand-written assembly) on 2026-11-15 by TowerKeeper-1. The rows came from #5925 (#5064), #2886, #2912, #2951, #3038 and #4571 (frozen #4571 holds the same adaptive work).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every IR optimization pass is checked against O0 as reference semantics: a differential harness runs each pass corpus at O0 and with the pass on, and fails on any difference. Proof: `jet test Compiler --profile cases --filter optimizer/o0_reference_differential`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:52.679Z"
+        },
+        {
+          "n": 2,
+          "text": "One post-lowering IR optimization pass canonicalizes literal and immutable Boolean loops plus proven literal integer ranges before every execution tier, preserves source markers and carries counted-loop vector proof metadata, with tier goldens, shape tests and a performance cell. Proof: `jet test Compiler --profile golden --filter optimizer/loop_canonicalize` on every tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:52.679Z"
+        },
+        {
+          "n": 3,
+          "text": "One target-neutral ordered IR legality and optimization pipeline produces deterministic canonical bytes and stores bounds, fusion, loop, copy-cost, failure-edge and data-plan facts once; every execution adapter rejects non-canonical input instead of deriving tier-local optimization policy. Proof: `jet test Compiler --profile cases --filter jetir/canonical_pipeline_bytes`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:52.679Z"
+        },
+        {
+          "n": 4,
+          "text": "All five bounded optimization experiment families have paired executable source, falsifying controls, exact machine, premise and observation contracts, and a real checker, inspect, run and Gauntlet collection driver, without adopting unproved transforms. Proof: `jet test Compiler --profile cases --filter optimizer/experiment_families`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:52.679Z"
+        },
+        {
+          "n": 5,
+          "text": "An eligible-to-ineligible transition caused by a supported IR rewrite or reduction rejection no longer leaves stale positive eligibility; a regression fails before the repair and passes afterward. Proof: `jet test Compiler --profile cases --filter optimizer/stale_eligibility_regression`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:52.679Z"
+        },
+        {
+          "n": 6,
+          "text": "Fresh optimization, unchanged re-optimization and changed-input validation agree on facts and canonical identity; no-op optimization is stable and malformed/stale evidence fails closed Proof: `jet test Compiler --profile cases --filter optimizer/reoptimize_identity`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:52.679Z"
+        },
+        {
+          "n": 7,
+          "text": "The affected source program keeps its values, effects, first error, cleanup and reduction bits on O0, O1, O2 and web; unsupported optimization takes the safe path. Proof: `jet test Compiler --profile golden --filter optimizer/safe_path` on O0, O1, O2 and web.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:52.679Z"
+        },
+        {
+          "n": 8,
+          "text": "D-ADAPTIVE-TIER1=B is built as an opt-in: a run record feeds a rebuild that specializes hot paths, with output identical to the plain build (frozen #4571 holds the same work). Proof: `jet test Compiler --profile cases --filter build/adaptive_rebuild_with_run_record`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:52.679Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "optimizer",
+        "jetir"
+      ],
+      "goals": [
+        "G13"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T05:41:52.679Z",
+      "updated": "2026-11-15T05:41:52.679Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c010rbgm",
+      "num": 6972,
+      "title": "Automatic acceleration keeps its fallback: column copies and auto-parallel loops consume checked facts and keep the serial meaning on every tier",
+      "body": "Destination: transient column copies are bounded by checked nested-reuse and single-pass facts, release lowering schedules automatic parallel work through the existing bounded pool from typed acceleration facts, and both keep the original scalar or serial fallback with the same meaning on O0, O1 and O2.\n\nWhy: automatic speedups are only safe if the plain meaning is always there to fall back to and to compare against.\n\nDecisions: I9; AGENTS.md performance gate.\n\nSource: split from #6414 (run time against hand-written assembly) on 2026-11-15 by TowerKeeper-1. The rows came from #2893 and #2894.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Transient column-copy source is limited by checked nested-reuse/single-pass facts and fixed cache-block storage; the shared measured gate and retained-sample paths consume the first chunk exactly once Proof: `jet test Compiler --profile cases --filter accel/column_copy_bounded`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:53.604Z"
+        },
+        {
+          "n": 2,
+          "text": "The original scalar fallback and shared canonical kernel semantics stay available on O0, O1 and O2, with gravity timing and transform-on/off output goldens. Proof: `jet test Compiler --profile golden --filter accel/gravity_scalar_fallback`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:53.604Z"
+        },
+        {
+          "n": 3,
+          "text": "The source release lowering consumes typed acceleration facts and the shared sampled gate, schedules through the existing bounded pool, preserves sampled work, and publishes actual decisions to typed inspect receipts Proof: `jet test Compiler --profile cases --filter accel/release_lowering_inspect_receipts`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:53.604Z"
+        },
+        {
+          "n": 4,
+          "text": "Automatic parallel code keeps the original serial fallback and the canonical independent kernel meaning on O0, O1 and O2, with output goldens and a performance cell. Proof: `jet test Compiler --profile golden --filter accel/auto_parallel_serial_fallback` and `node Tools/gauntlet/harness/run.mjs --entry auto-parallel`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:53.604Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "optimizer",
+        "performance",
+        "concurrency"
+      ],
+      "goals": [
+        "G13"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T05:41:53.604Z",
+      "updated": "2026-11-15T05:41:53.604Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0g80ty3",
+      "num": 6973,
+      "title": "Classic benchmark kernels beat C and Rust: the benchmarks-game set, tensor-map, enum dispatch, gradients and sprites, and the Doom renderer",
+      "body": "Destination: nbody, spectral-norm, mandelbrot, fannkuch, binary-trees and a text workload beat C; tensor-map and the enum-union bridge beat every peer; the gradient and sprite cells beat Rust; and the Doom renderer kernels reach gcc and clang -O2.\n\nWhy: these are the programs readers use to judge a language speed claim; each loss is a codegen or runtime root.\n\nDecisions: AGENTS.md performance gate (Jet/peer below 1.00, Rust included); scoring per #6953.\n\nSource: split from #6414 (run time against hand-written assembly) on 2026-11-15 by TowerKeeper-1. The rows came from #6205, #2414 (#3135, #2778), #3736 and the 2026-11-05 Doom port investigation.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "nbody, spectral-norm, mandelbrot, fannkuch, binary-trees and a string or text workload each beat C (Jet/C < 1.00) with identical output. Proof: `node Tools/gauntlet/harness/run.mjs --entry <each>` shows Jet/C below 1.00.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:54.524Z"
+        },
+        {
+          "n": 2,
+          "text": "`node Tools/gauntlet/harness/run.mjs --entry enum-union-bridge --runs 11` gives equal checksums for every cell and peer. It records tags, copies, spills, ownership transfers, allocation/copy counts and medians for direct named-enum, structural-union and explicit-conversion dispatch. Proof: that run receipt.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:54.524Z"
+        },
+        {
+          "n": 3,
+          "text": "The 256² and 512² tensor-map repros finish within the resource cap on a fresh release binary, and 4K does not regress into a timeout. The paired tensor-map cell gives Jet/peer < 1.00 for every peer, Rust included. A golden shows identical results on every level. Proof: `node Tools/gauntlet/harness/run.mjs --entry tensor-map` and `jet test Compiler --profile golden --filter tensor_map`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:54.524Z"
+        },
+        {
+          "n": 4,
+          "text": "The gradient and sprite cells (#3736) are committed with harness, baselines and a manifest entry, and Jet/Rust < 1.00 on both gradient cells and the sprite cell, measured in the same run with byte-identical outputs. Whether they are required cells is an owner choice (owner-gates row). Proof: `node Tools/gauntlet/harness/run.mjs --entry gradient` and `--entry sprite`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:54.524Z"
+        },
+        {
+          "n": 5,
+          "text": "On the Doom renderer kernels (R_DrawColumn, R_DrawSpan, FixedMul/FixedDiv, recursive BSP walk) with matching checksums, jet build --release is measurably faster than --optimize=none and reaches the peer floor against gcc -O2 and clang -O2. Measured on 2026-11-05: Jet O2 is 8.6x, 7.1x, 8.3x and 2.5x slower than gcc -O2; O0 and O2 run at nearly the same speed; #Inline(Always) and wrapping arithmetic make no measurable difference; --bounds=off only halves the column kernel. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea). Proof: `node Tools/gauntlet/harness/run.mjs --entry doom-kernels` against gcc -O2 and clang -O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:41:54.524Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "performance",
+        "gauntlet"
+      ],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T05:41:54.524Z",
+      "updated": "2026-11-15T05:41:54.524Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -217762,6 +218240,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T05:42:15.042Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T05:42:14.104Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T05:42:13.161Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T05:42:11.720Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T05:42:10.697Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T05:42:09.713Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T05:42:08.662Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-15T05:42:07.700Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T05:42:06.701Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0i891tv",
+      "note": "#57: strip debris; proof; was: End metric: startup is as fast as physically possible: exec-to-exit cycles and instructions of the hello and taskfile cells match their asm-parity references within noise. (moved from #6533 c2)"
+    },
+    {
+      "at": "2026-11-15T05:42:05.741Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0i891tv",
+      "note": "#35: proof; name the catalog; was: Every G10 kernel beats Rust (Jet/Rust < 1.00, same run) and is measured against the best hand-written assembly for the workload, with the gap to that ceiling reported per kernel and closed largest-fir"
+    },
+    {
+      "at": "2026-11-15T05:42:04.664Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0i891tv",
+      "note": "#15: proof; absorbs c4 and c30; was: Work backwards from hand-optimized machine code (owner direction 2026-11-11). A kernel catalog covers each common code shape: counted and iterator loops, list sum and map, text scan and compare, struc"
+    },
+    {
+      "at": "2026-11-15T05:42:03.691Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0i891tv",
+      "note": "#3: proof; was: The perf gate fails any corpus program over the bound, and a plan document (Docs/proposals) names the codegen and runtime design changes, with modelled gains, that close the gap without per-program tr"
+    },
+    {
+      "at": "2026-11-15T05:42:02.455Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0i891tv",
+      "note": "#2: proof; was: For every corpus program, `jet build` (default flags) runs within 1.10x of its assembly reference in cycles, with identical output; any program over that bound has a named codegen root on a card."
+    },
+    {
+      "at": "2026-11-15T05:42:01.389Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0i891tv",
+      "note": "#1: proof; was: A perf corpus with a hand-written optimized x86-64 assembly reference per program, plus a measurement harness (cycles and instructions, perf stat best of N on a pinned CPU), is committed under Tools/p"
+    },
+    {
+      "at": "2026-11-15T05:42:00.282Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0lt36hf",
+      "note": "#17 The ratified surface/plain performance contract, paired-prog"
+    },
+    {
+      "at": "2026-11-15T05:41:58.993Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0lt36hf",
+      "note": "#16 A frozen workload manifest covers systems, service, CLI, lib"
+    },
+    {
+      "at": "2026-11-15T05:41:57.831Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0lt36hf",
+      "note": "#15 The release gate passes with zero unowned losses; any remain"
+    },
+    {
+      "at": "2026-11-15T05:41:56.615Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0lt36hf",
+      "note": "#14 Every applicable native, cross-target, O0, O1, O2, normal an"
+    },
+    {
+      "at": "2026-11-15T05:41:55.517Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0lt36hf",
+      "note": "#13 The pinned report reproduces every current Jet loss with the"
+    },
+    {
+      "at": "2026-11-15T05:41:54.524Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0g80ty3",
+      "note": "Classic benchmark kernels beat C and Rust: the benchmarks-game set, tensor-map, enum dispatch, gradients and sprites, and the Doom renderer"
+    },
+    {
+      "at": "2026-11-15T05:41:53.605Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c010rbgm",
+      "note": "Automatic acceleration keeps its fallback: column copies and auto-parallel loops consume checked facts and keep the serial meaning on every tier"
+    },
+    {
+      "at": "2026-11-15T05:41:52.679Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0lpm2b4",
+      "note": "One verified optimizer pipeline: O0 is the reference, passes are canonical and deterministic, stale facts fail closed, and adaptive rebuild is opt-in"
+    },
+    {
+      "at": "2026-11-15T05:41:51.726Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c05y3url",
+      "note": "Hot loops emit what a hand-writer would: tag compares, no entry uniqueness test, range-only slices, cheap appends, two-instruction stop polls and no frame traffic"
+    },
+    {
+      "at": "2026-11-15T05:41:50.756Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0pwthed",
+      "note": "Data costs what it should: packed list strides, non-atomic unshared reference counts, unboxed scalar options and allocation-free aggregate captures"
+    },
+    {
+      "at": "2026-11-15T05:41:42.103Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00cqn1l",
+      "note": "#9 The WebSocket live hub sends an invalidation only to connect"
+    },
+    {
       "at": "2026-11-15T05:41:40.937Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -221106,713 +221759,6 @@
       "action": "card.criteria-edit",
       "ref": "c0uwol3w",
       "note": "#13: strip debris; proof; was: (was #3600) Integrated proof: `jet test Compiler --profile packages` passes every Jetpack engine row and Check.jet passes on the integrated tree; the receipt path and unit SHA are recorded here."
-    },
-    {
-      "at": "2026-11-15T05:13:26.343Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uwol3w",
-      "note": "#2: strip debris; proof; was: Every slice passes Jetpack/Bootstrap/Check.jet and `jet test Compiler --profile packages`, and runs on O0, O1 and O2 (I9), with no #Unsafe lacking an audited reason and no new external dependency outs"
-    },
-    {
-      "at": "2026-11-15T05:13:25.343Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uwol3w",
-      "note": "#1: strip debris; proof; was: Build-out: every non-JetOS Rust module in crates/jetpack (incl. src/bin), jetpack-bin, jet-nix-eval, jet-store, and the Jetpack-owned parts of jet-env-model and jet-pkg-model has a named Jet home unde"
-    },
-    {
-      "at": "2026-11-15T05:12:48.476Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0s2gaqp",
-      "note": "#2: proof; was: tests/cases/jetpack_dogfood/jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures gets past Nix cache admission: no 'closure reference discovery: Nix cache object is absent', and the "
-    },
-    {
-      "at": "2026-11-15T05:12:47.387Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0s2gaqp",
-      "note": "#1: proof; was: A jetpack case realizes a c@nixpkgs dependency into the cache, then corrupts the cached entry; the next build refuses it with a registered diagnostic and re-admits it only after a clean realize."
-    },
-    {
-      "at": "2026-11-15T05:12:46.101Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0bcerww",
-      "note": "#1: strip debris; proof; was: Owner 2026-11-04 (c): with a jet binary on PATH, every repo tool, gate and suite runs through jet directly, with no Nix and no jet-env. Tools/agent/jet-env stays only as the temporary bootstrap for a "
-    },
-    {
-      "at": "2026-11-15T05:12:43.945Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0a2monf",
-      "note": "#1: proof; was: The Engine-unit claim 'store broker realize verified round trips through broker and fails closed on auth' passes under jet test on the assembled Engine unit (O0, O1 and O2 tiers), and a minimal tests/"
-    },
-    {
-      "at": "2026-11-15T05:12:42.988Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0itgqr6",
-      "note": "#1: proof; was: Core declares `Package`, `Project` and `Env` record types; Jetpack evaluates each file as a record literal of its type with the prep evaluator; a misspelled field is an ordinary type error at its line"
-    },
-    {
-      "at": "2026-11-15T05:12:42.045Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08o25e8",
-      "note": "#2: proof; was: `#Policy(classified: ...)` makes the compiler refuse a classified value reaching an unlisted sink, with a registered diagnostic and UI snapshot."
-    },
-    {
-      "at": "2026-11-15T05:12:41.140Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08o25e8",
-      "note": "#1: proof; was: Licenses are SPDX values with `Custom(String)`, parsed and checked from the manifest."
-    },
-    {
-      "at": "2026-11-15T05:12:40.189Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0pf4ki0",
-      "note": "#1: proof; was: `trait Language` is declared in Core; the c binder implements it; `FFILanguage` and `ForeignLanguage` are gone; E1002's reserved-root list is a trait lookup; a test package adds a root without a compi"
-    },
-    {
-      "at": "2026-11-15T05:12:39.278Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uhfjtt",
-      "note": "#3: proof; was: The libm binder from ffi-v3 section 4.2 is written as tables only (types, handles, errors, refuse, names); a handle row derives a close and single use; a missing type mapping is a registered refusal w"
-    },
-    {
-      "at": "2026-11-15T05:12:38.354Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c00n89mp",
-      "note": "#1: proof; was: The three Rust-crate programs (regex, serde_json, a crate with its own threads) run through `use rust.<crate>` and print the card's outputs, as cases."
-    },
-    {
-      "at": "2026-11-15T05:12:37.392Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03kbmfy",
-      "note": "#1: proof; was: The three Python programs (statistics, numpy, pandas with matplotlib) run through `use py.<package>` and print the card's outputs, as cases."
-    },
-    {
-      "at": "2026-11-15T05:12:36.444Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05aa8kj",
-      "note": "#1: proof; was: The three isolation programs (a C decoder under `.Wasm`, a closed binary under `.Process`, the hardened profile) run with one `isolate:` line and no call-site change, printing the card's outputs, as c"
-    },
-    {
-      "at": "2026-11-15T05:12:35.528Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03yyxl3",
-      "note": "#3: strip debris; proof; was: (was #2377 c1) R, Perl, PHP, Ruby, PowerShell, and Octave generators emit one typed decode_response helper per binding, every generated operation delegates through it, protocol-specific raw extern acc"
-    },
-    {
-      "at": "2026-11-15T05:12:34.565Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03yyxl3",
-      "note": "#2: proof; tightened; was: The eight Examples/Interop/FFI/Projections/*/guest.jet exports with a declared failure carrier (document_open, document_bytes, view_at, document_replace, document_close: -> T? ProjectionError!) projec"
-    },
-    {
-      "at": "2026-11-15T05:12:33.623Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03yyxl3",
-      "note": "#1: proof; was: `#Export(c, python, js)` libraries build with `jet build --lib --host <host>` and the card's host programs in C, Python and JavaScript call them with the shown output, proven by cases."
-    },
-    {
-      "at": "2026-11-15T05:12:32.725Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0xf8qpl",
-      "note": "#1: strip debris; proof; was: (was #2901 c2) A prototype binds one C++ class (ctor, method, dtor) and prints identical output on O0, O1 and O2, or the note records exactly which tier blocked it and why [precut audit: no dev test, "
-    },
-    {
-      "at": "2026-11-15T05:12:31.829Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03t8ic0",
-      "note": "#1: proof; was: The three callback programs (qsort with a capturing comparator, an event loop, foreign-thread delivery) honor each retention fact and print the card's outputs, as goldens on O0, O1 and O2; a capture t"
-    },
-    {
-      "at": "2026-11-15T05:12:30.935Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0x2wq8a",
-      "note": "#1: proof; was: The three gallery programs (libm, zlib, libpng) call C through `use c.<lib>` with no `#Unsafe`, pointer or binding file and print the card's outputs, as goldens on O0, O1 and O2."
-    },
-    {
-      "at": "2026-11-15T05:12:30.043Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0mwaylu",
-      "note": "#2: strip debris; owner-gated; proof; was: C-linked programs follow the ratified D-FFI-CARRIER1. If it is option E, only the initial thread runs C, a task's C call is handed to it, and errno and results come back; a case proves that single-thr"
-    },
-    {
-      "at": "2026-11-15T05:12:29.132Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0mwaylu",
-      "note": "#1: proof; was: The three gallery programs (a #Blocking C call that does not stall other tasks, curl multi through ffi.completion, a main-thread GUI) run with the card's outputs as goldens on O0, O1 and O2."
-    },
-    {
-      "at": "2026-11-15T05:12:28.039Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l5a4vu",
-      "note": "#3: proof; was: An archive browser over libarchive (list, extract one entry by streaming, refuse a path that escapes the root) runs from one package.jet with no hand-written C, with a golden on O0, O1 and O2."
-    },
-    {
-      "at": "2026-11-15T05:12:27.099Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l5a4vu",
-      "note": "#2: proof; was: A terminal history viewer over libgit2 (commit walk with callbacks, diff of one commit) runs from one package.jet with no hand-written C, with a golden on O0, O1 and O2."
-    },
-    {
-      "at": "2026-11-15T05:12:26.162Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l5a4vu",
-      "note": "#1: proof; was: The sqlite notes CLI gallery app builds from `use c.sqlite` with no `#Unsafe`, pointer or binding file and prints the card outputs, as goldens on O0, O1 and O2."
-    },
-    {
-      "at": "2026-11-15T05:12:25.233Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0g5cadm",
-      "note": "#3: owner-gated; proof; was: After ratification the chosen build server and compile-time build surface is implemented with examples and golden output on o0, o1 and o2."
-    },
-    {
-      "at": "2026-11-15T05:12:24.329Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c07hz2zg",
-      "note": "#2: ratified independently of the ballot; proof; was: The core.<area>.runtime privacy uses a rule any package can use (UI snapshot for the refused import)."
-    },
-    {
-      "at": "2026-11-15T05:12:23.434Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c07hz2zg",
-      "note": "#1: owner-gated; proof; was: The ballot is answered; under A, `jet` resolves Core as a package with a version shown by `jet inspect`."
-    },
-    {
-      "at": "2026-11-15T05:12:22.522Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0qz3x03",
-      "note": "#2: proof; was: D-LADDER-LAW1=A is built: a value forced by a host or fleet file refuses a conflicting flag as a pin does, with one registered error; Policy Tighten, the BuildOptions pin (E2113) and FactLaw .Force (E"
-    },
-    {
-      "at": "2026-11-15T05:12:21.610Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c098yuyt",
-      "note": "#3: proof; was: With the schema option, the command writes the JSON Schema for the value's type from the same codec metadata, and a value that fails its type is never exported (test)."
-    },
-    {
-      "at": "2026-11-15T05:12:20.694Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c098yuyt",
-      "note": "#2: proof; was: The export command writes a named config value from a fixture as JSON, YAML and TOML; each output decodes back into the same typed value (round-trip test per format)."
-    },
-    {
-      "at": "2026-11-15T05:12:19.789Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c01ruyp3",
-      "note": "#3: proof; was: State is stored as a content-addressed lock, and a `Secret` value never appears in state or plan output (test)."
-    },
-    {
-      "at": "2026-11-15T05:12:18.902Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c01ruyp3",
-      "note": "#2: proof; was: An `infra` package plans a two-resource deployment against a fake provider; the plan is a value a `#Test` asserts on, and apply runs only with Net and Secret grants (test)."
-    },
-    {
-      "at": "2026-11-15T05:12:17.985Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uq7n80",
-      "note": "#4: strip debris; proof; was: (was #4215 c1) Compare the package's public API and effect rows against the last published snapshot; classify as patch/minor/major; fail publish when the written version is too small, with a Fix namin"
-    },
-    {
-      "at": "2026-11-15T05:12:17.083Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uq7n80",
-      "note": "#3: aligned with D-REGISTRY-EXAMPLE1=A (coverage shown, not forced); proof; was: Publishing a package with a public function that has no passing example and no reasoned exemption fails with an error listing those functions; the package page shows the exemption count (test)."
-    },
-    {
-      "at": "2026-11-15T05:12:16.129Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0uq7n80",
-      "note": "#2: proof; was: `jet registry publish` from a CI job authenticates with the job's OIDC identity and no stored secret, and the transparency-log entry names the repository, workflow and commit; a publish with a long-li"
-    },
-    {
-      "at": "2026-11-15T05:12:15.098Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05i2uiq",
-      "note": "#3: strip debris; proof; was: (was #5980) (was #4614) Package deps imply a prepared environment (D-DEPS-ENV1): each battery example compiles after jet env --prep with no env.jet."
-    },
-    {
-      "at": "2026-11-15T05:12:13.725Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05i2uiq",
-      "note": "#2: proof; was: D-MANIFEST-ONE1=A is built: a project with environment and workspace policy has only package.jet at its root, the old files are no longer read, and every in-repo project is migrated in one cutover."
-    },
-    {
-      "at": "2026-11-15T05:12:12.240Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0etvk8s",
-      "note": "#4: strip debris; proof; was: (was #2218 c1) Lock changes print a changelog-shaped diff with version moves, added/removed counts, and net size delta; jetpack lock diff shows the same on demand [precut audit: no dev test, golden, c"
-    },
-    {
-      "at": "2026-11-15T05:12:11.108Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0etvk8s",
-      "note": "#3: proof; was: The spec lists every `.jet/` subpath and whether it is disposable; files meant to be committed live outside `.jet/`."
-    },
-    {
-      "at": "2026-11-15T05:12:10.136Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0etvk8s",
-      "note": "#2: proof; was: The lock holds no per-machine state: building the same project on two machines gives byte-identical locks; build stamps live under `.jet/build/`."
-    },
-    {
-      "at": "2026-11-15T05:12:09.146Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0vzmbkk",
-      "note": "#2: proof; was: `jet status` at a workspace root lists members and their entries (no phantom `target run.jet`), and `jet project parts` lists the members."
-    },
-    {
-      "at": "2026-11-15T05:12:08.106Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0vzmbkk",
-      "note": "#1: proof; was: D-WORKSPACE-CMD1=A is built: at the root of a three-member workspace `jet check`, `jet test`, `jet doc` and `jet build` behave as it decides with `-p <member>` narrowing; `jet run` still asks which pr"
-    },
-    {
-      "at": "2026-11-15T05:12:07.088Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0he880u",
-      "note": "#1: proof; was: Package-level audit trail: an imperative change writes back into the declaration and drift from the last good state is reported, proven by a case (system-root and boot attestation parts wait while Jet"
-    },
-    {
-      "at": "2026-11-15T05:12:06.056Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0yozzfl",
-      "note": "#1: proof; was: Two independent builds of every published package from the same inputs are bit-identical, checked by the release gate, and each build attestation is appended to a transparency log anchored at the trus"
-    },
-    {
-      "at": "2026-11-15T05:12:05.110Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c07yeb2k",
-      "note": "#1: proof; was: Updating a dependency whose new version adds an effect (for example Net.Connect) or a `#Unsafe` block reports each widened effect with the dependency function that needs it, at update time and on the "
-    },
-    {
-      "at": "2026-11-15T05:12:04.164Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0gpih2e",
-      "note": "#1: owner-gated; proof; was: The owner question on grafts (allowed or not) is a ratified decision; if allowed, a graft is recorded in the declaration, applied without rebuilding dependents, and reconciled by the next full build, "
-    },
-    {
-      "at": "2026-11-15T05:12:02.992Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0nr5mre",
-      "note": "#1: proof; was: `jetpack` answers \"is this package affected by advisory X?\" from the exact lock and closure, down to version and build options, with a case on a fixture graph that has one affected and one unaffected "
-    },
-    {
-      "at": "2026-11-15T05:12:02.075Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c00tizy7",
-      "note": "#3: strip debris; proof; was: (was #320) jetos: declarative VM integration-test framework (NixOS test-driver parity) [precut audit: failing on 9c7ddf1359: C:jetpack_jetos/os_vm_test_runs_declared_scenario_and_records_proof FAIL ex"
-    },
-    {
-      "at": "2026-11-15T05:12:01.161Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c00tizy7",
-      "note": "#2: strip debris; the cited case tested generations, not this; was: (was #236) jetos risk-aware proof before switch [precut audit: failing on 9c7ddf1359: C:jetpack_jetos/os_generations_are_newest_first_and_rollback_activates_prior FAIL exit 1; expected 0]"
-    },
-    {
-      "at": "2026-11-15T05:12:00.252Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c00tizy7",
-      "note": "#1: strip debris; concrete; proof; was: (was #2) jetos with nameable generations (far horizon) [precut audit: failing on 9c7ddf1359: C:jetpack_jetos/os_generations_are_newest_first_and_rollback_activates_prior FAIL exit 1; expected 0]"
-    },
-    {
-      "at": "2026-11-15T05:11:59.367Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ba141x",
-      "note": "#2: strip debris; proof; was: (was #2785 c3) Declared native package/module closure feeds linker inputs and missing-library diagnostics, including the canonical z package key for -lz, proven by link execution tests on every applic"
-    },
-    {
-      "at": "2026-11-15T05:11:58.488Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ba141x",
-      "note": "#1: proof; was: D-LINK-MODEL1=A is built: each linked part has its own linkage (pure Jet and bundled C static; OS drivers and system libraries dynamic), the build function changes any part, and `jet inspect` lists ea"
-    },
-    {
-      "at": "2026-11-15T05:11:57.616Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c064zxf4",
-      "note": "#3: proof; was: every translated function passes a differential fixture against its C original on every tier; no generated code contains #Unsafe."
-    },
-    {
-      "at": "2026-11-15T05:11:56.715Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c064zxf4",
-      "note": "#2: proof; was: jet import c on a corpus (zlib, a sqlite3 subset, Chocolate Doom src/doom) writes byte-stable editable Jet; every untranslated function is called through the checked binder and carries a JT0101 note w"
-    },
-    {
-      "at": "2026-11-15T05:11:55.809Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0otj2s1",
-      "note": "#3: proof; was: An executable example with golden output proves the plan on every applicable tier."
-    },
-    {
-      "at": "2026-11-15T05:11:54.911Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0otj2s1",
-      "note": "#1: proof; was: One fn build registers the same program in at least two configurations with different profiles and targets, and one jet build invocation writes both artifacts to distinct output paths."
-    },
-    {
-      "at": "2026-11-15T05:11:54.008Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0r8y1nt",
-      "note": "#5: proof; was: Seam 5 has its home under the same mechanism: the compiler's build-receipt producer reads Core/build's session and key state (Core/build/keys.jet factory, session plan and target storage) through a `p"
-    },
-    {
-      "at": "2026-11-15T05:11:53.114Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0itvqcw",
-      "note": "#2: strip debris; proof; was: (was #4755) One naming module owns word splitting, the acronym list and every outside-medium projection (JSON, environment, flag, SQL, header) under D-WIRE-CASE1=A and D-WIRE-ACRONYM1=A (both ratified"
-    },
-    {
-      "at": "2026-11-15T05:11:51.826Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0itvqcw",
-      "note": "#1: proof; was: D-PATH-CASE2=A: One word-key resolver across roots, module declarations and file aliases; reject ambiguity before package read on every host; E0603/E0606/reserved-file fixes exact; user paths unrestri"
-    },
-    {
-      "at": "2026-11-15T05:10:07.740Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0810bga",
-      "note": "#5: proof; was: The `1.0 compatibility policy` line of `jet --version` reads from Docs/spec/release-policy.md, and the policy names the release in which the guard became blocking."
-    },
-    {
-      "at": "2026-11-15T05:10:06.297Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0810bga",
-      "note": "#4: proof; was: Across every release since the guard turned blocking, the number of hand edits needed to move the corpus forward is 0; the count is logged on this card per release."
-    },
-    {
-      "at": "2026-11-15T05:10:05.006Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0810bga",
-      "note": "#2: proof; was: A change that makes previously accepted source fail `jet check` without registering a `jet fix` rewrite fails the guard (planted-break test)."
-    },
-    {
-      "at": "2026-11-15T05:10:03.991Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0810bga",
-      "note": "#1: proof; was: A release guard checks out the previous release's Examples/ and a fixed corpus of 200 scripts (the ScriptBench programs plus Examples/features), runs `jet fix --all` then `jet check` with the new tool"
-    },
-    {
-      "at": "2026-11-15T05:10:03.072Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0jn187l",
-      "note": "#6: strip debris; proof; was: (was #3947) Parity: Package-default authority floor (#3718) not in JetDriver package facts [precut audit: no dev test, golden, case or snapshot proves this today] (was #4275 c147)"
-    },
-    {
-      "at": "2026-11-15T05:10:02.153Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0jn187l",
-      "note": "#4: strip debris; proof; was: (was #690 c4, #1038 c4) Focused multi-member workspace tests prove grant non-inheritance, explicit dependency grants, order, root-layer boundaries, diagnostic snapshots, and rollback of failed builds "
-    },
-    {
-      "at": "2026-11-15T05:10:01.240Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0jn187l",
-      "note": "#3: strip debris; proof; was: (was #690 c3, #1038 c3) Unlisted dependency authority, grant escalation, cycles, outside-root paths, read/write failure, and stale computed facts reject before effects with the correct registered diag"
-    },
-    {
-      "at": "2026-11-15T05:10:00.297Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0jn187l",
-      "note": "#2: strip debris; proof; was: (was #690 c2, #1038 c2) Each build unit receives only its declared Tier-1 inputs and explicitly named Tier-2 grants; dependency order, computed package facts, plan, execution, lock, and explain output"
-    },
-    {
-      "at": "2026-11-15T05:09:59.378Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0fq2ryv",
-      "note": "#6: strip debris; proof; was: (was #693 c3, #1043 c3) Corrupt or mismatched entries, malicious workers, lost connections, cancellation, timeout, replay, partial upload, and sandbox failure cannot become local truth or publish part"
-    },
-    {
-      "at": "2026-11-15T05:09:58.467Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0fq2ryv",
-      "note": "#5: strip debris; proof; was: (was #693 c2, #1043 c2) Local and remote action identity, inputs, outputs, worker platform, sandbox, signatures, provenance, cache publication, and consumed build result are identical in meaning [prec"
-    },
-    {
-      "at": "2026-11-15T05:09:57.582Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0fq2ryv",
-      "note": "#3: proof; was: Remote use still needs the D-JPK-REMOTE1 grants: a project cannot force remote execution or name an endpoint (test)."
-    },
-    {
-      "at": "2026-11-15T05:09:56.695Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0fq2ryv",
-      "note": "#2: proof; names D-REAPI1; was: With a remote builder bound by `jet remote bind`, `jet build` runs actions on a stock Remote Execution API server and its cache, and the outputs are byte-identical to a local build (CI test with a con"
-    },
-    {
-      "at": "2026-11-15T05:09:55.620Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l5ld15",
-      "note": "#4: proof; was: All active fixtures, diagnostic fixes, help/current explanations and relevant tooling migrate in one cutover; immutable history remains unchanged."
-    },
-    {
-      "at": "2026-11-15T05:09:54.693Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l5ld15",
-      "note": "#3: proof; was: Package declarations, profile/CLI/computed contributions, types, precedence, provenance and cache identity remain correct; compiler mode is not controlled by an application setting."
-    },
-    {
-      "at": "2026-11-15T05:09:53.783Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l5ld15",
-      "note": "#2: decision is ratified; proof; was: If constructor form wins, tls: Bool{true} and api_base: String{\"https://api.example.com\"} work and old equals declarations are not Jet syntax and get no migration diagnostic (owner order)."
-    },
-    {
-      "at": "2026-11-15T05:09:52.898Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l5ld15",
-      "note": "#1: concrete per D-SETTINGS-CTOR2=A; proof; was: The chosen declaration form has one parser/formatter meaning shared with ordinary Jet defaults, not a second hand-written constructor language."
-    },
-    {
-      "at": "2026-11-15T05:09:52.011Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0lyckm2",
-      "note": "#6: proof; was: A manifest dependency in the D-JPK-EXTPROV1 form (`leftpad: npm@\"1.3.0\"`, syntax-decisions.md:4186) fetches, pins and is called through its typed first-party stub package (:4220); the second run works"
-    },
-    {
-      "at": "2026-11-15T05:09:51.109Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0lyckm2",
-      "note": "#5: proof; was: Call cost: with `py@embed`, 100k calls of a small pure Python function finish in less than 1.5x the time of the same calls made inside CPython; with the sidecar default, the median round trip is below"
-    },
-    {
-      "at": "2026-11-15T05:09:50.218Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0lyckm2",
-      "note": "#4: proof; was: The #5949 prompt lists `FFI.Py` and the Python package names when a script first uses `py.*`, and a dependency update that adds a new Python package asks again (#5459 rules)."
-    },
-    {
-      "at": "2026-11-15T05:09:49.318Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0lyckm2",
-      "note": "#3: proof; was: Fence test: a fixture PyPI package that opens ~/.ssh/id_ed25519 at import is refused with an authority error naming FS.Read and the path, unless that grant was given; the same package under `pip insta"
-    },
-    {
-      "at": "2026-11-15T05:09:48.410Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0lyckm2",
-      "note": "#2: proof; was: Reach census: of the 100 most-downloaded PyPI packages, at least 90 import and pass a one-call smoke test through `use py.X` on Linux x86-64 (script and table checked in; the failing ones are listed w"
-    },
-    {
-      "at": "2026-11-15T05:09:47.483Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0lyckm2",
-      "note": "#1: proof; was: A loose script with `use py.numpy as np` and `print(np.mean([1.0, 2.0, 3.0]))` prints 2.0 under `jet run`; the first run fetches and hash-pins numpy from PyPI, the second run works with the network di"
-    },
-    {
-      "at": "2026-11-15T05:09:03.941Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0cwk90x",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T05:09:01.781Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0cwk90x",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T05:09:00.420Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0cwk90x",
-      "note": "#10: strip debris; proof; was: (from #6051 Ladder L-13 (Markers/policy): Audited gates claim ALL_SCOPES) The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden "
-    },
-    {
-      "at": "2026-11-15T05:08:58.941Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0cwk90x",
-      "note": "#9: strip debris; owner-gated; was: (from #6051 Ladder L-13 (Markers/policy): Audited gates claim ALL_SCOPES) An owner ballot on L-13 is ratified."
-    },
-    {
-      "at": "2026-11-15T05:08:57.643Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0cwk90x",
-      "note": "#7: strip debris; owner-gated; proof; was: (from #6044 Ladder L-05 (Effects/authority): Ratified #Abilities block r) The L-05 probe in the audit now behaves as the ratified rule says, and an example or UI test with a golden or snapshot proves "
-    },
-    {
-      "at": "2026-11-15T05:08:56.509Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0cwk90x",
-      "note": "#3: strip debris; proof; root-policy inheritance is the gated c13; was: (from #6042 Ladder L-03 (Packages/modules): Workspace rung only serves r) The L-03 probe in the audit now behaves as the ratified rule says, and an example or UI test with a golden or snapshot proves "
-    },
-    {
-      "at": "2026-11-15T05:08:55.337Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0cwk90x",
-      "note": "#2: concrete per D-LOOSE-GROW1; proof; was: The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot."
-    },
-    {
-      "at": "2026-11-15T05:08:54.257Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0cwk90x",
-      "note": "#12 Workspace root `policy:`, `settings:` and `authority.deny` r"
-    },
-    {
-      "at": "2026-11-15T05:07:38.313Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0acg7c2",
-      "note": "#9: strip debris; proof; was: (proof addition for criterion 7; reflection proposal B9) Runtime type-info retention is the `type_info` option with values `full`, `reachable` and `none`. `reachable` is the default and keeps only the"
-    },
-    {
-      "at": "2026-11-15T05:07:37.371Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0acg7c2",
-      "note": "#8: proof; was: Every option is auditable and controllable: the chosen value of each option is recorded in the build record and shown by jet inspect, and a project or package policy can forbid or pin any option with "
-    },
-    {
-      "at": "2026-11-15T05:07:36.499Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0acg7c2",
-      "note": "#6: strip debris; proof; was: (was #5838) #5005 child: build option `temp_storage` (Jai 2, `temporary_storage_size`)"
-    },
-    {
-      "at": "2026-11-15T05:07:35.630Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0acg7c2",
-      "note": "#5: strip debris; proof; was: (was #5837) #5005 child: build option `comptime_array_limit` (Jai 9, `maximum_array_count_before_compile_time_returns_are_not_reflected_in_ast`)"
-    },
-    {
-      "at": "2026-11-15T05:07:34.747Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0acg7c2",
-      "note": "#4: strip debris; proof; was: (was #5836) #5005 child: build option `polymorph_depth` (Jai 8, `maximum_polymorph_depth`)"
-    },
-    {
-      "at": "2026-11-15T05:07:33.847Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0acg7c2",
-      "note": "#3: proof; was: No option disables a memory-safety check outside an audited #Unsafe scope (I1); the refusal has a registered diagnostic and UI snapshot."
-    },
-    {
-      "at": "2026-11-15T05:07:32.944Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0acg7c2",
-      "note": "#2: proof; was: Each accepted option is set from a package.jet profile, from fn build and from the CLI through one definition, with an executable example and golden output."
-    },
-    {
-      "at": "2026-11-15T05:07:31.804Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0acg7c2",
-      "note": "#7: split per family; type info is c9, scratch size c6, generic depth c4; was: Every candidate Jai build-option family (output kind, output and intermediate paths, entry point and linker arguments, per-build target CPU and OS, backend choice, codegen knobs, dead-code policy, run"
-    },
-    {
-      "at": "2026-11-15T05:07:30.876Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0acg7c2",
-      "note": "#16 The Jai diagnostic output format family is a public option i"
-    },
-    {
-      "at": "2026-11-15T05:07:29.906Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0acg7c2",
-      "note": "#15 The Jai dead-code policy family is a public option in the on"
-    },
-    {
-      "at": "2026-11-15T05:07:28.993Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0acg7c2",
-      "note": "#14 The Jai codegen knobs family is a public option in the one o"
     }
   ],
   "nextNum": 368,
