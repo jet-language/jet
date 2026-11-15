@@ -99433,6 +99433,50 @@
       "completedAt": "2026-11-12T04:52:41.990Z",
       "questions": [],
       "retiredAt": "2026-11-15T04:52:42.594Z"
+    },
+    {
+      "id": "c0tpgv7j",
+      "num": 6754,
+      "title": "The Hangar store-quota walk tolerates files that another process removes during the walk",
+      "body": "store_quota_footprint walks the whole Hangar. A concurrent build's musl `.build` scratch files can vanish during the walk, and the walk then fails with E1340 \"Not found during read\". That made the cffi concurrent_* cases fail in b4-b6 and b8. Fix staged as G6Decl-74.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A file that disappears during the quota walk is skipped, not an error. Proof: the cffi concurrent_* cases PASS on a batch compiler that carries the fix, plus a unit test that removes a file mid-walk.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5f on dev a3ac8e7814 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 00:10. The fix is on dev as 00d5fa3e0d (G6Decl-74 store_quota_walk), and the unit test that removes a file mid-walk as 2e6df0830f (Jetpack/Store/Tests/AdmissionQuota.jet). jet test Compiler --profile cases on tests/cases/cffi/concurrent_bridges_share_one_target_publish_without_racing.case and concurrent_processes_share_one_bridge_build_per_key.case: each PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. jet test Compiler --profile packages --filter store quota footprint: 2 rows, 2 passed, 0 failed.",
+          "at": "2026-11-12T05:10:19.350Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T01:17:43.749Z",
+      "updated": "2026-11-12T05:10:21.364Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-12T05:10:21.364Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T05:11:51.990Z"
     }
   ]
 }
