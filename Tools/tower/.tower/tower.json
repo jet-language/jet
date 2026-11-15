@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6851,
-    "rev": 102846,
+    "rev": 102850,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98670,20 +98670,20 @@
         {
           "n": 9,
           "text": "`target.marker(T)` returns the typed marker record (`T?`, or `[T]` for a repeatable marker) on every site kind, fields included, and `Rock.reflect().marker(T)` works on named types; a non-marker argument is a registered refusal with a UI snapshot. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Attributes/MarkerRead`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:40.963Z"
+          "evidence": "Holds on dev 72a8142651 (typed marker(T) lookup landed in 38cb96129c, every site kind in 7a0d0f7d8d). Checked 2026-11-14 with the gate-p136 jet: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/Marker` PASS 9 (MarkerSites reads target.marker(T) at type, variant, function, method, field and module sites; MarkerUses; MarkerViews), `--profile golden --filter Metaprogramming/Reflection/CommentsAndDocs` PASS 3 (Order.reflect().marker(Note)), `--profile ui --filter marker_lookup_refusals` PASS 1 (jet.MarkerLookupNotMarker).",
+          "at": "2026-11-15T02:18:21.504Z"
         },
         {
           "n": 10,
           "text": "No string `has_marker(\"X\")` read remains in the compiler (today Sema/Calls/Reflection.jet and Registration/Derives.jet); a one-time in-repo script converts them to typed marker reads (D-MARKER-REFLECT1=A), and no jet fix rule ships. Proof: `git grep -n 'has_marker(\"' Compiler` prints nothing and `jet test Compiler --profile cases --filter marker_read` passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:40.963Z"
+          "evidence": "The string has_marker reads in Sema/Calls/Reflection.jet and Registration/Derives.jet were retired in 1e193c4e3f (G6Decl-11d). On dev 72a8142651 `git grep -n 'has_marker(\"' Compiler` prints nothing; `jet test Compiler --profile ui --filter marker_lookup_refusals` PASS 1 with the gate-p136 jet.",
+          "at": "2026-11-15T02:18:22.553Z"
         },
         {
           "n": 11,
@@ -98707,7 +98707,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:40.964Z",
-      "updated": "2026-11-15T02:10:40.964Z",
+      "updated": "2026-11-15T02:18:22.553Z",
       "updatedBy": "TowerKeeper-1"
     },
     {
@@ -98759,11 +98759,11 @@
         {
           "n": 4,
           "text": "Each generated declaration and rewrite carries a stable identity and its full producer and Compiler-handoff chain in `jet inspect`, `jet explain`, the editor and the CLI; diagnostics name the caller, handler, output or missing producer separately. Proof: `jet test Compiler --profile cases --filter inspect_generated_identity`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:41.959Z"
+          "evidence": "Landed on dev in c6d9e746f2 (the editor names what made a generated module, from .jet/build/receipt.json; its message records that inspect, explain and the CLI already carried the producer and handoff chain). Checked 2026-11-14 on dev 72a8142651 with the gate-p136 jet: `jet test Compiler --profile ui --filter meta_ladder_missing_producer` PASS 1.",
+          "at": "2026-11-15T02:18:23.687Z"
         },
         {
           "n": 5,
@@ -98832,7 +98832,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:41.959Z",
-      "updated": "2026-11-15T02:10:41.959Z",
+      "updated": "2026-11-15T02:18:23.687Z",
       "updatedBy": "TowerKeeper-1"
     },
     {
@@ -98934,6 +98934,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:10:42.975Z"
+        },
+        {
+          "n": 10,
+          "text": "A compile-time record collection holding named function values registers and evaluates: a `#run` total over `[Op]`, where `Op: struct { name: String, f: fn(Int) -> Int }` holds two named functions, folds and calls each one with no E0107 (checked by a scratch probe on 2026-10-31; no repository case pins it yet). Proof: `jet test Compiler --profile cases --filter comptime_record_of_function_values`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:18:20.433Z"
         }
       ],
       "refs": [],
@@ -98948,8 +98957,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:42.975Z",
-      "updated": "2026-11-15T02:10:42.975Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T02:18:20.434Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 10
     },
     {
       "id": "c0n7zpy3",
@@ -204643,6 +204653,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:18:23.687Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T02:18:22.553Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T02:18:21.504Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T02:18:20.434Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c07ywjvi",
+      "note": "#10 A compile-time record collection holding named function valu"
+    },
     {
       "at": "2026-11-15T02:13:32.034Z",
       "by": "Main",
