@@ -5,18 +5,19 @@
 // cut short fails and still ends.
 use {
     jet_sema.[
-        JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, SemaBodyJob, SemaBuildFacts, SemaCallSiteFact, SemaComptimeBodySource, SemaComptimeFunctionResult, SemaComptimeItemValue,
-        SemaComptimeRequest, SemaCopyEvent, SemaForeignProviderInput, SemaFunctionResult, SemaGraphModuleResult, SemaMethodInput,
+        JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, SEMA_CORE_BODIES_HEADER, SemaBodyJob, SemaBuildFacts, SemaCallSiteFact, SemaComptimeBodySource, SemaComptimeFunctionResult, SemaComptimeItemValue,
+        SemaComptimeRequest, SemaCopyEvent, SemaCoreBody, SemaForeignProviderInput, SemaFunctionResult, SemaGraphModuleResult, SemaMethodInput,
         SemaNameReferenceFact, SemaParallelBody, SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks,
         SemaRegistrationImportEdge, SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin,
-        SemaGraphResult, SemaSourceSegment, body_codec_get_semaparallelbody, body_codec_put_semaparallelbody, sema_core_body_was_loaded, sema_core_bodies_read, sema_hardware_empty_use,
+        SemaGraphResult, SemaSourceSegment, body_codec_get_semaparallelbody, body_codec_put_semaparallelbody, sema_core_body_was_loaded, sema_core_bodies_bytes, sema_core_bodies_keys,
+        sema_core_bodies_offset, sema_core_bodies_position, sema_core_bodies_problem, sema_core_bodies_read, sema_core_bodies_record, sema_hardware_empty_use,
         sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_has_error_since, sema_registration_prepare_graph,
     ]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_foundation.[
-        BodyCodecIn, DeclID, DeclRow, Diagnostic, FnBody, ModuleID, Span, SymbolID, SymbolKind, TFuncKind, TGenericParam, Type, body_codec_get_fnbody, body_codec_out, body_codec_put_fnbody,
-        compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table,
+        BodyCodecIn, DeclID, DeclRow, Diagnostic, FnBody, ModuleID, Span, SymbolID, SymbolKind, TFuncKind, TGenericParam, Type, body_codec_get_count, body_codec_get_fnbody, body_codec_get_string,
+        body_codec_out, body_codec_put_count, body_codec_put_fnbody, body_codec_put_string, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table,
     ]
 }
 
@@ -84,14 +85,15 @@ body_codec_source: fn() -> String {
 }
 
 // The check of body_codec_source() as module `main` of package `package`,
-// with the canonical effect module, under the host hooks `hooks`. Under the
-// canonical effect module's package `main` is a Prelude module. With no
-// bodies file in `hooks` it is checked as the Core library's check checks
-// it (SemaRegistrationGraph.core_seal), so its function checks are captured
+// with the canonical effect module, under the host hooks `hooks`; with
+// `core`, `main` is a Core module. Under the canonical effect module's
+// package `main` is a Prelude module. A Prelude or Core `main` with no
+// bodies file in `hooks` is checked as the Core library's check checks it
+// (SemaRegistrationGraph.core_seal), so its function checks are captured
 // (CoreBodies.jet); with one, as a compile bound to the built-in Core is,
-// which loads them.
-body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaRegistrationHostHooks>) -> SemaGraphResult? Err! {
-    source: body_codec_source()
+// which loads them. `extra` is source text added after body_codec_source().
+body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaRegistrationHostHooks>, core: Bool{false}, extra: String{""}) -> SemaGraphResult? Err! {
+    source: "{body_codec_source()}{extra}"
     threads: compiler_threads_single()
     parsed := parse_source(source.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
@@ -99,7 +101,7 @@ body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaReg
         return None
     }
     table := module_table()
-    main_id: module_intern(table, "body-codec::main")
+    main_id: module_intern(table, if core -> "<corelib>/body-codec" else -> "body-codec::main")
     canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
         failures.push("canonical effect module declares no effects")
         return None
@@ -113,7 +115,7 @@ body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaReg
         return None
     }
     loading: hooks.guard_read().value.core_bodies != None
-    graph.core_seal = package == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY && !loading
+    graph.core_seal = (package == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || core) && !loading
     // Declaration checking loans the graph to its stage, which returns it.
     stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, threads, None)
     declared := stage.graph.move()
@@ -271,42 +273,129 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
         loop function in module_row.functions -> keys["{function.key}"] = true
     }
     bodies: sema_core_bodies_read(checked.core_bodies.move()) ?? panic("BodyCodec: the bodies file does not read back")
-    if bodies.rows.len() < 6 -> failures.push("only {bodies.rows.len()} function checks were captured")
-    if bodies.rows.len() != keys.len() -> failures.push("{keys.len()} Prelude functions were checked and {bodies.rows.len()} captured")
+    if sema_core_bodies_problem(bodies.bytes) == .Val(problem) -> failures.push("the bodies file does not read back whole: {problem}")
+    count: bodies.head.count
+    if count < 6 -> failures.push("only {count} function checks were captured")
+    if count != keys.len() -> failures.push("{keys.len()} Prelude functions were checked and {count} captured")
     // The packets' ids read as stand-ins: this test has no tables to
     // resolve the keys into.
     stand_rows := Rows<DeclRow>{}
     stand: DeclID{row: stand_rows.add(DeclRow{symbol: SymbolID{id: U32{0}}, kind: SymbolKind.Function})}
-    loop row in bodies.rows {
-        if keys.get(row.key) == None -> failures.push("{row.key}: captured, but no checked Prelude function has its key")
-        input := BodyCodecIn{at: row.at, end: row.end, failed: false, symbols: (loop _ in row.symbols -> SymbolID{id: U32{1}}), decls: (loop _ in row.decls -> DeclID{row: stand.row}), modules: (loop _ in row.modules -> ModuleID{id: U32{1}})}
+    loop position in 0..<count {
+        record := sema_core_bodies_record(bodies.bytes, sema_core_bodies_offset(bodies.bytes, bodies.head, position))
+        key: body_codec_get_string(bodies.bytes, record)
+        symbols: sema_core_bodies_keys(bodies.bytes, record)
+        decls: sema_core_bodies_keys(bodies.bytes, record)
+        modules: sema_core_bodies_keys(bodies.bytes, record)
+        size: body_codec_get_count(bodies.bytes, record, 1)
+        end: record.at + size
+        if keys.get(key) == None -> failures.push("{key}: captured, but no checked Prelude function has its key")
+        input := BodyCodecIn{at: record.at, end: end, failed: false, symbols: (loop _ in symbols -> SymbolID{id: U32{1}}), decls: (loop _ in decls -> DeclID{row: stand.row}), modules: (loop _ in modules -> ModuleID{id: U32{1}})}
         packet: body_codec_get_semaparallelbody(bodies.bytes, input)
-        if input.failed || input.at != row.end {
-            failures.push("{row.key}: the packet read failed at byte {input.at} of {row.end}")
+        if input.failed || input.at != end {
+            failures.push("{key}: the packet read failed at byte {input.at} of {end}")
             next
         }
         if packet.checked == .Val(result) {
             if result.value == .Val(function) {
-                if function.key != row.key -> failures.push("{row.key}: the packet holds the check of {function.key}")
+                if function.key != key -> failures.push("{key}: the packet holds the check of {function.key}")
             } else {
-                failures.push("{row.key}: the packet's check has no function")
+                failures.push("{key}: the packet's check has no function")
             }
         } else {
-            failures.push("{row.key}: the packet has no check")
+            failures.push("{key}: the packet has no check")
         }
     }
     cut: bodies.bytes.len() - 1
-    if sema_core_bodies_read(bodies.bytes[0..<cut]) != None -> failures.push("a bodies file cut short reads back")
+    if sema_core_bodies_problem(bodies.bytes[0..<cut]) == None -> failures.push("a bodies file cut short reads back whole")
     if failures.len() > 0 -> panic("BodyCodec collected {failures.len()} failures:\n{failures.join("\n")}")
 }
 
+// A Core demand wave can check a function the body pass checked before;
+// the file holds one record of it, the later capture's.
+#Test("a Core bodies file keeps the last capture of a function checked twice") {
+    captures := [SemaCoreBody]{
+        SemaCoreBody{key: "core.b", bytes: [U8]{U8{1}}, symbols: [String]{}, decls: [String]{}, modules: [String]{}},
+        SemaCoreBody{key: "core.a", bytes: [U8]{U8{2}}, symbols: [String]{}, decls: [String]{}, modules: [String]{}},
+        SemaCoreBody{key: "core.b", bytes: [U8]{U8{3}, U8{4}}, symbols: [String]{"core.a"}, decls: [String]{}, modules: [String]{}},
+    }
+    file := sema_core_bodies_bytes(captures.move(), "context")
+    if sema_core_bodies_problem(file) == .Val(problem) -> panic("BodyCodec: the bodies file does not read back whole: {problem}")
+    bodies: sema_core_bodies_read(file.move())
+    if bodies == .Val(read) {
+        if read.head.count != 2 -> panic("BodyCodec: {read.head.count} records of 2 functions")
+    } else {
+        panic("BodyCodec: the bodies file does not read back")
+    }
+    if sema_core_bodies_position(bodies, "core.a") != Val(0) -> panic("BodyCodec: `core.a` is not the first record")
+    position: sema_core_bodies_position(bodies, "core.b") ?? panic("BodyCodec: `core.b` has no record")
+    if sema_core_bodies_position(bodies, "core.c") != None -> panic("BodyCodec: `core.c` has a record")
+    if bodies == .Val(read) {
+        record := sema_core_bodies_record(read.bytes, sema_core_bodies_offset(read.bytes, read.head, position))
+        _: body_codec_get_string(read.bytes, record)
+        symbols: sema_core_bodies_keys(read.bytes, record)
+        _: sema_core_bodies_keys(read.bytes, record)
+        _: sema_core_bodies_keys(read.bytes, record)
+        size: body_codec_get_count(read.bytes, record, 1)
+        last: symbols == ([String]{"core.a"}) && size == 2 && read.bytes[record.at] == U8{3}
+        if !last -> panic("BodyCodec: the record of `core.b` is not its last capture")
+    }
+}
+
+#Test("a Core bodies file with two records of one function does not read back whole") {
+    out := body_codec_out()
+    body_codec_put_string(out, SEMA_CORE_BODIES_HEADER)
+    body_codec_put_string(out, "context")
+    body_codec_put_count(out, 2)
+    table: out.bytes.len()
+    loop _ in 0..<16 -> out.bytes.push(U8{0})
+    loop entry in 0..<2 {
+        out.bytes[table + entry * 8] = U8{out.bytes.len()}
+        body_codec_put_string(out, "core.a")
+        loop _ in 0..<3 -> body_codec_put_count(out, 0)
+        body_codec_put_count(out, 1)
+        out.bytes.push(U8{entry})
+    }
+    if sema_core_bodies_problem(out.bytes) == {
+        .Val(problem) -> {
+            if problem != "the function `core.a` has two records" -> panic("BodyCodec: the bodies file's problem is {problem}")
+        }
+        .None -> panic("BodyCodec: a bodies file with two records of one function reads back whole")
+    }
+}
+
 #Test("a Prelude function check loaded from the Core library's check is the check from text") {
+    body_codec_load(JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, false)
+}
+
+#Test("a Core function check loaded from the Core library's check is the check from text") {
+    body_codec_load("core", true)
+}
+
+// A `jet build` loads the Core library's function checks as a run does, so
+// that check refuses a `debug` trace in Core as a build would (E3405); a
+// program's own check outside a build does not.
+#Test("the Core library's check refuses a debug trace that a build would") {
+    traced: "\ntraced: fn() -> Int {{\n    debug(1)\n}}\n"
     failures := [String]{}
-    captured := body_codec_check(failures, JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, body_codec_hooks()) ?? panic("BodyCodec could not check the Prelude module:\n{failures.join("\n")}")
+    if body_codec_check(failures, "core", body_codec_hooks(), true, traced) == .Val(_) -> panic("BodyCodec: the Core library's check took a Core module's debug trace")
+    if !failures.join("\n").contains("E3405") -> panic("BodyCodec: the Core library's check did not refuse the debug trace:\n{failures.join("\n")}")
+    program_failures := [String]{}
+    _ := body_codec_check(program_failures, "body-codec", body_codec_hooks(), false, traced)
+    if program_failures.join("\n").contains("E3405") -> panic("BodyCodec: a program's check outside a build refused its debug trace")
+}
+
+// Checks `main` (body_codec_check of `package`, `core`) as the Core
+// library's check does, then again with the bodies file that check wrote:
+// every function check is loaded, and each module's result and the
+// compile's diagnostics are those of the check from text.
+body_codec_load: fn(package: String, core: Bool) {
+    failures := [String]{}
+    captured := body_codec_check(failures, package, body_codec_hooks(), core) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
     bodies: sema_core_bodies_read(captured.core_bodies.move()) ?? panic("BodyCodec: the bodies file does not read back")
-    count: bodies.rows.len()
+    count: bodies.head.count
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, core_bodies: Val(bodies)}}
-    loaded := body_codec_check(failures, JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, hooks) ?? panic("BodyCodec could not load the Prelude module:\n{failures.join("\n")}")
+    loaded := body_codec_check(failures, package, hooks, core) ?? panic("BodyCodec could not load module `main`:\n{failures.join("\n")}")
     permit: hooks.guard_read()
     loaded_count := 0
     loop marked in permit.value.core_bodies_loaded {

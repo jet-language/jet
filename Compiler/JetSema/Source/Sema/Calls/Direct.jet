@@ -252,7 +252,10 @@ sema_call_check_special_debug: fn(call: Call, expected: Type?, environment: Sema
         }
     }
     site: sema_call_debug_site(call, environment, program)
-    if program.registration_graph == .Val(graph) && sema_build_facts_reject_debug_traces(graph.build_facts) {
+    // The Core library's check (core_seal) refuses one too: the function
+    // checks it captures (CoreBodies.jet) load in a `jet build` as well as in
+    // a run, so no Core body may hold a trace either would refuse.
+    if program.registration_graph == .Val(graph) && (graph.core_seal || sema_build_facts_reject_debug_traces(graph.build_facts)) {
         diagnostic: sema_error("E3405", call.name_span, "A `debug` trace is left at `{site}`.", "`debug(value)` is a development trace: it prints while you run, test, or evaluate a program and adds no effect, so a shipped artifact (`jet build`) or a release-profile build must not contain it.", "Remove the `debug(…)` wrapper and keep the expression; `jet fix` applies this edit.")
         if unwrap == .Val(edit) -> diagnostics.push(diagnostic_with_edit(diagnostic, edit)) else -> diagnostics.push(diagnostic)
     }

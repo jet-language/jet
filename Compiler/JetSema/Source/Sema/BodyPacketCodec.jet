@@ -98,6 +98,8 @@ body_codec_put_semaparallelbody: fn(out: &BodyCodecOut, value: SemaParallelBody)
     body_codec_put_bool(out, value.wanted_hooks)
     body_codec_put_opt_int(out, value.memory_position)
     body_codec_put_bool(out, value.memory_known)
+    body_codec_put_list_string(out, value.codec_demand)
+    body_codec_put_list_string(out, value.derive_demand)
 }
 
 body_codec_get_semaparallelbody: fn(bytes: [U8], input: &BodyCodecIn) -> SemaParallelBody Never! {
@@ -111,7 +113,9 @@ body_codec_get_semaparallelbody: fn(bytes: [U8], input: &BodyCodecIn) -> SemaPar
     f7: body_codec_get_bool(bytes, input)
     f8: body_codec_get_opt_int(bytes, input)
     f9: body_codec_get_bool(bytes, input)
-    SemaParallelBody{job_index: f0, checked: f1, diagnostics: f2, call_facts: f3, comptime_requests: f4, name_references: f5, method_input: f6, wanted_hooks: f7, memory_position: f8, memory_known: f9}
+    f10: body_codec_get_list_string(bytes, input)
+    f11: body_codec_get_list_string(bytes, input)
+    SemaParallelBody{job_index: f0, checked: f1, diagnostics: f2, call_facts: f3, comptime_requests: f4, name_references: f5, method_input: f6, wanted_hooks: f7, memory_position: f8, memory_known: f9, codec_demand: f10, derive_demand: f11}
 }
 
 body_codec_put_opt_fnbody: fn(out: &BodyCodecOut, value: FnBody?) Never! {

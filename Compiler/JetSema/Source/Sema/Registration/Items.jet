@@ -755,11 +755,13 @@ SemaRegistrationHostHooks: struct {
     // (CoreDemand.jet sema_core_stand_in_bind) and leaves None after.
     core_seal: SemaCoreSealSource?{None}
     // A compile whose Core is the Core built into the host: the Core
-    // library's bodies file (CoreBodies.jet), whose Prelude packets a check
-    // loads in place of checking from text, and which of its rows it so
-    // loaded, by position.
+    // library's bodies file (CoreBodies.jet), whose Core packets a check
+    // loads in place of checking from text, which of its records it so
+    // loaded, by position, and how many of the file's bytes those records
+    // hold.
     core_bodies: SemaCoreBodies?{None}
     core_bodies_loaded: [Bool]{[Bool]{}}
+    core_bodies_read: Int{0}
 }
 
 // The folded build snapshot the driver
@@ -1004,6 +1006,11 @@ SemaRegistrationGraph: struct {
     // finalization summarizes the Core functions for a bound program
     // (CoreSeal.jet) into SemaGraphResult.core_seal.
     core_seal: Bool{false}
+    // The Core function checks stay on the module pass's thread, off the
+    // compiler threads, so that thread captures them (`core_seal`) or loads
+    // them from the host's bodies file (CoreBodies.jet
+    // sema_core_bodies_hold), as the body pass sets it.
+    core_bodies_held: Bool{false}
     // A `jet run` that may bind to the Core image: `core_seal_pending`, its
     // Core seal is in the host hooks (SemaRegistrationHostHooks.core_seal)
     // and not yet read, which the Core demand does once it first names a

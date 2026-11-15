@@ -276,15 +276,25 @@ kept function the restore leaves without its body stops the compile as an
 internal compiler error, naming the function and its module, rather than
 check as an empty stub. Any other unit, or any unit of a load without
 reach or of jet-bare, which carries no part, parses whole.
-`core.bodies` (`JetSema/Sema/CoreBodies.jet`) holds the checks of the
-Prelude's functions as the Core library's check left them, each as the
-packet a compiler thread hands the module pass, its ids written as keys,
-with the facts of that check's compile (target, profile, OS, artifact
-build, keep-going and test modes). A native compile already bound to the
-built-in Core, without `--deep-checks`, loads a Prelude function's packet
-in place of checking its body when those facts are its own and every key
-resolves, and records again the codecs and derived methods the check
-demanded; any other function is checked from text. A `jet run` whose Core is jet's built-in Core sources (a
+`core.bodies` (`JetSema/Sema/CoreBodies.jet`) holds the checks of Core's
+functions as the Core library's check left them, each as the packet a
+compiler thread hands the module pass, its ids written as keys, with the
+facts of that check's compile (target, profile, OS, keep-going and test
+modes). The library's check runs those checks on the compiler threads; each
+thread records the codecs and derived methods its checks demand in rows of
+its own, and each packet carries its check's demand. The file holds one
+record per function, the last check of it, in key order behind a table of
+record offsets; the Core library refuses to write a file that does not read
+back whole, so a build never ships a bodies file with a repeated or
+malformed record. A native compile already bound to the built-in Core,
+without `--deep-checks`, reads the file's header, and finds a Core
+function's record by halving the table, loading its packet in place of
+checking its body when the file's facts are its own and every key resolves;
+it records again the codecs and derived methods the check demanded, and
+counts the record bytes it read (`core.bodies_read_bytes`). Any other
+function is checked from text. A shipped bodies file whose header does not
+read, or whose record does not, stops the compile as an internal compiler
+error. A `jet run` whose Core is jet's built-in Core sources (a
 compile outside a toolchain tree) binds its Core calls to that Core code
 (`JetCli/Cli/Host.jet` `jet_cli_native_executable`, `IRChecks.core`): a
 call of a non-generic Core function whose bounds checks are the stock ones
