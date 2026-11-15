@@ -11,8 +11,11 @@
 use cbd_files: core.files
 
 CBD_DOOR: "Core/Builtins/Builtins.jet"
+
 CBD_ROWS: "Compiler/Prelude/Core.rows"
+
 CBD_CEILING: 326
+
 CBD_SKIPPED: [String]{"Tests", ".jet", "target", "node_modules"}
 
 cbd_walk: fn(path: String, out: &[String]) {
@@ -69,7 +72,9 @@ cbd_spelled: fn(text: String, words: &[String:Bool]) Never! {
             next
         }
         end: cbd_ident_end(raw, at)
-        if end > at + 2 && cbd_ident_start(raw[at + 2]) -> words[String.from_bytes(raw.slice(at, end)) ?? ""] = true
+        if end > at + 2 && cbd_ident_start(raw[at + 2]) {
+            words[String.from_bytes(raw.slice(at, end)) ?? ""] = true
+        }
         at = end
     }
 }
@@ -106,7 +111,9 @@ cbd_declared_name: fn(line: String) -> String Never! {
         loop at < raw.len() && raw[at] == (U8{32}) -> at += 1
     }
     if at + 5 <= raw.len() && (String.from_bytes(raw.slice(at, at + 5)) ?? "") == "priv " -> at += 5
-    if at + 2 >= raw.len() || raw[at] != (U8{95}) || raw[at + 1] != (U8{95}) || !cbd_ident_start(raw[at + 2]) -> return ""
+    if at + 2 >= raw.len() || raw[at] != (U8{95}) || raw[at + 1] != (U8{95}) || !cbd_ident_start(raw[at + 2]) {
+        return ""
+    }
     end: cbd_ident_end(raw, at)
     if end >= raw.len() || raw[end] != (U8{58}) -> return ""
     String.from_bytes(raw.slice(at, end)) ?? ""
@@ -118,7 +125,9 @@ cbd_outside: fn() -> [String] {
     compiler := [String]{}
     cbd_walk("Compiler", compiler)
     assert(compiler.len() > 1000, "the walk found only {compiler.len()} compiler sources")
-    loop path in compiler -> cbd_spelled(cbd_files.read(path) ?? panic("read {path}: {err}"), spelled)
+    loop path in compiler {
+        cbd_spelled(cbd_files.read(path) ?? panic("read {path}: {err}"), spelled)
+    }
     cbd_spelled(cbd_files.read(CBD_ROWS) ?? panic("read {CBD_ROWS}: {err}"), spelled)
     core := [String]{}
     cbd_walk("Core", core)

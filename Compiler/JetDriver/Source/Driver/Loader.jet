@@ -5191,7 +5191,9 @@ jet_driver_runtime_entry_row: fn(core_sources: [JetDriverCoreSource], unit: JetD
 // `core.<area>.runtime` namespace (Rust `core_private_unit_diagnostic`), and
 // E1013 for one that names `jet_builtins`.
 jet_driver_core_private_unit: fn(module_name: String, span: Span) -> Diagnostic? {
-    if module_name == CORE_BUILTINS_MODULE || module_name.starts_with("{CORE_BUILTINS_MODULE}.") -> return Val(jet_driver_row_diagnostic("E1013", Val(span)))
+    if module_name == CORE_BUILTINS_MODULE || module_name.starts_with("{CORE_BUILTINS_MODULE}.") {
+        return Val(jet_driver_row_diagnostic("E1013", Val(span)))
+    }
     parts: module_name.split(".").to_list()
     if parts.len() < 3 || parts[0] != "core" || parts[2] != "runtime" -> return None
     public: "core.{parts[1]}"

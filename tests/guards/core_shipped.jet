@@ -121,7 +121,9 @@ core_shipped_problems: fn(listed: [String], lowered: [String], counts: [String:I
 #Test("the Core packages each program lowers itself are the ones fewer than one in a hundred program files name") {
     guards_enter_root()
     packages: core_shipped_packages()
-    loop always in CORE_SHIPPED_ALWAYS -> assert(packages.contains(always), "{CORE_SHIPPED_PACKAGES} must hold the `{always}` folder")
+    loop always in CORE_SHIPPED_ALWAYS {
+        assert(packages.contains(always), "{CORE_SHIPPED_PACKAGES} must hold the `{always}` folder")
+    }
     paths := [String]{}
     loop root in CORE_SHIPPED_PROGRAMS -> core_shipped_scan(root, paths)
     assert(paths.len() > 0, "no program files under {CORE_SHIPPED_PROGRAMS}")

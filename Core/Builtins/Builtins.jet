@@ -24,18 +24,39 @@
 // physical facts, not raw-codec tuples.
 
 // `evidence_read(path)`: a snapshot, golden or fixture file's text.
-EvidenceRead: struct { ok: Bool, text: String, missing: Bool }
+EvidenceRead: struct {
+    ok: Bool
+    text: String
+    missing: Bool
+}
+
 // `temp_facts()`: the process and thread a temporary directory is named for.
-TempFacts: struct { pid: U64, thread: String }
+TempFacts: struct {
+    pid: U64
+    thread: String
+}
+
 // `temp_join(name)`: a path under the temporary root. `path` is the host's
 // opaque platform encoding of it: pass it back to temp_remove and
 // temp_create unchanged, never built, sliced, decoded or edited. `text` is
 // its lossy display form.
-TempPath: struct { path: [U8], text: String }
+TempPath: struct {
+    path: [U8]
+    text: String
+}
+
 // `temp_remove(path)`: whether the old directory is gone.
-TempRemove: struct { ok: Bool, missing: Bool, cause: String }
+TempRemove: struct {
+    ok: Bool
+    missing: Bool
+    cause: String
+}
+
 // `temp_create(path)`: whether the new directory exists.
-TempCreate: struct { ok: Bool, cause: String }
+TempCreate: struct {
+    ok: Bool
+    cause: String
+}
 
 // The descriptor operations core.files.sealed reads and writes files through
 // (jetc_open_directory, jetc_read, jetc_link and the rest): whole-record
@@ -45,12 +66,26 @@ TempCreate: struct { ok: Bool, cause: String }
 // descriptor or byte count, negative on failure with `errno` set; `bytes`
 // is what jetc_read read. `linux` is a compile-time host capability,
 // consumed once at parent open.
-JetcRaw: struct { value: Int, errno: Int, bytes: [U8], linux: Bool }
+JetcRaw: struct {
+    value: Int
+    errno: Int
+    bytes: [U8]
+    linux: Bool
+}
+
 // `jetc_stat(fd)`: an open descriptor's metadata, `status` negative on
 // failure with `errno` set.
 JetcStat: struct {
-    status: Int, errno: Int, dev: Int, ino: Int, len: Int,
-    mtime: Int, mtime_ns: Int, nlink: Int, is_file: Bool, is_dir: Bool,
+    status: Int
+    errno: Int
+    dev: Int
+    ino: Int
+    len: Int
+    mtime: Int
+    mtime_ns: Int
+    nlink: Int
+    is_file: Bool
+    is_dir: Bool
 }
 
 // The advisory-lock operations core.files' lock and try_lock run on
@@ -61,17 +96,31 @@ JetcStat: struct {
 
 // What lock_open and lock_try return: `value` is the descriptor or result,
 // negative on failure.
-LockCall: struct { value: Int, errno: Int, platform: Int }
+LockCall: struct {
+    value: Int
+    errno: Int
+    platform: Int
+}
+
 // What lock_fd_identity and lock_path_identity return: the file a descriptor
 // or path names, so a replaced lock file is told apart from the held one.
 LockIdentity: struct {
-    device: Int, low: Int, high: Int,
-    regular: Bool, reparse: Bool, errno: Int, platform: Int
+    device: Int
+    low: Int
+    high: Int
+    regular: Bool
+    reparse: Bool
+    errno: Int
+    platform: Int
 }
+
 // What lock_wait returns: whether the lock was taken before `deadline_ns`.
 LockWait: struct {
-    acquired: Bool, timed_out: Bool, errno: Int,
-    platform: Int, deadline_ns: Int
+    acquired: Bool
+    timed_out: Bool
+    errno: Int
+    platform: Int
+    deadline_ns: Int
 }
 
 // `resolve_ordered(host, port)`: core.net's name resolution. It answers

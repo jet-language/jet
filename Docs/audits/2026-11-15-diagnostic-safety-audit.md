@@ -323,7 +323,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0996 | InvalidMembersList | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:451 | `members:` evaluates to `[String]` |
 | E0997 | MembersDirectoryNotFound | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:617 | the directory exists relative to `workspace.jet` |
 | E0998 | InvalidOverlayPolicy | Jetpack/CLI/Source/Commands/ExplainCommand.jet:81 | the overlay policy is written in its declared form |
-| E1001 | UnknownCoreModule | Compiler/JetDriver/Source/Driver/Loader.jet:5200 | Core's runtime units are imported only by Core sources |
+| E1001 | UnknownCoreModule | Compiler/JetDriver/Source/Driver/Loader.jet:5202 | Core's runtime units are imported only by Core sources |
 | E1002 | ReservedRootShadowed | Compiler/JetDriver/Source/Driver/Loader.jet:3554 | a local module takes a name outside the reserved roots |
 | E1003 | IntegerOutOfRange | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:3090 | the value fits the width, or stays an exact `Int` |
 | E1004 | UnknownCoreItem | Compiler/JetSema/Source/Sema/Calls/Core.jet:546 | no opt-in imports an item the module does not define |
@@ -334,7 +334,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1009 | MisplacedRestCapture | Compiler/JetParser/Source/Parser/Patterns.jet:338 | the rest capture is the pattern's last part |
 | E1010 | BinaryPatternSubjectMismatch | Compiler/JetSema/Source/Sema/Patterns.jet:1161 | binary patterns match `[U8]` subjects |
 | E1011 | UnalignedBinaryPattern | Compiler/JetSema/Source/Sema/Patterns.jet:1151 | the bit fields before them add up to whole bytes |
-| E1013 | BuiltinsOutsideCore | Compiler/JetDriver/Source/Driver/Loader.jet:5194 | a program reaches the compiler's operations through Core's public modules |
+| E1013 | BuiltinsOutsideCore | Compiler/JetDriver/Source/Driver/Loader.jet:5195 | a program reaches the compiler's operations through Core's public modules |
 | E1101 | ConcurrentCaptureNotOwned | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:803 | the value is moved, frozen or shared with `Shared` |
 | E1102 | ValueNotSendable | Compiler/JetSema/Source/Sema/Calls/Static.jet:882 | owned, sendable data crosses the boundary |
 | E1103 | DetachUnsendableTask | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:1137 | the task's values are made sendable before it is detached |
