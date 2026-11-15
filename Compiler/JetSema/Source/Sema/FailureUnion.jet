@@ -41,6 +41,7 @@ use jet_foundation.[
     sema_casing_acronym_name,
     sema_casing_pascal_words,
     module_text,
+    compiler_threads_failure_text,
 ]
 
 // Rounds of the call-graph join before a still-growing row widens to the
@@ -571,26 +572,15 @@ SemaFailureUnionProjected: struct {
 
 // Join the default-route rows of the unannotated
 // top-level functions, mint their own cases and project every set that holds
-// a typed member.
-sema_failure_union_infer: fn(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic], trail: &SemaGraphTrail) -> SemaFailureUnionProjected {
+// a typed member. The rows of each part of the modules `bounds` splits
+// (sema_failure_module_bounds) are read on its own thread and join in module
+// order.
+sema_failure_union_infer: fn(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], bounds: [Int], diagnostics: &[Diagnostic], trail: &SemaGraphTrail) -> SemaFailureUnionProjected {
     projected := SemaFailureUnionProjected{keys: [String]{}, modules: [Int]{}, minted: false, settled: [SemaFailureSettledCase]{}}
     rows := [SemaFailureUnionRow]{}
     entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
-    loop module_result in modules {
-        module_index: sema_registration_module_index(graph, module_result.module_identity) ?? next
-        loop facts in module_result.failure_facts {
-            function_row: sema_failure_function_row(graph, module_index, facts.function_key)
-            if function_row < 0 || !sema_failure_inference_candidate(graph.modules[module_index].functions[function_row].declaration) {
-                next
-            }
-            // The entry `run: fn` carries the default `Unit Err!` exit
-            // contract (Rust `default_entry_return`), so its failures meet
-            // `Err` instead of joining an inferred union.
-            if module_index == entry_index && graph.modules[module_index].functions[function_row].declaration.name == "run" {
-                next
-            }
-            rows.push(SemaFailureUnionRow{key: facts.function_key.copy(), name: graph.modules[module_index].functions[function_row].declaration.name.copy(), module_index: module_index, members: facts.union_members.copy(), general: facts.union_general, edges: facts.union_edges.copy(), cases: facts.union_cases.copy(), function_row: function_row})
-        }
+    loop part in sema_failure_union_row_parts(graph, modules, entry_index, bounds, 0) {
+        rows.extend(part)
     }
     if rows.len() == 0 -> return projected
     loop row_index in 0..<rows.len() {
@@ -659,6 +649,48 @@ sema_failure_union_infer: fn(graph: &SemaRegistrationGraph, modules: [SemaGraphM
     }
     sema_failure_project_returns(graph, projections, trail)
     projected
+}
+
+// The union rows of parts `at..<bounds.len() - 1`, in part order: the first
+// part on its own thread, the ones after it the same way, and the last on
+// this one.
+sema_failure_union_row_parts: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], entry_index: Int, bounds: [Int], at: Int) -> [[SemaFailureUnionRow]] Never! {
+    done := [[SemaFailureUnionRow]]{}
+    if at + 1 >= bounds.len() -> return done
+    if at + 2 == bounds.len() {
+        done.push(sema_failure_union_row_part(graph, modules, entry_index, bounds[at], bounds[at + 1]))
+        return done
+    }
+    task.group sema_failure_union_row_threads {
+        head: task sema_failure_union_row_part(graph, modules, entry_index, bounds[at], bounds[at + 1])
+        rest: sema_failure_union_row_parts(graph, modules, entry_index, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+// The union row of each unannotated top-level function among the failure
+// facts of modules `from..<to`.
+sema_failure_union_row_part: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], entry_index: Int, from: Int, to: Int) -> [SemaFailureUnionRow] Never! {
+    rows := [SemaFailureUnionRow]{}
+    loop at in from..<to {
+        module_index: sema_registration_module_index(graph, modules[at].module_identity) ?? next
+        loop facts in modules[at].failure_facts {
+            function_row: sema_failure_function_row(graph, module_index, facts.function_key)
+            if function_row < 0 || !sema_failure_inference_candidate(graph.modules[module_index].functions[function_row].declaration) {
+                next
+            }
+            // The entry `run: fn` carries the default `Unit Err!` exit
+            // contract (Rust `default_entry_return`), so its failures meet
+            // `Err` instead of joining an inferred union.
+            if module_index == entry_index && graph.modules[module_index].functions[function_row].declaration.name == "run" {
+                next
+            }
+            rows.push(SemaFailureUnionRow{key: facts.function_key.copy(), name: graph.modules[module_index].functions[function_row].declaration.name.copy(), module_index: module_index, members: facts.union_members.copy(), general: facts.union_general, edges: facts.union_edges.copy(), cases: facts.union_cases.copy(), function_row: function_row})
+        }
+    }
+    rows
 }
 
 // #3708 (card item T1): every function the failure solve proved infallible is
