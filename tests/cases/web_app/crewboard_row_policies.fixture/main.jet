@@ -1,0 +1,293 @@
+// Crewboard's projects, members and tasks behind its row policies, each call
+// run as the account that makes it. The board's operations carry no checks
+// of their own, so every refusal below is a policy's.
+use {
+    app
+    db: core.db
+}
+
+#Codable
+Project: struct {
+    id: Int
+    name: String
+    created_by: String
+}
+
+#[Codable, Comparable]
+MemberKey: struct {
+    project: Int
+    account: String
+}
+
+#Codable
+Member: struct {
+    project: Int
+    account: String
+    owner: Bool
+}
+
+#Codable
+Task: struct {
+    id: Int
+    project: Int
+    title: String
+}
+
+projects_in: fn(store: db.Store) -> db.Table<Int, Project> {
+    store.table("projects", key: fn(row: Project) { row.id })
+}
+
+members_in: fn(store: db.Store) -> db.Table<MemberKey, Member> {
+    store.table("members", key: fn(row: Member) { MemberKey{project: row.project, account: row.account} })
+}
+
+tasks_in: fn(store: db.Store) -> db.Table<Int, Task> {
+    store.table("tasks", key: fn(row: Task) { row.id })
+}
+
+account_of: fn(who: db.Who) -> String? {
+    if who == {
+        .Account(account) -> Val(account)
+        .System -> None
+        .Anonymous -> None
+    }
+}
+
+// The account's member row in `project`, read with the system's rights.
+member_of: fn(store: db.Store, project: Int, account: String) -[DB.Read]> Member? db.DBError! {
+    members_in(store).get(MemberKey{project: project, account: account})
+}
+
+// Members read a project's tasks and write them. A caller with no account
+// may do nothing.
+task_policy: fn(row: Task, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    account: account_of(who) ?? return Ok(false)
+    if member_of(store, row.project, account) == {
+        .Val(_) -> Ok(true)
+        .None -> Ok(false)
+        .Err(failure) -> Err(failure)
+    }
+}
+
+// Members read the project row; only an owner changes or deletes it, and a
+// change keeps `created_by`. The creator rule: any account may insert a new
+// project that names it as `created_by`, and member_policy then lets it
+// insert itself as the first owner.
+project_policy: fn(row: Project, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    account: account_of(who) ?? return Ok(false)
+    if op == db.Op.Insert -> return Ok(row.created_by == account)
+    if member_of(store, row.id, account) == {
+        .Val(member) -> {
+            if op == db.Op.Read -> return Ok(true)
+            if !member.owner -> return Ok(false)
+            if op != db.Op.Update -> return Ok(true)
+            if projects_in(store).get(row.id) == {
+                .Val(stored) -> Ok(stored.created_by == row.created_by)
+                .None -> Ok(false)
+                .Err(failure) -> Err(failure)
+            }
+        }
+        .None -> Ok(false)
+        .Err(failure) -> Err(failure)
+    }
+}
+
+// The creator rule, tied to the project row: an Owner insert for a project
+// whose row names the caller as its creator and that has no members yet. In
+// create_project the project row is the transaction's earlier write, so the
+// policy sees it. No other account can claim a project, and its creator
+// can't claim it again while it has members.
+first_owner: fn(store: db.Store, row: Member, account: String) -[DB.Read]> Bool db.DBError! {
+    if !row.owner -> return Ok(false)
+    if projects_in(store).get(row.project) == {
+        .Val(found) -> {
+            if found.created_by != account -> return Ok(false)
+        }
+        .None -> return Ok(false)
+        .Err(failure) -> return Err(failure)
+    }
+    rows: (members_in(store).query() ?? return Err(err)).collect() ?? return Err(db.DBError.Failed("the members do not collect"))
+    loop member in rows {
+        if member.project == row.project -> return Ok(false)
+    }
+    Ok(true)
+}
+
+// Members see who else is in the project. Only an owner adds, changes or
+// removes a member, except for two writes of the caller's own row: it may
+// delete it (leaving), or insert it as a project's first owner under the
+// creator rule. A Member that rewrites its own row as Owner is refused on
+// the stored row, where it is not an owner.
+member_policy: fn(row: Member, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    account: account_of(who) ?? return Ok(false)
+    member := false
+    owner := false
+    if member_of(store, row.project, account) == {
+        .Val(mine) -> {
+            member = true
+            owner = mine.owner
+        }
+        .None -> {}
+        .Err(failure) -> return Err(failure)
+    }
+    own_row: row.account == account
+    if op == db.Op.Insert {
+        if owner -> return Ok(true)
+        if !own_row -> return Ok(false)
+        return first_owner(store, row, account)
+    }
+    Ok(owner || (op == db.Op.Read && member) || (op == db.Op.Delete && own_row))
+}
+
+// Crewboard's three tables, each behind its policy.
+Board: struct {
+    store: db.Store
+    projects: db.Table<Int, Project>
+    members: db.Table<MemberKey, Member>
+    tasks: db.Table<Int, Task>
+}
+
+// The store the board opens its tables from. A lambda owns what it
+// captures, so each call opens the board rather than capturing it.
+Stores: struct {
+    store: db.Store?
+}
+
+STORE: Shared{Stores{store: None}}
+
+keep: fn(store: db.Store) {
+    stores := STORE.guard_edit()
+    stores.value.store = Val(store.copy())
+}
+
+board: fn() -> Board {
+    stores := STORE.guard_edit()
+    store: stores.value.store ?? panic("the store is open")
+    Board{
+        store: store.copy(),
+        projects: projects_in(store).guard(project_policy),
+        members: members_in(store).guard(member_policy),
+        tasks: tasks_in(store).guard(task_policy),
+    }
+}
+
+project_wrote: fn(result: Project db.DBError!) -> String {
+    if result == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+member_wrote: fn(result: Member db.DBError!) -> String {
+    if result == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+task_wrote: fn(result: Task db.DBError!) -> String {
+    if result == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+member_deleted: fn(key: MemberKey) -[DB.Read, DB.Write]> String {
+    if board().members.delete(key) == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+// The creator becomes the owner, in one transaction: the projects policy
+// lets the caller insert a project that names it as created_by, and the
+// members policy lets it insert itself as that project's first owner. Either
+// refusal undoes both.
+create_project: fn(id: Int, name: String) -[DB]> String {
+    me: app.maybe_caller() ?? return "no one is signed in"
+    crew: board()
+    transaction: crew.store.begin() ?? return "the transaction did not begin"
+    made: project_wrote(crew.projects.add(Project{id: id, name: name, created_by: me}))
+    owned: member_wrote(crew.members.add(Member{project: id, account: me, owner: true}))
+    if made == "ok" && owned == "ok" {
+        transaction.commit() ?? return "the transaction did not commit"
+        return "ok"
+    }
+    transaction.rollback() ?? return "the transaction did not roll back"
+    "project {made}, owner {owned}"
+}
+
+// The caller's projects, each with its number of tasks.
+my_projects: fn() -[DB.Read]> String {
+    crew: board()
+    projects: (crew.projects.query() ?? return "unreadable").collect() ?? return "uncollected"
+    tasks: (crew.tasks.query() ?? return "unreadable").collect() ?? return "uncollected"
+    cards := [String]{}
+    loop project in projects {
+        count := 0
+        loop task in tasks {
+            if task.project == project.id -> count += 1
+        }
+        cards.push("{project.name} ({count} open)")
+    }
+    "[{cards.join(", ")}]"
+}
+
+// The caller's tasks whose title holds `words`.
+search: fn(words: String) -[DB.Read]> String {
+    tasks: (board().tasks.query() ?? return "unreadable").collect() ?? return "uncollected"
+    found := [String]{}
+    loop task in tasks {
+        if task.title.contains(words) -> found.push(task.title)
+    }
+    "[{found.join(", ")}]"
+}
+
+members_read: fn(project: Int) -[DB.Read]> String {
+    rows: (board().members.query() ?? return "unreadable").collect() ?? return "uncollected"
+    names := [String]{}
+    loop row in rows {
+        if row.project == project {
+            mark: if row.owner -> " (owner)" else -> ""
+            names.push("{row.account}{mark}")
+        }
+    }
+    "[{names.join(", ")}]"
+}
+
+step: fn(label: String, outcome: String) { print("{label}: {outcome}") }
+
+run: fn() {
+    keep(db.open_memory())
+
+    step("mia creates launch", app.as_caller("mia", fn() { create_project(1, "launch") }))
+    step("mia adds ben as a Member", app.as_caller("mia", fn() { member_wrote(board().members.add(Member{project: 1, account: "ben", owner: false})) }))
+    step("ben adds a task", app.as_caller("ben", fn() { task_wrote(board().tasks.add(Task{id: 1, project: 1, title: "ship the beta"})) }))
+
+    // A Member's update of its own row to Owner, judged on the stored row.
+    step("ben makes his own row Owner", app.as_caller("ben", fn() { member_wrote(board().members.put(Member{project: 1, account: "ben", owner: true})) }))
+
+    // The creator rule: an Owner insert only for a project whose row names
+    // the caller and that has no members.
+    step("carol adds herself as launch's Owner", app.as_caller("carol", fn() { member_wrote(board().members.add(Member{project: 1, account: "carol", owner: true})) }))
+    step("ben, a Member, adds carol as launch's Owner", app.as_caller("ben", fn() { member_wrote(board().members.add(Member{project: 1, account: "carol", owner: true})) }))
+    step("carol adds a project in mia's name", app.as_caller("carol", fn() { project_wrote(board().projects.add(Project{id: 2, name: "forged", created_by: "mia"})) }))
+    step("mia adds plans without an owner", app.as_caller("mia", fn() { project_wrote(board().projects.add(Project{id: 2, name: "plans", created_by: "mia"})) }))
+    step("carol adds herself as the Owner of plans, which has no members", app.as_caller("carol", fn() { member_wrote(board().members.add(Member{project: 2, account: "carol", owner: true})) }))
+    step("mia, plans' creator, adds herself as its Owner", app.as_caller("mia", fn() { member_wrote(board().members.add(Member{project: 2, account: "mia", owner: true})) }))
+    step("ben creates side", app.as_caller("ben", fn() { create_project(3, "side") }))
+    step("ben adds mia as side's Owner", app.as_caller("ben", fn() { member_wrote(board().members.add(Member{project: 3, account: "mia", owner: true})) }))
+    step("ben leaves side", app.as_caller("ben", fn() { member_deleted(MemberKey{project: 3, account: "ben"}) }))
+    step("ben, side's creator, adds himself as its Owner while it has members", app.as_caller("ben", fn() { member_wrote(board().members.add(Member{project: 3, account: "ben", owner: true})) }))
+    step("carol reads launch's members", app.as_caller("carol", fn() { members_read(1) }))
+    step("launch's members", app.as_system(fn() { members_read(1) }))
+    step("plans' members", app.as_system(fn() { members_read(2) }))
+    step("side's members", app.as_system(fn() { members_read(3) }))
+
+    // What each caller finds.
+    step("carol searches", app.as_caller("carol", fn() { search("ship") }))
+    step("carol's projects", app.as_caller("carol", fn() { my_projects() }))
+    step("mia searches", app.as_caller("mia", fn() { search("ship") }))
+    step("mia's projects", app.as_caller("mia", fn() { my_projects() }))
+    step("ben's projects", app.as_caller("ben", fn() { my_projects() }))
+}
