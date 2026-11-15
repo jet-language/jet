@@ -120,8 +120,14 @@
 // process CPU, so it counts the build step children, which time -v leaves
 // out (the batch builds' time -v reports only the build process's own CPU).
 // A phase only one build ran is `new` or `gone`. The table leaves out the
-// phases under the floor. The verdict line reads `batch speed gate: PASS`,
-// `FAIL` or `INCONCLUSIVE`. A failed A/B compile is FAIL. A missing or
+// phases under the floor. After the A/B, per mode, the current compiler's
+// median compile shows its phase budgets: each Tools/perf/budget/budget.json
+// row at its `target` column over the corpus lines, as the full lane checks
+// it, with its lines/s against its budget's, then each phase over budget
+// with its root (the row's owner cards). They are reported, never judged;
+// a phase over budget that names no owner card is FAIL. The verdict line
+// reads `batch speed gate: PASS`, `FAIL` or `INCONCLUSIVE`. A failed A/B
+// compile is FAIL. A missing or
 // unreadable file, a build whose time.txt exit status is not 0, a missing
 // instructions count, or an A/B quantity the --against rules leave
 // unjudged gives INCONCLUSIVE. --out FILE appends a `batch` row for each
@@ -1271,9 +1277,37 @@ batch_ab: fn(options: Options) -> String {
     print("")
     print([String]{"mode", "quantity", "previous", "current", "change", "spread", "verdict"}.map(fn(h) { h.pad_start(12, " ") }).join(" "))
     loop row in rows -> print(gate_cells(row).map(fn(c) { c.pad_start(12, " ") }).join(" "))
+    budgets: batch_budgets(ab, runs, lines)
+    loop line in budgets.lines -> print(line)
     print("traces: {ab.work}/<previous|current>-<mode>.<run>/trace.jsonl")
     loop line in named -> print(line)
+    // A phase over its budget is reported, never judged (load moves wall
+    // time); one that names no owner card fails, since its root is unowned.
+    if budgets.unowned -> return "FAIL"
     gate_verdict(rows, runs)
+}
+
+// The phase budgets of the current compiler's median A/B compile in each
+// mode (budget_lines), read from its kept trace.
+batch_budgets: fn(options: Options, runs: [Run], lines: Int) -> (lines: [String], unowned: Bool) {
+    out := [String]{}
+    unowned := false
+    budget_file: files.join(options.tree, BUDGET_FILE)
+    file: json.decode<BudgetFile>(files.read(budget_file) ?? "") ?? {
+        out.push("")
+        out.push("phase budgets: cannot read {budget_file}")
+        return (lines: out, unowned: unowned)
+    }
+    current: runs.filter(fn(r) { r.compiler == "current" })
+    loop mode in options.modes {
+        median: median_run(current, mode) ?? next
+        trace_file: files.join(slot_dir(options, "current", mode, median.repeat), "trace.jsonl")
+        text: files.read(trace_file) ?? next
+        checked: budget_lines(file, median, text, lines)
+        out.extend(checked.lines)
+        if checked.unowned -> unowned = true
+    }
+    (lines: out, unowned: unowned)
 }
 
 // The --batch form. Returns the exit code: 0 PASS, 1 FAIL, 3 INCONCLUSIVE.
@@ -1650,9 +1684,61 @@ phase_budget_check: fn(file: BudgetFile, summary: Summary, code_lines: Int) -> B
             rows[at].actual_ns < rows[at].budget_ns -> "within"
             else -> "over"
         }
-        if rows[at].status != "within" -> over.push("{rows[at].id} {rows[at].phase}: {rows[at].actual_ns} ns vs {rows[at].budget_ns} ns budget (root: {rows[at].owners.join(", ")})")
+        root: if rows[at].owners.len() == 0 -> "no owner card" else -> rows[at].owners.join(", ")
+        if rows[at].status != "within" -> over.push("{rows[at].id} {rows[at].phase}: {rows[at].actual_ns} ns vs {rows[at].budget_ns} ns budget (root: {root})")
     }
     BudgetCheck{column: column.copy(), code_lines, rows, over}
+}
+
+// A rate of `ns_per_line` wall ns per line in millions of lines per second.
+million_lines_per_second: fn(ns_per_line: Float) -> String {
+    if ns_per_line <= 0.0 -> return "-"
+    "{Float{1000.0} / ns_per_line:Fixed(1)}M"
+}
+
+// The phase budget table of Docs/spec/reference/compiler-speed.md, in
+// Markdown: each budget.json row at the target column as wall ns per corpus
+// line and lines per second, with its spans and owner cards, then the build
+// steps outside the trace, then the end-to-end total, whose rate is the
+// target's.
+budget_table: fn(file: BudgetFile) -> [String] {
+    column: file.target.column
+    out := [String]{"| Row | Phase | Spans | ns/line | Lines/s | Owners |", "| --- | --- | --- | ---: | ---: | --- |"}
+    total := Float{0.0}
+    loop pin in file.rows {
+        per_line: pin.budget.get(column) ?? 0.0
+        total += per_line
+        named: if pin.spans == .Val(spans) -> spans.map(fn(s) { "`{s}`" }).join(", ") else -> ""
+        less: if pin.exclude == .Val(excluded) -> " less {excluded.map(fn(s) { "`{s}`" }).join(", ")}" else -> ""
+        spans_cell: if pin.residual ?? false -> "the rest of the trace" else -> "{named}{less}"
+        out.push("| {pin.id} | {pin.phase} | {spans_cell} | {per_line:Fixed(1)} | {million_lines_per_second(per_line)} | {pin.owners.join(", ")} |")
+    }
+    if file.outside_trace == .Val(outside) {
+        per_line: outside.budget.get(column) ?? 0.0
+        total += per_line
+        out.push("| outside | build steps around the traced compile | none | {per_line:Fixed(1)} | {million_lines_per_second(per_line)} | {outside.owners.join(", ")} |")
+    }
+    out.push("| total | end to end | | {total:Fixed(1)} | {million_lines_per_second(total)} | |")
+    out
+}
+
+// One compile's phase budgets: budget.json's target column over `lines`
+// corpus lines (phase_budget_check, as the full lane checks it), each row's
+// lines per second against its budget's, then each phase over budget with
+// its root, the owner cards of its row. `unowned` is a phase over budget that
+// names no owner card.
+budget_lines: fn(file: BudgetFile, run: Run, trace_text: String, lines: Int) -> (lines: [String], unowned: Bool) {
+    cell: read_cell_trace(trace_text)
+    sample: Sample{label: "median", wall_ns: run.wall_ns, cpu_user_ns: run.cpu_ns, cpu_sys_ns: 0, peak_rss_bytes: run.peak_bytes, parallelism_pct: 0, startup_ns: -1, phases: cell.phases, counters: [Counter]{}, artifact_sha256: "", diagnostic_sha256: "", run_exit: -1, stdout_sha256: "", problems: [String]{}}
+    checked: phase_budget_check(file, summarize([Sample]{sample}), lines)
+    out := [String]{"", "{run.mode}.{run.repeat} (current median) phase budgets at {checked.column}, {lines} lines: row, phase, lines/s, budget lines/s, status"}
+    unowned := false
+    loop row in checked.rows {
+        out.push("  {row.id.pad_end(8, " ")} {row.phase.pad_end(40, " ")} {per_second(lines, row.actual_ns):PadLeft(12)} {per_second(lines, row.budget_ns):PadLeft(12)} {row.status}")
+        if row.status == "over" && row.owners.len() == 0 -> unowned = true
+    }
+    loop over in checked.over -> out.push("  over budget: {over}")
+    (lines: out, unowned: unowned)
 }
 
 // The distinct artifact and diagnostics digests over every sample of every
@@ -2181,6 +2267,40 @@ test_run: fn(repeat: Int, rc: Int, wall_s: Int) -> Run {
     assert(outside_limit(parsed, "1M") == None)
     bare: json.decode<BudgetFile>("{{\"columns\":[],\"target\":{{\"column\":\"1M\",\"lines_per_second\":1000000}},\"rows\":[]}}") ?? panic("bare budget file")
     assert(bare.outside_trace == None)
+}
+
+#Test("the phase budget table is budget.json's target column, composes to its rate and is the reference's") {
+    file: json.decode<BudgetFile>(files.read(BUDGET_FILE) ?? panic("read {BUDGET_FILE}: {err}")) ?? panic("decode {BUDGET_FILE}")
+    column: file.target.column
+    total := Float{0.0}
+    loop pin in file.rows {
+        total += pin.budget.get(column) ?? panic("{pin.id} has no {column} budget")
+        assert(pin.owners.len() > 0)
+    }
+    total += outside_limit(file, column) ?? 0.0
+    rate: nearest(Float.from_int(1000000000) / total)
+    assert(rate >= file.target.lines_per_second)
+    assert(rate * 100 < file.target.lines_per_second * 101)
+    table: budget_table(file)
+    assert_eq(table[table.len() - 1], "| total | end to end | | 33.3 | 30.0M | |")
+    reference: files.read("Docs/spec/reference/compiler-speed.md") ?? panic("read the compiler-speed reference: {err}")
+    assert(reference.contains(table.join("\n")))
+}
+
+#Test("a batch compile's phase budgets give each row's lines/s and name each over-budget phase's root") {
+    planted: "{{\"target\":{{\"column\":\"30M-wall\",\"lines_per_second\":30000000}},\"rows\":[{{\"id\":\"P1\",\"phase\":\"read\",\"spans\":[\"sources\"],\"budget\":{{\"30M-wall\":1.0}},\"owners\":[\"A\"]}},{{\"id\":\"P5\",\"phase\":\"bodies\",\"spans\":[\"sources\"],\"budget\":{{\"30M-wall\":BODIES}},\"owners\":[]}},{{\"id\":\"P15\",\"phase\":\"residual\",\"residual\":true,\"budget\":{{\"30M-wall\":100000.0}},\"owners\":[\"C\"]}}]}}"
+    run: Run{mode: "check", repeat: 2, compiler: "current", rc: 0, wall_ns: 10000000, cpu_ns: 0, instructions: -1, cycles: -1, peak_bytes: 0, lines: 1000, trace: None, note: "", budget: ""}
+    owned: budget_lines(json.decode<BudgetFile>(planted.replace("BODIES", "10000.0")) ?? panic("owned budget file"), run, test_trace(), 1000)
+    assert_eq(owned.lines[1], "check.2 (current median) phase budgets at 30M-wall, 1000 lines: row, phase, lines/s, budget lines/s, status")
+    assert_eq(owned.lines[2], "  {"P1".pad_end(8, " ")} {"read".pad_end(40, " ")} {"333333":PadLeft(12)} {"1000000000":PadLeft(12)} over")
+    assert_eq(owned.lines[3], "  {"P5".pad_end(8, " ")} {"bodies".pad_end(40, " ")} {"333333":PadLeft(12)} {"100000":PadLeft(12)} within")
+    assert_eq(owned.lines[4], "  {"P15".pad_end(8, " ")} {"residual".pad_end(40, " ")} {"250000":PadLeft(12)} {"10000":PadLeft(12)} within")
+    assert_eq(owned.lines[5], "  over budget: P1 read: 3000000 ns vs 1000 ns budget (root: A)")
+    assert_eq(owned.lines.len(), 6)
+    assert(!owned.unowned)
+    unowned: budget_lines(json.decode<BudgetFile>(planted.replace("BODIES", "1.0")) ?? panic("unowned budget file"), run, test_trace(), 1000)
+    assert(unowned.unowned)
+    assert_eq(unowned.lines[unowned.lines.len() - 1], "  over budget: P5 bodies: 3000000 ns vs 1000 ns budget (root: no owner card)")
 }
 
 #Test("lines, sizes and CPU lists parse") {

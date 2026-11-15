@@ -151,6 +151,32 @@ and fails one that has none. `--budget` keeps that report in each compile's
 `budget.txt`, with the owners of `outside_trace` when the build steps outside
 the trace are over.
 
+The table is `budget.json` at its `target` column; the tests of
+`Throughput.jet` hold the two equal. Each row gives a phase's wall ns per
+corpus line and its rate, 1e9 over it, in millions of lines per second. The
+rates compose through their ns per line: the rows and the build steps outside
+the trace sum to 33.3 ns per line, so the end-to-end rate is 30 million lines
+per second.
+
+| Row | Phase | Spans | ns/line | Lines/s | Owners |
+| --- | --- | --- | ---: | ---: | --- |
+| P1+P2 | read + lex + intern + parse | `sources`, `load` | 2.8 | 357.1M | #6328 c22, #5910 c6, #5479 c7 |
+| P3 | collect / register / resolve | `register` | 1.1 | 909.1M | #6328 c22, #5479 c7 |
+| P4 | comptime: one check + evaluation | `sema.check`, `comptime`, `comptime.bodies`, `comptime.validate` | 2.8 | 357.1M | #6328 c22, #5479 c6 |
+| P5a+P5b | sema bodies + ownership (one pass; P5b is not traced apart) | `sema.bodies`, `sema.recheck` | 7.0 | 142.9M | #5479 c6, #5479 c7 |
+| P5c | effect tracking | `sema.effects` | 0.6 | 1666.7M | #5479 c7 |
+| P5d | failure inference | `sema.failure` | 0.6 | 1666.7M | #5479 c7 |
+| P6 | other whole-program finalize | `sema.finalize` less `sema.bodies`, `sema.recheck`, `sema.effects`, `sema.failure` | 1.7 | 588.2M | #5479 c7 |
+| P7 | typed tree -> IR lowering (driver lower) | `lower` | 0.6 | 1666.7M | #5479 c8 |
+| P8 | IR build | `ir.build` | 3.9 | 256.4M | #5479 c8, #5479 c7 |
+| P9 | IR O1 passes + IR consistency check (ir.lint, once, over the module x64 selection reads) | `ir.opt`, `ir.lint` | 2.8 | 357.1M | #5479 c8, #5479 c6 |
+| P10 | x64 selection, register allocation, encode | `ir.x64` | 1.7 | 588.2M | #5479 c8 |
+| P11 | object write + DWARF debug info (SPEED-500K P13; debug_info is on in stock builds and runs) | `ir.object` | 1.1 | 909.1M | #5479 c8 |
+| P14 | link + foreign objects | `native.link`, `native.foreign`, `native.rust_foreign` | 1.1 | 909.1M | #5479 c8 |
+| P15 | driver, phase boundaries (residual) | the rest of the trace | 2.2 | 454.5M | #5479 c6 |
+| outside | build steps around the traced compile | none | 3.3 | 303.0M | #5479 c6 |
+| total | end to end | | 33.3 | 30.0M | |
+
 `--against SEED` is the train speed gate: the compiler `JET` against the seed
 it was built with, each compiling the corpus in each mode, `--runs` rounds that
 alternate which compiler goes first. Every compile runs under
@@ -193,7 +219,12 @@ judged: load on a shared machine moves them by more than any limit. It prints
 `FAIL` when a judged row fails or an A/B compile fails, `INCONCLUSIVE` when a
 build's files, a built compiler or a count is missing or the build failed.
 `--out` records every build quantity, and every A/B compile in the throughput
-ledger beside it.
+ledger beside it. After the A/B, the report shows each mode's phase budgets
+for the current compiler's median compile. Every `budget.json` row appears at
+its `target` column, as lines per second against its budget's rate, and each
+phase over budget is listed with its root, the owner cards of its row. These
+rows are reported, never judged, since load moves wall time. The one exception
+is a phase over budget that names no owner card: the gate fails it.
 
 `--lane quick|full` runs the gauntlet's `compile_throughput` cell
 (`Tools/gauntlet/measurement-manifest.json`) with the same tool. The full lane
