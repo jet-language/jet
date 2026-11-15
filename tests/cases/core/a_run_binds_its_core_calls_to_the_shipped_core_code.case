@@ -1,28 +1,22 @@
 # Core ships as machine code in jet. Outside the tree, `jet run` checks
 # the Core sources built into jet and binds the program's Core calls to the
-# Core code jet carries (JetCli Host.jet jet_cli_native_executable): the
-# runtime image's when the program binds to the image, else the Core
-# library's object, which the full link takes beside the runtime pack, as for
-# a program whose live code calls C. The trace counter `ir.build.core_calls`
-# counts the Core symbols the program calls there. `jet build` binds none, so
-# a built program carries the Core code it calls.
+# Core code jet carries (JetCli Host.jet jet_cli_native_executable): here the
+# runtime image's. The trace counter `ir.build.core_calls` counts the Core
+# symbols the program calls there. `jet build` binds none, so a built
+# program carries the Core code it calls. A run whose live code calls C
+# binds to the Core library's object instead:
+# a_run_that_links_c_binds_its_core_calls_to_the_core_object.case, which
+# needs a C toolchain.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_PHASE_COUNTERS=1
 write: main.jet = "use base64: core.encoding.base64\n\nrun: fn() {\n    print(base64.encode(\"jet\".bytes()))\n}\n"
-write: c.jet = "use base64: core.encoding.base64\n\n#Import(c) c_labs: fn(value: I64) -> I64 = \"labs\"\n\nrun: fn() {\n    print(base64.encode(\"jet\".bytes()))\n    print(c_labs(I64{-6}))\n}\n"
 step: jet run --trace=run.json main.jet
 unset: JET_TOOLCHAIN_ROOT
 exit: 0
 stdout: = "amV0\n"
 stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"ir.build\",\"core_calls\":" # the run counts its bound Core calls
 stderr: !~ "\"core_calls\":0}" # and binds at least one
-step: jet run --trace=c.json c.jet
-unset: JET_TOOLCHAIN_ROOT
-exit: 0
-stdout: = "amV0\n6\n"
-stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"ir.build\",\"core_calls\":" # a run that links C links Core's object too
-stderr: !~ "\"core_calls\":0}" # and binds its Core calls there
 step: jet build --trace=build.json main.jet
 unset: JET_TOOLCHAIN_ROOT
 exit: 0
