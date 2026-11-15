@@ -1231,7 +1231,10 @@ sema_expression_bound_method: fn(base: Expr, member: String, span: Span, receive
     meta.bound_write = head == None && receiver_convention == AccessConvention.Write
     lambda: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: call}, span: span, meta: meta}, id: AST_NODE_GENERATED}
     pipe_head: head ?? return SemaBoundMethodRead{read: Val(lambda), invalid: false}
-    step: PipeStep{name: hidden, value: lambda, reads: 1, span: span}
+    // The hidden binding is declared at the receiver, where the lambda reads
+    // it: a binding is visible only from its declaration on, and the read's
+    // own span starts at the member name, after the receiver.
+    step: PipeStep{name: hidden, value: lambda, reads: 1, span: expr_span(base)}
     SemaBoundMethodRead{read: Val(Expr.Pipe{head: pipe_head, steps: [PipeStep]{step}, span: span, id: AST_NODE_GENERATED}), invalid: false}
 }
 
