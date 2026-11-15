@@ -2236,7 +2236,7 @@ sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScop
                     return sema_expression_condition_failed(bindings)
                 }
                 // The right side of `&&` reads the names the left side bound.
-                sema_expression_declare_condition_bindings(left_checked.bindings, scopes, state, false, diagnostics)
+                sema_expression_declare_condition_bindings(left_checked.bindings, environment, program, scopes, state, false, diagnostics)
                 right_check: sema_expression_check_condition_inner(right, environment, program, scopes, state, tail_store, context, diagnostics)
                 bindings := left_checked.bindings
                 loop binding in right_check.bindings -> bindings.push(binding)
@@ -2378,7 +2378,10 @@ sema_expression_check_condition: fn(condition: Expr, environment: SemaScopeEnvir
 // it (and `&binding.field` passes onward) reach the owner's storage, and it
 // holds a write view on its subject place while live. `track` is false for
 // the in-condition declaration a `&&` chain reads, which the branch repeats.
-sema_expression_declare_condition_bindings: fn(bindings: [SemaConditionBinding], scopes: &SemaScopeTable, state: &SemaOwnershipState, track: Bool, diagnostics: &[Diagnostic]) {
+// A payload that the binding owns (its subject is a temporary or a
+// `.move()`, not a named place that keeps owning it) carries the payload's
+// `#SingleUse` duty exactly as a plain binding of the same value does.
+sema_expression_declare_condition_bindings: fn(bindings: [SemaConditionBinding], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, track: Bool, diagnostics: &[Diagnostic]) {
     loop binding in bindings {
         access: if binding.window -> AccessConvention.Write else -> AccessConvention.Read
         // Resolved before the binding can shadow its subject's root name.
@@ -2397,6 +2400,9 @@ sema_expression_declare_condition_bindings: fn(bindings: [SemaConditionBinding],
         // Also track the temporary `&&` bindings: later tests must resolve
         // their payload origin and reborrow ancestry, not a new local owner.
         _ := sema_ownership_record_pattern_views(state, binding.symbol.name, binding.symbol.span, binding.sources, access, scopes)
+        if track && !binding.window && !in_place && !sema_copy_site_payload_of_named_subject(state, sema_ownership_payload_key(binding.symbol.name, binding.symbol.span)) {
+            sema_single_use_note_binding(state, binding.symbol, binding.key, environment, program)
+        }
     }
 }
 
@@ -2579,7 +2585,7 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     then_diagnostic_start: diagnostics.len()
     then_mark: sema_scope_mark(scopes)
     sema_scope_enter(scopes, state, "if.then@{span.start}")
-    sema_expression_declare_condition_bindings(condition_check.bindings, scopes, state, true, diagnostics)
+    sema_expression_declare_condition_bindings(condition_check.bindings, environment, program, scopes, state, true, diagnostics)
     then_result: if caught == .Val(found) -> sema_catch_all_err_check_body(found, then_body, then_mark.saved.return_type, environment, program, scopes, state, tail_store, context, diagnostics, then_mark.saved.loop_depth) else -> sema_check_statements(then_body, then_mark.saved.return_type, environment, program, scopes, state, tail_store, context, diagnostics, then_mark.saved.loop_depth)
     if !then_result.complete {
         sema_scope_leave(scopes, state)

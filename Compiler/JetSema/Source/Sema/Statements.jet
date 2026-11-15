@@ -1356,7 +1356,7 @@ sema_stmt_condition_type: fn(condition: TExpr?) -> Type Never! {
 
 sema_stmt_check_unit_branch: fn(body: [Stmt], value_expr: Expr, bindings: [SemaConditionBinding], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], owner: String, loop_depth: Int) -> SemaStatementResult {
     sema_scope_enter(scopes, state, owner)
-    sema_expression_declare_condition_bindings(bindings, scopes, state, true, diagnostics)
+    sema_expression_declare_condition_bindings(bindings, environment, program, scopes, state, true, diagnostics)
     result := sema_check_statements(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
     if result.complete {
         value_span: expr_span(value_expr)
@@ -1631,7 +1631,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         if arm_param == .Val(param) && arm_target == .Val(arm_type) -> sema_stmt_type_switch_rebind(scopes, param, arm_type)
         branch_fork: sema_ownership_fork(state)
         sema_scope_enter(scopes, state, "if.arm@{arms[arm_index].span.start}")
-        sema_expression_declare_condition_bindings(arm_bindings, scopes, state, true, diagnostics)
+        sema_expression_declare_condition_bindings(arm_bindings, environment, program, scopes, state, true, diagnostics)
         if value_tail -> context.value_tail_span = sema_stmt_value_tail_marker(arms[arm_index].body)
         branch := if {
             caught == .Val(found) -> if arm_return != None -> sema_catch_all_err_check_body(found, arms[arm_index].body, arm_return, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth) else -> sema_catch_all_err_check_body(found, arms[arm_index].body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)

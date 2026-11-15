@@ -1,0 +1,28 @@
+// A payload bound by a pattern from a temporary owns that payload, so a
+// `#SingleUse` payload bound so owes its `consume` exactly as a plain binding
+// of it would: here an `if` test and a match arm each drop theirs.
+#SingleUse Lease: struct {
+    name: String
+}
+
+acquire: fn(name: String) -> Lease? { Val(Lease{name: name.copy()}) }
+
+release: fn(lease: &&Lease) { print("released {lease.name}") }
+
+dropped_by_if: fn() {
+    if acquire("if") == .Val(lease) {
+        print(lease.name)
+    }
+}
+
+dropped_by_arm: fn() {
+    if acquire("arm") == {
+        .Val(lease) -> print(lease.name)
+        .None -> {}
+    }
+}
+
+run: fn() {
+    dropped_by_if()
+    dropped_by_arm()
+}
