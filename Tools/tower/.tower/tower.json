@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6926,
-    "rev": 104700,
+    "nextNum": 6930,
+    "rev": 104725,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29439,21 +29439,21 @@
       "criteria": [
         {
           "n": 5,
-          "text": "A task body `Err(e)` of domain type E reaches the joiner as E, not `TaskFailure.Panicked`, and Core declares the single `TaskFailure` enum used by sema and the runtime. Proof: the concurrency task_domain_error golden passes on O0, O1 and O2.",
+          "text": "A task body's `Err(e)` of domain type E reaches the joiner as E, not as `TaskFailure.Panicked`, and Core declares the single `TaskFailure` enum that sema and the runtime both use. Proof: `jet test Compiler --profile golden --filter concurrency/task_domain_error` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:07:21.066Z"
+          "at": "2026-11-15T04:38:05.199Z"
         },
         {
           "n": 6,
-          "text": "[#1302]  • Examples/Concurrency/Parallel/ParallelScan, Examples/Concurrency/DeadlineContext and Examples/Memory/Views/ReturnedViews match their .out goldens on O0, O1 and O2 (BrowserLockedProvision is on #6552). • Each rebless is justified as correct new output.",
+          "text": "Examples/Concurrency/Parallel/ParallelScan, Examples/Concurrency/DeadlineContext and Examples/Memory/Views/ReturnedViews match their .out goldens on O0, O1 and O2 (BrowserLockedProvision is on #6552), and each rebless is justified as correct new output. Proof: `jet test Compiler --profile golden --filter ParallelScan`, `--filter DeadlineContext` and `--filter ReturnedViews`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:43:22.461Z"
+          "at": "2026-11-15T04:38:06.077Z"
         },
         {
           "n": 7,
@@ -29484,30 +29484,31 @@
         },
         {
           "n": 10,
-          "text": "[#3180] • Capacity-one backpressure, the two-worker limit, first-failure identity and sibling cancellation, shown by observed transitions. • Join, shield and detach obligations. • Golden `concurrency/conformance_capsule` on O0, O1 and O2.",
+          "text": "A task group shows capacity-one backpressure, the two-worker limit, first-failure identity and sibling cancellation through observed transitions, plus its join, shield and detach obligations. Proof: `jet test Compiler --profile golden --filter concurrency/conformance_capsule` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:07:21.966Z"
+          "at": "2026-11-15T04:38:06.978Z"
         },
         {
           "n": 11,
-          "text": "[#3240] Task affinity, blocking offload, admission and backpressure, caller buffers, allocation and cancellation association each map onto an existing owner, and each new control is its own owner ballot. Proof: a tests/cases row per mapping shows the behavior on O0, O1 and O2. Cost claims are G11 (#2858).",
+          "text": "Task affinity, blocking offload, admission and backpressure, caller buffers, allocation and cancellation association each map onto an existing owner, and each new control goes to its own owner ballot (cost claims are G11, #2858). Proof: `jet test Compiler --profile cases --filter concurrency/control_mapping_`, one case per mapping on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:43:27.665Z"
+          "at": "2026-11-15T04:38:07.897Z"
         },
         {
           "n": 13,
           "text": "[#3261]  • Capacity 0/1, full, closed-send, dropped receiver, cancel and recv-after-close. • Rendezvous is distinct from minimum-one buffering. A public change needs a ballot. • Golden `concurrency/channel_outcomes`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:28:40.736Z"
+          "evidence": "Moved to #6926 c1: channels and streams card",
+          "at": "2026-11-15T04:38:18.863Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
@@ -29521,47 +29522,52 @@
         {
           "n": 15,
           "text": "[#3343]  • A non-blocking drain stops at Empty without closing; later items are still readable. • Closed, cancelled and failed states stay distinct. • Golden `concurrency/channel_ready_items`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:28:43.240Z"
+          "evidence": "Moved to #6926 c2: channels and streams card",
+          "at": "2026-11-15T04:38:20.312Z",
+          "closure": "obsolete"
         },
         {
           "n": 21,
           "text": "(was #3345) Not-ready never becomes normal EOF; consumer demand and producer wakeup cannot lose an item or spin.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:29:17.137Z"
+          "evidence": "Moved to #6926 c3: channels and streams card",
+          "at": "2026-11-15T04:38:22.095Z",
+          "closure": "obsolete"
         },
         {
           "n": 22,
           "text": "(was #3345) Breaking, dropping and failing a pipeline cancel/clean up through the existing task path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:29:18.030Z"
+          "evidence": "Moved to #6926 c4: channels and streams card",
+          "at": "2026-11-15T04:38:23.954Z",
+          "closure": "obsolete"
         },
         {
           "n": 23,
           "text": "(was #3345) Sync and suspended callbacks preserve their declared effects and output order across applicable tiers; no alternate StreamExt dialect is introduced.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:29:18.910Z"
+          "evidence": "Moved to #6926 c5: channels and streams card",
+          "at": "2026-11-15T04:38:25.784Z",
+          "closure": "obsolete"
         },
         {
           "n": 24,
           "text": "(was #3345) The stream_readiness, stream_cancel_on_break and stream_failure_adapters goldens print identical output on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:07:23.909Z"
+          "evidence": "Merged into #6926 c3: the three goldens are now the proofs of STREAMS c3, c4 and c5",
+          "at": "2026-11-15T04:38:27.094Z",
+          "closure": "obsolete"
         },
         {
           "n": 25,
@@ -29709,30 +29715,30 @@
         },
         {
           "n": 61,
-          "text": "(was #5468) (was #4654) core.tasks has no sentinel or silent rail: `sender.send(v)` returns `SendError!` and a send on a closed channel is that error (never -1); a lock always locks; nothing is dropped silently; a negative or zero capacity never means unbounded (c13 owns what 0 and 1 mean). Proof: a case per rule on O0, O1 and O2.",
+          "text": "core.tasks has no sentinel or silent rail: a send on a closed channel is an error (never -1), a lock always locks, nothing is dropped silently, and a negative or zero capacity never means unbounded (STREAMS owns what 0 and 1 mean). Proof: `jet test Compiler --profile cases --filter concurrency/no_sentinel_`, one case per rule on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:43:54.581Z"
+          "at": "2026-11-15T04:38:08.829Z"
         },
         {
           "n": 62,
-          "text": "(was #5468) (was #4874) Checked operations inside a task (overflow, division by zero, list bounds) publish TaskFailure.Panicked to the joiner instead of stopping the process. Proof: a case per operation on O0, O1 and O2 shows the joiner's report and the process continuing.",
+          "text": "A checked operation that fails inside a task (overflow, division by zero, list bounds) publishes `TaskFailure.Panicked` to the joiner instead of stopping the process. Proof: `jet test Compiler --profile cases --filter concurrency/checked_failure_in_task_`, one case per operation on O0, O1 and O2, each showing the joiner's report and the process continuing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:43:58.909Z"
+          "at": "2026-11-15T04:38:09.730Z"
         },
         {
           "n": 63,
-          "text": "(was #5468) (was #4985) A #Test whose body stops (a failed check, a panic, a cancelled task) reports that stop as its own failure on O0, O1 and O2, never a lost edge or a passing test. Proof: a tests/cases row per stop kind. (The Rust-era emit_test_stop_edges helper the old text named is gone from dev.)",
+          "text": "A #Test whose body stops (a failed check, a panic, a cancelled task) reports that stop as its own failure on O0, O1 and O2, never a lost edge or a pass. Proof: `jet test Compiler --profile cases --filter test_runner/stop_is_test_failure_`, one case per stop kind.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:44:02.205Z"
+          "at": "2026-11-15T04:38:10.788Z"
         },
         {
           "n": 69,
@@ -29763,48 +29769,48 @@
         },
         {
           "n": 79,
-          "text": "(was #3443 c1) Concurrency-service task-group expansion produces unique IR function identities, and the bounded workload reaches its exact expected behavior without the duplicate-function ICE.",
+          "text": "Task-group expansion in concurrency services gives each generated function a unique JetIR identity, and the bounded workload reaches its exact expected output with no duplicate-function internal error. Proof: `jet test Compiler --profile cases --filter concurrency/task_group_expansion_unique_ids`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:07:37.078Z"
+          "at": "2026-11-15T04:38:12.114Z"
         },
         {
           "n": 80,
-          "text": "(was #3900) Parity: Task detach/freeze rules missing in JetSema [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "JetSema enforces the spec's task detach and freeze rules, each refusal a registered error with a UI snapshot. Proof: `jet test Compiler --profile ui --filter task_detach_` and `--filter task_freeze_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:43:21.074Z"
+          "at": "2026-11-15T04:38:13.515Z"
         },
         {
           "n": 81,
-          "text": "(was #3989 c1) Every blocking function in core.tasks declares its waiting leaf (Time.Wait), and sema infers the same leaf for it.",
+          "text": "Every blocking function in core.tasks declares its waiting leaf (`Time.Wait`), and sema infers the same leaf for it. Proof: `jet test Compiler --profile cases --filter effects/tasks_blocking_leaf_time_wait`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:07:37.904Z"
+          "at": "2026-11-15T04:38:14.758Z"
         },
         {
           "n": 82,
-          "text": "(was #3989 c2) A block granted only `Time.Wait` can call `tasks.recv`, and the existing task examples pass unchanged on O0, O1 and O2.",
+          "text": "A block granted only `Time.Wait` can call `tasks.recv`, and the existing task examples pass unchanged on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter effects/time_wait_grant_allows_recv` and `jet test Compiler --profile golden --filter Concurrency/`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:07:38.789Z"
+          "at": "2026-11-15T04:38:16.166Z"
         },
         {
           "n": 84,
-          "text": "(was #4116 c1) Run-tier features from #3944 (task control, runtime stop codes, run-time I/O) work natively on O0 (`jet run`), with a focused test or fixture that passes; the command and its result are logged on this card [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #4741 c44)",
+          "text": "Task control, run-time stop codes and run-time I/O work at O0 under `jet run`. Proof: `jet test Compiler --profile cases --filter task_control_tiers/` passes its O0 rows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:54:17.183Z"
+          "at": "2026-11-15T04:38:17.442Z"
         },
         {
           "n": 85,
@@ -29835,8 +29841,8 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:16.660Z",
-      "updated": "2026-11-13T15:19:00.663Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:38:27.095Z",
+      "updatedBy": "TowerKeeper-1",
       "workOrder": 94,
       "goals": [
         "G10"
@@ -48931,6 +48937,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:29:50.945Z"
+        },
+        {
+          "n": 18,
+          "text": "D-VIEW-TRAP1=A: a negative or out-of-range dynamic view bound is a located run-time trap (exit 70 at the original site), never a compile error, the same on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter views/d_view_trap1_contract`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:38:03.435Z"
         }
       ],
       "refs": [
@@ -48949,12 +48964,12 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-15T04:32:40.767Z",
+      "updated": "2026-11-15T04:38:03.435Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 17
+      "criteriaLastN": 18
     },
     {
       "id": "c0441rvj",
@@ -64871,6 +64886,15 @@
           "evidence": "Moved to #6923 c3: pattern payload moves",
           "at": "2026-11-15T04:30:12.260Z",
           "closure": "obsolete"
+        },
+        {
+          "n": 21,
+          "text": "D-RESOURCE-REASSIGN1=A: once a replacement value is ready, the displaced owner is released before the next statement, the next statement observes the released owner, and a surviving alias keeps its provider alive until its final owner ends; the ratified sample prints false, true, true, true. Proof: `jet test Compiler --profile cases --filter memory/d_resource_reassign1_contract` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:38:02.553Z"
         }
       ],
       "refs": [],
@@ -64881,12 +64905,12 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-28T11:41:38.387Z",
-      "updated": "2026-11-15T04:30:30.222Z",
+      "updated": "2026-11-15T04:38:02.553Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 20
+      "criteriaLastN": 21
     },
     {
       "id": "c0j8ez91",
@@ -65944,6 +65968,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T04:24:36.850Z"
+        },
+        {
+          "n": 9,
+          "text": "D-REPLAY-ORDER1=A on the self-hosted toolchain: task message and lock order is recorded in .jetproof-replay at the scheduler, channel, lock and join boundaries, and a two-task race recorded under `jet run` replays identically under `jet run` and a built binary. Proof: `jet test Compiler --profile cases --filter replay/two_task_race_replays`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:38:04.320Z"
         }
       ],
       "refs": [
@@ -65963,12 +65996,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:19.302Z",
-      "updated": "2026-11-15T04:25:18.168Z",
+      "updated": "2026-11-15T04:38:04.320Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c0efae83",
@@ -109018,6 +109051,332 @@
       "needsAcceptance": false,
       "created": "2026-11-15T04:34:48.239Z",
       "updated": "2026-11-15T04:34:48.239Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0dbs1yh",
+      "num": 6926,
+      "title": "Channels and streams: every outcome stays distinct, no item is lost, and pipelines stay bounded",
+      "body": "Destination: channel capacities, closing, cancellation and failure are distinct observable outcomes; streams never turn not-ready into end-of-stream, never lose an item or spin, and clean up through the task path when broken, dropped or failed; parallel stream helpers keep order rules and in-flight bounds; and `Sender.try_send` hands optional work to a background queue without waiting (D-CONC-BACKGROUND1=A).\n\nWhy: a lost item, a silent end-of-stream or an unbounded queue is a correctness bug that tests rarely see.\n\nSource: #3239 c13, c15, c21-c29 and c38 (carried from #3261, #3343, #3344-#3346, #3365-#3367 and #4451).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Channel outcomes are distinct: capacity 0 (rendezvous) differs from capacity 1, and full, closed-send, dropped-receiver, cancel and receive-after-close each report their own outcome. A public API change needs a ballot. Proof: `jet test Compiler --profile golden --filter concurrency/channel_outcomes` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:58.858Z"
+        },
+        {
+          "n": 2,
+          "text": "A non-blocking drain stops at Empty without closing the channel, later items stay readable, and closed, cancelled and failed states stay distinct. Proof: `jet test Compiler --profile golden --filter concurrency/channel_ready_items`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:58.858Z"
+        },
+        {
+          "n": 3,
+          "text": "A stream's not-ready state never becomes a normal end-of-stream, and consumer demand and producer wakeup can never lose an item or spin. Proof: `jet test Compiler --profile golden --filter stream_readiness` prints the same output on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:58.858Z"
+        },
+        {
+          "n": 4,
+          "text": "Breaking out of, dropping or failing a pipeline cancels and cleans up through the existing task path. Proof: `jet test Compiler --profile golden --filter stream_cancel_on_break` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:58.858Z"
+        },
+        {
+          "n": 5,
+          "text": "Sync and suspended stream callbacks keep their declared effects and output order on every tier, with no second StreamExt-style dialect. Proof: `jet test Compiler --profile golden --filter stream_failure_adapters` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:58.858Z"
+        },
+        {
+          "n": 6,
+          "text": "Exact splitting, zip, reverse, positions and chunked folds are offered only when their bounds hold, encounter order stays separate from callback effect order, and cheap kernels stay serial (the speed pair is on #6085). Proof: `jet test Compiler --profile golden --filter concurrency/para_generic_sources` and `jet test Compiler --profile ui --filter para_indexed_after_filter`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:58.858Z"
+        },
+        {
+          "n": 7,
+          "text": "A parallel stream map's limit bounds in-flight work and results, ordered and completion-order modes both exist, failure and cancellation cleanup is defined, and capture rules apply (the speed pair is on #6085). Proof: `jet test Compiler --profile golden --filter concurrency/para_map_stream`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:58.858Z"
+        },
+        {
+          "n": 8,
+          "text": "Merging ready streams keeps per-source order, orders across sources by readiness, closes only the named sources on an owned end, drop or error, keeps keyed-source identity, and states its fairness and in-flight bound. Proof: `jet test Compiler --profile golden --filter streams/merge_ready`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:58.858Z"
+        },
+        {
+          "n": 9,
+          "text": "Timed batching keeps processing time, event time and readiness distinct and states its timeout, partial-batch and cancel rules. Proof: `jet test Compiler --profile golden --filter streams/timing_batches`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:58.858Z"
+        },
+        {
+          "n": 10,
+          "text": "A worker-pool stream reports per-worker initialize, clone and drop counts, ordered versus any-completion results, and the effects still in flight after cancel, with no new pool, scheduler or tuning API. Proof: `jet test Compiler --profile cases --filter concurrency/worker_pool_counts` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:58.858Z"
+        },
+        {
+          "n": 11,
+          "text": "D-CONC-BACKGROUND1=A: a nonblocking `Sender.try_send` returns ownership of the value when the queue is full, and a bounded worker, panic isolation and shutdown compose with it, with no Worker wrapper type. Proof: `jet test Compiler --profile cases --filter concurrency/try_send_background_queue`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:58.858Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "concurrency",
+        "channels",
+        "streams"
+      ],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:37:58.858Z",
+      "updated": "2026-11-15T04:37:58.858Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0sbl400",
+      "num": 6927,
+      "title": "Cancellation reaches everything: timers, idle loops, signals, deadlines, supervised restarts and job queues",
+      "body": "Destination: after a cancel or shutdown, no timer, interval, scheduled job, signal handler, listener or supervised worker survives; an idle event loop costs almost nothing; root cancellation, signals, request deadlines, listener drain and stdin close share one Prelude semantics; supervised restarts follow the #1076 policy; and core.jobs runs its typed queue lifecycle through one owner.\n\nWhy: a producer that outlives its cancel leaks work and keeps a process alive.\n\nSource: #3239 c7, c8, c40, c50-c52 and c75 (carried from #3095, #3108, #4347, #6013 and #2787).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "After `tasks.cancel`, no timer or interval producer survives, and app shutdown cancels and joins, or reports, every scheduled job; clock and missed-tick behavior is recorded, and nothing replays on restart. Proof: `jet test Compiler --profile cases --filter schedule_cancel_stops_producer_and_app_shutdown_joins`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:59.765Z"
+        },
+        {
+          "n": 2,
+          "text": "A 2 s idle wait with 10 ticks uses under 5% of one CPU, shows exactly 10 wakeups, and file descriptors return to the baseline after cancel. Proof: `jet test Compiler --profile cases --filter idle_event_loop_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:59.765Z"
+        },
+        {
+          "n": 3,
+          "text": "Root cancellation, signal handling, request deadlines, listener drain and ProcessStdin close run through shared Prelude semantics. Proof: `jet test Compiler --profile golden --filter concurrency/signal_deadline_` and `jet test Compiler --profile cases --filter cli_signals/` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:59.765Z"
+        },
+        {
+          "n": 4,
+          "text": "The #1076 restart policy (limit, window, backoff) works for services on the self-hosted toolchain, with its Rust-era acceptance tests ported. Proof: `jet test Compiler --profile cases --filter service/restart_policy_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:59.765Z"
+        },
+        {
+          "n": 5,
+          "text": "A task group can carry the same restart policy: a worker that fails 3 times is restarted 3 times, and a 4th failure inside the window fails the group with a report naming the worker and its last failure. Proof: `jet test Compiler --profile cases --filter concurrency/group_restart_policy`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:59.765Z"
+        },
+        {
+          "n": 6,
+          "text": "Cancelling a supervised group stops restarts and joins every worker, so no worker outlives the group. Proof: `jet test Compiler --profile cases --filter concurrency/group_cancel_stops_restarts`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:59.765Z"
+        },
+        {
+          "n": 7,
+          "text": "The ratified core.jobs typed queue methods (enqueue, delay, claim, acknowledge and the rest) and the job error lifecycle check and run through one owner. Proof: `jet test Compiler --profile golden --filter jobs/typed_queue_lifecycle`, deterministic on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:37:59.765Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "concurrency",
+        "cancellation"
+      ],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:37:59.765Z",
+      "updated": "2026-11-15T04:37:59.765Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c07qvm0k",
+      "num": 6928,
+      "title": "Atomics: exact Int and fixed-width atomics on one nonblocking store, and compare-and-swap without ABA",
+      "body": "Destination: D-ATOMIC-WIDTH1=A is built. Exact Int and direct fixed-width atomics share one growable nonblocking numeric store, with no Atomic-specific pool, extra family, hidden lock or capacity setup, and compare-and-swap on an exact atomic validates the same raw word as its retained owner, so it cannot suffer ABA.\n\nSource: #3239 c30 and c36 (carried from #4266 and #4495).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-ATOMIC-WIDTH1=A: an exact Int atomic grows beyond the machine width, concurrent fixed-width atomic operations stay correct, and allocator exhaustion still makes nonblocking progress, with no hidden lock or Atomic-specific pool. Proof: `jet test Compiler --profile cases --filter atomics/d_atomic_width1_contract` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:38:00.697Z"
+        },
+        {
+          "n": 2,
+          "text": "Compare-and-swap on an exact atomic uses the same validated raw word as its retained owner, so it has no ABA. Proof: `jet test Compiler --profile cases --filter atomics/cas_aba_witness`, plus the original schedule test, on the shipping runtime.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:38:00.697Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "concurrency",
+        "atomics"
+      ],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:38:00.697Z",
+      "updated": "2026-11-15T04:38:00.697Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0ndv80x",
+      "num": 6929,
+      "title": "Core functions that call your callback fail with the callback's own failure type (D-CALLBACK-ERR1=A)",
+      "body": "Destination: every Core function that calls a user function takes a failure type parameter `E`; the callback is `fn(T) -> U E!`, and the Core function fails with `E` (for example `sort: fn<T, E>(rows: [T], key_fn: fn(T) -> String E!) -> [T] E!`). A callback that cannot fail, one with a single failure type, and one with a union including an API-owned failure all propagate unchanged.\n\nSource: #3239 c31 (carried from #4266); ratified D-CALLBACK-ERR1=A, Docs/spec/syntax-decisions.md.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every Core function that calls a user callback takes a failure type parameter `E`, and a `Never` callback, a single-failure callback and a union with an API-owned failure each propagate unchanged. Proof: `jet test Compiler --profile cases --filter callbacks/d_callback_err1_contract`, and a guard over Core's public signatures finds no callback parameter without its `E`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:38:01.643Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "errors"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:38:01.643Z",
+      "updated": "2026-11-15T04:38:01.643Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -214437,6 +214796,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:38:27.095Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c06l1r0z",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-15T04:38:25.785Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c06l1r0z",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-15T04:38:23.955Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c06l1r0z",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-15T04:38:22.096Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c06l1r0z",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-15T04:38:20.312Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c06l1r0z",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-15T04:38:18.863Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c06l1r0z",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T04:38:17.443Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#84: strip debris; proof; was: (was #4116 c1) Run-tier features from #3944 (task control, runtime stop codes, run-time I/O) work natively on O0 (`jet run`), with a focused test or fixture that passes; the command and its result are"
+    },
+    {
+      "at": "2026-11-15T04:38:16.166Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#82: strip debris; proof; was: (was #3989 c2) A block granted only `Time.Wait` can call `tasks.recv`, and the existing task examples pass unchanged on O0, O1 and O2."
+    },
+    {
+      "at": "2026-11-15T04:38:14.759Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#81: strip debris; proof; was: (was #3989 c1) Every blocking function in core.tasks declares its waiting leaf (Time.Wait), and sema infers the same leaf for it."
+    },
+    {
+      "at": "2026-11-15T04:38:13.516Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#80: strip debris; proof; was: (was #3900) Parity: Task detach/freeze rules missing in JetSema [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-15T04:38:12.114Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#79: strip debris; proof; was: (was #3443 c1) Concurrency-service task-group expansion produces unique IR function identities, and the bounded workload reaches its exact expected behavior without the duplicate-function ICE."
+    },
+    {
+      "at": "2026-11-15T04:38:10.788Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#63: strip debris; proof; was: (was #5468) (was #4985) A #Test whose body stops (a failed check, a panic, a cancelled task) reports that stop as its own failure on O0, O1 and O2, never a lost edge or a passing test. Proof: a tests/"
+    },
+    {
+      "at": "2026-11-15T04:38:09.731Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#62: strip debris; proof; was: (was #5468) (was #4874) Checked operations inside a task (overflow, division by zero, list bounds) publish TaskFailure.Panicked to the joiner instead of stopping the process. Proof: a case per operati"
+    },
+    {
+      "at": "2026-11-15T04:38:08.829Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#61: strip debris; proof; was: (was #5468) (was #4654) core.tasks has no sentinel or silent rail: `sender.send(v)` returns `SendError!` and a send on a closed channel is that error (never -1); a lock always locks; nothing is droppe"
+    },
+    {
+      "at": "2026-11-15T04:38:07.897Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#11: strip debris; proof; was: [#3240] Task affinity, blocking offload, admission and backpressure, caller buffers, allocation and cancellation association each map onto an existing owner, and each new control is its own owner ball"
+    },
+    {
+      "at": "2026-11-15T04:38:06.978Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#10: strip debris; proof; was: [#3180] • Capacity-one backpressure, the two-worker limit, first-failure identity and sibling cancellation, shown by observed transitions. • Join, shield and detach obligations. • Golden `concurrency/"
+    },
+    {
+      "at": "2026-11-15T04:38:06.077Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#6: strip debris; proof; was: [#1302]  • Examples/Concurrency/Parallel/ParallelScan, Examples/Concurrency/DeadlineContext and Examples/Memory/Views/ReturnedViews match their .out goldens on O0, O1 and O2 (BrowserLockedProvision is"
+    },
+    {
+      "at": "2026-11-15T04:38:05.199Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#5: proof wording; was: A task body `Err(e)` of domain type E reaches the joiner as E, not `TaskFailure.Panicked`, and Core declares the single `TaskFailure` enum used by sema and the runtime. Proof: the concurrency task_dom"
+    },
+    {
+      "at": "2026-11-15T04:38:04.320Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c09f1iks",
+      "note": "#9 D-REPLAY-ORDER1=A on the self-hosted toolchain: task message"
+    },
+    {
+      "at": "2026-11-15T04:38:03.435Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#18 D-VIEW-TRAP1=A: a negative or out-of-range dynamic view boun"
+    },
+    {
+      "at": "2026-11-15T04:38:02.553Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00e9u2p",
+      "note": "#21 D-RESOURCE-REASSIGN1=A: once a replacement value is ready, t"
+    },
+    {
+      "at": "2026-11-15T04:38:01.643Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0ndv80x",
+      "note": "Core functions that call your callback fail with the callback's own failure type (D-CALLBACK-ERR1=A)"
+    },
+    {
+      "at": "2026-11-15T04:38:00.698Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c07qvm0k",
+      "note": "Atomics: exact Int and fixed-width atomics on one nonblocking store, and compare-and-swap without ABA"
+    },
+    {
+      "at": "2026-11-15T04:37:59.765Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0sbl400",
+      "note": "Cancellation reaches everything: timers, idle loops, signals, deadlines, supervised restarts and job queues"
+    },
+    {
+      "at": "2026-11-15T04:37:58.858Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0dbs1yh",
+      "note": "Channels and streams: every outcome stays distinct, no item is lost, and pipelines stay bounded"
+    },
     {
       "at": "2026-11-15T04:36:47.215Z",
       "by": "Main",
