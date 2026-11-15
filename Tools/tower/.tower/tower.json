@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106175,
+    "rev": 106200,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -28002,7 +28002,7 @@
       "id": "c04lnbtj",
       "num": 3175,
       "title": "Expose bounded checked local obligations through the existing semantic index",
-      "body": "Expose bounded checked local obligations through the existing semantic index.\n\nPublic local definitions already carry type/mutability, references have targets, and callable/returned-view contracts exist. Private FlowFacts additionally holds moved places, open views, invalidation and reachability. The captured index builder publishes checked-definition derivations, not a complete per-source-point local-flow witness. A friendly callable view must not pretend these are the same coverage.\n\nUnder D-READ-STATE1, add a bounded source-point local-obligation projection to the existing checked semantic index and reasoning records, or retain current public facts if the owner chooses B. First prove the field-availability matrix on selected source points; reuse existing producers and avoid duplicating facts already exposed.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-read-f10. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nDeliver this existing canonical owner without a parallel mechanism. Preserve every existing acceptance criterion and ratified decision. Integrate its complete checked facts, source-version identity and observable errors into the reflection/compiler-session consumers in #3509.\n\n## Owned paths and integration\n\n- crates/jet-sema/src/Sema/mod.rs:1067-1286\n- crates/jet-sema/src/Sema/FlowFacts.rs:624-827\n- crates/jet-semindex/src/Types.rs:1-148,303-389,521-573\n- crates/jet-semindex/src/Build.rs:116-265\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\n1. Keep existing public type/mutability, reference targets, callable access/failure and returned-view provenance; do not call those absent.\n2. For one selected expression, identify its source/version, binding definition and precise before/after point. Cover mutable binding versus writable access, moved/partly moved ownership, active views and their owner/invalidation, scope cleanup obligations, and reachable versus unknown state only where the current checker establishes them.\n3. The finite availability matrix must account for every captured plane: binding/type/narrowing, initialization, frozen state, sendability, origin/ownership/moves, views/invalidation, reachable state, typestate, compile-time string/path constraints and cleanup. Distinguish public facts already available, checker-established candidates, unsupported projection and nonapplicability. Do not export raw runtime values or treat module/name liveness as statement-point local liveness.\n4. Use one compiler-owned fact source. Retain bounded facts from the existing check; do not re-check source in the renderer, create a second ownership analysis or expose mutable compiler internals.\n5. Use the existing semantic-index/check result and jet.reasoning route. Version the exported fact shape under D-SEMINDEX1; coordinate the typed/JSON facade with BIG-F17 and version authority with READ-F16. No new runtime core.compiler use.\n6. Discriminate current empty facts from unavailable, unsupported, invalid, stale and truncated coverage. An absent local-flow record is not proof that no obligation exists.\n7. Preserve the existing clean-check publication gate. Invalid editor input yields unavailable current facts or an explicitly stale last-good snapshot; do not publish recovered partial checker state as fresh valid local facts.\n8. Prove shadowing, branch joins, a moved place, a last-use read view, a Fixed backing that remains borrowed until close, invalid editor input and an edit that makes retained facts stale. Preserve static-versus-observed labels.\n9. READ-F01 may present currently available callable facts without this addition. The new local-obligation API is an independent owner choice, not hidden scope inside that display.",
+      "body": "Expose bounded checked local obligations through the existing semantic index.\n\nPublic local definitions already carry type/mutability, references have targets, and callable/returned-view contracts exist. Private FlowFacts additionally holds moved places, open views, invalidation and reachability. The captured index builder publishes checked-definition derivations, not a complete per-source-point local-flow witness. A friendly callable view must not pretend these are the same coverage.\n\nUnder D-READ-STATE1, add a bounded source-point local-obligation projection to the existing checked semantic index and reasoning records, as D-READ-STATE1=A (ratified) chose. First prove the field-availability matrix on selected source points; reuse existing producers and avoid duplicating facts already exposed.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-read-f10. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nDeliver this existing canonical owner without a parallel mechanism. Preserve every existing acceptance criterion and ratified decision. Integrate its complete checked facts, source-version identity and observable errors into the reflection/compiler-session consumers in #3509.\n\n## Owned paths and integration\n\n- crates/jet-sema/src/Sema/mod.rs:1067-1286\n- crates/jet-sema/src/Sema/FlowFacts.rs:624-827\n- crates/jet-semindex/src/Types.rs:1-148,303-389,521-573\n- crates/jet-semindex/src/Build.rs:116-265\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\n1. Keep existing public type/mutability, reference targets, callable access/failure and returned-view provenance; do not call those absent.\n2. For one selected expression, identify its source/version, binding definition and precise before/after point. Cover mutable binding versus writable access, moved/partly moved ownership, active views and their owner/invalidation, scope cleanup obligations, and reachable versus unknown state only where the current checker establishes them.\n3. The finite availability matrix must account for every captured plane: binding/type/narrowing, initialization, frozen state, sendability, origin/ownership/moves, views/invalidation, reachable state, typestate, compile-time string/path constraints and cleanup. Distinguish public facts already available, checker-established candidates, unsupported projection and nonapplicability. Do not export raw runtime values or treat module/name liveness as statement-point local liveness.\n4. Use one compiler-owned fact source. Retain bounded facts from the existing check; do not re-check source in the renderer, create a second ownership analysis or expose mutable compiler internals.\n5. Use the existing semantic-index/check result and jet.reasoning route. Version the exported fact shape under D-SEMINDEX1; coordinate the typed/JSON facade with BIG-F17 and version authority with READ-F16. No new runtime core.compiler use.\n6. Discriminate current empty facts from unavailable, unsupported, invalid, stale and truncated coverage. An absent local-flow record is not proof that no obligation exists.\n7. Preserve the existing clean-check publication gate. Invalid editor input yields unavailable current facts or an explicitly stale last-good snapshot; do not publish recovered partial checker state as fresh valid local facts.\n8. Prove shadowing, branch joins, a moved place, a last-use read view, a Fixed backing that remains borrowed until close, invalid editor input and an edit that makes retained facts stale. Preserve static-versus-observed labels.\n9. READ-F01 may present currently available callable facts without this addition. The local-obligation API is this card's scope under D-READ-STATE1=A, not hidden scope inside that display.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
@@ -28173,8 +28173,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T13:27:32.883Z",
-      "updated": "2026-11-15T04:27:36.075Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:34.866Z",
+      "updatedBy": "TowerKeeper-2",
       "workOrder": 15,
       "goals": [
         "G5"
@@ -28420,7 +28420,7 @@
       "id": "c0dktg7a",
       "num": 3202,
       "title": "Structured source origin for public compiler diagnostics",
-      "body": "Choose structured source origin for public compiler diagnostics.\n\nA build/comptime tool receiving only a diagnostic byte span cannot safely identify an imported source snapshot. The current CLI location repair does not by itself change this public Core record.\n\nRecommend a versioned optional origin on CompilerDiagnostic with a source path when known and a source digest. Keep byte spans relative to that origin. Retain the existing read-only core.compiler module and mirror, not a new library or dependency. Submit the complete short ballot before changing the public record/schema.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-big-f20. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.\n\nExact final evidence boundary: Current public shape inspected; no runtime Core-API misattribution claimed. The related CLI import-origin failure is separately observed.\n\nOwner choice: A: add versioned source-origin data to existing stock core.compiler diagnostics. B: keep the current thin facade and require other tools for per-file attribution. A recommended; no new module/dependency.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nDeliver this existing canonical owner without a parallel mechanism. Preserve every existing acceptance criterion and ratified decision. Integrate its complete checked facts, source-version identity and observable errors into the reflection/compiler-session consumers in #3509.\n\n## Owned paths and integration\n\n- crates/jet-semindex/src\n- crates/jet-driver/src\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\n1. Owner ratifies D-BIG-DIAGORIGIN1 or retains the current thin facade explicitly.\n2. If A, every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, while genuinely source-free diagnostics use no origin.\n3. No diagnostic inherits the entry path merely because its own origin is absent; imported/local contrasts identify the right document.\n4. Typed, Rust and CLI compiler values undergo one consistent versioned cutover; package-model schemas are not silently changed.\n5. Reuse originating source identity and compute/reuse a digest per snapshot, not once per diagnostic or from changed disk text.\n6. No new runtime compiler service, AST mutation, third-party dependency or optional Core library is introduced.",
+      "body": "Choose structured source origin for public compiler diagnostics.\n\nA build/comptime tool receiving only a diagnostic byte span cannot safely identify an imported source snapshot. The current CLI location repair does not by itself change this public Core record.\n\nRecommend a versioned optional origin on CompilerDiagnostic with a source path when known and a source digest. Keep byte spans relative to that origin. Retain the existing read-only core.compiler module and mirror, not a new library or dependency. D-BIG-DIAGORIGIN1=A (ratified) settles the public record change.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-big-f20. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.\n\nExact final evidence boundary: Current public shape inspected; no runtime Core-API misattribution claimed. The related CLI import-origin failure is separately observed.\n\nOwner choice: A: add versioned source-origin data to existing stock core.compiler diagnostics. B: keep the current thin facade and require other tools for per-file attribution. A recommended; no new module/dependency. D-BIG-DIAGORIGIN1=A chose A.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nDeliver this existing canonical owner without a parallel mechanism. Preserve every existing acceptance criterion and ratified decision. Integrate its complete checked facts, source-version identity and observable errors into the reflection/compiler-session consumers in #3509.\n\n## Owned paths and integration\n\n- crates/jet-semindex/src\n- crates/jet-driver/src\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\n1. D-BIG-DIAGORIGIN1=A is ratified: versioned source-origin data on core.compiler diagnostics.\n2. Every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, while genuinely source-free diagnostics use no origin.\n3. No diagnostic inherits the entry path merely because its own origin is absent; imported/local contrasts identify the right document.\n4. Typed, Rust and CLI compiler values undergo one consistent versioned cutover; package-model schemas are not silently changed.\n5. Reuse originating source identity and compute/reuse a digest per snapshot, not once per diagnostic or from changed disk text.\n6. No new runtime compiler service, AST mutation, third-party dependency or optional Core library is introduced.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
@@ -28657,8 +28657,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-15T04:22:25.417Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:37.166Z",
+      "updatedBy": "TowerKeeper-2",
       "workOrder": 19,
       "goals": [
         "G5"
@@ -28669,7 +28669,7 @@
       "id": "c0eymgfx",
       "num": 3236,
       "title": "One Codable contract: options, field metadata, enum shapes, override precedence, schema and losslessness",
-      "body": "Destination: generated and hand-written codecs share one typed contract (D-ONE-CODECS1=A): one owner for field traversal, override precedence and field-error paths, decode returning [FieldError] (D-VALIDATE-DECODE1=B), the D-CODABLE-OPTIONS1=A marker forms only, and each wire format keeping its own leaves (duplicate keys, binary or text, extension tags, mixed XML, lossless numbers).\n\nWhy it matters: codecs are every program's boundary; two traversals or two marker vocabularies mean two answers for the same type.\n\nCurrent code: Compiler/JetSema/Source/Sema/Serde.jet (admissibility, wire reachability); Compiler/JetCodegen/Source/Codegen/AutoDerives.jet and EncodingCodecs.jet (generation).\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (finding core-f007), compared with selected Serde, Glaze and Jackson mappings without importing their reflection systems.\n\nOwner gate: the spelling of adjacent tagging, retained unknown variants and decode aliases under D-CODABLE-OPTIONS1 (owner-gates.tsv).",
+      "body": "Destination: generated and hand-written codecs share one typed contract (D-ONE-CODECS1=A): one owner for field traversal, override precedence and field-error paths, decode returning [FieldError] (D-VALIDATE-DECODE1=B), the D-CODABLE-OPTIONS1=A marker forms only, and each wire format keeping its own leaves (duplicate keys, binary or text, extension tags, mixed XML, lossless numbers).\n\nWhy it matters: codecs are every program's boundary; two traversals or two marker vocabularies mean two answers for the same type.\n\nCurrent code: Compiler/JetSema/Source/Sema/Serde.jet (admissibility, wire reachability); Compiler/JetCodegen/Source/Codegen/AutoDerives.jet and EncodingCodecs.jet (generation).\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (finding core-f007), compared with selected Serde, Glaze and Jackson mappings without importing their reflection systems.\n\nBallot: the spelling of adjacent tagging, retained unknown variants and decode aliases under D-CODABLE-OPTIONS1 is on Main's ballot list (2026-11-15).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -29058,7 +29058,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:12.813Z",
-      "updated": "2026-11-15T11:33:24.226Z",
+      "updated": "2026-11-15T11:34:38.889Z",
       "updatedBy": "TowerKeeper-2",
       "workOrder": 74,
       "goals": [
@@ -30918,7 +30918,7 @@
       "milestoneId": "e3-m21-iterator-stdlib",
       "phase": "ready",
       "priority": "P1",
-      "plan": "## Goal\nCarry verified iterator capability facts through the existing Iterable/Iterator protocol, adapters and storage representations, without a public iterator hierarchy or mandatory dynamic allocation. Build the three ratified slices now:\n- **D-ITER-SIZE1=A:** one runtime `size_hint()` pair; equal bounds convey exactness. There is no ExactRemaining hierarchy, no `remaining_len()` sibling and no runtime `@remaining`.\n- **D-ITER-FUSED1=A:** a checked `fused` capability fact plus `fuse()`, which latches the first true end.\n- **D-ITER-BORROW1=A:** `by_ref()` borrowed driving that reuses View/ViewMut provenance and sema overlap checks.\n\nThe open ballots D-ITER-BACK1 (reverse and mixed-end reads) and D-ITER-REPLAY1 each gate only their own slice.\n\n## Current state\n- The public `Iter` has no `size_hint`, `fuse` or `by_ref`: there are no rows in `Compiler/JetFoundation/Source/Collections.jet`.\n- The host uses `size_hint` only internally (`crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:453`).\n- `JetIter` boxes a forward iterator. `ViewIter` and the user `Iterator` hooks (`Examples/features/collections/iter_hook.jet`) exist.\n- Merged from #3336: a fused iterator never yields after its first end. Type erasure, `map` and driver loops never tag a source as fused. Async not-ready and channel `Empty` stay distinct from end (coordinate #3343), and nothing fuses silently.\n- Canonical handoff (#3398): use #3325's checked operation facts, and keep the exact-size, double-ended, fused and remainder guarantees separate.\n\n## Changes\n1. Jet compiler:\n   - `Collections.jet`: add `size_hint() -> (lower: Int, upper: Int?)` (non-advancing), `fuse() -> Iter<T>` and `by_ref()`. Adapters propagate conservative bounds (`map` keeps them; `filter` sets lower to 0; `take(n)` clamps; overflow sets upper to `None`) and the `fused` fact.\n   - `Compiler/JetSema/Source/Sema/Ownership`: `by_ref` creates a loan on the source owner. Overlapping mutation is rejected with the existing overlap code, and the remainder stays usable after the loan ends.\n   - Add ops in `TIR.jet`, with routes in `BuiltinMethods.jet`.\n2. Host mirror:\n   - `crates/jet-foundation/src/Collections.rs` and the TIR lowering.\n   - Prelude `JetIter` exposes `size_hint`, a `JetFuse` wrapper (one wrapper for non-fused sources) and `by_ref` over `&mut`.\n   - The JIT rows and the MIREval arms.\n3. Docs: `Docs/spec/reference/core-library.md` and a disposition row per stable Rust inventory entry (criterion 1). BACK1 and REPLAY1 rows are marked \"owner-gated\".\n\n## Proof\n- New `Examples/features/collections/iter_capabilities.jet` covers exact, bounded and unknown hints; a non-advancing query; a dishonest user hint that stays safe; overflow; a `fuse()` over a source that resumes after an empty poll; and `by_ref().take(2)` followed by reading the remainder.\n  - `JET_GOLDEN_FILTER=collections/iter_capabilities.jet Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes.\n  - `JET_1216_STEM=collections/iter_capabilities Tools/agent/jet-env cargo test --test dev_tier_parity collections_memory_and_streams_match_interpreter_jit_and_aot` passes.\n- `JET_UI_FILTER=tests/ui/iter_by_ref_overlap.jet Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots` shows the mutation-while-borrowed rejection.\n\n## Batch\n`batch-host-runtime` (iter cluster, with sema loan checks).\n\n## Dependencies\nNone for the three ratified slices. The reverse/mixed-end slice waits on D-ITER-BACK1 (recommended A) and replay on D-ITER-REPLAY1. No speed claim.",
+      "plan": "## Goal\nCarry verified iterator capability facts through the existing Iterable/Iterator protocol, adapters and storage representations, without a public iterator hierarchy or mandatory dynamic allocation. Build the three ratified slices now:\n- **D-ITER-SIZE1=A:** one runtime `size_hint()` pair; equal bounds convey exactness. There is no ExactRemaining hierarchy, no `remaining_len()` sibling and no runtime `@remaining`.\n- **D-ITER-FUSED1=A:** a checked `fused` capability fact plus `fuse()`, which latches the first true end.\n- **D-ITER-BORROW1=A:** `by_ref()` borrowed driving that reuses View/ViewMut provenance and sema overlap checks.\n\nThe open ballots D-ITER-BACK1 (reverse and mixed-end reads) and D-ITER-REPLAY1 each gate only their own slice.\n\n## Current state\n- The public `Iter` has no `size_hint`, `fuse` or `by_ref`: there are no rows in `Compiler/JetFoundation/Source/Collections.jet`.\n- The host uses `size_hint` only internally (`crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:453`).\n- `JetIter` boxes a forward iterator. `ViewIter` and the user `Iterator` hooks (`Examples/features/collections/iter_hook.jet`) exist.\n- Merged from #3336: a fused iterator never yields after its first end. Type erasure, `map` and driver loops never tag a source as fused. Async not-ready and channel `Empty` stay distinct from end (coordinate #3343), and nothing fuses silently.\n- Canonical handoff (#3398): use #3325's checked operation facts, and keep the exact-size, double-ended, fused and remainder guarantees separate.\n\n## Changes\n1. Jet compiler:\n   - `Collections.jet`: add `size_hint() -> (lower: Int, upper: Int?)` (non-advancing), `fuse() -> Iter<T>` and `by_ref()`. Adapters propagate conservative bounds (`map` keeps them; `filter` sets lower to 0; `take(n)` clamps; overflow sets upper to `None`) and the `fused` fact.\n   - `Compiler/JetSema/Source/Sema/Ownership`: `by_ref` creates a loan on the source owner. Overlapping mutation is rejected with the existing overlap code, and the remainder stays usable after the loan ends.\n   - Add ops in `TIR.jet`, with routes in `BuiltinMethods.jet`.\n2. Host mirror:\n   - `crates/jet-foundation/src/Collections.rs` and the TIR lowering.\n   - Prelude `JetIter` exposes `size_hint`, a `JetFuse` wrapper (one wrapper for non-fused sources) and `by_ref` over `&mut`.\n   - The JIT rows and the MIREval arms.\n3. Docs: `Docs/spec/reference/core-library.md` and a disposition row per stable Rust inventory entry (criterion 1). BACK1 and REPLAY1 rows follow the ratified D-ITER-BACK1=A and D-ITER-REPLAY1=A.\n\n## Proof\n- New `Examples/features/collections/iter_capabilities.jet` covers exact, bounded and unknown hints; a non-advancing query; a dishonest user hint that stays safe; overflow; a `fuse()` over a source that resumes after an empty poll; and `by_ref().take(2)` followed by reading the remainder.\n  - `JET_GOLDEN_FILTER=collections/iter_capabilities.jet Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes.\n  - `JET_1216_STEM=collections/iter_capabilities Tools/agent/jet-env cargo test --test dev_tier_parity collections_memory_and_streams_match_interpreter_jit_and_aot` passes.\n- `JET_UI_FILTER=tests/ui/iter_by_ref_overlap.jet Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots` shows the mutation-while-borrowed rejection.\n\n## Batch\n`batch-host-runtime` (iter cluster, with sema loan checks).\n\n## Dependencies\nNone for the three ratified slices. The reverse/mixed-end slice waits on D-ITER-BACK1 (recommended A) and replay on D-ITER-REPLAY1. No speed claim.",
       "checkSteps": "1. Each stable Rust inventory row has a semantic Jet disposition, including positive and negative capability bounds.\n2. Mixed front/back consumption never duplicates an item and preserves the remaining range.\n3. Exact-size operations are unavailable or explicitly fallible when only bounds are known; overflow cannot produce a false exact length.\n4. A permanently exhausted wrapper remains exhausted, while a source that can resume after an empty poll is not mislabeled fused.\n5. The representation and lowering preserve these facts without a separate public iterator hierarchy or mandatory dynamic allocation.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-iter-f005. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
@@ -31438,8 +31438,8 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:12.936Z",
-      "updated": "2026-11-15T03:17:52.880Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:40.511Z",
+      "updatedBy": "TowerKeeper-2",
       "workOrder": 37,
       "goals": [
         "G3"
@@ -35385,14 +35385,14 @@
       "id": "c0fi6uj5",
       "num": 3549,
       "title": "System Core modules are fully Jet-owned: every declaration has a Jet body or a policy-free provider leaf, with typed failures",
-      "body": "Destination: the system Core modules (archive, net, service, sys, log, http, term, sync, db, event, process, tasks, watcher, email) are ordinary Jet. Every declaration has a Jet body or a typed, policy-free provider leaf; protocol, policy, validation and typed failures live in Jet source; and failure and effect proofs pass on O0, O1 and O2.\n\nWhy it matters: Core is ordinary Jet that uses only mechanisms any package can use (philosophy pillar 5), and the same program means the same on every tier (I9).\n\nOpen work: the CoreSurfaceLedger check for these modules (c1), the per-module core proofs (c3), opaque file handles (c11, D-FILES-HANDLE-ABI1=A), sys.set reporting EnvError (c17), raw-byte env values (c18, owner gate D-ENV-RAW-BYTES1) and core.os facts computed once in Core (c19).\n\nThe Rust-era plan (crates/ paths, the 2026-09 dispatcher row counts) is retired with Rust removal; the dispatcher rows now live in Compiler/Prelude/Core.rows.",
+      "body": "Destination: the system Core modules (archive, net, service, sys, log, http, term, sync, db, event, process, tasks, watcher, email) are ordinary Jet. Every declaration has a Jet body or a typed, policy-free provider leaf; protocol, policy, validation and typed failures live in Jet source; and failure and effect proofs pass on O0, O1 and O2.\n\nWhy it matters: Core is ordinary Jet that uses only mechanisms any package can use (philosophy pillar 5), and the same program means the same on every tier (I9).\n\nOpen work: the CoreSurfaceLedger check for these modules (c1), the per-module core proofs (c3), opaque file handles (c11, D-FILES-HANDLE-ABI1=A), sys.set reporting EnvError (c17), raw-byte env values (c18, ballot D-ENV-RAW-BYTES1 on Main's ballot list (2026-11-15)) and core.os facts computed once in Core (c19).\n\nThe Rust-era plan (crates/ paths, the 2026-09 dispatcher row counts) is retired with Rust removal; the dispatcher rows now live in Compiler/Prelude/Core.rows.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "## Goal\nEvery system Core module declaration has a Jet body or a typed, policy-free provider leaf (c1), proven per module on O0, O1 and O2 (c3).\n\n## Open steps\n- c11: FileReader, FileWriter and FileLock become opaque provider-owned values (D-FILES-HANDLE-ABI1=A).\n- c17: sys.set returns EnvError (Core/Sys/Sys.jet declares Never! today).\n- c18: raw-byte env values, after the owner gate D-ENV-RAW-BYTES1.\n- c19: core.os facts computed once in Core.\n- Then run CoreSurfaceLedger --check for c1 and the per-module core profile for c3.",
+      "plan": "## Goal\nEvery system Core module declaration has a Jet body or a typed, policy-free provider leaf (c1), proven per module on O0, O1 and O2 (c3).\n\n## Open steps\n- c11: FileReader, FileWriter and FileLock become opaque provider-owned values (D-FILES-HANDLE-ABI1=A).\n- c17: sys.set returns EnvError (Core/Sys/Sys.jet declares Never! today).\n- c18: raw-byte env values, after the ballot D-ENV-RAW-BYTES1 (on Main's ballot list (2026-11-15)).\n- c19: core.os facts computed once in Core.\n- Then run CoreSurfaceLedger --check for c1 and the per-module core profile for c3.",
       "checkSteps": null,
       "probe": "scripts/agent/jet-env cargo test -p jet --test core_net_tls tls_rejects_empty_dns_labels_before_transport_on_all_tiers -- --exact --nocapture",
       "visualMedia": [],
@@ -35886,7 +35886,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:03.647Z",
-      "updated": "2026-11-15T11:33:25.380Z",
+      "updated": "2026-11-15T11:34:42.114Z",
       "updatedBy": "TowerKeeper-2",
       "claimedAt": "2026-11-13T01:49:48.348Z",
       "goals": [
@@ -43964,7 +43964,7 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "Owner decides D-CPU-DISPATCH1. Then add the chosen target-feature function form, a per-process feature probe in the Prelude, safe typed intrinsics in Core for the chosen ISAs, and dispatch on every tier.",
+      "plan": "D-CPU-DISPATCH1=A is ratified. Add the chosen target-feature function form, a per-process feature probe in the Prelude, safe typed intrinsics in Core for the chosen ISAs, and dispatch on every tier.",
       "checkSteps": null,
       "probe": "jet run Examples/features/lowlevel/simd_wide.jet",
       "visualMedia": [],
@@ -44083,7 +44083,7 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-10-02T01:15:08.474Z",
-      "updated": "2026-11-15T11:33:31.956Z",
+      "updated": "2026-11-15T11:34:43.652Z",
       "updatedBy": "TowerKeeper-2",
       "goals": [
         "G11"
@@ -51860,8 +51860,8 @@
     {
       "id": "c0r8y1nt",
       "num": 4896,
-      "title": "BALLOT D-CORE-PRIVATE-SEAM1: how Jetpack reaches compiler-only Core seams (held-directory process, held link)",
-      "body": "Owner decision needed (public API / visibility). Jetpack (the Jet package manager) needs two capabilities that exist only as raw Core kernels: run a child process with a held Directory as its cwd (#4895: kernel core.process.__with_directory_raw, CoreSystem2 d13edcfff) and the held link (compiler_link_held). Today they're reached through reserved __ names that the parser now rejects (E0067), so the Jet CLI's assembled source doesn't parse. Renaming them to legal names (files.compiler_process_directory, compiler_link_held) makes them ORDINARY PUBLIC Core functions: CoreReview5-2-2 traced Sema core_call 2607-2653: there is NO caller-privacy fence; the only gate (compiler_api_allowed, CompilerServices.jet:98-111) is a compile-time-only gate for core.compiler, not privacy; #Unsafe and names don't restrict callers. Visibility law today (D-VIS-MODULE1): public by default, priv only on modules and fields. Options (same program: Jetpack's TreeHash runs git with a held directory): A) Make them public, documented Core functions (e.g. process.spawn_in(spec, dir: Directory)). Beginner: one more safe capability (held handle, no path races). Expert: same. Cost: permanent public API to maintain. B) Add ONE toolchain-private visibility: a module-level marker so a Core module is importable only by the compiler and Jetpack (checked by sema, registered in Syntax.rs with a decision ID). Beginner: never sees it. Expert: can't call it. Cost: a new visibility mechanism (I8 allows it with this ratification). C) Jetpack calls the raw runtime route directly (#Import / ABI binding of the existing route symbol) with no Core wrapper. Beginner: unaffected. Cost: Jetpack carries unsafe ABI glue; violates the one-mechanism preference for Core access. Main recommends B if more toolchain-only seams are expected (they are: link, process dir, build receipts), else A for process.spawn_in only. Blocks: CLIParity1 / CLIParity2 composition (goal 4).",
+      "title": "Toolchain-private Core seams for Jetpack (D-CORE-PRIVATE-SEAM1=A) (held-directory process, held link)",
+      "body": "Decided: D-CORE-PRIVATE-SEAM1=A (ratified 2026-11-01), a toolchain-private module, as c1 states. The ballot text below is history. Jetpack (the Jet package manager) needs two capabilities that exist only as raw Core kernels: run a child process with a held Directory as its cwd (#4895: kernel core.process.__with_directory_raw, CoreSystem2 d13edcfff) and the held link (compiler_link_held). Today they're reached through reserved __ names that the parser now rejects (E0067), so the Jet CLI's assembled source doesn't parse. Renaming them to legal names (files.compiler_process_directory, compiler_link_held) makes them ORDINARY PUBLIC Core functions: CoreReview5-2-2 traced Sema core_call 2607-2653: there is NO caller-privacy fence; the only gate (compiler_api_allowed, CompilerServices.jet:98-111) is a compile-time-only gate for core.compiler, not privacy; #Unsafe and names don't restrict callers. Visibility law today (D-VIS-MODULE1): public by default, priv only on modules and fields. Options (same program: Jetpack's TreeHash runs git with a held directory): A) Make them public, documented Core functions (e.g. process.spawn_in(spec, dir: Directory)). Beginner: one more safe capability (held handle, no path races). Expert: same. Cost: permanent public API to maintain. B) Add ONE toolchain-private visibility: a module-level marker so a Core module is importable only by the compiler and Jetpack (checked by sema, registered in Syntax.rs with a decision ID). Beginner: never sees it. Expert: can't call it. Cost: a new visibility mechanism (I8 allows it with this ratification). C) Jetpack calls the raw runtime route directly (#Import / ABI binding of the existing route symbol) with no Core wrapper. Beginner: unaffected. Cost: Jetpack carries unsafe ABI glue; violates the one-mechanism preference for Core access. Main recommends B if more toolchain-only seams are expected (they are: link, process dir, build receipts), else A for process.spawn_in only. Blocks: CLIParity1 / CLIParity2 composition (goal 4).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e5",
@@ -51965,8 +51965,8 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-10-08T11:29:02.821Z",
-      "updated": "2026-11-15T05:11:54.008Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:45.171Z",
+      "updatedBy": "TowerKeeper-2",
       "goals": [
         "G7"
       ]
@@ -102464,12 +102464,12 @@
         },
         {
           "n": 7,
-          "text": "Growing public enums: adding a member to an enum carrying the growth marker breaks no caller, because a match on it from outside its package needs an `else` arm. Waits on an owner choice (no ballot). Proof: `jet test Compiler --profile ui --filter growing_enum_requires_else`.",
+          "text": "Growing public enums: adding a member to an enum carrying the growth marker breaks no caller, because a match on it from outside its package needs an `else` arm. The growth marker is on Main's ballot list (2026-11-15). Proof: `jet test Compiler --profile ui --filter growing_enum_requires_else`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T02:25:09.260Z"
+          "at": "2026-11-15T11:34:13.521Z"
         },
         {
           "n": 8,
@@ -102493,8 +102493,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-15T03:03:28.110Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:13.521Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 8
     },
     {
@@ -104465,12 +104465,12 @@
         },
         {
           "n": 4,
-          "text": "`json.JSONReader` and `jsonl.JSONLReader` have one `next()` shape for text and file sources (today DataEvent for text and DataEvent? for files), as a ballot decides. Proof: `jet test Compiler --profile cases --filter encoding/reader_next_shape`.",
+          "text": "`json.JSONReader` and `jsonl.JSONLReader` have one `next()` shape for text and file sources (today DataEvent for text and DataEvent? for files), as the ballot D-JSON-READER1 (on Main's ballot list (2026-11-15)) decides. Proof: `jet test Compiler --profile cases --filter encoding/reader_next_shape`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:12.288Z"
+          "at": "2026-11-15T11:34:14.671Z"
         },
         {
           "n": 5,
@@ -104511,8 +104511,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:12.288Z",
-      "updated": "2026-11-15T03:14:09.486Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:14.671Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 7
     },
     {
@@ -105117,12 +105117,12 @@
         },
         {
           "n": 3,
-          "text": "Owner choice: whether base64, base32 and hex gain caller-owned output (encode_into and decode_into with an exact required size) and a borrowed byte view distinct from an owning conversion (no decision exists; owner-gates row). Once chosen, `jet test Compiler --profile golden --filter serde/encoding_fixed_buffers` proves it on O0, O1 and O2.",
+          "text": "Ballot (on Main's ballot list (2026-11-15)): whether base64, base32 and hex gain caller-owned output (encode_into and decode_into with an exact required size) and a borrowed byte view distinct from an owning conversion. Once chosen, `jet test Compiler --profile golden --filter serde/encoding_fixed_buffers` proves it on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:19:44.267Z"
+          "at": "2026-11-15T11:34:15.812Z"
         },
         {
           "n": 4,
@@ -105218,8 +105218,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:19:44.267Z",
-      "updated": "2026-11-15T03:46:08.634Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:15.812Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 12
     },
     {
@@ -105404,21 +105404,21 @@
         },
         {
           "n": 5,
-          "text": "Owner choice: an explicit Locale object, its data, default and API (no decision exists; owner-gates row). Once chosen, Core/Text formats and parses en-US, de-DE, fr-FR and ja-JP number and date witnesses with an explicit Locale and no process-global default, kept separate from catalogs and normalization. Proof: `jet test Compiler --profile golden --filter text/locale_format`.",
+          "text": "Ballot (on Main's ballot list (2026-11-15)): an explicit Locale object, its data, default and API. Once chosen, Core/Text formats and parses en-US, de-DE, fr-FR and ja-JP number and date witnesses with an explicit Locale and no process-global default, kept separate from catalogs and normalization. Proof: `jet test Compiler --profile golden --filter text/locale_format`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:25:54.433Z"
+          "at": "2026-11-15T11:34:16.771Z"
         },
         {
           "n": 6,
-          "text": "Text diff states similarity, alignment, unified, context and HTML output and patch application as distinct operations, with newline, tie and cost rules fixed against real consumers; a new public operation waits on its own ballot (owner-gates row). Proof: `jet test Compiler --profile golden --filter text/diff_contracts`.",
+          "text": "Text diff states similarity, alignment, unified, context and HTML output and patch application as distinct operations, with newline, tie and cost rules fixed against real consumers; each new public operation is on Main's ballot list (2026-11-15). Proof: `jet test Compiler --profile golden --filter text/diff_contracts`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:25:54.433Z"
+          "at": "2026-11-15T11:34:17.739Z"
         }
       ],
       "refs": [],
@@ -105433,8 +105433,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:25:54.433Z",
-      "updated": "2026-11-15T03:25:54.433Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T11:34:17.739Z",
+      "updatedBy": "TowerKeeper-2"
     },
     {
       "id": "c065br2r",
@@ -105717,12 +105717,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "core.compress is the only public home for gzip and zstd byte-stream codecs and core.archive exposes only zip and tar (D-CORE-COMPRESS1=A): the module registry, prelude templates, examples, goldens, Core reference docs and module inventories name the split, with no alias or duplicate registry entry, and an old core.archive gzip call gets the ordinary unknown-member error. Owner choice first: D-CORE-ARCHIVE-BOUND1=A (later) spells the bounded inflater in core.archive (owner-gates row). Proof: `git grep -n -E 'archive\\.(gzip|zstd)|Archive/Gzip' -- Core Examples Docs` prints nothing.",
+          "text": "core.compress is the only public home for gzip and zstd byte-stream codecs and core.archive exposes only zip and tar (D-CORE-COMPRESS1=A): the module registry, prelude templates, examples, goldens, Core reference docs and module inventories name the split, with no alias or duplicate registry entry, and an old core.archive gzip call gets the ordinary unknown-member error. The conflict with D-CORE-ARCHIVE-BOUND1=A (later), which spells the bounded inflater in core.archive, is on Main's ballot list (2026-11-15). Proof: `git grep -n -E 'archive\\.(gzip|zstd)|Archive/Gzip' -- Core Examples Docs` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:30:11.324Z"
+          "at": "2026-11-15T11:34:18.661Z"
         },
         {
           "n": 2,
@@ -105809,8 +105809,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:30:11.324Z",
-      "updated": "2026-11-15T03:40:26.924Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:18.661Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 9
     },
     {
@@ -106395,12 +106395,12 @@
         },
         {
           "n": 7,
-          "text": "A two-binding loop over a list of 2-tuples (`loop (a, b) in pairs`, which binds index and tuple, not the pair) gets the treatment the owner chooses (no decision yet; owner-gates.tsv). Proof: `jet test Compiler --profile ui --filter loop_two_bindings_over_pairs`.",
+          "text": "A two-binding loop over a list of 2-tuples (`loop (a, b) in pairs`, which binds index and tuple, not the pair) gets the treatment its ballot chooses (on Main's ballot list (2026-11-15)). Proof: `jet test Compiler --profile ui --filter loop_two_bindings_over_pairs`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:50:53.787Z"
+          "at": "2026-11-15T11:34:19.618Z"
         },
         {
           "n": 8,
@@ -106441,8 +106441,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:53.787Z",
-      "updated": "2026-11-15T03:50:53.787Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T11:34:19.618Z",
+      "updatedBy": "TowerKeeper-2"
     },
     {
       "id": "c00gioxt",
@@ -107644,12 +107644,12 @@
         },
         {
           "n": 10,
-          "text": "The owner's visual review accepts the workbench as one Unreal-like IDE: project, output, preview, graph, code, diagnostics and run state. Proof: the owner's acceptance is logged on this card against screenshots from scenario `workbench_tour`.",
+          "text": "The owner's visual review (on Main's ballot list (2026-11-15)) accepts the workbench as one Unreal-like IDE: project, output, preview, graph, code, diagnostics and run state. Proof: the owner's acceptance is logged on this card against screenshots from scenario `workbench_tour`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:03:18.186Z"
+          "at": "2026-11-15T11:34:20.596Z"
         }
       ],
       "refs": [],
@@ -107663,8 +107663,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:18.186Z",
-      "updated": "2026-11-15T04:03:18.186Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T11:34:20.596Z",
+      "updatedBy": "TowerKeeper-2"
     },
     {
       "id": "c0xbfhbt",
@@ -108156,12 +108156,12 @@
         },
         {
           "n": 9,
-          "text": "The Code Map view in Canvas (D-CODEMAP-VIEW1=A) draws a treemap of the code-map rows with every metric plus Blend, all four border choices, click-to-source and zoom. Rectangles update live in the dev loop, and a saved --json snapshot opens in the same view. First-render and hover latency on Compiler/ are logged. A test proves that sizes, colours and hover values come unchanged from the --json rows. Proof: `jet test Compiler --profile cases --filter canvas/code_map_`.",
+          "text": "The Code Map view in Canvas (D-CODEMAP-VIEW1=A) draws a treemap of the code-map rows with every metric plus Blend, all four border choices, click-to-source and zoom. Rectangles update live in the dev loop, and a saved --json snapshot opens in the same view. First-render and hover latency on Compiler/ are logged. A test proves that sizes, colours and hover values come unchanged from the --json rows. The owner's acceptance of the visual design is on Main's ballot list (2026-11-15). Proof: `jet test Compiler --profile cases --filter canvas/code_map_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:03:22.585Z"
+          "at": "2026-11-15T11:34:21.523Z"
         }
       ],
       "refs": [],
@@ -108175,8 +108175,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:22.585Z",
-      "updated": "2026-11-15T04:03:22.585Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T11:34:21.523Z",
+      "updatedBy": "TowerKeeper-2"
     },
     {
       "id": "c0yljhgc",
@@ -108323,12 +108323,12 @@
         },
         {
           "n": 6,
-          "text": "`/`, `/%` and `%` with a zero divisor at run time all give the same E3010 'divided by zero' stop with the division's file, line and column and a caret under the divisor, on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter runtime_stops/every_division_by_zero_stops_at_its_line`. On dev 104ee83c5a it passes for the shared stop and the line; the column and caret are owed and wait on the owner gate.",
+          "text": "`/`, `/%` and `%` with a zero divisor at run time all give the same E3010 'divided by zero' stop with the division's file, line and column and a caret under the divisor, on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter runtime_stops/every_division_by_zero_stops_at_its_line`. On dev 104ee83c5a it passes for the shared stop and the line; the column and caret are owed; whether a stop quotes the line with a caret is on Main's ballot list (2026-11-15).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:06:30.758Z"
+          "at": "2026-11-15T11:34:22.497Z"
         },
         {
           "n": 7,
@@ -108341,12 +108341,12 @@
         },
         {
           "n": 8,
-          "text": "An E3001 panic report shows the 1-based column, and it quotes the source excerpt if the owner's answer on c6 keeps quoting. Proof: `jet test Compiler --profile ui --filter E3001`.",
+          "text": "An E3001 panic report shows the 1-based column, and it quotes the source excerpt if the c6 ballot (Main's ballot list, 2026-11-15) keeps quoting. Proof: `jet test Compiler --profile ui --filter E3001`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:18:31.352Z"
+          "at": "2026-11-15T11:34:23.595Z"
         },
         {
           "n": 9,
@@ -108369,8 +108369,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:06:30.758Z",
-      "updated": "2026-11-15T04:18:32.370Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:23.595Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 9
     },
     {
@@ -109205,21 +109205,21 @@
         },
         {
           "n": 5,
-          "text": "A service authority signing key comes from a secret issuance and registry and can never be derived from the public token (Core/Service/Service.jet reads the authority proof from hex today), and the receipt does not carry the authority as a public String. The issuance design waits on owner decision D-SERVICE-AUTH-KEY1. Proof: `jet test Compiler --profile cases --filter service/authority_key_not_derivable_from_token`.",
+          "text": "A service authority signing key comes from a secret issuance and registry and can never be derived from the public token (Core/Service/Service.jet reads the authority proof from hex today), and the receipt does not carry the authority as a public String. The issuance design is the ballot D-SERVICE-AUTH-KEY1, on Main's ballot list (2026-11-15). Proof: `jet test Compiler --profile cases --filter service/authority_key_not_derivable_from_token`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:34:48.238Z"
+          "at": "2026-11-15T11:34:24.860Z"
         },
         {
           "n": 6,
-          "text": "crypto.EdPoint (Core/Crypto/Crypto.jet:1645), which no public function takes or returns since the constant-time dedupe (af3a27c3c), is removed in one cutover or given a documented public use with a test, as the owner rules on D-EDPOINT-ORPHAN1. Proof: `git grep -n EdPoint -- Core Compiler Examples` matches the ruling.",
+          "text": "crypto.EdPoint (Core/Crypto/Crypto.jet:1645), which no public function takes or returns since the constant-time dedupe (af3a27c3c), is removed in one cutover or given a documented public use with a test, as the ballot D-EDPOINT-ORPHAN1 (on Main's ballot list (2026-11-15)) decides. Proof: `git grep -n EdPoint -- Core Compiler Examples` matches the ruling.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:34:48.238Z"
+          "at": "2026-11-15T11:34:25.934Z"
         },
         {
           "n": 7,
@@ -109242,8 +109242,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:34:48.239Z",
-      "updated": "2026-11-15T04:40:54.709Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:25.934Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 7
     },
     {
@@ -111092,21 +111092,21 @@
         },
         {
           "n": 4,
-          "text": "`ffi.USize` and `ffi.ISize` in core.ffi are sized to the target, so a C binding is right on 32-bit and 64-bit targets (D-PRIM-USIZE1=A), and a lossy conversion is a registered error; core.mem.CSize (D-USIZE-TARGET1, #4524 c4) is reconciled to one type. Proof: `jet test Compiler --profile golden --filter FFI/PointerSizedInts` on O0, O1 and O2 and `jet test Compiler --profile ui --filter ffi_usize_`.",
+          "text": "`ffi.USize` and `ffi.ISize` in core.ffi are sized to the target, so a C binding is right on 32-bit and 64-bit targets (D-PRIM-USIZE1=A), and a lossy conversion is a registered error; core.mem.CSize (D-USIZE-TARGET1, #4524 c4) is reconciled to one type, as the ballot on Main's ballot list (2026-11-15) decides. Proof: `jet test Compiler --profile golden --filter FFI/PointerSizedInts` on O0, O1 and O2 and `jet test Compiler --profile ui --filter ffi_usize_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:57:31.680Z"
+          "at": "2026-11-15T11:34:26.970Z"
         },
         {
           "n": 5,
-          "text": "C strings: once the owner ballot decides them (gate row FC1, no ballot yet), the chosen type has a registry row, an example with golden output on every tier and a misuse UI snapshot, or the spec lists the refusal with its reason and the Jet mechanism that covers the use. Proof: `jet test Compiler --profile golden --filter FFI/CStrings`, or the spec row and `jet test tests/guards --filter core_declarations`.",
+          "text": "C strings: once their ballot (on Main's ballot list (2026-11-15)) decides them, the chosen type has a registry row, an example with golden output on every tier and a misuse UI snapshot, or the spec lists the refusal with its reason and the Jet mechanism that covers the use. Proof: `jet test Compiler --profile golden --filter FFI/CStrings`, or the spec row and `jet test tests/guards --filter core_declarations`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:57:31.680Z"
+          "at": "2026-11-15T11:34:27.957Z"
         }
       ],
       "refs": [],
@@ -111120,8 +111120,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:31.681Z",
-      "updated": "2026-11-15T04:57:31.681Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T11:34:27.957Z",
+      "updatedBy": "TowerKeeper-2"
     },
     {
       "id": "c0kkogun",
@@ -111224,12 +111224,12 @@
         },
         {
           "n": 3,
-          "text": "Each extern form has a probe recording which Jet memory foreign code can reach when it writes out of bounds, ending with measured no-surface fixes or an owner gate row with measured options. Proof: `jet test Compiler --profile cases --filter cffi/oob_reach_probe_` and a committed receipt.",
+          "text": "Each extern form has a probe recording which Jet memory foreign code can reach when it writes out of bounds, ending with measured no-surface fixes or a row for Main's ballot list with measured options. Proof: `jet test Compiler --profile cases --filter cffi/oob_reach_probe_` and a committed receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:57:33.507Z"
+          "at": "2026-11-15T11:34:29.171Z"
         },
         {
           "n": 4,
@@ -111252,8 +111252,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:33.507Z",
-      "updated": "2026-11-15T04:57:33.507Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T11:34:29.171Z",
+      "updatedBy": "TowerKeeper-2"
     },
     {
       "id": "c0itin1p",
@@ -112964,12 +112964,12 @@
         },
         {
           "n": 3,
-          "text": "A TTY board of at most 8 lines redraws in place, with one final receipt line. UI snapshots cover building, success, no-change, failure, notes, piped and NO_COLOR. `--json` emits schema-valid NDJSON and `--trace` emits Chrome trace JSON. SIGTSTP/SIGCONT and resize restore the terminal, and TERM=dumb falls back. Old BuildProgress strings are deleted. The owner accepts the look (owner-gates row). Proof: `jet test Compiler --profile ui --filter build_board`.",
+          "text": "A TTY board of at most 8 lines redraws in place, with one final receipt line. UI snapshots cover building, success, no-change, failure, notes, piped and NO_COLOR. `--json` emits schema-valid NDJSON and `--trace` emits Chrome trace JSON. SIGTSTP/SIGCONT and resize restore the terminal, and TERM=dumb falls back. Old BuildProgress strings are deleted. The owner's acceptance of the look is on Main's ballot list (2026-11-15). Proof: `jet test Compiler --profile ui --filter build_board`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:35:08.120Z"
+          "at": "2026-11-15T11:34:30.617Z"
         }
       ],
       "refs": [],
@@ -112983,8 +112983,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:35:08.120Z",
-      "updated": "2026-11-15T05:35:08.120Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T11:34:30.617Z",
+      "updatedBy": "TowerKeeper-2"
     },
     {
       "id": "c01642i8",
@@ -113441,12 +113441,12 @@
         },
         {
           "n": 4,
-          "text": "The gradient and sprite cells (#3736) are committed with harness, baselines and a manifest entry, and Jet/Rust < 1.00 on both gradient cells and the sprite cell, measured in the same run with byte-identical outputs. Whether they are required cells is an owner choice (owner-gates row). Proof: `node Tools/gauntlet/harness/run.mjs --entry gradient` and `--entry sprite`.",
+          "text": "The gradient and sprite cells (#3736) are committed with harness, baselines and a manifest entry, and Jet/Rust < 1.00 on both gradient cells and the sprite cell, measured in the same run with byte-identical outputs. Whether they are required cells is on Main's ballot list (2026-11-15). Proof: `node Tools/gauntlet/harness/run.mjs --entry gradient` and `--entry sprite`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:41:54.524Z"
+          "at": "2026-11-15T11:34:32.249Z"
         },
         {
           "n": 5,
@@ -113469,8 +113469,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:41:54.524Z",
-      "updated": "2026-11-15T05:41:54.524Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T11:34:32.249Z",
+      "updatedBy": "TowerKeeper-2"
     },
     {
       "id": "c0dphagz",
@@ -217538,6 +217538,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T11:34:45.172Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0r8y1nt",
+      "note": "body,title"
+    },
+    {
+      "at": "2026-11-15T11:34:43.652Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0l389gj",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-15T11:34:42.114Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0fi6uj5",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-11-15T11:34:40.511Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0m83e3n",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-15T11:34:38.890Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0eymgfx",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:37.166Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:34.866Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c04lnbtj",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:32.250Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0g80ty3",
+      "note": "#4: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: The gradient and sprite cells (#3736) are committed with harness, baselines and a manifest entry, and Jet/Rust < 1.00 on both gradient cells and the sprite cell, measured in the same run with byte-ide"
+    },
+    {
+      "at": "2026-11-15T11:34:30.617Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0r1ln6j",
+      "note": "#3: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: A TTY board of at most 8 lines redraws in place, with one final receipt line. UI snapshots cover building, success, no-change, failure, notes, piped and NO_COLOR. `--json` emits schema-valid NDJSON an"
+    },
+    {
+      "at": "2026-11-15T11:34:29.171Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0zvan7c",
+      "note": "#3: Decision recorded by Main's operational authority (2026-11-15): the choice is within ratified scope, so nothing waits on the owner.; was: Each extern form has a probe recording which Jet memory foreign code can reach when it writes out of bounds, ending with measured no-surface fixes or an owner gate row with measured options. Proof: `j"
+    },
+    {
+      "at": "2026-11-15T11:34:27.957Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c05nyh21",
+      "note": "#5: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: C strings: once the owner ballot decides them (gate row FC1, no ballot yet), the chosen type has a registry row, an example with golden output on every tier and a misuse UI snapshot, or the spec lists"
+    },
+    {
+      "at": "2026-11-15T11:34:26.970Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c05nyh21",
+      "note": "#4: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: `ffi.USize` and `ffi.ISize` in core.ffi are sized to the target, so a C binding is right on 32-bit and 64-bit targets (D-PRIM-USIZE1=A), and a lossy conversion is a registered error; core.mem.CSize (D"
+    },
+    {
+      "at": "2026-11-15T11:34:25.934Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0sttk1s",
+      "note": "#6: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: crypto.EdPoint (Core/Crypto/Crypto.jet:1645), which no public function takes or returns since the constant-time dedupe (af3a27c3c), is removed in one cutover or given a documented public use with a te"
+    },
+    {
+      "at": "2026-11-15T11:34:24.860Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0sttk1s",
+      "note": "#5: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: A service authority signing key comes from a secret issuance and registry and can never be derived from the public token (Core/Service/Service.jet reads the authority proof from hex today), and the re"
+    },
+    {
+      "at": "2026-11-15T11:34:23.595Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0zlqnvv",
+      "note": "#8: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: An E3001 panic report shows the 1-based column, and it quotes the source excerpt if the owner's answer on c6 keeps quoting. Proof: `jet test Compiler --profile ui --filter E3001`."
+    },
+    {
+      "at": "2026-11-15T11:34:22.497Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0zlqnvv",
+      "note": "#6: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: `/`, `/%` and `%` with a zero divisor at run time all give the same E3010 'divided by zero' stop with the division's file, line and column and a caret under the divisor, on O0, O1 and O2. Proof: `jet "
+    },
+    {
+      "at": "2026-11-15T11:34:21.523Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0jk9aer",
+      "note": "#9: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: The Code Map view in Canvas (D-CODEMAP-VIEW1=A) draws a treemap of the code-map rows with every metric plus Blend, all four border choices, click-to-source and zoom. Rectangles update live in the dev "
+    },
+    {
+      "at": "2026-11-15T11:34:20.596Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0itl587",
+      "note": "#10: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: The owner's visual review accepts the workbench as one Unreal-like IDE: project, output, preview, graph, code, diagnostics and run state. Proof: the owner's acceptance is logged on this card against s"
+    },
+    {
+      "at": "2026-11-15T11:34:19.618Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0jt78qz",
+      "note": "#7: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: A two-binding loop over a list of 2-tuples (`loop (a, b) in pairs`, which binds index and tuple, not the pair) gets the treatment the owner chooses (no decision yet; owner-gates.tsv). Proof: `jet test"
+    },
+    {
+      "at": "2026-11-15T11:34:18.661Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0rqtmrp",
+      "note": "#1: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: core.compress is the only public home for gzip and zstd byte-stream codecs and core.archive exposes only zip and tar (D-CORE-COMPRESS1=A): the module registry, prelude templates, examples, goldens, Co"
+    },
+    {
+      "at": "2026-11-15T11:34:17.739Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0r8ohhq",
+      "note": "#6: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: Text diff states similarity, alignment, unified, context and HTML output and patch application as distinct operations, with newline, tie and cost rules fixed against real consumers; a new public opera"
+    },
+    {
+      "at": "2026-11-15T11:34:16.771Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0r8ohhq",
+      "note": "#5: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: Owner choice: an explicit Locale object, its data, default and API (no decision exists; owner-gates row). Once chosen, Core/Text formats and parses en-US, de-DE, fr-FR and ja-JP number and date witnes"
+    },
+    {
+      "at": "2026-11-15T11:34:15.812Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0pdkpef",
+      "note": "#3: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: Owner choice: whether base64, base32 and hex gain caller-owned output (encode_into and decode_into with an exact required size) and a borrowed byte view distinct from an owning conversion (no decision"
+    },
+    {
+      "at": "2026-11-15T11:34:14.671Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0zutf08",
+      "note": "#4: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: `json.JSONReader` and `jsonl.JSONLReader` have one `next()` shape for text and file sources (today DataEvent for text and DataEvent? for files), as a ballot decides. Proof: `jet test Compiler --profil"
+    },
+    {
+      "at": "2026-11-15T11:34:13.521Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c06r6neu",
+      "note": "#7: No owner question on the card: the choice is on Main's ballot list (2026-11-15), $JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv.; was: Growing public enums: adding a member to an enum carrying the growth marker breaks no caller, because a match on it from outside its package needs an `else` arm. Waits on an owner choice (no ballot). "
+    },
     {
       "at": "2026-11-15T11:34:11.899Z",
       "by": "TowerKeeper-2",
