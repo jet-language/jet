@@ -16,7 +16,7 @@ alloc_test_require: fn(ok: Bool) {
     }
 }
 
-alloc_test_payload: fn(size: I64, align: I64) {
+priv alloc_test_payload: fn(size: I64, align: I64) {
     first: jet_rt_alloc(size, align)
     second: jet_rt_alloc(size, align)
     count: if (size == I64{0}) -> I64{1} else -> size
@@ -301,7 +301,7 @@ alloc_test_nullable: fn() {
 // #5041 P2: every align >= 8 block (small, large, over-aligned) starts with
 // one owner in the count word 24 bytes before its payload; the block
 // protocol shares it, and byte blocks (align < 8) carry no count.
-alloc_test_count: fn(size: I64) {
+priv alloc_test_count: fn(size: I64) {
     pointer: jet_rt_alloc(size, I64{8})
     #Unsafe("the test owns this fresh align-8 block and its count word") {
         alloc_test_require(os_load_i64(wrapping(pointer - I64{24})) == I64{1})
@@ -329,7 +329,7 @@ alloc_test_counts: fn() {
 // unique once one owner remains, keeps its bytes while an owner remains, and
 // is zeroed by the free after its last release. A cached free reuses only the
 // header words, so the payload stays readable here.
-alloc_test_zero_mark: fn(size: I64, entry_8: Bool) {
+priv alloc_test_zero_mark: fn(size: I64, entry_8: Bool) {
     pointer: jet_rt_alloc(size, I64{8})
     at := I64{0}
     #Unsafe("the test owns this fresh align-8 block of size bytes") {
@@ -434,7 +434,7 @@ alloc_test_cache: fn() {
 }
 
 // The cached block count of the class `width` row of this thread.
-alloc_test_row_count: fn(width: I64) -> I64 {
+priv alloc_test_row_count: fn(width: I64) -> I64 {
     row: alloc_cache_row(width)
     count := I64{0}
     #Unsafe("row is this thread's own cache row") { count = os_load_i64(wrapping(row + I64{8})) }
@@ -444,7 +444,7 @@ alloc_test_row_count: fn(width: I64) -> I64 {
 // A block of jet_rt_alloc_8 is an align-8 payload with its count and block
 // header words, one block out of the class `width` row: the count that row
 // holds now.
-alloc_test_row_taken: fn(width: I64, pointer: I64) -> I64 {
+priv alloc_test_row_taken: fn(width: I64, pointer: I64) -> I64 {
     alloc_test_require(pointer != I64{0} && pointer.bit_and(I64{7}) == I64{0})
     #Unsafe("the test owns this fresh align-8 block and its header words") {
         alloc_test_require(os_load_i64(wrapping(pointer - I64{24})) == I64{1})

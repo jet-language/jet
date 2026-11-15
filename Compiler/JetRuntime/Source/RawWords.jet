@@ -7,23 +7,23 @@
 // lends or owns. The allocator, the atomics and the OS layer keep their own
 // leaves. The `rt_text_` prefix is historical: the text header was the first
 // layout these served.
-rt_text_word: fn(address: I64) -> I64 {
+priv rt_text_word: fn(address: I64) -> I64 {
     #Unsafe("address borrows an initialized aligned word in a live native layout the caller holds") {
         return os_load_i64(address)
     }
 }
 
-rt_text_store: fn(address: I64, value: I64) {
+priv rt_text_store: fn(address: I64, value: I64) {
     #Unsafe("address is an aligned word of native storage the caller owns or holds the lock for") { os_store_i64(address, value) }
 }
 
-rt_text_byte: fn(address: I64) -> I64 {
+priv rt_text_byte: fn(address: I64) -> I64 {
     #Unsafe("address borrows an initialized byte inside the caller's live buffer") {
         return os_load_u8(address)
     }
 }
 
-rt_text_put: fn(address: I64, value: I64) {
+priv rt_text_put: fn(address: I64, value: I64) {
     #Unsafe("address is one exclusively owned writable byte and value is a byte") {
         os_store_u8(address, value)
     }
@@ -41,7 +41,7 @@ rt_text_put: fn(address: I64, value: I64) {
 // RT_MOVE_STRING_FROM bytes is one ascending string move instead.
 RT_MOVE_STRING_FROM: I64{2048}
 
-#Export(c) jet_rt_mem_move: fn(target: I64, source: I64, count: I64) {
+#Export(c) priv jet_rt_mem_move: fn(target: I64, source: I64, count: I64) {
     #Unsafe("native lowering owns both live ranges of count bytes; each leaf loads all its bytes before it stores any, and the steps run in the order the overlap requires") {
         to := target
         from := source
@@ -93,7 +93,7 @@ RT_MOVE_STRING_FROM: I64{2048}
 // that chunk repeats over the rest.
 RT_FILL_CHUNK: I64{16384}
 
-#Export(c) jet_rt_mem_fill: fn(target: I64, source: I64, period: I64, total: I64) {
+#Export(c) priv jet_rt_mem_fill: fn(target: I64, source: I64, period: I64, total: I64) {
     if (total <= I64{0} || period <= I64{0}) -> return
     #Unsafe("native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes") {
         if (period == I64{1}) {
@@ -144,7 +144,7 @@ RT_FILL_CHUNK: I64{16384}
 // RT_FILL_STRING_FROM bytes it is one string store instead.
 RT_FILL_STRING_FROM: I64{2048}
 
-#Export(c) jet_rt_mem_fill_bytes: fn(target: I64, value: I64, count: I64) {
+#Export(c) priv jet_rt_mem_fill_bytes: fn(target: I64, value: I64, count: I64) {
     #Unsafe("native lowering owns count writable bytes at target; each leaf stores only inside its class's count") {
         // The byte in all eight lanes of a word.
         word: wrapping(value.bit_and(I64{255}) * I64{72340172838076673})
@@ -206,7 +206,7 @@ RT_FILL_STRING_FROM: I64{2048}
 // equal words; equal words to within 8 bytes of the end are settled by the
 // last word, read overlapped.
 // Otherwise the bytes from the first differing word decide.
-#Export(c) memcmp: fn(left: I64, right: I64, count: I64) -> I64 {
+#Export(c) priv memcmp: fn(left: I64, right: I64, count: I64) -> I64 {
     if (left == right) -> return I64{0}
     at := I64{0}
     last_block: count - I64{64}
@@ -232,55 +232,55 @@ RT_FILL_STRING_FROM: I64{2048}
 // Calls of a checked native code address on word arguments, for the
 // synchronous duration of the call: generated callbacks and closure
 // adapters, image entries and runtime exports the caller installed.
-coll_call1: fn(code: I64, a: I64) -> I64 {
+priv coll_call1: fn(code: I64, a: I64) -> I64 {
     #Unsafe("checked native value-returning callback; its raw argument stays valid for the synchronous call") {
         return os_call1_i64(code, a)
     }
 }
 
-coll_call2: fn(code: I64, a: I64, b: I64) -> I64 {
+priv coll_call2: fn(code: I64, a: I64, b: I64) -> I64 {
     #Unsafe("checked native value-returning callback; both raw arguments stay valid for the synchronous call") {
         return os_call2_i64(code, a, b)
     }
 }
 
-coll_call3: fn(code: I64, a: I64, b: I64, c: I64) -> I64 {
+priv coll_call3: fn(code: I64, a: I64, b: I64, c: I64) -> I64 {
     #Unsafe("checked unary closure adapter with borrowed environment, input and output slots") {
         return os_call3_i64(code, a, b, c)
     }
 }
 
-coll_call4: fn(code: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
+priv coll_call4: fn(code: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
     #Unsafe("checked binary closure adapter with live environment, inputs and output slots") {
         return os_call4_i64(code, a, b, c, d)
     }
 }
 
-coll_call1_unit: fn(code: I64, a: I64) {
+priv coll_call1_unit: fn(code: I64, a: I64) {
     #Unsafe("checked native Unit callback; its raw argument stays valid for the synchronous call") {
         os_call1_unit_i64(code, a)
     }
 }
 
-coll_call2_unit: fn(code: I64, a: I64, b: I64) {
+priv coll_call2_unit: fn(code: I64, a: I64, b: I64) {
     #Unsafe("checked Unit clone callback; source remains live and target lends writable output storage") {
         os_call2_unit_i64(code, a, b)
     }
 }
 
-coll_call5: fn(code: I64, a: I64, b: I64, c: I64, d: I64, e: I64) -> I64 {
+priv coll_call5: fn(code: I64, a: I64, b: I64, c: I64, d: I64, e: I64) -> I64 {
     #Unsafe("checked native entry or runtime export whose System V signature takes five words, all live for the synchronous call") {
         return os_call5_i64(code, a, b, c, d, e)
     }
 }
 
-coll_call0_unit: fn(code: I64) {
+priv coll_call0_unit: fn(code: I64) {
     #Unsafe("checked executable System V void(void) address") {
         os_call0_unit(code)
     }
 }
 
-coll_call3_unit: fn(code: I64, a: I64, b: I64, c: I64) {
+priv coll_call3_unit: fn(code: I64, a: I64, b: I64, c: I64) {
     #Unsafe("checked native Unit callback; its three raw arguments stay valid for the synchronous call") {
         os_call3_unit_i64(code, a, b, c)
     }
@@ -288,13 +288,13 @@ coll_call3_unit: fn(code: I64, a: I64, b: I64, c: I64) {
 
 // The audited code(box) and code(box, argument) ABIs of a closure or named-fn
 // box: `holder` is the box, live for the synchronous call.
-coll_call_box: fn(code: I64, holder: I64) -> I64 {
+priv coll_call_box: fn(code: I64, holder: I64) -> I64 {
     #Unsafe("checked code(box) address; the box stays live for the synchronous call") {
         return os_call_address_i64(code, holder)
     }
 }
 
-coll_call_box_two: fn(code: I64, holder: I64, argument: I64) -> I64 {
+priv coll_call_box_two: fn(code: I64, holder: I64, argument: I64) -> I64 {
     #Unsafe("checked code(box, argument) address; the box and argument stay live for the synchronous call") {
         return os_call_address_two_i64(code, holder, argument)
     }

@@ -111,7 +111,7 @@ fault_stack_start: fn() -> I64 {
 
 // Unregister (SS_DISABLE) and unmap a thread's alternate stack before the
 // thread ends; the thread is not on it.
-fault_stack_end: fn(stack: I64) {
+priv fault_stack_end: fn(stack: I64) {
     if (stack == I64{0}) -> return
     #Unsafe("stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words") {
         os_store_i64(wrapping(stack + I64{8}), I64{2})
@@ -245,7 +245,7 @@ trace_unmap: fn(address: I64, bytes: I64) {
 // Each Jet frame of the chain from `start`, read from the .debug_jetline
 // section of `image` (its load bias `bias`), as trace_walk takes them:
 // onto `text`, or to the first frame outside Core when `text` is 0.
-trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, with_function: Bool) -> Bool {
+priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, with_function: Bool) -> Bool {
     table := I64{0}
     table_end := I64{0}
     #Unsafe("image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table") {
@@ -294,7 +294,7 @@ trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, with_function: Bo
 // trap_user_frame). True when that line was written. The table's layout is
 // DebugPrune.jet's, and its lookup is report.S `find`. Nothing when no
 // function holds pc.
-trace_frame: fn(text: I64, table: I64, table_end: I64, pc: I64, with_function: Bool) -> Bool {
+priv trace_frame: fn(text: I64, table: I64, table_end: I64, pc: I64, with_function: Bool) -> Bool {
     block := table
     loop wrapping(block + I64{20}) <= table_end {
         end: wrapping(wrapping(block + I64{4}) + trace_u32(block))
@@ -374,7 +374,7 @@ trace_cstr_len: fn(at: I64, end: I64) -> I64 {
     length
 }
 
-trace_u8: fn(at: I64) -> I64 {
+priv trace_u8: fn(at: I64) -> I64 {
     byte := I64{0}
     #Unsafe("at lies in the executable's read-only mapping: its ELF header, section table or location table") {
         byte = os_load_u8(at)

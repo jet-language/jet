@@ -8,29 +8,29 @@
 // The fiber side is reached only through the hooks the lot records
 // (Fiber.jet sync_lot), which exists once a fiber may run, so these
 // primitives link no fiber or scheduler code into a program.
-sync_load: fn(address: I64) -> I64 {
+priv sync_load: fn(address: I64) -> I64 {
     #Unsafe("borrows an aligned live synchronization word") { return os_load_i64(address) }
 }
 
-sync_store: fn(address: I64, value: I64) {
+priv sync_store: fn(address: I64, value: I64) {
     #Unsafe("publishes an aligned live synchronization word with x86 release ordering") {
         os_store_i64(address, value)
     }
 }
 
-sync_swap: fn(address: I64, value: I64) -> I64 {
+priv sync_swap: fn(address: I64, value: I64) -> I64 {
     #Unsafe("atomic exchange on an aligned live synchronization word") {
         return os_swap_i64(address, value)
     }
 }
 
-sync_add: fn(address: I64, value: I64) -> I64 {
+priv sync_add: fn(address: I64, value: I64) -> I64 {
     #Unsafe("atomic fetch-add on an aligned live synchronization word") {
         return os_fetch_add_i64(address, value)
     }
 }
 
-sync_cas: fn(address: I64, expected: I64, desired: I64) -> I64 {
+priv sync_cas: fn(address: I64, expected: I64, desired: I64) -> I64 {
     #Unsafe("atomic compare-exchange on an aligned live synchronization word") {
         return os_cas_i64(address, expected, desired)
     }
@@ -150,7 +150,7 @@ sync_vdso_lookup: fn() -> I64 {
 
 // One word of the vDSO image, which the kernel maps readable for the
 // process lifetime.
-sync_word: fn(base: I64, offset: I64) -> I64 {
+priv sync_word: fn(base: I64, offset: I64) -> I64 {
     #Unsafe("base points into the kernel's vDSO image, mapped readable for the process lifetime") {
         return os_load_i64(wrapping(base + offset))
     }
@@ -279,7 +279,7 @@ sync_sole_inflight := I64{0}
 
 // true: the lock word was set with a plain store (an elided section); release
 // it with sync_sole_exit(address, true). false: the mutex is held.
-sync_sole_enter: fn(address: I64) -> Bool {
+priv sync_sole_enter: fn(address: I64) -> Bool {
     #Unsafe("sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier") {
         sync_sole_inflight = wrapping(sync_sole_inflight + I64{1})
         if (sync_sole != I64{0}) {
@@ -292,7 +292,7 @@ sync_sole_enter: fn(address: I64) -> Bool {
     false
 }
 
-sync_sole_exit: fn(address: I64, sole: Bool) {
+priv sync_sole_exit: fn(address: I64, sole: Bool) {
     if !sole {
         sync_mutex_unlock(address)
         return

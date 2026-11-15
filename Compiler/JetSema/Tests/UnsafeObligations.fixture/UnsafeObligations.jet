@@ -104,13 +104,16 @@ run: fn() Never! {
     unsafe_test_require(boundary.diagnostics.len() == 2, "one refusal per caller-chosen address: {boundary.diagnostics:Debug}")
     loop refused in boundary.diagnostics -> unsafe_test_require(refused.diagnostic.code == "E3114", "kernel address refusal code")
     unsafe_test_require(boundary.diagnostics[0].diagnostic.what.contains("`peek`") && boundary.diagnostics[1].diagnostic.what.contains("`Cell.base`"), "the parameter and the public field are named")
-    // The runtime package's kernel is the address API itself: its public
-    // functions take caller addresses by design, so only its sources answer
-    // E3113; another package's same file still answers E3114.
+    // The runtime's kernel answers the same rule: its address helpers are
+    // `priv`, so a public one raises E3114 there too, in a package check and
+    // in a composed runtime unit alike.
     runtime_kernel: sema_unsafe_inspect([SemaGateModule{source: "cell.jet", program: kernel.program, policy_path: Val("src/kernel/cell.jet"), memory_kernel: Val([String]{"src/kernel"}), package_identity: "package:11:jet_runtime:0.0.1"}], GateSet{})
-    unsafe_test_require(runtime_kernel.diagnostics.len() == 0, "the runtime package's kernel takes caller addresses: {runtime_kernel.diagnostics:Debug}")
-    other_kernel: sema_unsafe_inspect([SemaGateModule{source: "cell.jet", program: kernel.program, policy_path: Val("src/kernel/cell.jet"), memory_kernel: Val([String]{"src/kernel"}), package_identity: "package:3:app:0.0.1"}], GateSet{})
-    unsafe_test_require(other_kernel.diagnostics.len() == 2 && other_kernel.diagnostics[0].diagnostic.code == "E3114", "another package's kernel answers E3114: {other_kernel.diagnostics:Debug}")
+    unsafe_test_require(runtime_kernel.diagnostics.len() == 2 && runtime_kernel.diagnostics[0].diagnostic.code == "E3114", "the runtime package's kernel answers E3114: {runtime_kernel.diagnostics:Debug}")
+    runtime_unit_text: "\n// [unit source: R/Kernel.jet]\npeek: fn(address: Int) -> Int {{ #Unsafe(\"live\") {{ return mem.Ptr<Int>.from_addr(address).* }} }}\npriv inner: fn(address: Int) -> Int {{ #Unsafe(\"live\") {{ return mem.Ptr<Int>.from_addr(address).* }} }}\n// [unit source: R/Host.jet]\nhost: fn(address: Int) -> Int {{ inner(address) }}\n"
+    runtime_unit: parse_source(runtime_unit_text.bytes())
+    runtime_unit_map: sema_unsafe_unit_map("package:11:jet_runtime:", runtime_unit_text) ?? panic("UnsafeObligations: a runtime unit maps its sources")
+    runtime_unit_refused: sema_unsafe_inspect([SemaGateModule{source: "unit.jet", program: runtime_unit.program, policy_path: Val("unit.jet"), memory_kernel: Val([String]{"R/Kernel.jet"}), unit: Val(runtime_unit_map), package_identity: "package:11:jet_runtime:0.0.1"}], GateSet{})
+    unsafe_test_require(runtime_unit_refused.diagnostics.len() == 1 && runtime_unit_refused.diagnostics[0].diagnostic.code == "E3114" && runtime_unit_refused.diagnostics[0].diagnostic.what.contains("`peek`"), "a composed unit's public kernel function answers E3114, its `priv` one and a host source do not: {runtime_unit_refused.diagnostics:Debug}")
     invocation: GateSet{allowed: [PolicyKey.Unsafe]}
     declaration: PolicyDeclaration{key: PolicyKey.Unsafe, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 1}, target: None, source: "org.jet"}
     refusal: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: parsed.program, declarations: [declaration]}], invocation)

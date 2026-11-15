@@ -15,8 +15,8 @@ SemaGateModule: struct {
     // single program, Core, compiler-private sources); empty: no kernel file.
     memory_kernel: [String]?{None}
     expert: Bool?{None}
-    // The owning package's loader identity ("" for none); the kernel address
-    // rule reads it (sema_unsafe_runtime_package).
+    // The owning package's loader identity ("" for none); the mapping-keeper
+    // rule reads it (sema_unsafe_mapping_keepers).
     package_identity: String{""}
     // A composed runtime unit's sources (sema_unsafe_unit_map): the kernel
     // rule reads each operation's own source path, not the unit's.
@@ -223,11 +223,7 @@ sema_unsafe_package_surface: fn(modules: [SemaGateModule], result: &UnsafeInspec
         if row.memory_kernel == .Val(kernel) {
             if row.unit == .Val(unit) -> sema_unsafe_unit_kernel(row, unit, path, kernel, result) else {
                 within: sema_unsafe_path_within(path, kernel)
-                // The runtime's address API (its word, byte, sync and
-                // allocator leaves) is the memory internals the runtime's
-                // own review vets; until it hands out owners and views, the
-                // kernel address rule (E3114) holds for every other package.
-                if within && !sema_unsafe_runtime_package(row.package_identity) {
+                if within {
                     loop item in row.program.items -> sema_unsafe_kernel_item(item, row.program, row.source, result)
                 }
                 if !within {
@@ -314,8 +310,7 @@ sema_unsafe_mapping_keepers: fn(row: SemaGateModule, result: &UnsafeInspection) 
 SEMA_UNSAFE_UNIT_SOURCE_MARK: "// [unit source: "
 
 // True for the runtime's own packages (SEMA_GUEST_RUNTIME_PACKAGES), the
-// only ones whose unit marks name sources and whose kernels keep an address
-// API.
+// only ones whose unit marks name sources.
 sema_unsafe_runtime_package: fn(package_identity: String) -> Bool Never! {
     loop prefix in SEMA_GUEST_RUNTIME_PACKAGES {
         if package_identity.starts_with(prefix) -> return true
@@ -354,14 +349,18 @@ sema_unsafe_last_at: fn(starts: [Int], offset: Int) -> Int? Never! {
 }
 
 // A composed unit holds many sources: each raw operation answers to the
-// source it stands in, and a refusal names that source and its line. Only a
-// runtime package composes units, so the kernel address rule never reads one.
+// source it stands in, and a refusal names that source and its line. Each
+// item of a kernel source answers the kernel address rule (E3114).
 sema_unsafe_unit_kernel: fn(row: SemaGateModule, unit: SemaUnitMap, path: String, kernel: [String], result: &UnsafeInspection) Never! {
     starts: loop source in unit.sources -> source.start
     loop gate in result.gates {
         if gate.source != row.source -> next
         loop operation in gate.operations -> sema_unsafe_unit_refusal(result, row.source, unit, starts, path, kernel, operation.kind, operation.span)
         loop operation in gate.memory_operations -> sema_unsafe_unit_refusal(result, row.source, unit, starts, path, kernel, operation.kind, operation.span)
+    }
+    loop item in row.program.items {
+        index: sema_unsafe_last_at(starts, sema_compiler_index_item_span(item).start) ?? next
+        if sema_unsafe_path_within(unit.sources[index].path, kernel) -> sema_unsafe_kernel_item(item, row.program, row.source, result)
     }
 }
 

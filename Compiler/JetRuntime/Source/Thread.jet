@@ -309,7 +309,7 @@ rt_tls_shared_destructor_address: fn() -> I64 {
     key
 }
 
-thread_tls_destroy: fn(table: I64, key: I64, attempt_only: Bool) -> Bool {
+priv thread_tls_destroy: fn(table: I64, key: I64, attempt_only: Bool) -> Bool {
     value: sync_load(wrapping(sync_load(wrapping(table + I64{16})) + (key - I64{1}) * I64{8}))
     if (value == I64{0}) { return false }
     sync_mutex_lock(thread_tls_registry)
@@ -416,7 +416,7 @@ rt_thread_entry_address: fn() -> I64 {
 // A thread_spawn thread's first Jet code. Every signal is blocked until the
 // thread has its own thread block and alternate signal stack; then the
 // spawner's mask is restored from the start record.
-#Export(c) jet_rt_thread_entry: fn(start: I64) -> I64 {
+#Export(c) priv jet_rt_thread_entry: fn(start: I64) -> I64 {
     jet_rt_thread_bootstrap()
     thread_spawn_settled()
     // This thread's alternate signal stack, for the fault report (Fault.jet).
@@ -618,7 +618,7 @@ thread_libc_detach := I64{0}
 
 // A call of one of the functions jet_rt_thread_libc handed over: its result,
 // 0 or a positive errno.
-thread_libc_call: fn(code: I64, first: I64, second: I64, third: I64, fourth: I64) -> I64 {
+priv thread_libc_call: fn(code: I64, first: I64, second: I64, third: I64, fourth: I64) -> I64 {
     #Unsafe("the link's thread functions take words: the handle's live thread id word, jet_rt_thread_entry, its start record and a stack size, or a thread id") {
         return os_call_address_four_i64(code, first, second, third, fourth)
     }
