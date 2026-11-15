@@ -273,10 +273,11 @@ sema_library_effect_reach_diagnostic: fn(node: SemaEffectNode, over: [String]) -
     sorted := over.copy()
     sorted.sort()
     over_list: sema_effect_show(sorted)
-    written: loop row in node.library_rows -> row.written
+    rare: node.rare ?? SEMA_EFFECT_NODE_NO_RARE
+    written: loop row in rare.library_rows -> row.written
     effects: sema_effect_show(written)
     listed := [String]{}
-    loop row in node.library_rows {
+    loop row in rare.library_rows {
         loop name in row.kernel -> sema_effect_set_add(listed, name)
     }
     stands: if listed.len() == 0 -> "no kernel effect" else -> "`{sema_effect_show(listed)}`"
@@ -315,19 +316,21 @@ sema_library_effect_check_list: fn(items: [Item], name: String, cap: ModuleCap?,
 sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> SemaLibraryEffectReach Never! {
     ancestry := [String: [String]]{}
     loop node in nodes {
-        loop row in node.library_rows {
+        rare: node.rare ?? next
+        loop row in rare.library_rows {
             if row.ancestors.len() > 0 && ancestry.get(row.token) == None -> ancestry[row.token] = row.ancestors.copy() // copy: the map keeps its own list.
         }
     }
     any_kind: ancestry.len() > 0
     any_denial: loop node in nodes {
-        if node.library_denials.len() > 0 -> break true
+        if node.rare == .Val(rare) && rare.library_denials.len() > 0 -> break true
     } ?? false
     reached := (loop _ in nodes -> [String]{})
     if !any_denial && !any_kind -> return SemaLibraryEffectReach{reached: reached, ancestry: ancestry}
     pending := [SemaEffectPending]{}
     loop (index, node) in nodes {
-        loop row in node.library_rows {
+        rare: node.rare ?? next
+        loop row in rare.library_rows {
             if sema_effect_set_add(reached[index], row.token) -> pending.push(SemaEffectPending{node: index, name: row.token.copy()}) // copy: the queue keeps its own name.
             loop ancestor in row.ancestors {
                 if sema_effect_set_add(reached[index], ancestor) -> pending.push(SemaEffectPending{node: index, name: ancestor.copy()}) // copy: as above.
@@ -352,7 +355,8 @@ sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> Sema
 // already reach the denied effect itself (sema_effect_check_node reports
 // that). `solved` is the node's solved row.
 sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], solved: [String], diagnostics: &[Diagnostic]) {
-    loop denial in node.library_denials {
+    rare: node.rare ?? SEMA_EFFECT_NODE_NO_RARE
+    loop denial in rare.library_denials {
         denied: denial.name
         loop token in reached {
             hit: if {
@@ -385,11 +389,12 @@ sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], s
 // `audit.Audit`; `billing.Audit`, another kind of `Log`, needs `Log` or
 // `billing.Audit` in the row.
 sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffectReach, reached: [String], diagnostics: &[Diagnostic]) {
-    if node.library_rows.len() == 0 -> return
+    rare: node.rare ?? return
+    if rare.library_rows.len() == 0 -> return
     named := [String]{}
     own := [String]{}
     roots := [String]{}
-    loop row in node.library_rows {
+    loop row in rare.library_rows {
         sema_effect_set_add(named, row.token)
         sema_effect_set_add(own, row.token)
         loop ancestor in row.ancestors {
@@ -404,11 +409,11 @@ sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffe
         if ancestors.len() == 0 -> next
         root: ancestors[ancestors.len() - 1]
         if root.contains("/") || !roots.contains(root) || ancestors.any(fn(ancestor) { named.contains(ancestor) }) -> next
-        written_root: loop bound in node.written_declared {
+        written_root: loop bound in rare.written_declared {
             if sema_effect_covers(bound, root) -> break true
         } ?? false
         if written_root -> next
-        kinds: loop row in node.library_rows -> row.written
+        kinds: loop row in rare.library_rows -> row.written
         shown: sema_effect_show(kinds)
         parts: token.split("/").to_list()
         leaf: parts[parts.len() - 1]
