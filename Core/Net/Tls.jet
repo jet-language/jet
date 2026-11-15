@@ -111,7 +111,7 @@ TLSVersion: enum {
 
 // A stream made by `client` or `__server`. `TLSStream{}` is a closed stream.
 TLSStream: struct {
-    state: Shared<__TLSState>?{None}
+    state: Shared<TLSState>?{None}
 
     read_bytes: fn(self, max_bytes: Int, /, *, deadline: Duration) -[Net, Time.Wait]> [U8] IOError! {
         if max_bytes <= 0 -> return Err(IOError.InvalidInput(io_context(.Read, "tls read limit must be positive")))
@@ -198,13 +198,13 @@ TLSStream: struct {
 
 // A configuration before setup: the engine's config, the roots loaded so
 // far, and the generator the connection draws from.
-__TLSContext: struct {
+priv TLSContext: struct {
     conf: ssldefs.SSLConfig
     ca: [x509crt.X509Crt]
     rng: drbg.HMACDrbg
 }
 
-__TLSState: struct {
+priv TLSState: struct {
     ssl: ssldefs.SSLContext
     rng: drbg.HMACDrbg
     tcp: TCPStream
@@ -233,7 +233,7 @@ __TLSState: struct {
 }
 
 // Free the engine and wipe the buffers of a stream that is done.
-priv release: fn(&tls: __TLSState) Never! {
+priv release: fn(&tls: TLSState) Never! {
     ssltls.ssl_free(tls.ssl)
     ssldefs.ssl_wipe(tls.buffer)
     ssldefs.ssl_wipe(tls.pending)
@@ -241,20 +241,20 @@ priv release: fn(&tls: __TLSState) Never! {
 }
 
 // One engine read: the byte count or the status, and the bytes read.
-__Got: struct {
+priv Got: struct {
     status: Int
     bytes: [U8]
 }
 
 #Error
-__TLSFailure: struct {
+priv TLSFailure: struct {
     message: String
 
     impl Display { display: fn(self) -> String { self.message.copy() } }
 
     impl Debug { debug: fn(&&self) -> String { self.message } }
 }
-priv fail: fn(message: String) -> __TLSFailure Never! { __TLSFailure{message: message} }
+priv fail: fn(message: String) -> TLSFailure Never! { TLSFailure{message: message} }
 
 // Mbed TLS 3.6 status codes this policy acts on; the engine's errors map to
 // them through ssldefs.ssl_error_code.
@@ -336,7 +336,7 @@ __server: fn(stream: &&TCPStream, cert_pem: String, key_pem: String, alpn: [Stri
 // Docs/spec/syntax-decisions.md:5083). The messages are the Rust oracle's
 // (c9129d174d^): a certificate PEM holds a CERTIFICATE block, and a key PEM
 // holds a PKCS#8, PKCS#1 or SEC1 private key block.
-priv server_tls_context: fn(cert_pem: String, key_pem: String) -> __TLSContext __TLSFailure! {
+priv server_tls_context: fn(cert_pem: String, key_pem: String) -> TLSContext TLSFailure! {
     if !cert_pem.contains("-----BEGIN CERTIFICATE-----") -> return Err(fail("TLS certificate PEM did not contain a certificate"))
     if !key_pem.contains("-----BEGIN PRIVATE KEY-----") && !key_pem.contains("-----BEGIN RSA PRIVATE KEY-----") && !key_pem.contains("-----BEGIN EC PRIVATE KEY-----") {
         return Err(fail("TLS private key PEM did not contain a private key"))
@@ -619,7 +619,7 @@ ascii_lower: fn(text: String) -> String Never! {
 
 // A fresh configuration for `endpoint` (SSL_IS_CLIENT or SSL_IS_SERVER)
 // whose generator is seeded from the system entropy source.
-priv context_new: fn(endpoint: Int) -> __TLSContext __TLSFailure! {
+priv context_new: fn(endpoint: Int) -> TLSContext TLSFailure! {
     seed := core.net.tls.__host_entropy(C_SEED_BYTES) ?? return Err(fail("TLS could not create a context: the system entropy source failed"))
     if seed.len() != C_SEED_BYTES {
         crypto.wipe(seed)
@@ -633,7 +633,7 @@ priv context_new: fn(endpoint: Int) -> __TLSContext __TLSFailure! {
 // (mbedtls_hmac_drbg_seed_buf over entropy || nonce || custom). `seed` is
 // wiped, and the material is built at its final size, so no growth leaves a
 // copy behind.
-priv context_seeded: fn(endpoint: Int, seed: &[U8]) -> __TLSContext __TLSFailure! {
+priv context_seeded: fn(endpoint: Int, seed: &[U8]) -> TLSContext TLSFailure! {
     custom: "jet_tls".bytes()
     material := [U8]{}
     cipher.reserve(material, seed.len() + custom.len())
@@ -650,7 +650,7 @@ priv context_seeded: fn(endpoint: Int, seed: &[U8]) -> __TLSContext __TLSFailure
     conf.ciphersuite_list = policy_suites()
     conf.group_list = policy_groups()
     conf.sig_algs = policy_sig_algs()
-    Ok(__TLSContext{conf: conf, ca: [x509crt.X509Crt]{}, rng: rng})
+    Ok(TLSContext{conf: conf, ca: [x509crt.X509Crt]{}, rng: rng})
 }
 
 // Core's TLS policy: the engine's default preset narrowed to these suites,
@@ -690,7 +690,7 @@ priv policy_sig_algs: fn() -> [Int] Never! {
 
 // Binds a finished configuration to a connected socket. An empty hostname
 // sets no SNI or verification name (servers).
-priv open: fn(context: &&__TLSContext, tcp: &&TCPStream, hostname: String) -> __TLSState ssldefs.SSLError! {
+priv open: fn(context: &&TLSContext, tcp: &&TCPStream, hostname: String) -> TLSState ssldefs.SSLError! {
     ctx := context.move()
     conf := ctx.conf.move()
     if ctx.ca.len() > 0 -> conf.ca_chain = Val(ctx.ca.move())
@@ -699,10 +699,10 @@ priv open: fn(context: &&__TLSContext, tcp: &&TCPStream, hostname: String) -> __
     if hostname != "" {
         _: ssltls.ssl_set_hostname(ssl, Val(hostname.copy())) ?? return Err(err)
     }
-    Ok(__TLSState{ssl: ssl, rng: ctx.rng.move(), tcp: tcp.move(), buffer: ssldefs.ssl_zeros(C_RECORD_BYTES), peer: None, pending: [U8]{}, read_eof: false, write_closed: false, closed: false})
+    Ok(TLSState{ssl: ssl, rng: ctx.rng.move(), tcp: tcp.move(), buffer: ssldefs.ssl_zeros(C_RECORD_BYTES), peer: None, pending: [U8]{}, read_eof: false, write_closed: false, closed: false})
 }
 
-priv client_tls_context: fn(server_name: String, config: ClientConfig) -> __TLSContext __TLSFailure! {
+priv client_tls_context: fn(server_name: String, config: ClientConfig) -> TLSContext TLSFailure! {
     if !valid_server_name(server_name) -> return Err(fail("invalid TLS server name `{server_name}`"))
     context := context_new(ssldefs.SSL_IS_CLIENT) ?? return Err(err)
     _: load_trust(context, config.trust) ?? return Err(err)
@@ -726,7 +726,7 @@ priv client_tls_context: fn(server_name: String, config: ClientConfig) -> __TLSC
 // client certificate): 0, or the status of the step that failed, as
 // mbedtls_x509_crt_parse, mbedtls_pk_parse_key and mbedtls_pk_check_pair
 // return it. The key must be the leaf certificate's key.
-priv own_identity: fn(context: &__TLSContext, cert: String, key: String) -> Int Never! {
+priv own_identity: fn(context: &TLSContext, cert: String, key: String) -> Int Never! {
     chain := [x509crt.X509Crt]{}
     if x509crt.x509_crt_parse(chain, cert.bytes()) == {
         .Ok(skipped) -> { if skipped != 0 -> return skipped }
@@ -743,7 +743,7 @@ priv own_identity: fn(context: &__TLSContext, cert: String, key: String) -> Int 
     0
 }
 
-priv add_alpn: fn(context: &__TLSContext, protocols: [String]) __TLSFailure! {
+priv add_alpn: fn(context: &TLSContext, protocols: [String]) TLSFailure! {
     message: alpn_problem(protocols)
     if message != "" -> return Err(fail(message))
     offered := [String]{}
@@ -756,7 +756,7 @@ priv add_alpn: fn(context: &__TLSContext, protocols: [String]) __TLSFailure! {
     Ok()
 }
 
-priv load_trust: fn(context: &__TLSContext, trust: TLSClientTrust) __TLSFailure! {
+priv load_trust: fn(context: &TLSContext, trust: TLSClientTrust) TLSFailure! {
     if trust == {
         .System -> { _: load_system_roots(context, true) ?? return Err(err) }
         .SystemPlus(roots) -> {
@@ -768,7 +768,7 @@ priv load_trust: fn(context: &__TLSContext, trust: TLSClientTrust) __TLSFailure!
     Ok()
 }
 
-priv load_custom_roots: fn(context: &__TLSContext, roots: RootCertificates) __TLSFailure! {
+priv load_custom_roots: fn(context: &TLSContext, roots: RootCertificates) TLSFailure! {
     before: context.ca.len()
     if {
         roots.pem != "" -> {
@@ -835,7 +835,7 @@ priv ca_dir: fn(ca: &[x509crt.X509Crt], path: String) -> Int Never! {
 // distribution bundle that loads, then the hashed /etc/ssl/certs directory.
 // The variables are read as process facts of the trust store, not as program
 // configuration, so they add no Env effect to the handshake.
-priv load_system_roots: fn(context: &__TLSContext, required: Bool) __TLSFailure! {
+priv load_system_roots: fn(context: &TLSContext, required: Bool) TLSFailure! {
     file: env_text("SSL_CERT_FILE")
     dirs: env_text("SSL_CERT_DIR")
     if {
@@ -888,7 +888,7 @@ priv split_colon: fn(text: String) -> [String] Never! {
     parts
 }
 
-priv roots_validate: fn(pem: [U8]) -> String __TLSFailure! {
+priv roots_validate: fn(pem: [U8]) -> String TLSFailure! {
     text: String.from_bytes(pem) ?? return Err(fail("TLS custom CA PEM must be UTF-8 text"))
     _: pem_certificates(text.bytes()) ?? return Err(err)
     if __has_nul(text) -> return Err(fail("TLS custom CA PEM must contain only certificate blocks"))
@@ -902,7 +902,7 @@ priv roots_validate: fn(pem: [U8]) -> String __TLSFailure! {
 // identity itself: the blinding of the key operations is unpredictable to
 // anyone without the key, and validating needs no entropy source. The
 // handshake checks the pair again under a generator from system entropy.
-priv identity_validate: fn(cert_chain: [U8], private_key: [U8]) -> ClientIdentity __TLSFailure! {
+priv identity_validate: fn(cert_chain: [U8], private_key: [U8]) -> ClientIdentity TLSFailure! {
     cert: String.from_bytes(cert_chain) ?? return Err(fail("TLS custom CA PEM must be UTF-8 text"))
     _: pem_certificates(cert.bytes()) ?? return Err(err)
     key: String.from_bytes(private_key) ?? return Err(fail("TLS private key PEM must be UTF-8 text"))
@@ -931,7 +931,7 @@ priv identity_message: fn(status: Int) -> String Never! {
 // ---- PEM ----------------------------------------------------------------------
 
 // The number of CERTIFICATE blocks; nothing but whitespace may surround them.
-priv pem_certificates: fn(raw: [U8]) -> Int __TLSFailure! {
+priv pem_certificates: fn(raw: [U8]) -> Int TLSFailure! {
     begin: "-----BEGIN CERTIFICATE-----".bytes()
     end: "-----END CERTIFICATE-----".bytes()
     count := 0
@@ -951,7 +951,7 @@ priv pem_certificates: fn(raw: [U8]) -> Int __TLSFailure! {
     Ok(count)
 }
 
-priv private_key_check: fn(raw: [U8]) __TLSFailure! {
+priv private_key_check: fn(raw: [U8]) TLSFailure! {
     first := 0
     last := raw.len()
     loop first < last && __space(Int{raw[first]}, true) { first += 1 }
@@ -969,7 +969,7 @@ priv private_key_check: fn(raw: [U8]) __TLSFailure! {
 }
 
 // Strict base64 for one PEM body; returns the decoded byte count.
-priv pem_base64: fn(raw: [U8], start: Int, end: Int) -> Int __TLSFailure! {
+priv pem_base64: fn(raw: [U8], start: Int, end: Int) -> Int TLSFailure! {
     decoded := 0
     used := 0
     pads := 0
@@ -1074,7 +1074,7 @@ priv settle: fn(status: Int, sent: Int) -> Int Never! {
 
 // Sends the records the engine queued, then drops them: 0, or the socket
 // status that failed the send. Writes are sliced like __wait.
-priv flush: fn(&tls: __TLSState, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
+priv flush: fn(&tls: TLSState, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
     if tls.ssl.bio.tx.len() == 0 -> return Ok(0)
     status: send_queued(tls, end_ns, operation) ?? {
         tls.ssl.bio.tx.clear()
@@ -1084,7 +1084,7 @@ priv flush: fn(&tls: __TLSState, end_ns: Int, operation: String) -[Net, Time.Wai
     Ok(status)
 }
 
-priv send_queued: fn(&tls: __TLSState, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
+priv send_queued: fn(&tls: TLSState, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
     total: tls.ssl.bio.tx.len()
     at := 0
     loop at < total {
@@ -1111,7 +1111,7 @@ priv send_queued: fn(&tls: __TLSState, end_ns: Int, operation: String) -[Net, Ti
 
 // Queues what a readable socket holds for the engine: 0, or the socket
 // status that failed the read. An empty read is the end of the stream.
-__take: fn(&tls: __TLSState, end_ns: Int) -[Net, Time.Wait]> Int Never! {
+__take: fn(&tls: TLSState, end_ns: Int) -[Net, Time.Wait]> Int Never! {
     remaining: end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return 0
     slice: Duration{ns: if remaining > C_WAIT_SLICE_NS -> C_WAIT_SLICE_NS else -> remaining}
@@ -1137,22 +1137,22 @@ priv socket_status: fn(err: NetError, fallback: Int) -> Int Never! {
 
 // Waits out a WANT_READ or WANT_WRITE status: 0 when the engine can be
 // called again, or the socket status that ended the wait.
-priv await: fn(&tls: __TLSState, status: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
+priv await: fn(&tls: TLSState, status: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
     ready: __wait(tls.tcp, status_interest(status), end_ns, operation) ?? return Err(err)
     if status == C_WANT_READ && ready.readable -> return Ok(__take(tls, end_ns))
     Ok(0)
 }
 
 // One engine read of at most `limit` bytes (mbedtls_ssl_read).
-priv engine_read: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> __Got NetError! {
+priv engine_read: fn(&tls: TLSState, limit: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Got NetError! {
     status: engine_read_status(tls, limit, end_ns, operation) ?? return Err(err)
-    if status > 0 -> return Ok(__Got{status: status, bytes: byte_range(tls.buffer, 0, status)})
-    Ok(__Got{status: status, bytes: [U8]{}})
+    if status > 0 -> return Ok(Got{status: status, bytes: byte_range(tls.buffer, 0, status)})
+    Ok(Got{status: status, bytes: [U8]{}})
 }
 
 // One engine read of at most `limit` bytes into `tls.buffer`: the count, or
 // the settled status when no byte came.
-priv engine_read_status: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
+priv engine_read_status: fn(&tls: TLSState, limit: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
     size: if limit < C_RECORD_BYTES -> limit else -> C_RECORD_BYTES
     status := 0
     if sslmsg.ssl_read(tls.ssl, tls.buffer, size, tls.rng) == {
@@ -1168,7 +1168,7 @@ priv engine_read_status: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation
 
 // A failed handshake frees the engine and wipes the buffers before its error
 // goes back, as close does.
-priv run_handshake: fn(&tls: __TLSState, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
+priv run_handshake: fn(&tls: TLSState, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
     if handshake_steps(tls, server_name, end_ns) == .Err(error) {
         release(tls)
         return Err(error)
@@ -1176,7 +1176,7 @@ priv run_handshake: fn(&tls: __TLSState, server_name: String, end_ns: Int) NetEr
     Ok()
 }
 
-priv handshake_steps: fn(&tls: __TLSState, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
+priv handshake_steps: fn(&tls: TLSState, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
     loop {
         status := 0
         if ssltls.ssl_handshake(tls.ssl, tls.rng) == .Err(e) {
@@ -1238,7 +1238,7 @@ priv wants_write: fn(interest: NetReadyInterest) -> Bool Never! {
     }
 }
 
-__read: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8] IOError! {
+__read: fn(&tls: TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8] IOError! {
     if tls.closed -> return Err(io_error(.Read, "TLS stream is closed"))
     if tls.pending.len() > 0 {
         count: if max_bytes < tls.pending.len() -> max_bytes else -> tls.pending.len()
@@ -1268,7 +1268,7 @@ __read: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8
 
 // read_into under the stream's lock: __read's steps, the bytes appended to
 // `buffer` rather than returned.
-priv read_into_locked: fn(&tls: __TLSState, &buffer: [U8], limit: Int, end_ns: Int) -[Net, Time.Wait]> Int IOError! {
+priv read_into_locked: fn(&tls: TLSState, &buffer: [U8], limit: Int, end_ns: Int) -[Net, Time.Wait]> Int IOError! {
     if tls.closed -> return Err(io_error(.Read, "TLS stream is closed"))
     if tls.pending.len() > 0 {
         count: if limit < tls.pending.len() -> limit else -> tls.pending.len()
@@ -1311,7 +1311,7 @@ priv read_into_each: fn(stream: TLSStream, &buffer: [U8], limit: Int, wait: Dura
 }
 
 // read_into_each under the stream's lock.
-priv read_into_waiting: fn(&tls: __TLSState, &buffer: [U8], limit: Int, wait: Duration) -[Net]> Int IOError! {
+priv read_into_waiting: fn(&tls: TLSState, &buffer: [U8], limit: Int, wait: Duration) -[Net]> Int IOError! {
     if tls.closed -> return Err(io_error(.Read, "TLS stream is closed"))
     if tls.pending.len() > 0 {
         count: if limit < tls.pending.len() -> limit else -> tls.pending.len()
@@ -1350,7 +1350,7 @@ priv read_into_waiting: fn(&tls: __TLSState, &buffer: [U8], limit: Int, wait: Du
 
 // flush with each socket write bounded by `wait`: 0, or the socket status
 // that failed the send.
-priv flush_each: fn(&tls: __TLSState, wait: Duration) -[Net]> Int NetError! {
+priv flush_each: fn(&tls: TLSState, wait: Duration) -[Net]> Int NetError! {
     total: tls.ssl.bio.tx.len()
     at := 0
     loop at < total {
@@ -1372,7 +1372,7 @@ priv flush_each: fn(&tls: __TLSState, wait: Duration) -[Net]> Int NetError! {
 
 // await with one socket wait bounded by `wait`: 0 when the engine can be
 // called again, or the socket status that ended the wait.
-priv await_each: fn(&tls: __TLSState, status: Int, wait: Duration) -[Net]> Int NetError! {
+priv await_each: fn(&tls: TLSState, status: Int, wait: Duration) -[Net]> Int NetError! {
     if status == C_WANT_WRITE {
         if tls.tcp.ready(NetReadyInterest.Write, deadline: wait) == .Err(err) {
             if timed_out(err) -> return Err(deadline_error("tls read"))
@@ -1403,7 +1403,7 @@ priv stopped: fn(err: NetError) -> Bool Never! {
 
 // read_text under the stream's lock: the bytes it takes past the text it
 // returns go back in front of `pending`.
-__read_text: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> String IOError! {
+__read_text: fn(&tls: TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> String IOError! {
     bytes := [U8]{}
     loop {
         want: if bytes.len() < max_bytes -> max_bytes - bytes.len() else -> 1
@@ -1430,7 +1430,7 @@ __read_text: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]
     }
 }
 
-priv unread: fn(&tls: __TLSState, bytes: [U8]) Never! {
+priv unread: fn(&tls: TLSState, bytes: [U8]) Never! {
     if bytes.len() == 0 -> return
     out := bytes.copy()
     loop b in tls.pending -> out.push(b)
@@ -1512,13 +1512,13 @@ priv utf8_width: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // Moves what one engine queued for the network to the other's input, so a
 // test runs both ends of a handshake in memory.
-priv test_pump: fn(&from: __TLSState, &to: __TLSState) Never! {
+priv test_pump: fn(&from: TLSState, &to: TLSState) Never! {
     to.ssl.bio.rx.extend(from.ssl.bio.tx)
     from.ssl.bio.tx.clear()
 }
 
 // One engine handshake call: 0 when it is over, else the status it stopped at.
-priv test_step: fn(&tls: __TLSState) -> Int Never! {
+priv test_step: fn(&tls: TLSState) -> Int Never! {
     if tls.ssl.state == ssldefs.SSL_HANDSHAKE_OVER -> return 0
     if ssltls.ssl_handshake(tls.ssl, tls.rng) == .Err(e) -> return engine_status(e)
     0
@@ -1547,7 +1547,7 @@ priv test_zero: fn(bytes: [U8]) -> Bool Never! {
 }
 
 // Whether a state's engine was freed and its buffers wiped.
-priv test_released: fn(tls: __TLSState) -> Bool Never! {
+priv test_released: fn(tls: TLSState) -> Bool Never! {
     !tls.ssl.has_conf && tls.ssl.tpool.len() == 0 && tls.ssl.spool.len() == 0 && tls.ssl.in_buf.len() == 0 && tls.pending.len() == 0 && test_zero(tls.buffer)
 }
 
@@ -1637,7 +1637,7 @@ priv test_released: fn(tls: __TLSState) -> Bool Never! {
 
 // Buffers decrypted bytes for `ready`; true once a read would not block.
 // Only a `readable` socket is read, once.
-priv fill_pending: fn(&tls: __TLSState, operation: IOOperation, end_ns: Int, readable: Bool) -[Net, Time.Wait]> Bool IOError! {
+priv fill_pending: fn(&tls: TLSState, operation: IOOperation, end_ns: Int, readable: Bool) -[Net, Time.Wait]> Bool IOError! {
     if tls.pending.len() > 0 || tls.read_eof -> return Ok(true)
     socket := readable
     loop {
@@ -1663,7 +1663,7 @@ priv fill_pending: fn(&tls: __TLSState, operation: IOOperation, end_ns: Int, rea
     }
 }
 
-priv write_all: fn(&tls: __TLSState, bytes: [U8], end_ns: Int) IOError! -[Net, Time.Wait]> {
+priv write_all: fn(&tls: TLSState, bytes: [U8], end_ns: Int) IOError! -[Net, Time.Wait]> {
     if tls.closed || tls.write_closed -> return Err(io_error(.Write, "TLS stream is closed"))
     offset := 0
     loop offset < bytes.len() {
@@ -1677,7 +1677,7 @@ priv write_all: fn(&tls: __TLSState, bytes: [U8], end_ns: Int) IOError! -[Net, T
 
 // One engine write (mbedtls_ssl_write): the count it took, after its records
 // were sent.
-priv write_chunk: fn(&tls: __TLSState, chunk: [U8], end_ns: Int) -[Net, Time.Wait]> Int IOError! {
+priv write_chunk: fn(&tls: TLSState, chunk: [U8], end_ns: Int) -[Net, Time.Wait]> Int IOError! {
     loop {
         status := 0
         if sslmsg.ssl_write(tls.ssl, chunk, chunk.len(), tls.rng) == {
@@ -1696,7 +1696,7 @@ priv write_chunk: fn(&tls: __TLSState, chunk: [U8], end_ns: Int) -[Net, Time.Wai
     }
 }
 
-priv send_close_notify: fn(&tls: __TLSState, end_ns: Int, operation: String) IOError! -[Net, Time.Wait]> {
+priv send_close_notify: fn(&tls: TLSState, end_ns: Int, operation: String) IOError! -[Net, Time.Wait]> {
     if tls.write_closed -> return Ok()
     loop {
         status := 0
@@ -1765,7 +1765,7 @@ priv deadline_end: fn(deadline: Duration, operation: String) -> Int NetError! {
     Ok(now + deadline.ns)
 }
 
-__state: fn(stream: TLSStream) -> Shared<__TLSState>? Never! {
+__state: fn(stream: TLSStream) -> Shared<TLSState>? Never! {
     if stream.state == .Val(state) -> return Val(state.copy())
     None
 }
@@ -1910,7 +1910,7 @@ priv empty_identity: fn() -> TLSPeerIdentity Never! {
 // engine's parsed X509Crt chain, leaf first (mbedtls_ssl_get_peer_cert), so
 // every certificate x509 accepted reports them and no second DER walk can
 // refuse one.
-priv verified_peer_identity: fn(ssl: ssldefs.SSLContext, server_name: String) -> TLSPeerIdentity __TLSFailure! {
+priv verified_peer_identity: fn(ssl: ssldefs.SSLContext, server_name: String) -> TLSPeerIdentity TLSFailure! {
     chain := [TLSCertificate]{}
     if ssl.session >= 0 && ssl.session < ssl.spool.len() && ssl.spool[ssl.session].peer_cert == .Val(certs) {
         loop crt in certs -> chain.push(certificate(crt))

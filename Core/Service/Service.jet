@@ -563,8 +563,8 @@ ServiceTree: struct {
     priv snapshot: String?
     priv event_log: [String]
     priv dead_letters: [String]
-    priv idempotency: [__IdempotencyRecord]
-    priv directory: [__DirectoryRecord]
+    priv idempotency: [IdempotencyRecord]
+    priv directory: [DirectoryRecord]
     priv draining: [String]
     priv partitioned: [String]
     priv workflows: [__TreeWorkflowState]
@@ -616,13 +616,13 @@ __TreeStateAuthority: struct {
     adapter: __TreeStateAdapter
 }
 
-__IdempotencyRecord: struct {
+priv IdempotencyRecord: struct {
     key: String
     endpoint: ServiceEndpoint
     message: String
 }
 
-__DirectoryRecord: struct {
+priv DirectoryRecord: struct {
     name: String
     endpoint: ServiceEndpoint
     proof: String
@@ -672,8 +672,8 @@ tree: fn(name: String) -> ServiceTree Never! {
         snapshot: None,
         event_log: [String]{},
         dead_letters: [String]{},
-        idempotency: [__IdempotencyRecord]{},
-        directory: [__DirectoryRecord]{},
+        idempotency: [IdempotencyRecord]{},
+        directory: [DirectoryRecord]{},
         draining: [String]{},
         partitioned: [String]{},
         workflows: [__TreeWorkflowState]{},
@@ -1019,7 +1019,7 @@ __PendingEntry: struct {
     store: String
 }
 
-__PendingQueue: struct {
+priv PendingQueue: struct {
     store: String
     authority: String
     worker: String
@@ -1028,7 +1028,7 @@ __PendingQueue: struct {
 }
 
 __PendingRegistry: struct {
-    queues: [__PendingQueue]
+    queues: [PendingQueue]
 }
 
 // In-process serialization of durable authority store work; the file locks
@@ -1042,7 +1042,7 @@ init_service_registry: fn() -> Shared<__ServiceRegistry> Never! {
 }
 
 init_pending_registry: fn() -> Shared<__PendingRegistry> Never! {
-    Shared{__PendingRegistry{queues: [__PendingQueue]{}}}
+    Shared{__PendingRegistry{queues: [PendingQueue]{}}}
 }
 
 init_authority_gate: fn() -> Shared<__AuthorityGate> Never! {
@@ -1953,12 +1953,12 @@ state_append: fn(authority: __TreeStateAuthority, record: String) ServiceError! 
 // Rollout journal: the generation, upgrade receipt and per-worker route
 // state, checksummed and published atomically beside the state store, so a
 // restarted controller resumes the same rollout instead of guessing.
-__RolloutWorker: struct {
+priv RolloutWorker: struct {
     name: String
     generation: Int
 }
 
-__RolloutDirectory: struct {
+priv RolloutDirectory: struct {
     name: String
     worker: String
     generation: Int
@@ -1968,17 +1968,17 @@ __RolloutState: struct {
     generation: Int
     previous_generation: Int
     last_upgrade: ServiceUpgradeReceipt?
-    workers: [__RolloutWorker]
+    workers: [RolloutWorker]
     draining: [String]
     partitioned: [String]
-    directory: [__RolloutDirectory]
+    directory: [RolloutDirectory]
 }
 
 rollout_snapshot: fn(tree: ServiceTree) -> __RolloutState Never! {
-    workers := [__RolloutWorker]{}
-    loop worker in tree.workers -> workers.push(__RolloutWorker{name: worker.name, generation: worker.endpoint.generation})
-    directory := [__RolloutDirectory]{}
-    loop record in tree.directory -> directory.push(__RolloutDirectory{name: record.name, worker: record.endpoint.worker, generation: record.endpoint.generation})
+    workers := [RolloutWorker]{}
+    loop worker in tree.workers -> workers.push(RolloutWorker{name: worker.name, generation: worker.endpoint.generation})
+    directory := [RolloutDirectory]{}
+    loop record in tree.directory -> directory.push(RolloutDirectory{name: record.name, worker: record.endpoint.worker, generation: record.endpoint.generation})
     __RolloutState{generation: tree.generation, previous_generation: tree.previous_generation, last_upgrade: tree.last_upgrade, workers: workers, draining: tree.draining, partitioned: tree.partitioned, directory: directory}
 }
 
@@ -2156,7 +2156,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> __RolloutState ServiceErro
     }
     if last_upgrade == None && previous != 0 -> return Err(state_error("rollout journal has a previous generation without a receipt"))
     worker_count: rollout_read_count(lines, "worker_count")
-    workers := [__RolloutWorker]{}
+    workers := [RolloutWorker]{}
     loop _ in 0..<worker_count {
         name: rollout_read_frame(lines, "worker")
         rollout_name(name, "worker")
@@ -2169,7 +2169,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> __RolloutState ServiceErro
         loop seen in workers {
             if seen.name == name -> return Err(state_error("rollout journal contains a duplicate worker"))
         }
-        workers.push(__RolloutWorker{name: name, generation: worker_generation})
+        workers.push(RolloutWorker{name: name, generation: worker_generation})
     }
     draining_count: rollout_read_count(lines, "draining_count")
     draining := [String]{}
@@ -2188,7 +2188,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> __RolloutState ServiceErro
         partitioned.push(name)
     }
     directory_count: rollout_read_count(lines, "directory_count")
-    directory := [__RolloutDirectory]{}
+    directory := [RolloutDirectory]{}
     loop _ in 0..<directory_count {
         name: rollout_read_frame(lines, "directory_name")
         worker: rollout_read_frame(lines, "directory_worker")
@@ -2200,7 +2200,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> __RolloutState ServiceErro
             if seen.name == name -> duplicate = true
         }
         if worker_generation < 1 || duplicate -> return Err(state_error("rollout journal directory entry is invalid"))
-        directory.push(__RolloutDirectory{name: name, worker: worker, generation: worker_generation})
+        directory.push(RolloutDirectory{name: name, worker: worker, generation: worker_generation})
     }
     if lines.next < lines.lines.len() -> return Err(state_error("rollout journal has trailing records"))
     Ok(__RolloutState{generation: generation, previous_generation: previous, last_upgrade: last_upgrade, workers: workers, draining: draining, partitioned: partitioned, directory: directory})
@@ -2329,7 +2329,7 @@ restore_rollout_state: fn(tree: &ServiceTree) ServiceError! {
         index: worker_named(tree, entry.worker) ?? return Err(ServiceError.Unknown("restored directory worker disappeared"))
         endpoint: tree.workers[index].endpoint
         if endpoint.generation != entry.generation -> return Err(state_error("rollout journal directory generation does not match its worker"))
-        tree.directory.push(__DirectoryRecord{name: entry.name, endpoint: endpoint, proof: directory_sign(tree.authority, tree.name, entry.name, endpoint)})
+        tree.directory.push(DirectoryRecord{name: entry.name, endpoint: endpoint, proof: directory_sign(tree.authority, tree.name, entry.name, endpoint)})
     }
 }
 
@@ -3266,7 +3266,7 @@ directory_validate: fn(authority: String, tree_name: String, name: String, endpo
 
 // Exact lookup, then generation, proof, authority, running and draining.
 directory_resolve: fn(tree: ServiceTree, name: String) -> ServiceEndpoint ServiceError! {
-    entry := __DirectoryRecord?{None}
+    entry := DirectoryRecord?{None}
     loop record in tree.directory {
         if record.name == name {
             entry = Val(record)
@@ -3654,7 +3654,7 @@ pending_queue_slot: fn(pending: &__PendingRegistry, store: String, endpoint: Ser
         queue: pending.queues[index]
         if queue.store == identity && queue.authority == endpoint.authority && queue.worker == endpoint.worker && queue.generation == endpoint.generation -> return index
     }
-    pending.queues.push(__PendingQueue{store: identity, authority: endpoint.authority, worker: endpoint.worker, generation: endpoint.generation, entries: [__PendingEntry]{}})
+    pending.queues.push(PendingQueue{store: identity, authority: endpoint.authority, worker: endpoint.worker, generation: endpoint.generation, entries: [__PendingEntry]{}})
     pending.queues.len() - 1
 }
 
@@ -4306,7 +4306,7 @@ send_durable: fn(tree: &ServiceTree, endpoint: ServiceEndpoint, message: String,
         loop record in tree.idempotency {
             if record.key == idempotency_key -> seen = true
         }
-        if !seen -> tree.idempotency.push(__IdempotencyRecord{key: idempotency_key, endpoint: endpoint, message: message})
+        if !seen -> tree.idempotency.push(IdempotencyRecord{key: idempotency_key, endpoint: endpoint, message: message})
     }
     Ok(delivery)
 }
@@ -4875,9 +4875,9 @@ directory_register: fn(tree: &ServiceTree, name: String, endpoint: ServiceEndpoi
     }
     if tree.directory.len() >= 4096 && existing == None -> return Err(ServiceError.Policy("service directory entry limit exceeded"))
     proof: directory_sign(tree.authority, tree.name, name, endpoint)
-    previous := __DirectoryRecord?{None}
+    previous := DirectoryRecord?{None}
     if existing == .Val(at) -> previous = tree.directory.remove(at, .Slot)
-    tree.directory.push(__DirectoryRecord{name: name, endpoint: endpoint, proof: proof})
+    tree.directory.push(DirectoryRecord{name: name, endpoint: endpoint, proof: proof})
     if rollout_store_write(tree) == {
         .Err(error) -> {
             _: tree.directory.pop()
