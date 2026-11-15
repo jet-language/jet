@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106090,
+    "rev": 106091,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101613,6 +101613,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c14 boundary decision (Main): two direct kernel-call sites stay as the boundary of 'no direct mmap', each with a stated reason at the site: the loader's emitted OS_SYS_MUNMAP executor rows, which run before the runtime and its sentry exist, and Assets/FaultReport/report.S, a relocation-free dying-path blob that cannot call Jet. The allocator's large-block mremap goes through the kernel primitive family (an untracked heap remap beside os_map and os_unmap), not a raw syscall. SUB CardCloser-3-kernel-maps-untracked-form is queued; the remap follow-up is stacked on it."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c14 decision (Main, within approved scope): the sentry tracks live storage precisely. (1) The allocator's own slab, large-object and page-map mappings are the heap; per-block MemStorage registration covers them, and registering whole slabs would make freed blocks look live. They still go through the kernel map primitive, in its untracked form, not a raw mmap. (2) Mappings on paths that must not allocate (Fault, auxv and Secret pages) and the ProductionReceipt scratch also use the untracked kernel form, each with a stated reason. The comptime reply mapping named in c14 stays tracked; only a separate refused-frame scratch on the dying path may be untracked. (3) Done means: a grep of Compiler/ and JetRuntime for raw mmap/munmap finds only the kernel primitive, and the c14 R0801 case passes on every tier. Owner: CardCloser-3."
         },
         {
@@ -101847,7 +101852,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T10:04:58.544Z",
+      "updated": "2026-11-15T10:21:58.619Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -217793,6 +217798,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T10:21:58.619Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T10:12:02.201Z",
       "by": "Main",
