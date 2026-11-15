@@ -33,7 +33,9 @@
 //   any case that runs `jet fmt`, whose unformatted bytes are the test;
 // - Compiler/JetDevserver (#5931), which doesn't compile;
 // - evidence: a source a recorded run under Tools/agent-eval/ pins by line;
-//   its receipts stay as run, so their pins don't move;
+//   its receipts stay as run, so their pins don't move; and the agent
+//   workload corpus (tests/agent_workloads/ and the copies its cases run),
+//   whose recorded baselines and SHA256SUMS pin its bytes by digest;
 // - does not parse: a negative fixture `jet fmt` refuses, found while it runs.
 //
 // One bad source never stalls a run: each formatter run has a time limit
@@ -86,9 +88,9 @@ RULE_EVIDENCE: "evidence"
 RULE_UNPARSED: "does not parse"
 
 // Trees the corpus leaves out whole, with their rule.
-EXCLUDED_TREES: [String]{"tests/cases/fmt", "Compiler/JetDevserver/"}
+EXCLUDED_TREES: [String]{"tests/cases/fmt", "Compiler/JetDevserver/", "tests/agent_workloads/", "tests/cases/agent_workloads/"}
 
-EXCLUDED_TREE_RULES: [String]{RULE_FORMATTER_INPUT, RULE_DEVSERVER}
+EXCLUDED_TREE_RULES: [String]{RULE_FORMATTER_INPUT, RULE_DEVSERVER, RULE_EVIDENCE, RULE_EVIDENCE}
 
 ADAPTATION_FILE: "after.jet"
 
