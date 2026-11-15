@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6887,
-    "rev": 103645,
+    "nextNum": 6888,
+    "rev": 103650,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -54573,12 +54573,12 @@
         },
         {
           "n": 8,
-          "text": "Main probe 2026-11-10 on the t17a compiler (dev c2cecce162): `#Context(allocator: …)` blocks run, but `context.allocator` and `context.scratch` give E0107 (no `context` name), `#Context(frame_index: 3)` gives E0761 (only allocator, logger and deadline exist), and `#ContextKey` is not recognized (E0357 casing on the constant). The context hooks take effect: context.on_stop (D-CONTEXT1=A: `on_stop: fn(debug.Stop)`, the stop handler that a failed assert or panic reaches), context.print (print style) and context.thread (thread index) are readable and settable through #Context, and a replaced stop handler runs on a failed assert. Goldens on O0, O1 and O2.",
+          "text": "The context hooks take effect: context.on_stop (D-CONTEXT1=A: `on_stop: fn(debug.Stop)`, the handler a failed assert or panic reaches), context.print and context.thread are readable, on_stop and print are settable through #Context, and a replaced stop handler runs on a failed assert. Proof: `jet test Compiler --profile golden --filter Concurrency/Context` (ContextOnStop, ContextPrintStyle, ContextPureReads) on O0, O1 and O2; all 24 rows pass on dev a652c3674b with gate-p141.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T03:28:41.153Z"
+          "at": "2026-11-15T03:28:06.690Z"
         },
         {
           "n": 9,
@@ -54713,8 +54713,8 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-15T00:25:31.886Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:28:06.690Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
@@ -55173,11 +55173,12 @@
         {
           "n": 5,
           "text": "(was #2484 c1) Game dev source implements Play In Editor, Simulate In Editor and return-to-editing while retaining selected world state [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:02.176Z"
+          "evidence": "Moved to #6887 c3: game tooling gets its own card",
+          "at": "2026-11-15T03:28:07.603Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
@@ -55289,12 +55290,12 @@
         },
         {
           "n": 19,
-          "text": "(was #2850 c1) The ui subsystem (D-GAME-PLATFORM1=A; the owner renamed ray to ui on 2026-11-08) uses one shared input, atlas decode, sprite draw and transcript model for keyboard/gamepad state and deterministic headless rendering on O0, O1, O2, compile-time code and web where applicable, with the native window adapter consuming the same facts.",
+          "text": "The ui subsystem (D-GAME-PLATFORM1=A; the owner renamed ray to ui on 2026-11-08) uses one shared input, atlas decode, sprite draw and transcript model for keyboard and gamepad state, with deterministic headless rendering that matches on O0, O1, O2, compile time and web where applicable; the native window adapter reads the same facts. Proof: `jet test Compiler --profile golden --filter Ui/Headless` on every tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:01:17.045Z"
+          "at": "2026-11-15T03:28:04.808Z"
         },
         {
           "n": 20,
@@ -55316,12 +55317,12 @@
         },
         {
           "n": 22,
-          "text": "D-GAME-PLATFORM1=A (the owner renamed ray to ui on 2026-11-08): two independent subsystems shared by games and apps: ui (windows, frames, present(pixels, palette)/present(rgba), immediate-mode drawing, per-window events, gamepads) and audio (open(rate), queue(samples), queued(), mixer with voices and buses); several windows and outputs per program; ui.headless and audio.headless record checksums; core.game and gui compose them with no device code; core.game.raylib moves into ui and audio and is deleted (#6701 c1)",
+          "text": "D-GAME-PLATFORM1=A is built: two independent subsystems shared by games and apps: ui (windows, frames, present(pixels, palette) and present(rgba), immediate-mode drawing, per-window events, gamepads) and audio (open(rate), queue(samples), queued(), a mixer with voices and buses); several windows and outputs per program; ui.headless and audio.headless record checksums; core.game composes them with no device code; Core/Game/Raylib.jet is deleted (owner 2026-11-08: no raylib naming anywhere). Proof: `git ls-files Core | grep -i raylib` prints nothing and `jet test Compiler --profile golden --filter Ui/` and `--filter Audio/` pass on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:01:18.434Z"
+          "at": "2026-11-15T03:28:05.733Z"
         },
         {
           "n": 23,
@@ -55346,8 +55347,8 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:36:57.362Z",
-      "updated": "2026-11-13T02:19:53.334Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:28:07.603Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
@@ -104028,6 +104029,149 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:25:55.334Z",
       "updated": "2026-11-15T03:25:55.334Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c087ot9q",
+      "num": 6887,
+      "title": "core.game: parallel system scheduling, the frame schedule, and editor, overlay and packaging tools",
+      "body": "Destination: core.game runs systems in parallel from their declared access (D-SYSSCHED1=A) on one canonical frame schedule, and game developers get the tooling the ratified game designs promise: play and simulate in the editor, pause and frame advance, an in-game overlay debugger on the real window loop, typed launcher profiles, asset watch events, packaging with receipts, consented crash reporting, release devtools policy, and a complete `jet new game` scaffold.\n\nWhy it matters: these are what make Jet usable for real games rather than demos; each was designed and none is proven today.\n\nDecisions: D-SYSSCHED1=A, D-GAME-ECS1=B, D-GAME-ENTITY1=A, D-GAME-BACKEND1=A, D-GAME-BUDGET1=A. Platform (windows, pixels, audio, input) is #5035; assets and hot reload are #238.\n\nSource: #5035 c5-c18, c20, c23 (archived #2484, #2485, #2490, #2491, #2967, #3645).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Systems run in parallel by default from the conflict graph of each system's parameter access; conflicting systems keep source order; commands, events and logs merge in declaration order at each stage end; `schedule: .Serial` and `schedule: .Manual(stages)` are the expert forms, and a manual stage whose systems conflict is refused (D-SYSSCHED1=A). Proof: `jet test Compiler --profile golden --filter Game/SystemSchedule` prints the same on O0, O1 and O2 under each schedule, and `jet test Compiler --profile ui --filter game_manual_stage_conflict`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 2,
+          "text": "Checked resource and hardware accesses produce one canonical frame schedule whose completion handles keep the resource guards until the provider completes. Proof: `jet test Compiler --profile golden --filter Game/FrameSchedule` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 3,
+          "text": "Play In Editor, Simulate In Editor and return to editing keep the selected world state, and pause and frame advance are real state transitions (frame advance only while paused). Proof: `jet test Compiler --profile cases --filter game/editor_play_modes`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 4,
+          "text": "Ejecting a selection and the explicit Keep or Discard operations work with no implicit write to authored source. Proof: `jet test Compiler --profile cases --filter game/editor_keep_discard`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 5,
+          "text": "The in-game overlay runs on the real window, frame, input and draw loop with typed console, stat, category and error-pause state, and its debugger categories and actor and world selection read the shared observation stream. Proof: `jet test Compiler --profile golden --filter Game/Overlay` (headless).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 6,
+          "text": "Typed launcher profiles record target, mode and phase outcomes and are read by the headless path. Proof: `jet test Compiler --profile cases --filter game/launcher_profiles`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 7,
+          "text": "Declared asset watchers publish changed, created, deleted and skipped session events through the one bridge. Proof: `jet test Compiler --profile cases --filter game/asset_watch_events`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 8,
+          "text": "Game packaging has its phase and profile CLI with help, and each selected phase writes a machine receipt with target, profile, backend, source, result and error facts. Proof: `jet test Compiler --profile cases --filter cli/game_package_receipts`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 9,
+          "text": "Crash reporting is an explicit consent and profile choice with inspectable routing, retention and upload policy, and an unavailable upload transport fails closed. Proof: `jet test Compiler --profile cases --filter game/crash_report_consent`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 10,
+          "text": "The target's ReleaseDevtoolsPolicy controls inspector data allocation, collection, publication and control, and a stripped release never builds the debug session. Proof: `jet test Compiler --profile cases --filter game/release_devtools_policy`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 11,
+          "text": "Missing renderer authority gives the registered E1803 receipt path. Proof: `jet test Compiler --profile ui --filter game_renderer_authority_missing`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 12,
+          "text": "`jet new game` writes the complete scaffold (role homes, a runnable scene, profiles, error-pause behaviour, bounded remote protocol, typed tooling metadata and real session identity) and the result builds and runs. Proof: `jet test Compiler --profile cases --filter cli/jet_new_game`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:03.889Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "game",
+        "tooling"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:28:03.889Z",
+      "updated": "2026-11-15T03:28:03.889Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -209447,6 +209591,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:28:07.603Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T03:28:06.691Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#8: drop the stale 2026-11-10 probe narrative; add proof; was: Main probe 2026-11-10 on the t17a compiler (dev c2cecce162): `#Context(allocator: …)` blocks run, but `context.allocator` and `context.scratch` give E0107 (no `context` name), `#Context(frame_index: 3"
+    },
+    {
+      "at": "2026-11-15T03:28:05.733Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0776o2m",
+      "note": "#22: add proof; owner naming order; was: D-GAME-PLATFORM1=A (the owner renamed ray to ui on 2026-11-08): two independent subsystems shared by games and apps: ui (windows, frames, present(pixels, palette)/present(rgba), immediate-mode drawing"
+    },
+    {
+      "at": "2026-11-15T03:28:04.808Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0776o2m",
+      "note": "#19: strip debris; proof; was: (was #2850 c1) The ui subsystem (D-GAME-PLATFORM1=A; the owner renamed ray to ui on 2026-11-08) uses one shared input, atlas decode, sprite draw and transcript model for keyboard/gamepad state and det"
+    },
+    {
+      "at": "2026-11-15T03:28:03.889Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c087ot9q",
+      "note": "core.game: parallel system scheduling, the frame schedule, and editor, overlay and packaging tools"
+    },
     {
       "at": "2026-11-15T03:26:15.891Z",
       "by": "TowerKeeper-1",
