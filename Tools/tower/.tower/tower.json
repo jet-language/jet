@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6975,
-    "rev": 106104,
+    "rev": 106105,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75672,11 +75672,11 @@
         {
           "n": 38,
           "text": "A record-Core run of a program whose foreign facts carry C rows binds its Core calls to the shipped Core code (core_calls > 0). This regressed in eab31483df: with C rows, bind is false and the object is built before IRChecks.core is set. Proof: tests/cases/core/a_run_binds_its_core_calls_to_the_shipped_core_code.case passes with its known-failing row removed, plus a second program with C rows showing core_calls > 0 (fixed by S7b-2 option A).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T15:39:24.514Z"
+          "evidence": "p172 (dev 85bdfe8f4a), 2026-11-15, with the census environment (devshell PATH plus Lander/musl.env): tests/cases/core/a_run_binds_its_core_calls_to_the_shipped_core_code.case PASS (no known-failing row); tests/cases/core/a_run_that_links_c_binds_its_core_calls_to_the_core_object.case PASS. That second program has C rows and asserts ir.build core_calls is not 0. PrecompiledCore-5 also ran a third C-rows program (base64.decode, core.math is_even, labs): exit 0, core_calls=1, native.link 2.2 MB. An earlier FAIL was environmental: without musl.env, jet run stops at E2105, no musl libc.a on LIBRARY_PATH.",
+          "at": "2026-11-15T10:52:46.607Z"
         },
         {
           "n": 39,
@@ -75723,7 +75723,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T10:43:37.233Z",
+      "updated": "2026-11-15T10:52:46.607Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -96701,65 +96701,6 @@
       "completedAt": "2026-11-12T11:08:41.159Z"
     },
     {
-      "id": "c0828za3",
-      "num": 6766,
-      "title": "Diagnostic coverage credits orphan snapshot text that no producer still prints",
-      "body": "Found by G5DevX-1 on 2026-11-12 during the #3720 c79 id sweep. tests/fixtures/jetpack-diagnostics is read only as snapshot text: tests/guards/diagnostics_coverage.jet:147 (dc_snapshot_texts) and Compiler/JetTestKit Ui.jet:682 (kit_ui_coverage) both credit it as rendered coverage, but neither checks that a producer still prints it. Live producers have moved on. JetOS/Source/LoadValidate.jet:18 E0979 now renders 'a bare host selects system.<host> in ./package.jet…', while the snapshot still holds the old decision-id text and ./config.jet. EnvModel ModuleEval/EnvPlanBuilder.jet:372 E1327 renders 'an environment image projects…', while module-eval-diagnostics/E1327.stderr holds a decision-id line and an old Fix. The jetpack_jetos cases are opt-in (-- --ignored), so nothing re-renders them. This breaks I4: a snapshot that no producer run checks is not evidence. Fix at the root, sweeping every snapshot directory first: tests/guards/diagnostics_snapshots.jet (which owns the snapshot-directory list, line 14) requires every listed snapshot to be compared against a live producer run in some suite that runs by default; orphan fixtures are re-rendered from their producer or deleted; dc_snapshot_texts and kit_ui_coverage count only producer-checked snapshots. Every stale text is re-blessed from its live producer, with no ids, in the same batch.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "Duplicate of #6752: its two criteria moved there as c5 and c6."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Every snapshot in the directories tests/guards/diagnostics_snapshots.jet lists is compared against a live producer run in a suite that runs by default. The guard fails when a snapshot has no producer, and orphans are re-rendered from their producer or deleted (sweep list in the evidence). Proof: the guard passes on dev, and a planted orphan snapshot makes it fail.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6752 c5 (diagnostic snapshot coverage is one stream).",
-          "at": "2026-11-12T10:46:23.599Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 2,
-          "text": "dc_snapshot_texts (tests/guards/diagnostics_coverage.jet) and kit_ui_coverage (JetTestKit Ui.jet) credit only producer-checked snapshots. The E0979 (jetpack_jetos) and E1327 (module-eval-diagnostics) snapshots match their live producers' text, with no decision ids. Proof: jet test tests/guards/diagnostics_coverage.jet, plus the producer tests for E0979 and E1327, all passing.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6752 c6.",
-          "at": "2026-11-12T10:46:24.742Z",
-          "closure": "duplicate"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G5"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-12T09:30:03.553Z",
-      "updated": "2026-11-12T10:46:27.058Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-12T10:46:27.058Z"
-    },
-    {
       "id": "c05c458o",
       "num": 6767,
       "title": "Remove card and criterion citations from tests/ comments",
@@ -97128,104 +97069,6 @@
       "updated": "2026-11-15T04:25:09.826Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 5
-    },
-    {
-      "id": "c0ufhyo0",
-      "num": 6773,
-      "title": "Ballot: a very large build-time constant in a binary (do nothing, a lint, or a compact encoding)",
-      "body": "The compile-time rule stays: a computable value is computed while compiling, at any size (owner, 2026-11-12, #6769). A 50 MB \"x\".repeat(...) folds into 100 MB of read-only data: on seed-b13, 100,227,872 bytes of binary against 232,544, a 6.5 s build against 0.7 s, and 147 MB of program peak RSS against 49 MB. This ballot decides whether Jet says or does anything about that cost. Draft by G11Speed-4: $JET_SCRATCH_ROOT/lanes/G11Speed/work/gen/ballots/large-build-time-constants.md.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "Duplicate: merged into #6769 c2; the ballot's card is #6769."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The owner ratifies the ballot, and its build card is created with the ratified option's criteria.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Merged into #6769 c2: the ballot follows from that card's failure.",
-          "at": "2026-11-12T10:46:34.245Z",
-          "closure": "duplicate"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G11"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-12T10:43:41.597Z",
-      "updated": "2026-11-12T10:46:35.972Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-12T10:46:35.972Z"
-    },
-    {
-      "id": "c0xjtafc",
-      "num": 6774,
-      "title": "Port switches: each Jet tool twin beats its original on wall time and peak memory, then the repository switches to it",
-      "body": "Owner, 2026-11-12: speed and size work must not block G4. #5072 (G4) proves each port's Jet twin does the same job (gauntlet tool entry, parity cases). This card owns the switch: under AGENTS.md's tooling rule, the repository keeps running an original until its twin passes Tools/gauntlet/PortBars.jet (lower wall time and lower peak memory on the same job, the reasoning checklist, tokens reported). The root work is #6759 (cold compile: a cold jet run peaks at 344-379 MB against 6.6-48 MB for the node originals).",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "Duplicate: merged into #6759 c6."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Merged into #6759 c6.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Merged into #6759 c6: the port switches wait on the same cold-compile speed and memory work.",
-          "at": "2026-11-12T10:46:30.366Z",
-          "closure": "duplicate"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G11"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-12T10:44:18.791Z",
-      "updated": "2026-11-12T10:46:32.218Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-12T10:46:32.218Z"
     },
     {
       "id": "c0wcqb47",
@@ -218124,6 +217967,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T10:52:46.607Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#38"
+    },
     {
       "at": "2026-11-15T10:43:37.233Z",
       "by": "Main",
