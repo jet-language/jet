@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106049,
+    "rev": 106050,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -96718,11 +96718,11 @@
         {
           "n": 5,
           "text": "The type-level comptime precheck builds no more than one child per compilation. Today run-cold-context builds 2 (the user constant NUL alone, then the Core SSL field defaults cert_profile and conf) before comptime.bodies builds its one. The precheck values that feed types are batched into one image and one child, keeping each value's own failure report and its I9 meaning. Proof: the jet run phase trace for run-cold-context shows at most one precheck child and one comptime.bodies child, with every comptime case and golden unchanged.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T08:17:50.341Z"
+          "evidence": "On p155 (dev 49836bd978), 2026-11-15 01:55: jet run --trace Tools/agent-eval/RunColdContext.jet -- --help with a fresh JET_STORE_DIR. The comptime phase builds one precheck program (comptime.build NUL, SSLConfig.cert_profile, SSLContext.conf; # comptime.programs_built = 1), and comptime.bodies builds none (0.000 s, items=1422). The remaining children are the sema.finalize land waves (a user wave: entry, fence; a Core-demand wave: mds, custom, the TLS labels, psk_mask), which c1 owns.",
+          "at": "2026-11-15T06:50:07.992Z"
         },
         {
           "n": 6,
@@ -96823,7 +96823,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-15T06:49:38.655Z",
+      "updated": "2026-11-15T06:50:07.992Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -218400,6 +218400,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T06:50:07.992Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ssy5wy",
+      "note": "#5"
+    },
     {
       "at": "2026-11-15T06:49:38.656Z",
       "by": "Main",
