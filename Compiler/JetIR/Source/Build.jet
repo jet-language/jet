@@ -794,13 +794,18 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     types := type_defs.move()
     ir_add_compiler_owned_types(types)
     ir_add_union_types(types, functions)
-    // A type row by its key, then by its name where no key names one.
+    // A type row by its key, then by its name where no key names one. A bare
+    // name is a Core signature's spelling (a jet_builtins row's
+    // `LockIdentity`) or a compiler-owned one; a program declares its types
+    // under their keys, so a program type of the same name never takes the
+    // name from the Core declaration: Core declarations claim names first.
     type_keys := [(key: String, at: Int, row: Int)]{}
     loop (index, definition) in types {
         type_keys.push((key: definition.key.copy(), at: index, row: index))
     }
     loop (index, definition) in types {
-        type_keys.push((key: definition.name.copy(), at: types.len() + index, row: index))
+        tier: if definition.key.starts_with("<corelib>/") -> 1 else -> 2
+        type_keys.push((key: definition.name.copy(), at: tier * types.len() + index, row: index))
     }
     type_rows: ir_first_rows(type_keys)
     impls: impl_defs.move()

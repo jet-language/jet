@@ -1,0 +1,19 @@
+use files: core.files
+
+// The program's own record, spelled like the record core.files' lock calls
+// return. The lock calls still read their own.
+LockKind: enum {
+    Source
+    Tool
+}
+
+LockIdentity: struct {
+    kind: LockKind
+    key: String
+}
+
+run: fn() IOError! -[FS, Env, IO]> {
+    mine: LockIdentity{kind: .Tool, key: "tool"}
+    held: files.try_lock("held.lock")
+    print("{mine.key} {held != None}")
+}
