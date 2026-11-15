@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6975,
-    "rev": 106113,
+    "rev": 106114,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60490,6 +60490,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c62 progress, 2026-11-15 06:20. GNU time maxrss of jet check Compiler/JetCli/Source/Cli/InspectBuild.jet, 2 runs each, taskset 8-15. p174 (dev 50b866567e): 3,195,172 and 3,201,360 kB, 16.2 and 17.1 s. p175 (dev 604cc6eb7a, adds local-reads-share-kind 604cc6eb7a and member-move-zeroable-r2 a7efc0d492): 3,083,708 and 3,087,372 kB, 22.1 and 12.2 s. That is -112 MB (-3.6%) from sharing one Local kind between equal reads (estimated 60-90 MiB). Earlier: 10.65 GB on b9687be981, 3.56 GB on p166. Remaining to the bar: about 2.06 GB. Next per the plan: compact keys, then release the AST and bodies after their last reader."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Main 2026-11-15, c62 plan (operational, within the criterion). GoalsA-1-4's p166 retention profile: load 856 MB, register +570 MB, bodies +1.2 GB and side/effects +400 MB are all held to the peak. Order: (a) box NodeKind.Local's TLocal (~138 MB); (b) a boxed extras row for SemaEffectNode's ~50 inline lists (its 61.5 MiB list is held 2-3 times during collect); (c) compact local and parameter symbol keys (module once plus an owner id; parameter keys alone took 72.7 MiB); (d) release each module's AST and checked bodies after their last reader, behind an explicit released flag with a debug assert on any read after release, on every tier; (e) a structured SymbolTable only if (c) and (d) miss the bar. The 24 B allocator header goes to #6842 c11 (CardCloser-3), a general runtime gain. Option<scalar> 32 B boxes (~26-46 MB) is a codegen layout change, recorded for later. Landed this night so far: text growth fills its class, function-key-shared, qualified-apply-writes-only, taint and effects index cuts in flight."
         },
         {
@@ -60858,7 +60863,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-15T10:59:11.916Z",
+      "updated": "2026-11-15T11:18:31.299Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -217482,6 +217487,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T11:18:31.300Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T11:14:59.543Z",
       "by": "Main",
