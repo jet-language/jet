@@ -25,6 +25,16 @@ step: node app.js
 cwd: .jet/build
 exit: 0
 stdout: = "3 4 5\n1 block kept\n"
+step: jet build --target web after_close.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 70
+stdout: = "closed\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "after_close.jet:22:" # the fault is located at the copy's line
+stderr: ~ "raw `list_copy` outside" # the gate's audit text follows
 end when
 step closednone: jet run -O0 after_close.jet
 exit: 70
