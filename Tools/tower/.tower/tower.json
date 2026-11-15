@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6851,
-    "rev": 102775,
+    "rev": 102791,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26294,7 +26294,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-11T12:59:34.979Z",
-      "updated": "2026-11-15T00:24:38.577Z",
+      "updated": "2026-11-15T02:11:03.347Z",
       "updatedBy": "Main",
       "claimedAt": "2026-11-15T00:09:14.389Z",
       "goals": [
@@ -27648,30 +27648,30 @@
         },
         {
           "n": 22,
-          "text": "(was #3160 c1) Observe success/absence/error labels and payload values through each legal boundary, including nested optional/result types [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #4741 c36)",
+          "text": "Success, absence and error labels and payload values of a three-state outcome are observable through each legal reflection boundary, including nested optional and result types. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/OutcomeCases`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:54:05.555Z"
+          "at": "2026-11-15T02:11:00.617Z"
         },
         {
           "n": 23,
-          "text": "(was #3160 c2) Reject ambiguous collapse such as treating a named case, optional unit and structural unit membership as automatically identical [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #4741 c37)",
+          "text": "Reflection does not treat a named unit case, an optional's absence and a structural unit as the same case; a program that relies on that collapse is refused with a UI snapshot. Proof: `jet test Compiler --profile ui --filter enum_cases_no_unit_collapse`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:54:07.238Z"
+          "at": "2026-11-15T02:11:01.555Z"
         },
         {
           "n": 24,
-          "text": "(was #3160 c3) If shared reflection/codec generation is adopted, it preserves builtin roles and does not falsely expose an infinite payload value domain as T.cases [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #4741 c38)",
+          "text": "The shared reflection and codec generation keeps the built-in roles of outcome cases and does not expose a payload's infinite value domain as `T.cases`. Proof: `jet test Compiler --profile cases --filter enum_cases_builtin_roles`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:54:08.949Z"
+          "at": "2026-11-15T02:11:02.470Z"
         }
       ],
       "refs": [
@@ -27700,7 +27700,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-15T02:10:59.484Z",
+      "updated": "2026-11-15T02:11:02.470Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 171,
       "goals": [
@@ -33528,38 +33528,42 @@
         {
           "n": 11,
           "text": "[#3509] Standard mode allows complete read-only reflection and explicit checked generation, and denies operations above level 5. Explicit opt-in unlocks the advanced suite (#3526). Prep runs on all levels; build runs only for artifacts; prepared artifacts never re-run prep. A pure cache hit preserves every observable effect (print count and order). The composed evidence is bound to one commit and independently reviewed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:07.022Z"
+          "evidence": "Moved to #6846 c2: levels and opt-in belong with the Compiler value and Meta effects",
+          "at": "2026-11-15T02:11:12.395Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
           "text": "[#3522] FunctionInfo, MethodInfo and callable types share one typed contract over CallableSignatureFact: params, labels, defaults (unexecuted), effects (inferred vs declared), captures (ownership/access/type), and specialization identity. The callable_catalog witness needs no string parsing, and changes invalidate dependents.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:07.706Z"
+          "evidence": "Moved to #6845 c1: typed callable facts, one focused reflection card",
+          "at": "2026-11-15T02:11:04.184Z",
+          "closure": "obsolete"
         },
         {
           "n": 13,
           "text": "[#3523] Every declaration and semantic fact family has a typed projection with stable identity and scope. Comments, docs and marker args stay distinct. Effective package settings are visible with their origins. Whole-program queries report completeness and revision.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:08.400Z"
+          "evidence": "Moved to #6845 c2: typed declaration facts",
+          "at": "2026-11-15T02:11:05.081Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
           "text": "[#3524] Runtime views keep typed values and identity (no display-string inference). Capture is complete or refused. Retention is explicit and inspectable. All levels call the same Prelude semantics (reflection/reflect-value golden).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:09.454Z"
+          "evidence": "Moved to #6845 c3: run-time reflection views",
+          "at": "2026-11-15T02:11:05.974Z",
+          "closure": "obsolete"
         },
         {
           "n": 15,
@@ -33582,20 +33586,22 @@
         {
           "n": 17,
           "text": "[#3538] Per-type entity buckets, counts, defaults and dispatch update from declarations, including generated ones, with real per-type storage. Standard mode.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:12.150Z"
+          "evidence": "Moved to #6845 c8: per-type entity buckets from .uses",
+          "at": "2026-11-15T02:11:08.660Z",
+          "closure": "obsolete"
         },
         {
           "n": 18,
           "text": "[#3539] One executable manifest covers the 40 peer families and every reflection registry row, each with a passing witness on its levels. Missing or inconclusive rows fail. Historical behavior is distinguished from observed Jai behavior. `meta_suite` test green.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:13.295Z"
+          "evidence": "Moved to #6845 c11: meta_suite manifest",
+          "at": "2026-11-15T02:11:10.507Z",
+          "closure": "obsolete"
         },
         {
           "n": 19,
@@ -33618,11 +33624,12 @@
         {
           "n": 21,
           "text": "(was #4758) Runtime typed hook points with prefix-scoped web decisions and zero unused cost",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:10:15.029Z"
+          "evidence": "Moved to #5009 c5: run-time hook points belong with the compiler event and hook card",
+          "at": "2026-11-15T02:11:14.292Z",
+          "closure": "obsolete"
         },
         {
           "n": 22,
@@ -33645,11 +33652,12 @@
         {
           "n": 25,
           "text": "(proof addition for criterion 13; reflection proposal B1) Proof: a golden reads a field's type, `default` and `offset` (D-META-REFLECT2 `FieldInfo`) in marker and derive `expand`, in `T.reflect()` from ordinary code and in `fn build`, for a struct with a defaulted field. Today the default read is E0956 and `Rock.reflect()` outside a template is E0311. `TypeInfo` lists associated constants with their values and generic bindings, and numeric forms report signedness and bit width. String `implements(\"X\")` reads are replaced by the typed `traits` list.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T15:56:33.320Z"
+          "evidence": "Moved to #6845 c4: field facts; TypeInfo and traits parts split to the next two criteria of the same card",
+          "at": "2026-11-15T02:11:06.833Z",
+          "closure": "obsolete"
         },
         {
           "n": 26,
@@ -33672,11 +33680,12 @@
         {
           "n": 28,
           "text": "(proof addition for criterion 17; reflection proposal B4) Proof: an engine-style library marks entity types with its own marker and derives the count, the sorted names, per-type `Rows<T>` storage and default constructors from `Entity.reflect().uses`, with no hand-kept list. A golden shows that adding one marked struct is the only edit needed for it to appear.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T15:56:35.132Z"
+          "evidence": "Merged into #6845 c8: proof addition for c17, same outcome",
+          "at": "2026-11-15T02:11:09.583Z",
+          "closure": "obsolete"
         },
         {
           "n": 29,
@@ -33744,11 +33753,12 @@
         {
           "n": 36,
           "text": "TypeInfo.identity is a TypeId as D-META-REFLECT2 A ratified, not a String; every reader migrates in one cutover.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T23:02:06.841Z"
+          "evidence": "Moved to #6845 c7: TypeId identity cutover",
+          "at": "2026-11-15T02:11:07.786Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [
@@ -33771,8 +33781,8 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-14T08:46:29.415Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:11:14.292Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
@@ -96119,7 +96129,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:57.804Z",
-      "updated": "2026-11-15T01:02:47.487Z",
+      "updated": "2026-11-15T02:11:13.210Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -96733,7 +96743,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:36.307Z",
-      "updated": "2026-11-15T01:02:46.429Z",
+      "updated": "2026-11-15T02:11:11.487Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -200495,42 +200505,42 @@
       "id": "D-IFHOLE2",
       "cardId": "c0p39lw2",
       "group": "syntax",
-      "title": "Keep the plain table header for comparing one value, or require a hole in every table?",
-      "situation": "A decision table is an `if` that tries its arms in order and runs the first one that fits. The plain header `if light == { .Red -> 30 }` compares one value with each arm. The hole header `if n % _ == 0 { 3 -> \"Fizz\" }` is built and waiting to land; it drops each arm's value into the `_`. On 2026-09-11 you ruled that every table needs a `_` and that the plain header goes. The spec still teaches the plain header, because that change never ran. Removing it would change about 16,000 tables. About 6,000 call a function in the header, and your rule runs the header again for each arm tried, so each needs a named value first. You are asked which headers Jet keeps. We recommend keeping the plain header for comparing one value and using a hole only for shared tests.",
-      "gist": "Should a table that compares one value keep its plain header, with `_` kept for shared tests that do more?",
-      "lesson": "A decision table is an `if` whose arms are tried in order. Its header holds the shared test. A hole is a `_` in that test, and each arm's value fills it in turn. Jet has built both the plain header `if light == {` and the hole header `if n % _ == 0 {`. Whichever option wins, the rules, the formatter and the docs must name one spelling for each job.",
-      "explainer": "",
-      "story": "Maya teaches Jet to new programmers with a traffic light. Her first table is `if light == { .Red -> 30, .Amber -> 5, .Green -> 0 }`. Later she shows FizzBuzz with `if n % _ == 0 { 15 -> \"FizzBuzz\" ... }`. A student asks whether the light table should also say `light == _`, since the newer rule says every table has a hole. Another student writes `if reader.next() == _ {` and wonders why records go missing. Maya wants one answer she can teach without exceptions.",
+      "title": "Keep the plain table header for comparing one value, with the hole written `<>`?",
+      "situation": "A decision table is an `if` followed by a list of arms; Jet tries the arms in order and runs the first one that fits. The plain header `if light == {` compares one value with each arm. The hole header `if n % <> == 0 {` drops each arm's value into the `<>`, so the arm `15 -> \"FizzBuzz\"` tests `n % 15 == 0`. In September you ruled that every table needs a hole. That would change about 16,000 tables and make about 5,400 function calls in headers run again for every arm tried. You asked for the hole to be `<>`, the mark a pipe already uses for \"the value goes here\", so every option below spells it that way. You are asked which headers Jet keeps. We recommend keeping the plain header for comparing one value and using the `<>` hole only for tests that do more.",
+      "gist": "Should a table that compares one value keep its plain header, with the `<>` hole kept for tests that do more?",
+      "lesson": "A decision table is an `if` whose arms are tried in order, like a list of cases. Its header holds the test the arms share. A hole is the mark `<>` in that test, and each arm's value fills it in turn. A pipe already uses `<>` to mean \"the value goes here\", so one mark keeps one meaning. Whichever option wins, the rules, the formatter and the docs name one spelling for each job.",
+      "explainer": "Words used here. A decision table is an `if` followed by a list of arms. Each arm is a value, an arrow and what to do: `15 -> \"FizzBuzz\"`. Jet tries the arms from the top and runs the first one that fits.\n\nThe header is the test written after `if`, before the `{`. A plain header such as `if light == {` compares one value with each arm. A hole header holds the mark `<>`, and each arm's value fills that mark in turn: `if n % <> == 0 {` with the arm `3` tests `n % 3 == 0`.\n\nA pipe passes a value down a chain of steps: `raw |> Int.parse(<>)`. Inside a step, `<>` is the value coming in. The `else` arm runs when no other arm fits.\n\nA call has an effect when it does more than compute an answer: it reads input, takes a lock, changes a value or prints. Calling it twice is not the same as calling it once. A pure call only computes, so a second call gives the same answer.",
+      "story": "Maya teaches Jet to new programmers with a traffic light. Her first table is `if light == { .Red -> 30  .Amber -> 5  .Green -> 0 }`. Later she shows FizzBuzz with `if n % <> == 0 { 15 -> \"FizzBuzz\"  3 -> \"Fizz\" }`. One student asks whether the light table also needs `light == <>`. Another writes `if reader.next() == <> {` and wonders why records go missing. A third ends a pipe with a FizzBuzz table and cannot tell which `<>` is the piped number. Maya wants one answer she can teach without exceptions.",
       "inWild": "// Rust reference: https://doc.rust-lang.org/reference/expressions/match-expr.html\n// A match reads its value once and lists the arms.\nfn wait_secs(light: Light) -> u32 {\n    match light {\n        Light::Red => 30,\n        Light::Amber => 5,\n        Light::Green => 0,\n    }\n}\n// A shared test repeats in each guard instead of using a hole.\nfn label(n: u32) -> String {\n    match () {\n        _ if n % 15 == 0 => \"FizzBuzz\".into(),\n        _ if n % 3 == 0 => \"Fizz\".into(),\n        _ => n.to_string(),\n    }\n}\n\n;; Clojure condp: https://clojuredocs.org/clojure.core/condp\n;; One shared two-input test, one value read once, candidates in order.\n(condp #(zero? (mod %2 %1)) n\n  15 \"FizzBuzz\"\n  3 \"Fizz\"\n  (str n))",
-      "detail": "The rulings. D-IFHOLE1=A (ratified 2026-09-11, card #3067) requires one typed `_` in every dispatch header and removes the holeless header in one cutover. Its terms run the header once per arm tried, with no caching even for a comparison, and say it amends D-IF3, D-IFDIST1 and S68. D-IF3 has no ballot of its own. Its only Tower trace is a bulk ratify on 2026-10-01 that quotes the S68 heading, which still shows the old header because the cutover never ran.\n\nSo the newer explicit choice is the hole rule. This ballot asks whether to keep it now that its cost is measured.\n\nWhat is built. The hole patches are queued and not in the current compiler. The parser rewrites each arm into the header with its value in the hole, then runs the ordinary guard table. A header that is exactly `subject OP _` or `_ == subject` becomes the existing comparison table instead. It reads its subject once and keeps patterns, ranges, bindings and coverage.\n\nThat once-only read departs from the ratified per-arm rule for computed subjects, so it must be fixed or ratified whichever option wins. E0946 refuses a second hole, E0947 refuses `_` outside a header, and E0948 refuses a pattern or range arm under any other header. The formatter copies a hole table as written and does not lay it out.\n\nMigration count. A lexer scan of dev e3f8a73a8b skips comments and strings and follows headers across lines. It finds 16,351 holeless tables in 2,724 files: Compiler 6,588, Core 1,530, Examples 427, tests 2,063, Jetpack 5,135, Tools 504 and Docs 104. Markdown pages hold about 117 more. Of the tables, 5,983 call a function in the subject and about 530 read through an index or borrow. In Examples, 240 of 427 tables call a function in the header.\n\nWhy computed subjects matter. Under the ratified rule, `if reader.next() == _ {` calls `next` again for each arm tried, so a miss on the first arm skips a record. A probe of the hand-written equivalent printed two fetches where the plain header printed one. The migration therefore names about 6,000 subjects first, and a table in a value position must hoist that name without reordering other effects.\n\nThe same tables in each option. The tables are `if kind == {` in Compiler ItemHeads.jet, `if parse(...) == {` in Core Toml.jet, and `if files.try_lock(path) == {` in Examples FilesRootedLifecycle.jet. A leaves all three as they are. B writes `if kind == _ {` and names `parse(...)` and `files.try_lock(path)` first, since a second `try_lock` would take the lock again. C allows either spelling of each. D writes `_` into all three, and each still reads its subject once.\n\nOne mechanism (I8). Jet already has two ways to run a table: the comparison table and the guard table. A gives each one spelling, and a `_` always means the header runs per arm. B runs every table by one per-arm rule. C gives one table two spellings with the same meaning, which I8 allows only where it helps users. D keeps one shape, but its `_` means once in some headers and per arm in others.\n\nBeginner path. A learner reads `if light == {` as \"compare light with each arm\". Under A the hole lesson invites `light == _`, which is refused, so the error must teach the split. Under B and D every table looks alike, but the `_` in a plain comparison tells the reader nothing new. Under B a learner who writes `if reader.next() == _ {` gets no warning and loses records.\n\nExpert path. An expert wants one rule and no hidden repeats. A shows the evaluation rule in the syntax. B gives one rule and makes single reads explicit through a named value. C makes each review pick a spelling. D asks the reader to recognize the header's shape to know how often it runs.\n\nFormatter and diagnostics. Under A, the fix for `light == _` deletes one token, and the parser already proves both spellings build the same table. E0948's fix text must stop suggesting `subject == _`. Under B and D the formatter must learn to lay out hole tables before the cutover, and the cutover touches files in every live lane at once.",
+      "detail": "What you ruled. On 2026-09-11 you chose D-IFHOLE1=A (card #3067). It says every table header holds exactly one hole and the plain header goes away in one change. It also says the header runs again for each arm tried, with no saving of the first result, even for a plain comparison. That change never ran, so the spec still teaches the plain header.\n\nWhat is built today. The hole landed on 2026-11-14, spelled `_`. Jet rewrites each arm into the header, with the arm's value in the hole, and runs an ordinary list of tests. A header that is exactly `subject == _` is treated as the plain table, so it reads its subject once. That does not match your per-arm rule, so the ruling must settle it either way. Three errors, E0946, E0947 and E0948, refuse a misplaced hole or arm.\n\nWhy `<>` instead of `_`. You asked for it, and it fits. A pipe step already reads its input as `<>`, so `<>` already means \"the value goes here\". The `_` mark already means \"ignore this\" in patterns and in the catch-all arm. With `_` as the hole, one table would use it both ways, as in `if files.try_lock(path) == _ { .Val(_) -> false }`. Switching is a one-token change in the parser, plus respelling the hole's own example, spec rows and tests. A `_` written where the hole goes then gets an error whose fix writes `<>`.\n\nThe pipe rule. A pipe runs each step on the value of the line above, and the step names that value `<>`. A table inside a step could then see two meanings of `<>`. The rule in every option is the one pipes already use: inside a step, `<>` is always the step's value, even inside a lambda or a string. So a table header inside a step cannot hold a hole. A plain header there, such as `|> if <> == {`, compares the piped value and works.\n\nWhat the pipe rule refuses. A table inside a step whose header needs a hole is refused with a registered error. Its fix ends the pipe one line early in a named value and starts the table with that name. The author picks the name, so `jet fix` does not apply it. A pipe written inside a hole header is fine: in `if (raw |> Int.parse(<>) ?? 0) % <> == 0 {`, the `<>` in the parentheses belongs to that pipe and the other is the hole.\n\nHow many tables would change. A scan of dev e3f8a73a8b skips comments and strings and follows headers across lines. It finds 16,351 plain-header tables in 2,724 files. By area: Compiler 6,588, Core 1,530, Examples 427, tests 2,063, Jetpack 5,135, Tools 504 and Docs 104. Markdown pages hold about 117 more. Of these tables, about 5,400 call a function in the header, and about 530 read through an index or a borrow. In Examples, 240 of 427 tables call a function in the header.\n\nWhy a call in the header matters. A header that holds a hole runs again for each arm tried. Then `if reader.next() % <> == 0 {` calls `next` once per arm, and a miss on the first arm skips a record. A test of the hand-written equivalent printed two fetches where the plain header printed one. Under your per-arm rule this holds for every table, so option B must first name about 5,400 header calls, and must do it without reordering other effects.\n\nThe effect rule. Options A, C and D keep hole headers that run per arm, so each refuses a call with an effect in one. Sema already knows each call's effects: reading input, taking a lock, printing, or changing a value through `&` or `&self`. The fix names the value first, as B does: `next: reader.next()` on the line above, then `if next % <> == 0 {`. A pure call such as `fits(<>, size)` stays, since a second run gives the same answer. D allows any call in `subject == <>`, which reads once.\n\nWhen a table needs `else`. A plain table over an enum that lists every case, such as `light == {` with `.Red`, `.Amber` and `.Green`, is proven complete and needs no `else`. A hole table cannot be proven that way: Jet cannot tell that `15` and `3` cover every `n`. So a hole table that gives a value needs `else`, and today a missing one is refused. A hole table used as a statement may leave `else` out and does nothing when no arm fits.\n\nEdge cases. A call that holds the hole, such as `if queue.try_push(<>) {`, cannot be named first, since each arm passes a different value. It gets the same error, and the fix writes the arms as plain tests: `if { queue.try_push(1) -> … }`. A call inside a lambda in the header is checked the same way. A call that only reads, such as `list.len()`, is pure and stays.\n\nSome fixes are shown and not applied. In `total: base() + if next() % <> == 0 {`, the table does not start its statement. Moving `next()` above would run it before `base()`, so the author places it.\n\nThe same tables in each option. Take `if kind == {` in Compiler ItemHeads.jet, `if parse(...) == {` in Core Toml.jet and `if files.try_lock(path) == {` in Examples FilesRootedLifecycle.jet. A leaves all three as they are. B writes `if kind == <> {` and names `parse(...)` and `files.try_lock(path)` first, since a second `try_lock` would take the lock again. C allows either spelling of each. D writes `<>` into all three, and each still reads its subject once.\n\nOne way per meaning (I8). Jet already runs a table two ways: as a comparison against one value, or as a list of tests. A gives each way one spelling, and a `<>` in a header always means the header runs per arm. B runs every table by one per-arm rule. C gives one table two spellings with the same meaning. D keeps one shape, but its `<>` means one read in some headers and a read per arm in others.\n\nBeginners. A learner reads `if light == {` as \"compare light with each arm\". Under A, the hole lesson may invite `light == <>`, which is refused with a fix that deletes `<>`. Under B and D every table looks alike, but `<>` in a plain comparison tells the reader nothing new. Under B, `if reader.next() == <> {` loses records with no warning.\n\nExperts. Experts want one rule and no hidden repeats. A shows the read rule in the syntax and refuses a repeated effect, and B gives one rule with explicit names. C makes each review pick a spelling, and D asks readers to spot which header shapes read once.\n\nFormatter and errors. Under A, the fix for `light == <>` deletes one token, and the parser already proves both spellings build the same table. E0948's fix must stop suggesting `subject == _`. Under B and D the formatter must learn to lay out hole tables before the change, and the change touches files in every live lane at once.",
       "options": [
         {
           "key": "A",
-          "name": "Plain header compares one value; a hole fills a shared test",
-          "detail": "`if subject OP {` stays the one way to compare one value with each arm, and it reads the subject once. A hole is for a shared test that does more than compare, such as `n % _ == 0` or `fits(_, size)`, and that header runs once per arm tried. A header whose whole test is one comparison with `_` as one side is refused, with a fix that removes the `_`. No existing table changes.",
-          "code": "wait_secs: fn(light: Light) -> Int {\n    if light == {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\nlabel: fn(n: Int) -> String {\n    return if n % _ == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\ncontended: if files.try_lock(path) == {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// `if light == _ {` is refused: the fix removes the `_`.",
-          "technical": "Amend D-IFHOLE1: drop the rule that every table holds a hole, and drop its cutover. Keep D-IF3, D-IFDIST1 and S68 for comparison headers. The parser refuses a header whose whole test, ignoring parentheses, is `subject OP _` or `_ OP subject`. The refusal is a registered error with a machine fix that deletes the `_` and flips the operator when `_` stood on the left.\n\nThe queued rewrite of `subject == _` into the comparison table becomes that refusal. E0946 and E0947 stay. E0948 stays, with its fix changed to `if subject == {`. The spec text, the syntax row and Examples/Basics/DispatchHole.jet drop `shape == _`."
+          "name": "Plain header compares one value; the `<>` hole fills a shared test",
+          "detail": "`if subject == {` stays the one way to compare one value with each arm, and it reads the subject once. The `<>` hole is for a shared test that does more, such as `n % <> == 0` or `fits(<>, size)`. That header runs once per arm tried, so a call with an effect in it is refused, and the fix names the value first. A header that only compares with `<>` is refused, with a fix that removes the `<>`.\n\nA hole table that gives a value needs `else`, because Jet cannot prove its arms cover every value. A plain table over an enum that lists every case needs none. In a pipe step `<>` is the piped value: a plain table works there, and a hole table names the value first. No existing table changes.",
+          "code": "// Compare one value: `light` is read once, and listing every case needs no `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// A call in a plain header still runs once.\ncontended: if files.try_lock(path) == {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// A call with an effect in a hole header is refused; the fix names it first.\n// `if reader.next() % <> == 0 {` becomes:\nbatch_size: fn(reader: &Reader) -> Int {\n    next: reader.next()\n    if next % <> == 0 {\n        100 -> 100\n        10 -> 10\n        else -> 1\n    }\n}\n// In a pipe step `<>` is the piped value, so a plain table can test it.\nsize_word: fn(raw: String) -> String {\n    raw |> Int.parse(<>) ?? 0 |> if <> == {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}\n// `if light == <> {` is refused: the fix removes the `<>`.\n// `raw |> Int.parse(<>) ?? 0 |> if <> % 3 == 0 {` is refused: name the number first.",
+          "technical": "Amend D-IFHOLE1: drop the rule that every table holds a hole, and drop its cutover. Keep D-IF3, D-IFDIST1 and S68 for comparison headers. Respell the hole `<>`. E0437 (`<>` outside a pipe step) narrows to `<>` outside a step or a table header, E0947 retires into it, and a `_` where the hole goes gets an error whose fix writes `<>`.\n\nThe parser refuses a header whose whole test, ignoring parentheses, is `subject OP <>` or `<> OP subject`. That refusal is a registered error with a machine fix that deletes the `<>` and flips the operator when `<>` stood on the left. The queued rewrite of that header into the comparison table becomes this refusal. E0946 stays. E0948 stays, with its fix changed to `if subject == {`.\n\nA new registered error (E0950, the next free code) refuses a call with an effect in a hole header. It reads the call's effect facts: an effect, a `&` argument or a `&self` receiver. A pure call stays. The error ships with a UI snapshot and a machine fix that binds the call to a name on the line above and reads the name in the header.\n\nThe name is the called method's name (`next`), or `value` for another call, with a number added on a clash. The fix applies only when the table starts its statement; otherwise it is shown, not applied, so no effect moves before another. A call that holds the `<>` cannot be named; its fix shows the arms as plain tests. Calls inside a lambda in the header are checked too.\n\nA hole table that gives a value requires `else` (E0003), since its arms are tests, not cases of one type; one used as a statement may leave `else` out. A plain table keeps today's coverage rule.\n\nInside a pipe step `<>` is always the step's value, through lambdas and string holes, as D-PIPE1 says. A table header there that needs a hole is refused with a registered error whose fix shows the pipe split into a named value. The spec, the syntax row and Examples/Basics/DispatchHole.jet drop `shape == _` and spell the hole `<>`."
         },
         {
           "key": "B",
-          "name": "Every table holds a hole, as ratified",
-          "detail": "D-IFHOLE1 as ratified. Every table header holds exactly one `_`, so `if light == {` becomes `if light == _ {`. The header runs once per arm tried, with no caching even for a comparison. A table whose header calls a function gets a named value first, so the call still runs once. The holeless header is removed after about 16,400 tables in 2,700 files migrate, about 6,000 of them with a call in the header.",
-          "code": "wait_secs: fn(light: Light) -> Int {\n    if light == _ {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\nlock: files.try_lock(path)\ncontended: if lock == _ {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}",
-          "technical": "Keep D-IFHOLE1 as written. Remove the holeless parser path and the `it` subject name, and refuse a holeless header with a registered error and a machine fix. Change the queued rewrite so a computed `subject == _` runs per arm tried and needs a named subject to omit `else`.\n\nMigrate every table with a source-aware tool that names each computed subject first and hoists it without reordering other effects. Teach the formatter to lay out hole tables. The examples, spec and teaching pages move to the hole header."
+          "name": "Every table holds a `<>` hole, as ratified",
+          "detail": "D-IFHOLE1 as ratified, with the hole spelled `<>`. Every header holds exactly one `<>`, so `if light == {` becomes `if light == <> {`. The header runs once per arm tried, even for a plain comparison. A header that calls a function gets a named value first, so the call still runs once. A table written later with a call in its header repeats the call per arm, as ratified.\n\nA table needs `else` unless its header compares a named value with every case of an enum. In a pipe step `<>` is the piped value, so a table there names the value first. About 16,400 tables in 2,700 files change, about 5,400 with a call in the header.",
+          "code": "// Compare one value: the header runs once per arm tried.\n// `light` is a named value and every case is listed, so no `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == <> {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// A call is named first, or it would run once per arm.\nlock: files.try_lock(path)\ncontended: if lock == <> {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// No table fits in a pipe step, so the number is named first.\nsize_word: fn(raw: String) -> String {\n    count: Int.parse(raw) ?? 0\n    if count == <> {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}",
+          "technical": "Keep D-IFHOLE1 as written, with the hole respelled `<>`. Remove the plain-header parser path and the `it` subject name, and refuse a plain header with a registered error and a machine fix. Change the queued rewrite so a computed `subject == <>` runs per arm tried and needs a named subject to leave out `else`.\n\nMigrate every table with a source-aware tool that names each computed subject first and moves it without reordering other effects. Inside a pipe step `<>` is the step's value, so every table there is refused with the pipe-split fix, and the migration splits such pipes too. Teach the formatter to lay out hole tables. The examples, spec and teaching pages move to the hole header."
         },
         {
           "key": "C",
           "name": "Both headers stay",
-          "detail": "Keep both spellings. As built, `if light == {` and `if light == _ {` produce the same table, and both read the subject once. The formatter keeps whichever was written and copies the hole spelling without laying it out. Hole headers that do more than compare work as ratified. No existing table changes.",
-          "code": "wait_secs: fn(light: Light) -> Int {\n    if light == {\n        .Red -> 30\n        else -> 0\n    }\n}\nwait_again: fn(light: Light) -> Int {\n    if light == _ {\n        .Red -> 30\n        else -> 0\n    }\n}",
-          "technical": "Keep D-IF3 and D-IFHOLE1 side by side, and drop D-IFHOLE1's cutover. Amend D-IFHOLE1 so a hole header whose whole test is one comparison reads its subject once, as built. The formatter keeps the written spelling. The docs teach both spellings as one table."
+          "detail": "Keep both spellings. `if light == {` and `if light == <> {` build the same table, and both read the subject once. Both keep the plain coverage rule, so listing every case of an enum needs no `else`. The formatter keeps whichever was written. No existing table changes.\n\nHole headers that do more than compare work as ratified and run per arm. A call with an effect in one is refused with a fix that names the value first, as in A. Such a table needs `else` when it gives a value. Inside a pipe step `<>` is the piped value: a plain table there works, and a hole table must name the value first.",
+          "code": "// Compare one value, either way: `light` is read once.\n// Every case is listed, so neither needs `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\nwait_again: fn(light: Light) -> Int {\n    if light == <> {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// `if reader.next() % <> == 0 {` is refused: name `reader.next()` first.\n// In a pipe step `<>` is the piped value, so a plain table can test it.\nsize_word: fn(raw: String) -> String {\n    raw |> Int.parse(<>) ?? 0 |> if <> == {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}",
+          "technical": "Keep D-IF3 and D-IFHOLE1 side by side, drop D-IFHOLE1's cutover, and respell the hole `<>`. Amend D-IFHOLE1 so a hole header whose whole test is one comparison reads its subject once, as built, with the plain table's coverage. The formatter keeps the written spelling, and the docs teach both spellings as one table.\n\nEvery other hole header runs per arm tried. The same new registered error as in A (E0950, with a UI snapshot and the same machine fix) refuses a call with an effect there. A hole table that gives a value requires `else` (E0003).\n\nInside a pipe step `<>` is always the step's value, as D-PIPE1 says. A plain header there compares that value. A header there that needs a hole is refused with a registered error whose fix shows the pipe split into a named value."
         },
         {
           "key": "D",
-          "name": "Every table holds a hole; a plain comparison still reads once",
-          "detail": "Every table header holds one `_`, as ratified. A header whose whole test is `subject OP _` still reads its subject once, as the queued parser builds it. Migration adds one token per table: `if fetch() == {` becomes `if fetch() == _ {` with no named value and no change in behavior. The holeless header is removed after about 16,400 tables change.",
-          "code": "wait_secs: fn(light: Light) -> Int {\n    if light == _ {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\ncontended: if files.try_lock(path) == _ {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// `try_lock` runs once, as today.",
-          "technical": "Keep D-IFHOLE1's required hole and its cutover. Amend its evaluation rule: a header whose whole test, ignoring parentheses, is `subject OP _` or `_ OP subject` is the comparison table over `subject`. That table reads its subject once and keeps `it`, patterns, ranges and coverage. Every other hole header runs per arm tried.\n\nA machine fix inserts the `_` in every table, and the parser already proves both spellings build the same table. The formatter learns to lay out hole tables before the cutover."
+          "name": "Every table holds a `<>` hole; a plain comparison still reads once",
+          "detail": "Every table header holds one `<>`, as ratified. A header whose whole test is `subject == <>` still reads its subject once, as the parser builds it today. It keeps the plain coverage rule, so listing every case of an enum needs no `else`. The change adds one token per table: `if fetch() == {` becomes `if fetch() == <> {`, with no named value and no change in behavior.\n\nEvery other hole header runs per arm. A call with an effect there is refused with a fix that names the value first, as in A. Such a table needs `else` when it gives a value. Inside a pipe step `<>` is the piped value, so no table can sit in a step, and the value is named first. The plain header is removed after about 16,400 tables change.",
+          "code": "// Compare one value: `light` is read once.\n// Every case is listed, so no `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == <> {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// `try_lock` runs once, as today.\ncontended: if files.try_lock(path) == <> {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// `if reader.next() % <> == 0 {` is refused: name `reader.next()` first.\n// No table fits in a pipe step, so the number is named first.\nsize_word: fn(raw: String) -> String {\n    count: Int.parse(raw) ?? 0\n    if count == <> {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}",
+          "technical": "Keep D-IFHOLE1's required hole and its cutover, with the hole respelled `<>`. Amend its read rule: a header whose whole test, ignoring parentheses, is `subject OP <>` or `<> OP subject` is the comparison table over `subject`. That table reads its subject once and keeps `it`, patterns, ranges and coverage. Every other hole header runs per arm tried. There, the new registered error from A (E0950, with its UI snapshot and machine fix) refuses a call with an effect. A table there that gives a value requires `else` (E0003).\n\nA machine fix inserts the `<>` in every table, and the parser already proves both spellings build the same table. Inside a pipe step `<>` is the step's value, so every table there is refused with the pipe-split fix, and the migration splits such pipes too. The formatter learns to lay out hole tables before the cutover."
         }
       ],
       "comparisons": [
@@ -200541,23 +200551,23 @@
         },
         {
           "lang": "Clojure",
-          "note": "Primary documentation and the clojure.core source read on 2026-11-14. `condp` takes one two-input test, one value and candidate clauses, and tries the test with each candidate in order. The macro binds the value once, and plain equality uses the same form with `=`. It is the closest prior art to the hole table, and it never re-reads the value. Source: https://clojuredocs.org/clojure.core/condp",
+          "note": "Primary documentation and the clojure.core source read on 2026-11-14. `condp` takes one two-input test, one value and candidate clauses, and tries the test with each candidate in order. The macro binds the value once, and plain equality uses the same form with `=`. It is the closest prior art to the hole table, and it never reads the value twice. Source: https://clojuredocs.org/clojure.core/condp",
           "code": "(condp = light\n  :red 30\n  :amber 5\n  0)\n(condp #(zero? (mod %2 %1)) n\n  15 \"FizzBuzz\"\n  3 \"Fizz\"\n  (str n))"
         },
         {
           "lang": "Scala",
-          "note": "Primary documentation read on 2026-11-14. Scala uses `_` as a placeholder for one unnamed function input, and keeps `match` for comparing one value. Source: https://docs.scala-lang.org/scala3/book/fun-anonymous-functions.html",
+          "note": "Primary documentation read on 2026-11-14. Scala writes `_` for one unnamed function input and also for the catch-all case, so one mark carries both meanings. That is the double meaning a `<>` hole avoids. Source: https://docs.scala-lang.org/scala3/book/fun-anonymous-functions.html",
           "code": "val doubled = List(1, 2, 3).map(_ * 2)\nlight match\n  case Red => 30\n  case _ => 0"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A keeps one spelling for each job and changes no existing table. A `_` then always means the header runs again for each arm, and a plain header reads its subject once, so no call silently repeats.",
-        "tradeoff": "A reverses part of your 2026-09-11 choice. `light == _` is refused with a fix, and the plain header stays. Every other hole table works as ratified.",
+        "why": "A keeps one spelling for each job and changes no existing table. A plain header reads its subject once. A `<>` in a header means the header runs again for each arm, so Jet refuses a call with an effect there, with a fix that names the value first. Inside a pipe, `<>` keeps its one pipe meaning.",
+        "tradeoff": "A reverses part of your 2026-09-11 choice. `light == <>` is refused with a fix, and the plain header stays. Every other hole table works as ratified, now spelled `<>`.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "B changes about 16,400 tables and needs a named value before about 6,000 of them. A table written later as `if reader.next() == _ {` silently reads again for each arm."
+            "reason": "B changes about 16,400 tables and needs a named value before about 5,400 of them. A table written later as `if reader.next() == <> {` silently reads again for each arm, and no table fits in a pipe step."
           },
           {
             "key": "C",
@@ -200565,21 +200575,21 @@
           },
           {
             "key": "D",
-            "reason": "D keeps the required `_` with a one-token migration, but its `_` would mean one read in some headers and a read per arm in others."
+            "reason": "D keeps the required hole with a one-token change per table. But its `<>` means one read in some headers and a read per arm in others, and no table fits in a pipe step."
           }
         ],
         "losses": [
           {
             "loss": "Learners meet two header shapes instead of one rule.",
-            "mitigation": "The docs teach the plain table first and show the hole only where a test repeats."
+            "mitigation": "The docs teach the plain table first and show the `<>` hole only where a test repeats, and both shapes use marks learners already know from pipes."
           },
           {
             "loss": "The every-table-has-a-hole rule is amended.",
-            "mitigation": "Holes keep their full meaning; only the duplicate `subject OP _` spelling is refused, with a fix."
+            "mitigation": "Holes keep their full meaning; only the duplicate `subject == <>` spelling is refused, and its fix deletes one token."
           },
           {
-            "loss": "The hole lesson invites `light == _`, which A refuses.",
-            "mitigation": "The error names the plain header, and its machine fix deletes the `_`."
+            "loss": "A hole table cannot sit directly inside a pipe step.",
+            "mitigation": "The error shows the pipe split into a named value. Plain tables, the common case in a pipe, still work inside steps."
           }
         ]
       },
@@ -200588,16 +200598,16 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: IfholeReview-1. A lexer recount found 16,351 holeless tables with 5,983 call subjects, and showed that the queued parser reads `subject OP _` once, against the ratified rule. Option D was added, and A still holds because only A ties the per-arm read to the visible `_` without migration."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main checked this rewrite against the code and a p138 probe, confirming the error meanings, the read-once `subject == _` table, the pipe example and about 8 existing hole tables. Main found that a hole header could silently repeat a call with an effect, that `else` was unstated and that the header-call count was high; all three are fixed."
       },
       "checkInstructions": null,
       "surface": {
-        "gist": "Should a table that compares one value keep its plain header, with `_` kept for shared tests that do more?",
-        "lesson": "A decision table is an `if` whose arms are tried in order. A hole is a `_` in its header's shared test, and each arm's value fills it in turn. Both `if light == {` and `if n % _ == 0 {` are built. One spelling per job must be named.",
+        "gist": "Should a table that compares one value keep its plain header, with the `<>` hole kept for tests that do more?",
+        "lesson": "A decision table is an `if` whose arms are tried in order. The plain header `if light == {` compares one value with each arm. A hole header puts `<>` in a shared test that each arm's value fills: `if n % <> == 0 {`. One spelling per job must be named.",
         "trio": {
           "current": {
-            "note": "Both headers are built. The plain one compares one value; the hole one fills a shared test.",
-            "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif n % _ == 0 {\n    3 -> \"Fizz\"\n    else -> \"{n}\"\n}"
+            "note": "Both headers are built; today's hole is `_`, written `<>` in every option.",
+            "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif n % <> == 0 {\n    3 -> \"Fizz\"\n    else -> \"{n}\"\n}"
           },
           "wild": {
             "lang": "Rust",
@@ -200608,42 +200618,42 @@
         "options": [
           {
             "key": "A",
-            "name": "Plain header compares; a hole fills a shared test",
-            "gist": "`if light == {` stays. A `_` is only for tests that do more than compare. `light == _` is refused with a fix.",
+            "name": "Plain header compares; the `<>` hole fills a shared test",
+            "gist": "`if light == {` stays; a `<>` hole is for tests that do more.",
             "gains": [
               "One spelling for each job.",
               "No existing table changes.",
-              "A `_` always means the header runs per arm."
+              "A `<>` always means a value goes there."
             ],
             "losses": [
               "Two header shapes to learn.",
               "Reverses part of the required-hole rule."
             ],
             "proposed": {
-              "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif n % _ == 0 { 3 -> \"Fizz\", else -> \"{n}\" }\n// `if light == _ {` is refused: remove the `_`."
+              "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif n % <> == 0 {\n    3 -> \"Fizz\"\n    else -> \"{n}\"\n}\n// `if light == <> {` is refused: remove the `<>`.\nraw |> Int.parse(<>) ?? 0 |> if <> == {\n    0 -> \"none\"\n    else -> \"some\"\n}"
             }
           },
           {
             "key": "B",
-            "name": "Every table holds a hole, as ratified",
-            "gist": "Every header holds one `_` and runs once per arm tried. About 16,400 tables change.",
+            "name": "Every table holds a `<>` hole, as ratified",
+            "gist": "Every header holds one `<>` and runs per arm tried; about 16,400 tables change.",
             "gains": [
               "One header rule for every table.",
-              "A `_` always means the header runs per arm."
+              "A `<>` always means the header runs per arm."
             ],
             "losses": [
               "About 16,400 tables in 2,700 files change.",
-              "About 6,000 header calls need a named value first.",
-              "`if reader.next() == _ {` silently reads per arm."
+              "About 5,400 header calls need a named value first.",
+              "`if reader.next() == <> {` silently reads per arm."
             ],
             "proposed": {
-              "code": "if light == _ {\n    .Red -> 30\n    else -> 0\n}\nlock: files.try_lock(path)\nif lock == _ { .Val(_) -> run(), else -> wait() }"
+              "code": "if light == <> {\n    .Red -> 30\n    else -> 0\n}\nlock: files.try_lock(path)\nif lock == <> {\n    .Val(_) -> run()\n    else -> wait()\n}"
             }
           },
           {
             "key": "C",
             "name": "Both headers stay",
-            "gist": "`if light == {` and `if light == _ {` build the same table. The formatter keeps whichever was written.",
+            "gist": "`if light == {` and `if light == <> {` build the same table.",
             "gains": [
               "No existing table changes.",
               "Authors pick the spelling they like."
@@ -200653,29 +200663,29 @@
               "Readers must learn both."
             ],
             "proposed": {
-              "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif light == _ {\n    .Red -> 30\n    else -> 0\n}"
+              "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif light == <> {\n    .Red -> 30\n    else -> 0\n}"
             }
           },
           {
             "key": "D",
-            "name": "Every table holds a hole; a comparison reads once",
-            "gist": "Every header holds one `_`, but `subject == _` still reads its subject once.",
+            "name": "Every table holds a `<>` hole; a comparison reads once",
+            "gist": "Every header holds one `<>`, but `subject == <>` still reads its subject once.",
             "gains": [
               "One header shape for every table.",
-              "Migration adds `_` and changes no behavior."
+              "The change adds `<>` and keeps behavior."
             ],
             "losses": [
               "About 16,400 tables in 2,700 files change.",
-              "`_` means one read here, a read per arm elsewhere."
+              "`<>` means one read here, a read per arm elsewhere."
             ],
             "proposed": {
-              "code": "if light == _ {\n    .Red -> 30\n    else -> 0\n}\nif files.try_lock(path) == _ { .Val(_) -> run(), else -> wait() }\n// `try_lock` runs once."
+              "code": "if light == <> {\n    .Red -> 30\n    else -> 0\n}\nif files.try_lock(path) == <> {\n    .Val(_) -> run()\n    else -> wait()\n}\n// `try_lock` runs once."
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "A keeps one spelling per job and changes no table. A `_` always means the header runs per arm, and a plain header reads its subject once.",
+          "why": "A keeps one spelling per job and changes no table. A plain header reads once; a `<>` header runs per arm and refuses a call with an effect.",
           "gains": [
             "One spelling per job.",
             "No migration.",
@@ -200684,17 +200694,21 @@
           "losses": [
             {
               "loss": "Learners meet two header shapes.",
-              "mitigation": "The docs teach the plain table first and show the hole only where a test repeats."
+              "mitigation": "The docs teach the plain table first and show the `<>` hole only where a test repeats."
             },
             {
               "loss": "Your required-hole rule is amended.",
-              "mitigation": "Only `subject OP _` is refused, with a fix; other holes work as ratified."
+              "mitigation": "Only `subject == <>` is refused, with a fix; other holes work as ratified."
+            },
+            {
+              "loss": "A hole table cannot sit inside a pipe step.",
+              "mitigation": "The error shows the pipe split into a named value."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B changes about 16,400 tables, and about 6,000 header calls repeat per arm unless named first."
+              "reason": "B changes about 16,400 tables, and about 5,400 header calls repeat per arm unless named first."
             },
             {
               "key": "C",
@@ -200702,15 +200716,500 @@
             },
             {
               "key": "D",
-              "reason": "D adds `_` to 16,400 tables and gives `_` two meanings."
+              "reason": "D adds `<>` to 16,400 tables and gives `<>` two meanings."
             }
           ],
-          "tradeoff": "`light == _` is refused with a fix. Every other hole table works as ratified."
+          "tradeoff": "`light == <>` is refused with a fix; other hole tables work as ratified."
         }
       },
       "draft": false,
       "status": "open",
       "created": "2026-11-15T00:09:11.051Z"
+    },
+    {
+      "id": "D-DB-TABLE1",
+      "cardId": "c0429qak",
+      "group": "library",
+      "title": "How an app declares and uses a typed database table: a table value with a key function, a marker on the row type, or SQL checked against the migrated schema",
+      "situation": "A database table is a list of rows on disk that a program reads and changes. In a Jet app today, a programmer writes the SQL text for every table by hand and turns each result row into a struct with a decode call. Nothing ties a table to its row type or its key, and nothing checks the SQL against the tables. Live screens refresh a whole table after any write. This vote picks how an app names a table, its key and its row type, and how a change to the row type reaches the stored table. It also fixes the rule that each method that writes runs as one transaction. We recommend A: a typed table value made from the row type and a key function.",
+      "gist": "Should an app's tables be typed values with a key function, a marker on the row type, or SQL checked against the migrated schema?",
+      "lesson": "A table holds rows of one shape, and each row has a key that finds it. When the language knows the shape and the key, it can check reads and writes, keep secrets out of answers, and refresh only the screens a write touched.",
+      "explainer": "Words used here. A row type is the struct one row holds, such as Task. A key is the value that finds one row, such as a task's ID. A composite key is a key made of two or more fields, such as a project and an account together.\n\nA transaction is a group of reads and writes that happens all at once or not at all. Serializable means the result is the same as if the transactions ran one after another. A row policy is a rule that decides which rows a caller may read or change.\n\nA migration is a step that changes the stored tables when the row type changes. A full scan reads every row of a table. A read set is the list of rows a query looked at, so a later write can tell which live queries it changed.",
+      "story": "Mia builds a task board. A Task has an ID, a title, a status and a version number. A Member is found by its project and its account together.\n\nUnder A she writes one line per table: store.table(\"tasks\", key: task_key). Her method move_task reads a task with get, checks its version and writes it back with put. Two people move the same task at once. One call wins, and the other gets Conflict, because the method is one serializable transaction.\n\nLater she adds a due date to Task as an optional field, and jet check records the new column on its own. She renames title to name next. jet check now stops with an error naming Task.title, and its fix line is the one migration step to add.\n\nUnder B she marks the Task struct with #Table and writes the key field names in the marker. Under C she writes CREATE TABLE in a migration and every SELECT by hand, and jet check verifies each query against the migrated schema.",
+      "inWild": "// Drizzle ORM: a table is a value built from its name and columns.\n// https://orm.drizzle.team/docs/sql-schema-declaration\nexport const tasks = sqliteTable(\"tasks\", { id: text(\"id\").primaryKey() });\n\n// Prisma: a schema file generates a typed client and the migrations.\n// https://www.prisma.io/docs/orm/prisma-schema/data-model/models\nmodel Task { id String @id  title String }\n\n// Ecto: a schema macro on the row module names the table.\n// https://hexdocs.pm/ecto/Ecto.Schema.html\nschema \"tasks\" do field :title, :string end\n\n// Diesel: table! describes the table; queries are checked by the Rust compiler.\n// https://diesel.rs/guides/schema-in-depth.html\ntable! { tasks (id) { id -> Text, title -> Text, } }\n\n// sqlx: SQL text checked at compile time against the migrated database.\n// https://docs.rs/sqlx/latest/sqlx/macro.query_as.html\nlet task = sqlx::query_as!(Task, \"SELECT id, title FROM tasks WHERE id = ?\", id)",
+      "detail": "What this ballot decides: how a service declares a typed table, its key and its row type, and the methods get, add, put, delete, query and search. It also fixes, for every option, the transaction rule of a method that writes.\n\nCurrent code. Core/Db/Db.jet has a connection (DBConnection), a policy scope (DBScope) and an open transaction (DBTransaction). A scope runs checked SQL through query and query_one, which need DB.Read, and execute, which needs DB.Write. The SQL type checks its holes, not the tables. live binds one SELECT as a live query, refreshed when its table is written.\n\nMore current code. transaction runs SQL steps in one transaction, and migrate records SQL steps and their checksum in a ledger. db.decode turns a row and a list of column names into a struct. A row policy (RowPolicy, made by db.policy(table, expr)) accepts only true and owner == user. There is no table type. The data library's Query<T> filters, sorts, groups and collects into an ordinary list; its public Table<T> carrier was retired.\n\nThe transaction rule, the same for every option. A method of a mounted service whose effects include DB.Write runs in one serializable transaction. On SQLite that is BEGIN IMMEDIATE, so writers take turns. On a server database it is the SERIALIZABLE isolation level. A method called from another method joins the caller's transaction. A method that only reads runs on one consistent snapshot.\n\nmove_task's read, version check and write rely on this: no other writer can change the task between them. A serialization failure or a busy database retries the whole method, up to 5 attempts with a short random wait. After the last attempt the method returns DBError.Busy. A client call that ends in Busy gets 503 with Retry-After, which the client maps to app.CallError.Unreachable with a retry time.\n\nA retried method must not repeat work outside the database. So a Net, FS.Write or Exec effect inside a method that writes is a compile error that names the call. The program queues such work with app.after_commit(fn), which runs once after the commit, or starts a job.\n\nOut of scope: the full-text index syntax and live-query transport, which have their own cards.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A table value: db.Table<K, T>, made by store.table(name, key: fn(T) -> K)",
+          "gist": "The row type and the key function make a typed table; queries return the data library's Query<T>.",
+          "detail": "A service's field is a table: tasks: db.Table<TaskID, Task>. The server opens it with store.table(\"tasks\", key: task_key), where task_key is a function from a row to its key. A composite key is a struct key, such as MemberKey with project and account.\n\nThe key function must be pure and deterministic. It has no effects, reads only its row, and calls only functions that do the same. Each field of K is stored as a key column, and the primary key is those columns. A key function that reads a clock, a global or anything but its row is a compile error at key:, naming the read.\n\nget(key) returns the row or None. add(row) inserts a row whose key must be new, and answers Exists or Denied. put(row) inserts or replaces. delete(key) removes a row. query() returns the data library's Query<T>, so filter, sort_by, group_by and collect mean what they mean on a list.\n\nFilters. A filter made of field comparisons joined by && and || becomes SQL. Any other filter needs a full scan, and A makes that explicit. A filter the compiler cannot turn into SQL is a registered warning at the filter, naming the part it could not read. Writing .scan() before it says the full scan is meant and silences the warning.\n\nSecrets and policies. The row is stored with its storage codec, which keeps #Secret fields. Answers to a client use the wire codec, which drops them. A table attaches a row policy with .guard(policy), the typed form of the ratified row-policy rule. Each query records its read set and each write its write set, so a live query refreshes only when a write touched its rows.\n\nSchema changes. The row type is the schema, and Jet writes the steps it can prove safe. Each table's layout is kept in a schema snapshot beside the package, the way a published wire shape is pinned. jet check compares the row type and the key type with that snapshot.\n\nA new field with a default, or an optional field, is recorded as one generated step, applied when the table opens. A removed, renamed or retyped field, or a changed key type, is a compile error naming the table, the field and the change. Its fix line is the SQL step to add, which the program lists with store.table(..., migrate: [steps]). Each step runs once and is recorded in the migrate ledger.\n\nEdge case: renaming Task.title to name. jet check reports that tasks lost title and gained name, and suggests SQL{\"ALTER TABLE tasks RENAME COLUMN title TO name\"}. After the step is listed, open applies it once.\n\nBeginner path: one line per table and plain methods. Expert path: the same store still runs checked SQL, and a scope that runs as the system can bypass a guard on purpose.",
+          "technical": "Proposed, not implemented. Core/Db gains Store (db.open) and Table<K, T> with get, add, put, delete, query, search and scan. It gains Who (Account, System) and Op (Read, Insert, Update, Delete), and DBError gains Denied, Exists and Busy. Query<T> gains limit and count. T and K are #Codable; K is #Comparable. The table keeps key columns from K and one column per top-level scalar field of T for filters.\n\nNew diagnostics: an impure key function, a filter that needs a full scan (a warning), and a row type that changed without a migration step.\n\nProof: an example with a db.Table holding a #Secret field prints its stored and wire forms on O0, O1 and O2. A case shows a query's read set refreshing a live query after a write. A UI snapshot shows the effect error for a put without DB.Write. A case runs two concurrent move_task calls and prints one Ok and one Conflict.",
+          "code": "Crew: struct {\n    tasks: db.Table<TaskID, Task>,\n    members: db.Table<MemberKey, Member>,\n\n    #App.SignedIn\n    move_task: fn(self, id: TaskID, to: Status, seen: Int) -[DB.Read, DB.Write]> Task TaskError! {\n        task: self.tasks.get(id) ?? return Err(TaskError.NotFound)\n        if task.version != seen -> return Err(TaskError.Conflict)\n        Ok(self.tasks.put(Task{id: task.id, title: task.title, status: to, version: seen + 1}))\n    }\n}\n\nopen_crew: fn(path: String) -[DB.Read, DB.Write]> Crew TaskError! {\n    store: db.open(path)\n    Ok(Crew{\n        tasks: store.table(\"tasks\", key: fn(t: Task) { t.id }).guard(task_policy),\n        members: store.table(\"members\", key: fn(m: Member) { MemberKey{project: m.project, account: m.account} }),\n    })\n}"
+        },
+        {
+          "key": "B",
+          "name": "A marker on the row type: #Table(name:, key:) on the struct, and db.Table<T> fields",
+          "gist": "The row struct says which table it lives in and which fields are its key.",
+          "detail": "The row struct carries #Table(name: \"tasks\", key: [id]). A composite key lists two fields: key: [project, account]. The service field is tasks: db.Table<Task>, and store.open<Task>() binds it. get takes the key fields in order, as a tuple: self.members.get((project, account)).\n\nThe methods, the storage codec, the guard, the filter warning, the read sets and the schema changes work as in A. The key is a list of fields, so it is pure by construction. The difference is where the table is declared: on the row type, once, instead of where the table is opened.\n\nBeginner path: one marker per row type. Expert path: as A.\n\nGain: the table name and key sit beside the fields they name. Loss: a row type can live in only one table, so an archive table of old tasks needs a copy of the Task struct. The key is a list of field names inside a marker, so a renamed field breaks the marker, and the key has no type of its own to pass around.",
+          "technical": "Proposed, not implemented. A new #Table marker, declared by core.db, with name: String and key: a list of field names checked against the struct. db.Table<T> derives its key type as a tuple of the key fields' types. The rest is as in A.",
+          "code": "#Table(name: \"tasks\", key: [id])\nTask: struct { id: TaskID, title: String, status: Status, version: Int }\n\n#Table(name: \"members\", key: [project, account])\nMember: struct { project: ProjectID, account: auth.AccountID, role: Role }\n\nCrew: struct {\n    tasks: db.Table<Task>,\n    members: db.Table<Member>,\n\n    #App.SignedIn\n    move_task: fn(self, id: TaskID, to: Status, seen: Int) -[DB.Read, DB.Write]> Task TaskError! {\n        task: self.tasks.get(id) ?? return Err(TaskError.NotFound)\n        if task.version != seen -> return Err(TaskError.Conflict)\n        Ok(self.tasks.put(Task{id: task.id, title: task.title, status: to, version: seen + 1}))\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "SQL checked against the migrated schema: no table type; jet check verifies each query, like sqlx",
+          "gist": "The program writes the migrations and every query in SQL; jet check proves each query against the schema the migrations build.",
+          "detail": "The service holds a database scope. A migration creates each table with SQL. jet check replays the package's migrations into a schema and checks every SQL text against it. Each table and column must exist, and the selected columns must match the struct db.decode fills. A method reads with query_one, decodes the row, and writes with execute.\n\nSchema changes are migrations the programmer writes. A struct field with no column, or a query naming a dropped column, is a compile error at the query.\n\nRead sets come from the parsed query: the table and the columns its WHERE clause compares. A write names its table and the key it changes, so a live query refreshes only when a write could match it.\n\nBeginner path: learn SQL first. Expert path: full control of every statement, joins and indexes included.\n\nGain: what runs is exactly what is written, every query is checked, and no new table surface is taught. Loss: every table and every query is written by hand, so a get-by-key is three lines of SQL and decode. A composite key, a row policy and a #Secret column are the program's job in SQL text, and a policy stays limited to true and owner == user.",
+          "technical": "Proposed in part. Core/Db has query, query_one, execute, migrate, decode and live today. New: a schema built from the package's migrations at check time, a check of each SQL text against it, and statement-level read sets. The transaction rule above applies. Proof: the same move_task case written in SQL, and a UI snapshot of a query naming a dropped column.",
+          "code": "Crew: struct {\n    db: db.DBScope,\n\n    #App.SignedIn\n    move_task: fn(self, id: TaskID, to: Status, seen: Int) -[DB.Read, DB.Write]> Task TaskError! {\n        row: self.db.query_one(SQL{\"SELECT id, title, status, version FROM tasks WHERE id = {id}\"}) ?? return Err(TaskError.Store)\n        task: db.decode<Task>(row ?? return Err(TaskError.NotFound), task_columns) ?? return Err(TaskError.Store)\n        if task.version != seen -> return Err(TaskError.Conflict)\n        _: self.db.execute(SQL{\"UPDATE tasks SET status = {to}, version = {seen + 1} WHERE id = {id}\"}) ?? return Err(TaskError.Store)\n        Ok(Task{id: task.id, title: task.title, status: to, version: seen + 1})\n    }\n}\n\n// migration 001: SQL{\"CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT, status TEXT, version INTEGER)\"}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Drizzle ORM",
+          "note": "A table is a value built from a name and typed columns, and queries are typed by it: the shape of A. Migrations are generated from the table values by drizzle-kit. Source: https://orm.drizzle.team/docs/sql-schema-declaration",
+          "code": "export const tasks = sqliteTable(\"tasks\", { id: text(\"id\").primaryKey() });"
+        },
+        {
+          "lang": "Prisma",
+          "note": "One schema file is the source of the typed client and of generated migrations; a rename needs a hand-edited migration. Close to A's schema story. Source: https://www.prisma.io/docs/orm/prisma-migrate/workflows/customizing-migrations",
+          "code": "model Task {\n  id    String @id\n  title String\n}"
+        },
+        {
+          "lang": "Ecto (Elixir)",
+          "note": "A schema macro on the row module names the table and its fields, the shape of B; migrations are written by hand. Source: https://hexdocs.pm/ecto/Ecto.Schema.html",
+          "code": "schema \"tasks\" do\n  field :title, :string\nend"
+        },
+        {
+          "lang": "Diesel (Rust)",
+          "note": "A table! description, printed from the migrated database, types every query at compile time; migrations are SQL the programmer writes. Between A and C. Source: https://diesel.rs/guides/schema-in-depth.html",
+          "code": "table! { tasks (id) { id -> Text, title -> Text, } }"
+        },
+        {
+          "lang": "sqlx (Rust)",
+          "note": "Plain SQL text, checked at compile time against the migrated database or its saved description: the shape of C. Source: https://docs.rs/sqlx/latest/sqlx/macro.query_as.html",
+          "code": "let task = sqlx::query_as!(Task, \"SELECT id, title FROM tasks WHERE id = ?\", id)\n    .fetch_one(&pool).await?;"
+        },
+        {
+          "lang": "Convex",
+          "note": "Each mutation is one serializable transaction that the platform retries on conflict, and side effects go to scheduled functions: the transaction rule here. Source: https://docs.convex.dev/database/advanced/occ",
+          "code": "export const move = mutation(async (ctx, { id }) => { await ctx.db.patch(id, { status: \"done\" }); });"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A gives each table a typed key and row with one pure function, writes the schema steps it can prove safe, and reuses the data library's Query<T>. B ties a row type to one table and puts the key in field names. C checks every query, but leaves every table, key, policy and secret to hand-written SQL.",
+        "gains": [
+          "A table, its key and its row type are declared once and checked at every get, put and query.",
+          "#Secret fields stay in storage and never reach a client answer.",
+          "Live screens refresh only when a write touched the rows they read."
+        ],
+        "losses": [
+          {
+            "loss": "New public names in core.db: Store, Table, Who, Op, and three DBError cases.",
+            "mitigation": "They replace hand-written CREATE TABLE, SELECT and decode code, and the query side adds no carrier: query() returns the existing Query<T>."
+          },
+          {
+            "loss": "A filter the compiler cannot turn into SQL needs a full scan.",
+            "mitigation": "Such a filter is a registered warning naming the part it could not read, and only an explicit .scan() silences it."
+          },
+          {
+            "loss": "A retried method could repeat work outside the database.",
+            "mitigation": "The compiler refuses Net, FS.Write and Exec effects inside a method that writes, and app.after_commit runs such work once after the commit."
+          },
+          {
+            "loss": "A renamed or removed field, or a new key type, needs a migration step the programmer adds.",
+            "mitigation": "jet check finds the change before the app runs, and its fix line is the SQL step to add; safe additions are generated."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A row type can live in only one table, and the key is a list of field names with no type of its own."
+          },
+          {
+            "key": "C",
+            "reason": "Every query is checked, but each get-by-key is hand-written SQL and decode, and composite keys, policies and secrets stay the program's job in SQL text."
+          }
+        ],
+        "tradeoff": "A typed table costs a handful of new core.db names in exchange for checked keys, guarded secrets, generated safe migrations and precise live refresh."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main's review found five gaps (a checked-SQL option, schema evolution, the full-scan filter, isolation and Busy, and the key function's purity), and every one is fixed in this payload."
+      },
+      "checkInstructions": "Code reads only, on dev. In Core/Db/Db.jet, read SQL (:260), RowPolicy and db.policy, which accepts only true and owner == user (:303-334), and DBConnection and DBScope with its live binding (:711-764). Then read DBTransaction (:773), transaction (:889), migrate (:1077) and decode (:1474). Read Core/Data/Data.jet:408-440 for Query<T>, the one typed query carrier.\n\nIn the web app proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md), read the Crew service and its tables (:1171-1180) and open_crew (:1573-1592). Then read the table rules (:2925-2990) and the db stub (:6471).",
+      "surface": {
+        "gist": "Should app tables be typed values with a key function, a marker on the row type, or checked SQL?",
+        "lesson": "A table holds rows of one shape, each found by a key. When Jet knows the shape and the key, it checks reads and writes. It also keeps secrets out of answers and refreshes only the screens a write touched.",
+        "trio": {
+          "current": {
+            "note": "Today each table is SQL text plus a decode call, and nothing checks the SQL against the tables.",
+            "code": "row: scope.query_one(SQL{\"SELECT * FROM tasks WHERE id = {id}\"}) ?? return Err(err)\ntask: db.decode<Task>(row ?? return Err(missing), task_columns) ?? return Err(err)"
+          },
+          "wild": {
+            "lang": "Drizzle ORM",
+            "note": "A table is a value made from a name and typed columns.",
+            "code": "export const tasks = sqliteTable(\"tasks\", { id: text(\"id\").primaryKey() });\nawait db.select().from(tasks).where(eq(tasks.id, id));"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "A table value with a key function",
+            "gist": "store.table(\"tasks\", key: fn) makes a typed table; queries return Query<T>.",
+            "gains": [
+              "Keys and rows checked at every call",
+              "Secrets never reach a client",
+              "Safe schema steps are generated"
+            ],
+            "losses": [
+              "A few new core.db names"
+            ],
+            "proposed": {
+              "code": "tasks: db.Table<TaskID, Task>\n\ntasks: store.table(\"tasks\", key: fn(t: Task) { t.id })\ntask: self.tasks.get(id) ?? return Err(TaskError.NotFound)\nself.tasks.put(Task{id: task.id, title: task.title, status: to, version: seen + 1})"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A marker on the row type",
+            "gist": "#Table(name:, key:) on the struct names its table and key fields.",
+            "gains": [
+              "Table name and key sit beside the fields"
+            ],
+            "losses": [
+              "One row type fits only one table",
+              "The key is field names, with no type"
+            ],
+            "proposed": {
+              "code": "#Table(name: \"tasks\", key: [id])\nTask: struct { id: TaskID, title: String, status: Status, version: Int }\n\ntasks: db.Table<Task>\ntask: self.tasks.get(id) ?? return Err(TaskError.NotFound)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "SQL checked against the schema",
+            "gist": "Hand-written migrations and queries; jet check proves each query against the migrated schema.",
+            "gains": [
+              "What runs is exactly what is written",
+              "Every query is checked"
+            ],
+            "losses": [
+              "Every get and put is hand-written SQL",
+              "Keys, policies and secrets stay manual"
+            ],
+            "proposed": {
+              "code": "row: self.db.query_one(SQL{\"SELECT * FROM tasks WHERE id = {id}\"}) ?? return Err(TaskError.Store)\ntask: db.decode<Task>(row ?? return Err(TaskError.NotFound), task_columns) ?? return Err(TaskError.Store)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A declares each table once with a pure key function and reuses Query<T>. B ties a row type to one table. C checks queries but leaves keys, policies and secrets to hand-written SQL.",
+          "gains": [
+            "Checked keys and rows",
+            "Secrets stay in storage",
+            "Precise live refresh"
+          ],
+          "losses": [
+            {
+              "loss": "A few new core.db names.",
+              "mitigation": "They replace hand-written SQL and decode code, and queries reuse the existing Query<T>."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "One row type fits only one table, and the key has no type."
+            },
+            {
+              "key": "C",
+              "reason": "Every get and put is hand-written, and keys, policies and secrets stay manual."
+            }
+          ],
+          "tradeoff": "A few new names buy checked tables, guarded secrets and generated safe migrations."
+        }
+      },
+      "reports": [
+        {
+          "title": "Drizzle ORM: schema declaration",
+          "url": "https://orm.drizzle.team/docs/sql-schema-declaration",
+          "note": "Tables are values built from typed columns."
+        },
+        {
+          "title": "Prisma: customizing migrations",
+          "url": "https://www.prisma.io/docs/orm/prisma-migrate/workflows/customizing-migrations",
+          "note": "Generated migrations, with renames edited by hand."
+        },
+        {
+          "title": "Ecto.Schema",
+          "url": "https://hexdocs.pm/ecto/Ecto.Schema.html",
+          "note": "A schema macro on the row module names the table."
+        },
+        {
+          "title": "Diesel: schema in depth",
+          "url": "https://diesel.rs/guides/schema-in-depth.html",
+          "note": "table! descriptions type every query at compile time."
+        },
+        {
+          "title": "sqlx: query_as!",
+          "url": "https://docs.rs/sqlx/latest/sqlx/macro.query_as.html",
+          "note": "SQL text checked at compile time against the database."
+        },
+        {
+          "title": "Convex: optimistic concurrency control",
+          "url": "https://docs.convex.dev/database/advanced/occ",
+          "note": "Mutations are serializable transactions retried on conflict."
+        },
+        {
+          "title": "SQLite: BEGIN IMMEDIATE",
+          "url": "https://www.sqlite.org/lang_transaction.html",
+          "note": "A write transaction that takes the write lock at its start."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-15T02:11:11.487Z"
+    },
+    {
+      "id": "D-STREAM-REGION1",
+      "cardId": "c02vkuef",
+      "group": "library",
+      "title": "Where a streamed page splits into regions: at each read's Loading branch, at an explicit deferred wrapper, or nowhere with the client finishing slow reads",
+      "situation": "When a server builds a web page, some data comes back fast and some comes back slow. Today a Jet server waits for every read to finish before it sends any of the page. One slow read makes the whole page late, and the person sees a blank screen. Streaming sends the parts that are ready first, with a loading state in place of the slow parts. Each slow part then arrives on the same connection when its data is ready. This vote picks where a page splits into those parts, which we call regions, and in what order they appear. We recommend A: each read that a screen matches on is its own region, and its Loading branch is what shows until the data arrives.",
+      "gist": "Should a streamed page split at each read's Loading branch, at an explicit deferred wrapper, or should the client finish slow reads itself?",
+      "lesson": "A page is ready in pieces. If the server knows which piece waits on which read, it can send the ready pieces at once and fill in each slow piece the moment its data arrives.",
+      "explainer": "Words used here. A read is a call a screen makes for data, such as app.state(app.live(fn() { crew.board(id) })). A screen matches on its state: Loading, Failed or Loaded. The Loading branch is the code that draws the screen while the data is on its way.\n\nThe shell is the first part of the page the server sends. A region is a part of the page that the server may send later. Streaming means sending one HTTP answer in several pieces over one connection.\n\nLayout shift is the page jumping when a late part appears with a different size. Resuming means the browser picks the page up where the server left it, without running the screen code again.",
+      "story": "Sam opens a project board. The page has a header, the board and a members panel. The board's read takes 300 ms; the header and the members panel are ready in 10 ms.\n\nUnder A the app graph says .stream(after: 50ms). At 50 ms the server sends the header, the members panel and the board's spinner, which is its Loading branch. At 300 ms it sends the board, and the spinner is replaced in place. Sam's programmer wrote no new code; the spinner was already there.\n\nUnder B the programmer also wraps the board in ui.deferred with a fallback, and an unwrapped slow read still holds up the whole page. Under C Sam sees the spinner at 50 ms too. But the browser then asks the server for the board in a second request, so the board arrives one round trip later.",
+      "inWild": "// React 18 and Next.js: an explicit Suspense boundary marks each streamed\n// region; SuspenseList orders reveals; Next.js sends whole pages to bots.\n// https://react.dev/reference/react/Suspense\n<Suspense fallback={<Spinner />}><Board id={id} /></Suspense>\n\n// Remix: a loader returns a deferred promise; <Await> renders it, with its own errorElement.\n// https://remix.run/docs/en/main/guides/streaming\n<Suspense fallback={<Spinner />}><Await resolve={board} errorElement={<Failed />}>{(b) => <Board b={b} />}</Await></Suspense>\n\n// Marko: <await> streams in order with no script, or out of order with client-reorder.\n// https://markojs.com/docs/await/\n<await(board from input.boardPromise) client-reorder><@placeholder>Loading</@placeholder></await>\n\n// SolidStart: Suspense boundaries over resources, streamed out of order.\n// https://docs.solidjs.com/reference/components/suspense\n<Suspense fallback={<Spinner />}><Board /></Suspense>\n\n// Phoenix LiveView: assign_async renders loading, failed and ok over the socket.\n// https://hexdocs.pm/phoenix_live_view/Phoenix.LiveView.html#assign_async/4\n<.async_result :let={board} assign={@board}><:loading>Loading...</:loading></.async_result>",
+      "detail": "What this ballot decides: where a page streamed by .stream(after:) splits into regions, in what order they appear, and what each region carries. The graph spelling .stream(after: 50ms) is already in the web app shape.\n\nCurrent code. Core/App/App.jet's state reads a live binding and returns Loadable: Idle, Loading, Failed or Loaded. On the server it runs the read at once and waits for it. App.stream is a stub in the shape proposal and is not built.\n\nThe same for every option. Without .stream the page is sent whole, after every read, as today. A page whose reads all finish before after: is sent whole too, with no swap code. A screen cached with .cache(.Public) is always sent whole, so a shared cache never keeps a page with Loading regions.\n\nHTTP status, the same for every option. The status code and the head are fixed when the shell is sent. A 404 from a bad link comes from the route decode, which runs before the shell. A read whose Failed branch shows the graph's not-found or error view decides the status, so it holds the shell until it finishes. Any other read that fails after the shell draws its Failed branch under the 200 already sent.\n\nPlacing a late piece, for A and B. Each later piece is HTML in a template tag plus a short inline script that moves it into place. A browser with scripts off keeps the Loading branch. Requests from known search crawlers get the whole page, as Next.js does for bots.\n\nResume, the same for every option. Each piece carries its read's encoded result in the page's resume state. The browser never runs the read or the screen code again for that region.\n\nOut of scope: the head and sitemap builders, install and assets, which have their own cards.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Each read is a region, and its Loading branch is the fallback",
+          "gist": "A screen that matches on app.state is one region; no new code.",
+          "detail": "Each app.state read on the server starts its source on its own task. When after: passes, a read still running draws its Loading branch inside a marked region. The server then sends the shell. When the read finishes, the server draws that region's Loaded branch and sends it. A read that fails after the shell draws its Failed branch the same way.\n\nConcurrency. A page runs at most 8 reads at once; the rest wait their turn in page order. The reads belong to the request's task group, so they stop when the browser disconnects or the request times out.\n\nReveal order. A region inside another region appears only after its parent. Sibling regions appear in page order: one that finishes early waits for the regions above it. Reveals are batched every 300 ms, so the page moves a few times at most, top to bottom.\n\nLayout shift remains when a Loading branch and its Loaded branch differ in size. A Loading branch drawn at the size of its content, such as a placeholder of the board's height, avoids it.\n\nBeginner path: add .stream(after: 50ms) to the graph; the spinners already written become the fallbacks. Expert path: a screen that must arrive whole reads its data with a plain call instead of app.state. jet inspect choices lists each region with its read.",
+          "technical": "Proposed, not implemented. app.state gains a server mode that returns Loading when the stream deadline passes and records the region. The web server writes the response in chunks and bounds each page's reads at 8. The renderer marks each region's root node and orders reveals. No new public names beyond the shape's App.stream.\n\nProof: a case with two reads, one fast and one slow, shows the shell with the slow read's Loading branch and then its Loaded HTML. A second case shows a read that fails after the 200 status drawing its Failed branch.",
+          "code": "with_web_delivery: fn(graph: app.App) -> app.App Never! {\n    graph.stream(after: 50ms)\n}\n\nboard: fn(crew: app.Remote<logic.Crew>, view: logic.BoardView) -> ui.Node {\n    if app.state(app.live(fn() { crew.board(view.project) })) == {\n        .Idle | .Loading -> kit.spinner()\n        .Failed(error) -> failed(error)\n        .Loaded(data) -> board_columns(crew, data)\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "An explicit wrapper: ui.deferred(fallback:, content:)",
+          "gist": "Only code wrapped in ui.deferred streams; every other read holds up the shell.",
+          "detail": "A region is written by hand: ui.deferred(fallback: kit.spinner(), content: fn() { board(crew, view) }). The server sends the fallback in the shell and the content later. A read outside any ui.deferred holds up the shell until it finishes. Concurrency and placing are as in A; reveal order follows the wrappers, which can group several reads into one reveal.\n\nBeginner path: wrap each slow part. Expert path: choose exactly which parts stream and which appear together.\n\nGain: a reader sees each region in the code, and grouping is explicit, as React's Suspense and SuspenseList give. Loss: two ways to say loading, the Loading branch and the fallback, and a screen needs both. A slow read that nobody wrapped makes the whole page late, which is the problem streaming is meant to fix.",
+          "technical": "Proposed, not implemented. A new ui.deferred function in the ui package. The rest is as in A.",
+          "code": "with_web_delivery: fn(graph: app.App) -> app.App Never! {\n    graph.stream(after: 50ms)\n}\n\nboard_page: fn(crew: app.Remote<logic.Crew>, view: logic.BoardView) -> ui.Node {\n    ui.deferred(fallback: kit.spinner(), content: fn() { board(crew, view) })\n}\n\nboard: fn(crew: app.Remote<logic.Crew>, view: logic.BoardView) -> ui.Node {\n    if app.state(app.live(fn() { crew.board(view.project) })) == {\n        .Idle | .Loading -> kit.spinner()\n        .Failed(error) -> failed(error)\n        .Loaded(data) -> board_columns(crew, data)\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "No server streaming: send the shell at the deadline, and the client finishes slow reads",
+          "gist": "The server stops waiting at after:; the browser runs each unfinished read itself.",
+          "detail": "At after: the server sends the whole page with each unfinished read's Loading branch and closes the answer. The browser resumes the page, sees the unfinished reads and calls the server for each one.\n\nBeginner path: as A. Expert path: as A.\n\nGain: the server sends one plain answer and needs no chunked writer. Loss: each slow region arrives one round trip later than in A. The server's work on that read is thrown away and done again. A browser with scripts off keeps the Loading branch, as in A, and crawlers get whole pages, as in A.",
+          "technical": "Proposed, not implemented. app.state gains the same deadline as in A; the client runs unfinished reads through app.Remote after resume. No chunked response.",
+          "code": "with_web_delivery: fn(graph: app.App) -> app.App Never! {\n    graph.stream(after: 50ms)\n}\n\nboard: fn(crew: app.Remote<logic.Crew>, view: logic.BoardView) -> ui.Node {\n    if app.state(app.live(fn() { crew.board(view.project) })) == {\n        .Idle | .Loading -> kit.spinner()\n        .Failed(error) -> failed(error)\n        .Loaded(data) -> board_columns(crew, data)\n    }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "React 18 and Next.js",
+          "note": "Explicit Suspense boundaries mark regions, the shape of B, and SuspenseList controls reveal order. React throttles reveals to limit layout shift, and Next.js sends whole pages to bots. A borrows the ordering, throttling and bot rule but places boundaries at reads. Source: https://react.dev/reference/react/Suspense",
+          "code": "<Suspense fallback={<Spinner />}><Board id={id} /></Suspense>"
+        },
+        {
+          "lang": "Remix",
+          "note": "A loader returns a deferred promise and the page awaits it inside Suspense, with its own error element. Each deferred value is chosen in the loader, closer to B. Source: https://remix.run/docs/en/main/guides/streaming",
+          "code": "<Await resolve={board} errorElement={<Failed />}>{(b) => <Board b={b} />}</Await>"
+        },
+        {
+          "lang": "Marko",
+          "note": "An await tag streams in order with no script, or out of order with client-reorder. A only streams out of order, so A needs a script that Marko's in-order mode does not. Source: https://markojs.com/docs/await/",
+          "code": "<await(board from input.boardPromise) client-reorder>\n  <@placeholder>Loading</@placeholder>\n</await>"
+        },
+        {
+          "lang": "SolidStart",
+          "note": "Suspense boundaries over resources stream out of order, and a resource read outside a boundary suspends the nearest parent. Source: https://docs.solidjs.com/reference/components/suspense",
+          "code": "<Suspense fallback={<Spinner />}><Board /></Suspense>"
+        },
+        {
+          "lang": "Phoenix LiveView",
+          "note": "assign_async loads data after the first render, and the template matches on loading, failed and ok, close to A's Loading branch. It updates over the live socket, not one streamed HTML answer. Source: https://hexdocs.pm/phoenix_live_view/Phoenix.LiveView.html#assign_async/4",
+          "code": "<.async_result :let={board} assign={@board}>\n  <:loading>Loading...</:loading>\n</.async_result>"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A streams every slow read with the Loading branches screens already have, so there is one way to say loading and no slow read can hold up the page by accident. B adds a second loading form, and C makes each slow region a round trip late.",
+        "gains": [
+          "Turning streaming on is one line on the app graph; screens do not change.",
+          "Every slow read streams, so no forgotten wrapper makes the page late.",
+          "Each region resumes from its own result, with no second render in the browser."
+        ],
+        "losses": [
+          {
+            "loss": "A screen cannot ask for one read to hold up the shell while the rest stream.",
+            "mitigation": "It reads that data with a plain call instead of app.state, and jet inspect choices lists every region with its read."
+          },
+          {
+            "loss": "A read that fails after the 200 status cannot change the status code.",
+            "mitigation": "A read whose Failed branch shows the not-found or error view holds the shell, and a 404 from a bad link comes from the route decode first."
+          },
+          {
+            "loss": "Late regions can make the page jump.",
+            "mitigation": "Regions appear in page order, batched every 300 ms, and a Loading branch drawn at its content's size does not shift."
+          },
+          {
+            "loss": "A browser with scripts off keeps the Loading branch of a late region.",
+            "mitigation": "Known search crawlers get the whole page, and a cached public page is always sent whole."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It needs both a fallback and a Loading branch for one wait, and a slow read nobody wrapped still makes the page late."
+          },
+          {
+            "key": "C",
+            "reason": "Each slow region costs one more round trip, and the server's work on it is done twice."
+          }
+        ],
+        "tradeoff": "A gives up a per-read hold-the-shell switch and explicit grouping in exchange for streaming that needs no screen changes."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main's review found five gaps (no-script placing, reveal order, the HTTP status, the read bound and the in-the-wild list), and every one is fixed here."
+      },
+      "checkInstructions": "Code reads only, on dev. Read Core/App/App.jet: Live (:254) and state (:292), which runs a read at once and returns Loadable. Then read the web app proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md). See the board screen and its Loading branch (:2060-2078), the streaming example in section 5.2.2 (:4123-4146) and the App.stream stub (:5850).",
+      "surface": {
+        "gist": "Should a streamed page split at each read's Loading branch, at a wrapper, or let the browser finish slow reads?",
+        "lesson": "A page is ready in pieces. If the server knows which piece waits on which read, it sends the ready pieces at once. Then it fills in each slow piece when its data arrives.",
+        "trio": {
+          "current": {
+            "note": "Today the server waits for every read, so one slow read makes the whole page late.",
+            "code": "board: fn(crew: app.Remote<logic.Crew>, view: logic.BoardView) -> ui.Node {\n    if app.state(app.live(fn() { crew.board(view.project) })) == {\n        .Idle | .Loading -> kit.spinner()\n        .Failed(error) -> failed(error)\n        .Loaded(data) -> board_columns(crew, data)\n    }\n}"
+          },
+          "wild": {
+            "lang": "React 18",
+            "note": "A Suspense boundary marks each streamed part, with its own fallback.",
+            "code": "<Suspense fallback={<Spinner />}>\n  <Board id={id} />\n</Suspense>"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Each read is a region",
+            "gist": "The Loading branch screens already have is what shows until the data arrives.",
+            "gains": [
+              "One line turns streaming on",
+              "No slow read is missed",
+              "No second render in the browser"
+            ],
+            "losses": [
+              "No per-read switch to hold the shell"
+            ],
+            "proposed": {
+              "code": "graph.stream(after: 50ms)\n\nif app.state(app.live(fn() { crew.board(view.project) })) == {\n    .Idle | .Loading -> kit.spinner()\n    .Failed(error) -> failed(error)\n    .Loaded(data) -> board_columns(crew, data)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "An explicit deferred wrapper",
+            "gist": "Only code wrapped in ui.deferred streams.",
+            "gains": [
+              "Each region is visible in the code"
+            ],
+            "losses": [
+              "Two ways to say loading",
+              "An unwrapped slow read still delays the page"
+            ],
+            "proposed": {
+              "code": "graph.stream(after: 50ms)\n\nui.deferred(fallback: kit.spinner(), content: fn() { board(crew, view) })"
+            }
+          },
+          {
+            "key": "C",
+            "name": "The browser finishes slow reads",
+            "gist": "The server sends spinners at the deadline; the browser fetches the rest.",
+            "gains": [
+              "One plain answer from the server"
+            ],
+            "losses": [
+              "One more round trip per slow region",
+              "The server's work on a slow read is wasted"
+            ],
+            "proposed": {
+              "code": "graph.stream(after: 50ms)\n\n// the same screen as A; the browser re-runs crew.board after resume"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A streams every slow read with the Loading branches screens already have. B adds a second loading form, and C makes each slow region a round trip late.",
+          "gains": [
+            "One line turns streaming on",
+            "No slow read is missed",
+            "Regions resume without a second render"
+          ],
+          "losses": [
+            {
+              "loss": "No per-read switch to hold the shell.",
+              "mitigation": "Read that data with a plain call; jet inspect choices lists every region."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two loading forms, and unwrapped slow reads still delay the page."
+            },
+            {
+              "key": "C",
+              "reason": "An extra round trip per slow region, and work done twice."
+            }
+          ],
+          "tradeoff": "A drops a hold-the-shell switch to stream with no screen changes."
+        }
+      },
+      "reports": [
+        {
+          "title": "React: Suspense",
+          "url": "https://react.dev/reference/react/Suspense",
+          "note": "Boundaries, fallbacks and reveal throttling."
+        },
+        {
+          "title": "Remix: streaming",
+          "url": "https://remix.run/docs/en/main/guides/streaming",
+          "note": "Deferred loader data rendered with Await."
+        },
+        {
+          "title": "Marko: await",
+          "url": "https://markojs.com/docs/await/",
+          "note": "In-order streaming without scripts, or out of order with client-reorder."
+        },
+        {
+          "title": "SolidJS: Suspense",
+          "url": "https://docs.solidjs.com/reference/components/suspense",
+          "note": "Suspense boundaries over resources."
+        },
+        {
+          "title": "Phoenix LiveView: assign_async",
+          "url": "https://hexdocs.pm/phoenix_live_view/Phoenix.LiveView.html#assign_async/4",
+          "note": "Async assigns render loading, failed and ok states."
+        },
+        {
+          "title": "Qwik: resumable",
+          "url": "https://qwik.dev/docs/concepts/resumable/",
+          "note": "The browser resumes server state instead of re-running components."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-15T02:11:13.210Z"
     }
   ],
   "questions": [
@@ -204049,6 +204548,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:11:14.292Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-15T02:11:13.210Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-STREAM-REGION1",
+      "note": "Where a streamed page splits into regions: at each read's Loading branch, at an explicit deferred wrapper, or nowhere with the client finishing slow reads"
+    },
+    {
+      "at": "2026-11-15T02:11:12.395Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T02:11:11.487Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DB-TABLE1",
+      "note": "How an app declares and uses a typed database table: a table value with a key function, a marker on the row type, or SQL checked against the migrated schema"
+    },
+    {
+      "at": "2026-11-15T02:11:10.507Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-15T02:11:09.583Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-15T02:11:08.660Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-15T02:11:07.786Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-15T02:11:06.833Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-15T02:11:05.974Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T02:11:05.081Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T02:11:04.184Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T02:11:03.347Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-IFHOLE2",
+      "note": ""
+    },
+    {
+      "at": "2026-11-15T02:11:02.470Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w7t4qu",
+      "note": "#24: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (was #3160 c3) If shared reflection/codec generation is adopted, it preserves builtin roles and does not falsely expose an infinite payload value domain as T.cases [precut audit: no dev test, golden, "
+    },
+    {
+      "at": "2026-11-15T02:11:01.556Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w7t4qu",
+      "note": "#23: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (was #3160 c2) Reject ambiguous collapse such as treating a named case, optional unit and structural unit membership as automatically identical [precut audit: no dev test, golden, case or snapshot pro"
+    },
+    {
+      "at": "2026-11-15T02:11:00.617Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w7t4qu",
+      "note": "#22: Restated as one observable outcome with one exact proof, in current syntax and paths.; was: (was #3160 c1) Observe success/absence/error labels and payload values through each legal boundary, including nested optional/result types [precut audit: no dev test, golden, case or snapshot proves t"
+    },
     {
       "at": "2026-11-15T02:10:59.484Z",
       "by": "TowerKeeper-1",
