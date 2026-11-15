@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6890,
-    "rev": 103700,
+    "nextNum": 6891,
+    "rev": 103725,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4204,25 +4204,25 @@
         }
       ],
       "created": "2026-07-06T19:15:48.960Z",
-      "updated": "2026-11-13T01:54:40.921Z",
+      "updated": "2026-11-15T03:32:48.406Z",
       "criteria": [
         {
           "n": 2,
-          "text": "Asset handles are typed and tied to their owning scene. Image and sound loading uses the checked importer fact, reports the declared path and kind, and successful reload publishes one deterministic handle and receipt.",
+          "text": "Asset handles are typed and tied to their owning scene (D-GAME-ASSET1=A: `player: scene.assets.image(\"assets/player.png\")?`); image and sound loading uses the checked importer fact and reports the declared path and kind; a successful reload publishes one deterministic handle and receipt. Proof: `jet test Compiler --profile golden --filter Apps/Game/GameAssets` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-01T18:15:53.297Z"
+          "at": "2026-11-15T03:32:44.638Z"
         },
         {
           "n": 3,
-          "text": "Missing files, wrong asset kinds, stale scene identity, corrupt import facts, and failed hot reload report a safe error while preserving the last valid asset state and its provenance.",
+          "text": "Missing files, wrong asset kinds, stale scene identity, corrupt import facts and a failed hot reload each give a safe error and keep the last valid asset state and its provenance, the same on O0, O1 and O2, and the check fails when the Jet asset path is bypassed. Proof: `jet test Compiler --profile golden --filter Apps/Game/GameAssets`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-01T18:15:53.297Z"
+          "at": "2026-11-15T03:32:45.550Z"
         },
         {
           "n": 8,
@@ -4235,12 +4235,12 @@
         },
         {
           "n": 9,
-          "text": "Runnable proof: `jet test Compiler --profile golden game/game_assets` passes on O0, O1 and O2, and no asset policy remains outside Core/Game/*.jet (replaces the Rust-bypass wording of criterion 6).",
+          "text": "No asset policy remains outside Core/Game (or the game battery): the host keeps only file-read and decode leaves. Proof: `git grep -n -E 'assets_(image|sound)|reload' -- Compiler/JetRuntime` shows only those leaves, and `jet test Compiler --profile golden --filter Apps/Game/GameAssets` passes on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:15:47.378Z"
+          "at": "2026-11-15T03:32:46.551Z"
         },
         {
           "n": 10,
@@ -4289,21 +4289,21 @@
         },
         {
           "n": 15,
-          "text": "[#3287] **[OWNER]** The PCM container IO ballot (A/B/C) is ratified. If A: golden game/game_wav passes on every level, scoped to bounded common game-asset PCM, with no specialist audio expansion.",
+          "text": "Core reads and writes basic WAV files as ordinary game assets, bounded to common game-asset PCM with no specialist audio expansion (D-VERDICT-3287-1=A, ratified 2026-10-04). Proof: `jet test Compiler --profile golden --filter Apps/Game/GameWav` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:24:42.657Z"
+          "at": "2026-11-15T03:32:47.504Z"
         },
         {
           "n": 16,
-          "text": "(was #2488 c1) Implementation-only closure: declared asset roots are discovered and watched with typed coalesced dependency facts; imports produce validated runtime facts; hot reload atomically swaps shared in-memory handles only after a committed receipt and preserves the previous artifact on failure [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Declared asset roots are discovered and watched with typed, coalesced dependency facts; imports produce validated runtime facts; hot reload swaps shared in-memory handles atomically only after a committed receipt and keeps the previous artifact on failure. Proof: `jet test Compiler --profile cases --filter game/asset_hot_reload`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:50:30.775Z"
+          "at": "2026-11-15T03:32:48.406Z"
         }
       ],
       "needsAcceptance": false,
@@ -4314,7 +4314,7 @@
         "examples/features/game/core_game_headless.jet",
         "tests/fuzz/sema/differential/ex_game_core_game_headless.jet"
       ],
-      "updatedBy": "Main",
+      "updatedBy": "TowerKeeper-1",
       "tags": [
         "retargeted",
         "batch-core-ui",
@@ -31812,39 +31812,39 @@
       "criteria": [
         {
           "n": 4,
-          "text": "The collections/filter_map and filter_map_absence goldens pass on O0, O1 and O2: Option absence skips, Result keeps success-only selection, failure propagates, map_while stops and find_map continues.",
+          "text": "filter_map's callback carrier picks the rule: `-> U?` skips None, an explicit Result keeps success-only selection, and a callback failure propagates; map_while stops at None and find_map continues past it, consuming the triggering item, with no new absence or error type (D-ITER-SELECTION1=A). Proof: `jet test Compiler --profile golden --filter Collections/Iterators/FilterMap` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:21:09.028Z"
+          "at": "2026-11-15T03:32:49.534Z"
         },
         {
           "n": 5,
-          "text": "[#3326]  • State and output types may differ, including a move-only output. • The step runs once per demanded item, with an explicit stop/error/remainder rule. • No whole-state clone; existing `scan` is unchanged. • Golden `collections/scan_emit`.",
+          "text": "Scan keeps state separate from output: state and output types may differ (a move-only output too), the step runs once per demanded item with an explicit stop, error and remainder rule, and no whole-state clone; existing scan is unchanged (D-ITER-SCAN1=A). Proof: `jet test Compiler --profile golden --filter Collections/Iterators/ScanEmit`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:52.710Z"
+          "at": "2026-11-15T03:32:50.548Z"
         },
         {
           "n": 6,
-          "text": "[#3328]  • Key and binary Ordering forms both exist. • Ties keep the pinned LAST item. Callback count and error order are documented. Empty and partial orders follow the existing law. • Golden `collections/extrema_comparator`; `max_by_tie` golden unchanged.",
+          "text": "Extrema take a key form and a binary Ordering form; ties keep the last item; callback count and error order are documented; empty and partial orders follow the existing law (D-ITER-CMPSELECT1=A). Proof: `jet test Compiler --profile golden --filter Collections/Iterators/ExtremaComparator` and the max_by_tie golden unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:54.239Z"
+          "at": "2026-11-15T03:32:51.520Z"
         },
         {
           "n": 7,
-          "text": "[#3347]  • A,A,B,A gives three runs. Groups are consumed incrementally, with no full-run materialization. • Retaining a group needs an explicit collection. • Golden `collections/chunk_by`; UI `chunk_by_child_blocks_parent`.",
+          "text": "chunk_by groups adjacent equal keys incrementally (A,A,B,A gives three runs) without materializing a run; keeping a group needs an explicit collection (D-ITER-KEYRUNS1=A). Proof: `jet test Compiler --profile golden --filter Collections/Iterators/ChunkBy` and `jet test Compiler --profile ui --filter chunk_by_child_blocks_parent`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:54.936Z"
+          "at": "2026-11-15T03:32:52.407Z"
         },
         {
           "n": 8,
@@ -31947,8 +31947,8 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:26.482Z",
-      "updated": "2026-11-13T01:56:43.048Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:32:52.407Z",
+      "updatedBy": "TowerKeeper-1",
       "workOrder": 46,
       "goals": [
         "G3"
@@ -55377,6 +55377,15 @@
           "evidence": "Moved to #6887 c1: system scheduling is core.game runtime",
           "at": "2026-11-15T03:28:22.191Z",
           "closure": "obsolete"
+        },
+        {
+          "n": 24,
+          "text": "Backends expose typed capability interfaces with headless and native ui providers (D-GAME-BACKEND1=A; no raylib, owner 2026-11-08), and an unsupported capability fails at startup, not mid-frame. Proof: `jet test Compiler --profile cases --filter game/backend_capability_missing`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:32:43.756Z"
         }
       ],
       "refs": [
@@ -55392,12 +55401,12 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:36:57.362Z",
-      "updated": "2026-11-15T03:28:31.936Z",
+      "updated": "2026-11-15T03:32:43.756Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 23
+      "criteriaLastN": 24
     },
     {
       "id": "c0grmd0j",
@@ -79705,6 +79714,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: this card is now only the sql and auth move (c1). The pool, migrations, SQL console, inspector and EXPLAIN criteria (c2-c12) moved to #6889."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -79728,47 +79742,52 @@
         {
           "n": 2,
           "text": "(was #2450 c1) The local SQL console accepts direct typed sources, scripts, stdin and bounded multiline input, using the shared parser/executor [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:46.831Z"
+          "evidence": "Moved to #6889 c6: db tooling gets its own card",
+          "at": "2026-11-15T03:31:12.317Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
           "text": "(was #2450 c2) Source ingestion and query execution enforce typed schemas and explicit byte/row/result bounds; projection, aliases and aggregates use the canonical SQL kernel [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:47.500Z"
+          "evidence": "Merged into #6889 c6: console bounds are part of the console sources criterion",
+          "at": "2026-11-15T03:31:13.246Z",
+          "closure": "obsolete"
         },
         {
           "n": 4,
           "text": "(was #2450 c3) Tables/schema/plan/stats/export and structured result metadata are implemented against the same source/session [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:48.205Z"
+          "evidence": "Moved to #6889 c7: db tooling gets its own card",
+          "at": "2026-11-15T03:31:14.193Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
           "text": "(was #2450 c4) The browser inspector binds loopback only and snapshots the same authorized source, SQL session and query state [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:48.837Z"
+          "evidence": "Moved to #6889 c8: db tooling gets its own card",
+          "at": "2026-11-15T03:31:15.175Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
           "text": "(was #2450 c5) Remote, file and export authority and resource limits fail closed with structured errors, proven by runtime, browser and golden tests on every applicable tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:46.643Z"
+          "evidence": "Merged into #6889 c8: fail-closed authority is part of the inspector criterion",
+          "at": "2026-11-15T03:31:16.190Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
@@ -79783,38 +79802,42 @@
         {
           "n": 8,
           "text": "(was #2456 c2) A migration declaration generates a deterministic versioned change and a SQL or data-risk preview without changing the database, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:48.856Z"
+          "evidence": "Moved to #6889 c3: db tooling gets its own card",
+          "at": "2026-11-15T03:31:09.633Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
           "text": "(was #2456 c3) Status, apply, target, step, lock, and rollback report explicit receipts, and a failed apply leaves no partial schema change, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:50.051Z"
+          "evidence": "Moved to #6889 c4: db tooling gets its own card",
+          "at": "2026-11-15T03:31:10.536Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
           "text": "(was #2456 c4) The migration workflow reports conflicts and authority failures as actionable diagnostics in human and machine output, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:51.227Z"
+          "evidence": "Moved to #6889 c5: db tooling gets its own card",
+          "at": "2026-11-15T03:31:11.431Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
           "text": "(was #2460 c1) Implementation-only closure: one typed database fact stream supplies bounded query statistics and authority-gated read-only EXPLAIN commands across browser, terminal and native adapters without exposing credentials, query text, or bindings [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:52.826Z"
+          "evidence": "Moved to #6889 c9: db tooling gets its own card",
+          "at": "2026-11-15T03:31:17.152Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
@@ -79835,7 +79858,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:11:14.430Z",
-      "updated": "2026-11-15T03:31:08.547Z",
+      "updated": "2026-11-15T03:31:18.096Z",
       "updatedBy": "TowerKeeper-1"
     },
     {
@@ -104232,6 +104255,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:28:03.889Z"
+        },
+        {
+          "n": 13,
+          "text": "Typed ECS storage, entity identity, deterministic queries and conflict-safe scheduling live in Jet with no host rows (D-GAME-ECS1=B, D-GAME-ENTITY1=A). Proof: `jet test Compiler --profile golden --filter Apps/Game/Ecs` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:32:40.284Z"
+        },
+        {
+          "n": 14,
+          "text": "Input action mapping and a fixed-step clock give identical tick sequences for identical input logs on every tier; replay divergence is detected and rollback works (D-GAME-INPUT1=A, D-GAME-REPLAY1=A). Proof: `jet test Compiler --profile golden --filter Apps/Game/Replay` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:32:41.146Z"
+        },
+        {
+          "n": 15,
+          "text": "Editor transitions and typed perf roles and budgets live in Jet semantics, with no host scene-budget rows (D-GAME-BUDGET1=A). Proof: `jet test Compiler --profile cases --filter game/perf_budgets`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:32:42.009Z"
+        },
+        {
+          "n": 16,
+          "text": "A playable vertical slice degrades or fails visibly without corruption under hostile states: device loss, missing assets, frame spikes, corrupt saves, input disconnect and replay divergence. Proof: `jet test Compiler --profile cases --filter game/hostile_states`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:32:42.877Z"
         }
       ],
       "refs": [],
@@ -104246,8 +104305,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:28:03.889Z",
-      "updated": "2026-11-15T03:28:03.889Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:32:42.877Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 16
     },
     {
       "id": "c0rqtmrp",
@@ -104452,6 +104512,94 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:31:05.913Z",
       "updated": "2026-11-15T03:31:05.913Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0t3qh8f",
+      "num": 6890,
+      "title": "Lazy multi-source and combinatoric iterator adapters: sorted merge, join, combinations, interleave, Cartesian product and keyed set operations",
+      "body": "Destination: iterators combine several sources lazily, buffering only what the contract needs: sorted merges keep only the frontiers, joins state their cardinality and sides, combinations, permutations and powersets are generated lazily, interleave and Cartesian products state their end and order policies, and keyed set operations state representatives and consumption.\n\nWhy it matters: today Core/Math/Combinatorics.jet builds whole [[T]] lists and Core/Collections/Collections.jet:640 merge_sorted takes only [Int]; eager forms blow up on large or endless input.\n\nDecisions: D-ITER-SORTEDMERGE1=A, D-ITER-COMBINATIONS1=A, D-ITER-PERMUTATIONS1=A, D-ITER-POWERSET1=A, D-ITER-INTERLEAVE1=A, D-ITER-CARTESIAN1=A, D-ITER-SETOPS1=A, D-ITER-ITDEP1=A (no itertools dependency).\n\nSource: #3327 c9-c14 (archived #3351, #3352, #3353, #3377, #3379, #3390); evidence Docs/research/mine-for-jet-2026-09-12.md.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Two-way and k-way sorted merges buffer only the frontiers, the earlier source wins ties, and a comparator failure or an unsorted source has its stated result, never a silent re-sort (D-ITER-SORTEDMERGE1=A). Proof: `jet test Compiler --profile golden --filter Collections/Iterators/MergeSorted` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:32:39.427Z"
+        },
+        {
+          "n": 2,
+          "text": "A data join states duplicate-key cardinality, left and right projection, missing sides, order, one-shot input and DataLimits, with no second join library. Proof: `jet test Compiler --profile golden --filter Collections/Iterators/DataJoin`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:32:39.427Z"
+        },
+        {
+          "n": 3,
+          "text": "Combinations, combinations with replacement, permutations and powerset are lazy and generic, with empty and zero-width identities, ordering and invalid widths specified and lawful copying and borrowing (D-ITER-COMBINATIONS1, PERMUTATIONS1, POWERSET1 =A); Core/Math/Combinatorics.jet's eager list forms are replaced. Proof: `jet test Compiler --profile golden --filter Collections/Iterators/Combinatorics`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:32:39.427Z"
+        },
+        {
+          "n": 4,
+          "text": "Interleave has longest (drain) and shortest end policies with pull traces for empty, non-fused and failing sources, and no fairness claim (D-ITER-INTERLEAVE1=A). Proof: `jet test Compiler --profile golden --filter Collections/Iterators/Interleave`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:32:39.427Z"
+        },
+        {
+          "n": 5,
+          "text": "Cartesian products handle empty and zero-dimension inputs, give rightmost-fastest tuple order and allow `take(n)` over an unbounded left dimension; a reused one-shot dimension is a registered error (D-ITER-CARTESIAN1=A). Proof: `jet test Compiler --profile golden --filter Collections/Iterators/Cartesian` and `jet test Compiler --profile ui --filter cartesian_one_shot_dimension`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:32:39.427Z"
+        },
+        {
+          "n": 6,
+          "text": "`union_by`, `intersection_by` and `difference_by` state the representative, which side is consumed for membership, the retained key state, second-source errors and provenance (D-ITER-SETOPS1=A). Proof: `jet test Compiler --profile golden --filter Collections/Iterators/SetOps`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:32:39.427Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "iterators"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:32:39.427Z",
+      "updated": "2026-11-15T03:32:39.427Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -209871,6 +210019,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:32:52.407Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0u913de",
+      "note": "#7: strip debris; decision; proof; was: [#3347]  • A,A,B,A gives three runs. Groups are consumed incrementally, with no full-run materialization. • Retaining a group needs an explicit collection. • Golden `collections/chunk_by`; UI `chunk_b"
+    },
+    {
+      "at": "2026-11-15T03:32:51.520Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0u913de",
+      "note": "#6: strip debris; decision; proof; was: [#3328]  • Key and binary Ordering forms both exist. • Ties keep the pinned LAST item. Callback count and error order are documented. Empty and partial orders follow the existing law. • Golden `collec"
+    },
+    {
+      "at": "2026-11-15T03:32:50.549Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0u913de",
+      "note": "#5: strip debris; decision; proof; was: [#3326]  • State and output types may differ, including a move-only output. • The step runs once per demanded item, with an explicit stop/error/remainder rule. • No whole-state clone; existing `scan` "
+    },
+    {
+      "at": "2026-11-15T03:32:49.534Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0u913de",
+      "note": "#4: decision and current path; was: The collections/filter_map and filter_map_absence goldens pass on O0, O1 and O2: Option absence skips, Result keeps success-only selection, failure propagates, map_while stops and find_map continues."
+    },
+    {
+      "at": "2026-11-15T03:32:48.407Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c9q0534j",
+      "note": "#16: strip debris; proof; was: (was #2488 c1) Implementation-only closure: declared asset roots are discovered and watched with typed coalesced dependency facts; imports produce validated runtime facts; hot reload atomically swaps "
+    },
+    {
+      "at": "2026-11-15T03:32:47.504Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c9q0534j",
+      "note": "#15: the ballot is ratified; restate as the build criterion; was: [#3287] **[OWNER]** The PCM container IO ballot (A/B/C) is ratified. If A: golden game/game_wav passes on every level, scoped to bounded common game-asset PCM, with no specialist audio expansion."
+    },
+    {
+      "at": "2026-11-15T03:32:46.551Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c9q0534j",
+      "note": "#9: one outcome with proof; was: Runnable proof: `jet test Compiler --profile golden game/game_assets` passes on O0, O1 and O2, and no asset policy remains outside Core/Game/*.jet (replaces the Rust-bypass wording of criterion 6)."
+    },
+    {
+      "at": "2026-11-15T03:32:45.551Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c9q0534j",
+      "note": "#3: absorbs c8; proof; was: Missing files, wrong asset kinds, stale scene identity, corrupt import facts, and failed hot reload report a safe error while preserving the last valid asset state and its provenance."
+    },
+    {
+      "at": "2026-11-15T03:32:44.638Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c9q0534j",
+      "note": "#2: proof; current path; was: Asset handles are typed and tied to their owning scene. Image and sound loading uses the checked importer fact, reports the declared path and kind, and successful reload publishes one deterministic ha"
+    },
+    {
+      "at": "2026-11-15T03:32:43.756Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0776o2m",
+      "note": "#24 Backends expose typed capability interfaces with headless an"
+    },
+    {
+      "at": "2026-11-15T03:32:42.877Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c087ot9q",
+      "note": "#16 A playable vertical slice degrades or fails visibly without "
+    },
+    {
+      "at": "2026-11-15T03:32:42.009Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c087ot9q",
+      "note": "#15 Editor transitions and typed perf roles and budgets live in "
+    },
+    {
+      "at": "2026-11-15T03:32:41.146Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c087ot9q",
+      "note": "#14 Input action mapping and a fixed-step clock give identical t"
+    },
+    {
+      "at": "2026-11-15T03:32:40.284Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c087ot9q",
+      "note": "#13 Typed ECS storage, entity identity, deterministic queries an"
+    },
+    {
+      "at": "2026-11-15T03:32:39.427Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0t3qh8f",
+      "note": "Lazy multi-source and combinatoric iterator adapters: sorted merge, join, combinations, interleave, Cartesian product and keyed set operations"
+    },
+    {
+      "at": "2026-11-15T03:31:18.096Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0du93i4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:31:17.152Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0du93i4",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T03:31:16.190Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0du93i4",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T03:31:15.175Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0du93i4",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T03:31:14.193Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0du93i4",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T03:31:13.246Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0du93i4",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T03:31:12.317Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0du93i4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T03:31:11.431Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0du93i4",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T03:31:10.536Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0du93i4",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T03:31:09.633Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0du93i4",
+      "note": "#8"
+    },
     {
       "at": "2026-11-15T03:31:08.547Z",
       "by": "TowerKeeper-1",
