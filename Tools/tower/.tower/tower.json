@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6953,
-    "rev": 105325,
+    "rev": 105345,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -82452,21 +82452,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The three gallery programs (a #Blocking C call that does not stall other tasks, curl multi through ffi.completion, a main-thread GUI) run with the card's outputs as goldens on O0, O1 and O2.",
+          "text": "The three async gallery programs (a `#Blocking` C call that does not stall other tasks, curl multi through ffi.completion, a main-thread GUI) print the card's outputs. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/Async` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:28:51.629Z"
+          "at": "2026-11-15T05:12:29.132Z"
         },
         {
           "n": 2,
-          "text": "C-linked programs follow the ratified D-FFI-CARRIER1. If it is option E, only the initial thread runs C, a task's C call is handed to it, and errno and results come back; a case proves that single-threaded C called from many tasks is safe and that main-thread affinity holds, at O0, O1 and O2 (was #6689 c5).",
+          "text": "C-linked programs follow the owner's ruling on which threads run C (drafted as D-FFI-CARRIER1, not on Tower); under option E only the initial thread runs C, a task's C call is handed to it, and errno and results come back, so single-threaded C called from many tasks is safe and main-thread affinity holds. Proof: `jet test Compiler --profile cases --filter ffi_threads/single_threaded_c_from_tasks` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T17:55:19.658Z"
+          "at": "2026-11-15T05:12:30.043Z"
         }
       ],
       "refs": [],
@@ -82481,8 +82481,8 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:23.352Z",
-      "updated": "2026-11-09T19:31:17.932Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:30.043Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
     {
@@ -82512,12 +82512,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The three gallery programs (libm, zlib, libpng) call C through `use c.<lib>` with no `#Unsafe`, pointer or binding file and print the card's outputs, as goldens on O0, O1 and O2.",
+          "text": "The three C-library gallery programs (libm, zlib, libpng) call C through `use c.<lib>` with no `#Unsafe`, pointer or binding file and print the card's outputs. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/CLibraries` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:28:54.590Z"
+          "at": "2026-11-15T05:12:30.935Z"
         }
       ],
       "refs": [],
@@ -82532,8 +82532,8 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:26.144Z",
-      "updated": "2026-11-07T03:28:54.591Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:30.935Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 1
     },
     {
@@ -82563,12 +82563,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The three callback programs (qsort with a capturing comparator, an event loop, foreign-thread delivery) honor each retention fact and print the card's outputs, as goldens on O0, O1 and O2; a capture the retention forbids is a registered diagnostic with a UI snapshot.",
+          "text": "The three callback programs (qsort with a capturing comparator, an event loop, foreign-thread delivery) honor each retention fact and print the card's outputs, and a capture the retention forbids is a registered error. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/Callbacks` on O0, O1 and O2, and `jet test Compiler --profile ui --filter ffi_callback_retention_refused`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:18.916Z"
+          "at": "2026-11-15T05:12:31.829Z"
         }
       ],
       "refs": [],
@@ -82583,8 +82583,8 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:28.728Z",
-      "updated": "2026-11-07T03:29:18.917Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:31.829Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 1
     },
     {
@@ -82619,12 +82619,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "(was #2901 c2) A prototype binds one C++ class (ctor, method, dtor) and prints identical output on O0, O1 and O2, or the note records exactly which tier blocked it and why [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "A prototype binds one C++ class (constructor, method, destructor) and prints identical output on O0, O1 and O2, or a note records exactly which tier blocked it and why. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/CppClass`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:51:12.916Z"
+          "at": "2026-11-15T05:12:32.725Z"
         }
       ],
       "refs": [],
@@ -82639,8 +82639,8 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:30.519Z",
-      "updated": "2026-11-07T04:02:23.671Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:12:32.725Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c03yyxl3",
@@ -82669,30 +82669,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`#Export(c, python, js)` libraries build with `jet build --lib --host <host>` and the card's host programs in C, Python and JavaScript call them with the shown output, proven by cases.",
+          "text": "`#Export(c, python, js)` libraries build with `jet build --lib --host <host>`, and the card's host programs in C, Python and JavaScript call them with the shown output. Proof: `jet test Compiler --profile cases --filter ffi_export/host_programs_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:21.426Z"
+          "at": "2026-11-15T05:12:33.623Z"
         },
         {
           "n": 2,
-          "text": "The eight Examples/Interop/FFI/Projections/*/guest.jet exports with a declared failure carrier (document_open, document_bytes, view_at, document_replace, document_close: -> T? ProjectionError!) project their errors into each host language (C, C++, Go, JavaScript, Python, Rust, Zig), and the gallery is golden-tested on every applicable tier (I5). Today they're red and ungated: jet check gives E3203 on their params, build.sh names stale lowercase dirs (c, cpp, rust ...), and no golden runs them. As of #5454 c98, sema refuses a declared carrier on #Export(c) with E3203, matching codegen's ir_infallible. This card lifts that refusal only together with a built error projection: one mechanism, with sema and codegen agreeing.",
+          "text": "The eight Examples/Interop/FFI/Projections/*/guest.jet exports with a declared failure carrier (document_open, document_bytes, view_at, document_replace, document_close: `-> T? ProjectionError!`) project their errors into C, C++, Go, JavaScript, Python, Rust and Zig. Sema's E3203 refusal of a carrier on `#Export(c)` (from #5454 c98) is lifted only together with the built projection, so sema and codegen agree, and build.sh uses the PascalCase directories. Proof: `jet test Compiler --profile golden --filter Interop/FFI/Projections` on every applicable tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T14:18:33.558Z"
+          "at": "2026-11-15T05:12:34.565Z"
         },
         {
           "n": 3,
-          "text": "(was #2377 c1) R, Perl, PHP, Ruby, PowerShell, and Octave generators emit one typed decode_response helper per binding, every generated operation delegates through it, protocol-specific raw extern access remains available, generated error domains are valid, and focused renderer plus real Octave round-trip tests pass [precut audit: no dev test, golden, case or snapshot proves this today] (was #6517 c1)",
+          "text": "The R, Perl, PHP, Ruby, PowerShell and Octave binding generators emit one typed decode_response helper per binding; every generated operation delegates through it, raw extern access stays available, and generated error domains are valid. Proof: `jet test Compiler --profile cases --filter binding_generators/decode_response_` plus an Octave round-trip case.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:38:12.914Z"
+          "at": "2026-11-15T05:12:35.528Z"
         }
       ],
       "refs": [],
@@ -82707,8 +82707,8 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:33.092Z",
-      "updated": "2026-11-09T19:38:12.914Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:35.528Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
     {
@@ -82738,12 +82738,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The three isolation programs (a C decoder under `.Wasm`, a closed binary under `.Process`, the hardened profile) run with one `isolate:` line and no call-site change, printing the card's outputs, as cases.",
+          "text": "The three isolation programs (a C decoder under `.Wasm`, a closed binary under `.Process`, the hardened profile) run with one `isolate:` line and no call-site change and print the card's outputs. Proof: `jet test Compiler --profile cases --filter ffi_isolation/gallery_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:27.578Z"
+          "at": "2026-11-15T05:12:36.444Z"
         }
       ],
       "refs": [],
@@ -82758,8 +82758,8 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:35.348Z",
-      "updated": "2026-11-07T03:29:27.578Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:36.444Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 1
     },
     {
@@ -82789,12 +82789,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The three Python programs (statistics, numpy, pandas with matplotlib) run through `use py.<package>` and print the card's outputs, as cases.",
+          "text": "The three Python programs (statistics, numpy, pandas with matplotlib) run through `use py.<package>` and print the card's outputs. Proof: `jet test Compiler --profile cases --filter ffi_python/gallery_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:29.777Z"
+          "at": "2026-11-15T05:12:37.392Z"
         }
       ],
       "refs": [],
@@ -82809,8 +82809,8 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:37.420Z",
-      "updated": "2026-11-07T03:29:29.777Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:37.392Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 1
     },
     {
@@ -82840,12 +82840,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The three Rust-crate programs (regex, serde_json, a crate with its own threads) run through `use rust.<crate>` and print the card's outputs, as cases.",
+          "text": "The three Rust-crate programs (regex, serde_json, a crate with its own threads) run through `use rust.<crate>` and print the card's outputs. Proof: `jet test Compiler --profile cases --filter ffi_rust/gallery_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:31.934Z"
+          "at": "2026-11-15T05:12:38.354Z"
         }
       ],
       "refs": [],
@@ -82860,8 +82860,8 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:39.421Z",
-      "updated": "2026-11-07T03:29:31.935Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:38.354Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 1
     },
     {
@@ -83075,12 +83075,12 @@
       "criteria": [
         {
           "n": 3,
-          "text": "The libm binder from ffi-v3 section 4.2 is written as tables only (types, handles, errors, refuse, names); a handle row derives a close and single use; a missing type mapping is a registered refusal with a UI snapshot; `jet inspect expand` shows the derived module (golden).",
+          "text": "The libm binder from ffi-v3 section 4.2 is written as tables only (types, handles, errors, refuse, names); a handle row derives a close and single use; a missing type mapping is a registered refusal; and `jet inspect expand` shows the derived module. Proof: `jet test Compiler --profile golden --filter ffi_binder/libm_tables` and `jet test Compiler --profile ui --filter ffi_binder_missing_type_map`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:31:19.594Z"
+          "at": "2026-11-15T05:12:39.278Z"
         }
       ],
       "refs": [],
@@ -83094,8 +83094,8 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:44.432Z",
-      "updated": "2026-11-09T19:38:17.878Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:39.278Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
     {
@@ -83233,12 +83233,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`trait Language` is declared in Core; the c binder implements it; `FFILanguage` and `ForeignLanguage` are gone; E1002's reserved-root list is a trait lookup; a test package adds a root without a compiler change.",
+          "text": "`trait Language` is declared in Core and the c binder implements it; `FFILanguage` and `ForeignLanguage` are gone; E1002's reserved-root list is a trait lookup; and a test package adds a root without a compiler change (D-EXTEND-ARCH1=A). Proof: `git grep -nE 'FFILanguage|ForeignLanguage' -- Compiler Core Jetpack` prints nothing and `jet test Compiler --profile cases --filter ffi_language/package_adds_root`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:39.843Z"
+          "at": "2026-11-15T05:12:40.189Z"
         }
       ],
       "refs": [],
@@ -83252,8 +83252,8 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:52.833Z",
-      "updated": "2026-11-07T03:29:39.843Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:40.189Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 1
     },
     {
@@ -83355,21 +83355,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Licenses are SPDX values with `Custom(String)`, parsed and checked from the manifest.",
+          "text": "Licenses are SPDX values with `Custom(String)`, parsed and checked from the manifest. Proof: `jet test Compiler --profile packages --filter PackageFacts/license_spdx`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:49.478Z"
+          "at": "2026-11-15T05:12:41.140Z"
         },
         {
           "n": 2,
-          "text": "`#Policy(classified: ...)` makes the compiler refuse a classified value reaching an unlisted sink, with a registered diagnostic and UI snapshot.",
+          "text": "`#Policy(classified: ...)` makes the compiler refuse a classified value that reaches an unlisted sink, with a registered error. Proof: `jet test Compiler --profile ui --filter classified_value_unlisted_sink`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:51.747Z"
+          "at": "2026-11-15T05:12:42.045Z"
         }
       ],
       "refs": [],
@@ -83383,8 +83383,8 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:58.350Z",
-      "updated": "2026-11-09T19:31:25.902Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:42.045Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
     {
@@ -83408,12 +83408,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Core declares `Package`, `Project` and `Env` record types; Jetpack evaluates each file as a record literal of its type with the prep evaluator; a misspelled field is an ordinary type error at its line; the `pkg_parse_*` scanners and the separate env evaluator are deleted; the existing manifest cases pass unchanged.",
+          "text": "Core declares `Package`, `Project` and `Env` record types; Jetpack evaluates each file as a record literal of its type with the prep evaluator; a misspelled field is an ordinary type error at its line; the `pkg_parse_*` scanners and the separate env evaluator are deleted; and the existing manifest cases pass unchanged. Proof: `git grep -n 'fn pkg_parse_' -- Jetpack` prints nothing and `jet test Compiler --profile packages --filter PackageFacts`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:54.682Z"
+          "at": "2026-11-15T05:12:42.988Z"
         }
       ],
       "refs": [],
@@ -83427,8 +83427,8 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:01.141Z",
-      "updated": "2026-11-13T02:02:21.547Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:42.988Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
     {
@@ -85512,12 +85512,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The Engine-unit claim 'store broker realize verified round trips through broker and fails closed on auth' passes under jet test on the assembled Engine unit (O0, O1 and O2 tiers), and a minimal tests/cases repro of the faulting pattern passes on O0/O1/O2.",
+          "text": "The Engine-unit claim 'store broker realize verified round trips through broker and fails closed on auth' passes on the assembled Engine unit at O0, O1 and O2, and a minimal repro of the faulting pattern passes too. Proof: `jet test Jetpack/Engine --filter store_broker_realize_verified` and `jet test Compiler --profile cases --filter native_fault/null_deref_repro`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T10:39:54.386Z"
+          "at": "2026-11-15T05:12:43.945Z"
         }
       ],
       "refs": [],
@@ -85528,8 +85528,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T10:39:48.294Z",
-      "updated": "2026-11-08T14:06:09.907Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:12:43.945Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0gelll3",
@@ -88919,12 +88919,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Owner 2026-11-04 (c): with a jet binary on PATH, every repo tool, gate and suite runs through jet directly, with no Nix and no jet-env. Tools/agent/jet-env stays only as the temporary bootstrap for a machine that has no jet yet, and its environment setup moves into jet itself as Jet replaces Nix (#3402, #6071). (moved from #6564 c6)",
+          "text": "With a jet binary on PATH, every repo tool, gate and suite runs through jet directly, with no Nix and no jet-env (owner 2026-11-04). Tools/agent/jet-env stays only as the bootstrap for a machine with no jet yet, and its environment setup moves into jet as Jet replaces Nix (#3402, #6071). Proof: `git grep -n 'jet-env' -- Tools tests Compiler Jetpack ':!Tools/agent/jet-env'` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T01:04:00.127Z"
+          "at": "2026-11-15T05:12:46.101Z"
         },
         {
           "n": 2,
@@ -88944,7 +88944,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T01:03:58.839Z",
-      "updated": "2026-11-15T03:42:13.432Z",
+      "updated": "2026-11-15T05:12:46.101Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
@@ -90970,21 +90970,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A jetpack case realizes a c@nixpkgs dependency into the cache, then corrupts the cached entry; the next build refuses it with a registered diagnostic and re-admits it only after a clean realize.",
+          "text": "A jetpack case realizes a c@nixpkgs dependency into the cache and corrupts the cached entry; the next build refuses it with a registered error and re-admits it only after a clean realize. Proof: `jet test Compiler --profile cases --filter jetpack/nix_cache_corrupt_entry_refused`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T05:00:29.049Z"
+          "at": "2026-11-15T05:12:47.387Z"
         },
         {
           "n": 2,
-          "text": "tests/cases/jetpack_dogfood/jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures gets past Nix cache admission: no 'closure reference discovery: Nix cache object is absent', and the portable Nix CAS bundle has no empty archive path, dangling ld.so symlink or self-reference (defect found by PortsLead-2 on 2026-11-06 while proving #3590 c162-c165).",
+          "text": "The dogfood case gets past Nix cache admission: no 'closure reference discovery: Nix cache object is absent', and the portable Nix CAS bundle has no empty archive path, dangling ld.so symlink or self-reference (found by PortsLead-2 on 2026-11-06 while proving #3590 c162-c165). Proof: `jet test Compiler --profile cases --filter jetpack_dogfood/jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:32:00.677Z"
+          "at": "2026-11-15T05:12:48.476Z"
         }
       ],
       "refs": [],
@@ -90995,8 +90995,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:00:28.117Z",
-      "updated": "2026-11-09T19:32:00.677Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:12:48.476Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
     {
@@ -216167,6 +216167,146 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T05:12:48.476Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0s2gaqp",
+      "note": "#2: proof; was: tests/cases/jetpack_dogfood/jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures gets past Nix cache admission: no 'closure reference discovery: Nix cache object is absent', and the "
+    },
+    {
+      "at": "2026-11-15T05:12:47.387Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0s2gaqp",
+      "note": "#1: proof; was: A jetpack case realizes a c@nixpkgs dependency into the cache, then corrupts the cached entry; the next build refuses it with a registered diagnostic and re-admits it only after a clean realize."
+    },
+    {
+      "at": "2026-11-15T05:12:46.101Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0bcerww",
+      "note": "#1: strip debris; proof; was: Owner 2026-11-04 (c): with a jet binary on PATH, every repo tool, gate and suite runs through jet directly, with no Nix and no jet-env. Tools/agent/jet-env stays only as the temporary bootstrap for a "
+    },
+    {
+      "at": "2026-11-15T05:12:43.945Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0a2monf",
+      "note": "#1: proof; was: The Engine-unit claim 'store broker realize verified round trips through broker and fails closed on auth' passes under jet test on the assembled Engine unit (O0, O1 and O2 tiers), and a minimal tests/"
+    },
+    {
+      "at": "2026-11-15T05:12:42.988Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0itgqr6",
+      "note": "#1: proof; was: Core declares `Package`, `Project` and `Env` record types; Jetpack evaluates each file as a record literal of its type with the prep evaluator; a misspelled field is an ordinary type error at its line"
+    },
+    {
+      "at": "2026-11-15T05:12:42.045Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08o25e8",
+      "note": "#2: proof; was: `#Policy(classified: ...)` makes the compiler refuse a classified value reaching an unlisted sink, with a registered diagnostic and UI snapshot."
+    },
+    {
+      "at": "2026-11-15T05:12:41.140Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08o25e8",
+      "note": "#1: proof; was: Licenses are SPDX values with `Custom(String)`, parsed and checked from the manifest."
+    },
+    {
+      "at": "2026-11-15T05:12:40.189Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0pf4ki0",
+      "note": "#1: proof; was: `trait Language` is declared in Core; the c binder implements it; `FFILanguage` and `ForeignLanguage` are gone; E1002's reserved-root list is a trait lookup; a test package adds a root without a compi"
+    },
+    {
+      "at": "2026-11-15T05:12:39.278Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0uhfjtt",
+      "note": "#3: proof; was: The libm binder from ffi-v3 section 4.2 is written as tables only (types, handles, errors, refuse, names); a handle row derives a close and single use; a missing type mapping is a registered refusal w"
+    },
+    {
+      "at": "2026-11-15T05:12:38.354Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00n89mp",
+      "note": "#1: proof; was: The three Rust-crate programs (regex, serde_json, a crate with its own threads) run through `use rust.<crate>` and print the card's outputs, as cases."
+    },
+    {
+      "at": "2026-11-15T05:12:37.392Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03kbmfy",
+      "note": "#1: proof; was: The three Python programs (statistics, numpy, pandas with matplotlib) run through `use py.<package>` and print the card's outputs, as cases."
+    },
+    {
+      "at": "2026-11-15T05:12:36.444Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05aa8kj",
+      "note": "#1: proof; was: The three isolation programs (a C decoder under `.Wasm`, a closed binary under `.Process`, the hardened profile) run with one `isolate:` line and no call-site change, printing the card's outputs, as c"
+    },
+    {
+      "at": "2026-11-15T05:12:35.528Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03yyxl3",
+      "note": "#3: strip debris; proof; was: (was #2377 c1) R, Perl, PHP, Ruby, PowerShell, and Octave generators emit one typed decode_response helper per binding, every generated operation delegates through it, protocol-specific raw extern acc"
+    },
+    {
+      "at": "2026-11-15T05:12:34.565Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03yyxl3",
+      "note": "#2: proof; tightened; was: The eight Examples/Interop/FFI/Projections/*/guest.jet exports with a declared failure carrier (document_open, document_bytes, view_at, document_replace, document_close: -> T? ProjectionError!) projec"
+    },
+    {
+      "at": "2026-11-15T05:12:33.623Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03yyxl3",
+      "note": "#1: proof; was: `#Export(c, python, js)` libraries build with `jet build --lib --host <host>` and the card's host programs in C, Python and JavaScript call them with the shown output, proven by cases."
+    },
+    {
+      "at": "2026-11-15T05:12:32.725Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xf8qpl",
+      "note": "#1: strip debris; proof; was: (was #2901 c2) A prototype binds one C++ class (ctor, method, dtor) and prints identical output on O0, O1 and O2, or the note records exactly which tier blocked it and why [precut audit: no dev test, "
+    },
+    {
+      "at": "2026-11-15T05:12:31.829Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03t8ic0",
+      "note": "#1: proof; was: The three callback programs (qsort with a capturing comparator, an event loop, foreign-thread delivery) honor each retention fact and print the card's outputs, as goldens on O0, O1 and O2; a capture t"
+    },
+    {
+      "at": "2026-11-15T05:12:30.935Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0x2wq8a",
+      "note": "#1: proof; was: The three gallery programs (libm, zlib, libpng) call C through `use c.<lib>` with no `#Unsafe`, pointer or binding file and print the card's outputs, as goldens on O0, O1 and O2."
+    },
+    {
+      "at": "2026-11-15T05:12:30.043Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0mwaylu",
+      "note": "#2: strip debris; owner-gated; proof; was: C-linked programs follow the ratified D-FFI-CARRIER1. If it is option E, only the initial thread runs C, a task's C call is handed to it, and errno and results come back; a case proves that single-thr"
+    },
+    {
+      "at": "2026-11-15T05:12:29.132Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0mwaylu",
+      "note": "#1: proof; was: The three gallery programs (a #Blocking C call that does not stall other tasks, curl multi through ffi.completion, a main-thread GUI) run with the card's outputs as goldens on O0, O1 and O2."
+    },
+    {
       "at": "2026-11-15T05:12:28.039Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-edit",
@@ -219546,713 +219686,6 @@
       "action": "card.criteria-add",
       "ref": "c01sunrb",
       "note": "#5 The generated code moves the value back into the place on ev"
-    },
-    {
-      "at": "2026-11-15T04:44:51.603Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c01sunrb",
-      "note": "#4 Sema tracks each moved-out gap in a borrowed place (E0121): "
-    },
-    {
-      "at": "2026-11-15T04:44:50.535Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0h063eg",
-      "note": "#4 The tie is published as a fact like inferred link sources, a"
-    },
-    {
-      "at": "2026-11-15T04:44:49.359Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0h063eg",
-      "note": "#3 Only a tied, frozen sibling list is exempt from D-LINK-ITEM1"
-    },
-    {
-      "at": "2026-11-15T04:44:48.162Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0h063eg",
-      "note": "#2 A tied record's source field stays frozen while any link tak"
-    },
-    {
-      "at": "2026-11-15T04:43:57.410Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0sg79an",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T04:43:56.087Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0kyjdtx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T04:43:55.159Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0kyjdtx",
-      "note": "title,body,plan"
-    },
-    {
-      "at": "2026-11-15T04:43:53.650Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kyjdtx",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T04:43:52.667Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0kyjdtx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T04:43:51.707Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0bmxzrb",
-      "note": "#6: proof (KF row names #6011); was: First slice of c1 (bounds): under --profile=hardened (D-MEM-HARDEN1=A), an out-of-bounds read or write through an #Unsafe pointer or raw slice stops with a named runtime code and the source location a"
-    },
-    {
-      "at": "2026-11-15T04:43:50.787Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0bmxzrb",
-      "note": "#3: proof; no hosted nightly; was: All in-repo `#Test`s pass under checking mode in a nightly job."
-    },
-    {
-      "at": "2026-11-15T04:43:49.831Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0bmxzrb",
-      "note": "#2: proof; was: A planted-bug corpus with one program per class, each inside `#Unsafe` or a foreign edge, stops in checking mode with a named runtime code and the source location, and runs without a report in normal "
-    },
-    {
-      "at": "2026-11-15T04:43:48.906Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0bmxzrb",
-      "note": "#1: proof; was: Under `--profile=hardened` (D-MEM-HARDEN1=A, on `jet build` and `jet test`; no new spelling), every #Unsafe operation and foreign edge stops with a named runtime code and the source location on: out-o"
-    },
-    {
-      "at": "2026-11-15T04:43:47.994Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08rdp62",
-      "note": "#11: strip debris; proof; was: (was #4198 c2) A dependency that dereferences a raw pointer is reported, and a package that denies the leaf fails to build with a registered diagnostic [precut audit: no dev test, golden, case or snap"
-    },
-    {
-      "at": "2026-11-15T04:43:47.093Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08rdp62",
-      "note": "#4: strip debris; proof; was: [#4526] D-USIZE-TARGET1=A: opaque target-size core.mem.CSize, exact conversions, and $build.usize_max / $build.pointer_bytes. Native size_t declarations and SQL ordinals/LIMIT migrate to Int."
-    },
-    {
-      "at": "2026-11-15T04:43:46.178Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08rdp62",
-      "note": "#3: strip debris; proof; was: [#4339] An address round-trip through core.mem.from_addr keeps allocation provenance, with live and expired storage sentry cases."
-    },
-    {
-      "at": "2026-11-15T04:43:45.285Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08rdp62",
-      "note": "#2: strip debris; one compiler now; proof; was: [#4517] D-RT-NATIVE-CAP1=A: hash-admitted core.mem.native with all nine checked tool groups plus the owner-admitted provider registry, on both compilers."
-    },
-    {
-      "at": "2026-11-15T04:43:44.213Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08rdp62",
-      "note": "#1: strip debris; proof; was: [#4525] D-UNSAFE-EXIT-OBLIGATIONS=A: exit checks on audited #Unsafe blocks use the ratified Requires/Ensures spelling (D-CONTRACT-NAME1=A), including cleanup, return and failure ordering."
-    },
-    {
-      "at": "2026-11-15T04:43:43.322Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0sg79an",
-      "note": "#9: split three outcomes into c9, UBFLAG and UBINDEX; was: D-UB-BOUNDARY1=A is built: expert code skips a check only inside a written #Unchecked(<check>) block (bounds first), and the global --bounds flag is removed in the same cutover with every caller migra"
-    },
-    {
-      "at": "2026-11-15T04:43:42.426Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0sg79an",
-      "note": "#8: strip debris; no hosted nightly (removed per #6011 log); proof; was: (was #4726) A type-checker fuzzer generates well-typed programs, runs each at O0 and O2 and diffs the output; a nightly job runs a fixed seed budget, logs the seeds, and every divergence gets its own "
-    },
-    {
-      "at": "2026-11-15T04:43:41.533Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0sg79an",
-      "note": "#7: strip debris; proof; was: (was #4726) Every typing and ownership rule in Docs/spec/spec.md has a row in a checked-in rule table with one program that must compile and one that must be rejected with its named code; a test runs "
-    },
-    {
-      "at": "2026-11-15T04:43:40.636Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0sg79an",
-      "note": "#5: strip debris; proof; was: (was #4726) Every row links a conformance program that passes on every applicable tier"
-    },
-    {
-      "at": "2026-11-15T04:43:39.748Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0sg79an",
-      "note": "#4: strip debris; proof; was: (was #4726) Docs/spec/spec.md has a Defined behavior section with every listed operation class and its result"
-    },
-    {
-      "at": "2026-11-15T04:43:38.841Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0sg79an",
-      "note": "#3: proof; D-UB-BOUNDARY1 is the ratified boundary; was: After ratification every inventoried operation has one defined meaning on o0, o1 and o2, each with a test that proves it, and the language spec states the zero-undefined-behavior guarantee and its #Un"
-    },
-    {
-      "at": "2026-11-15T04:43:37.913Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#17: strip debris; proof (KF row names #6295); was: (was #1895 c3) Ledger rows persist across runs in the configured path; missing-ledger error registered + snapshotted beside E2110 [precut audit: failing on 9c7ddf1359: C:memory_semantics/gc_promotions"
-    },
-    {
-      "at": "2026-11-15T04:43:36.932Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#16: strip debris; proof; was: (was #1895 c2) jet fix memory applies an exactly-one repair (diff proven in a targeted test) and lists options otherwise; jet gc report is unchanged (existing snapshots green) [precut audit: failing o"
-    },
-    {
-      "at": "2026-11-15T04:43:35.935Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#15: strip debris; proof; was: (was #1895 c1) jet audit memory renders deterministic ledgers for the six cases (empty, gc-only, sentry-only, combined, exact-fix, ambiguous-fix) pinned by CLI snapshots; output names its exercised-ru"
-    },
-    {
-      "at": "2026-11-15T04:43:34.950Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#13: strip debris; proof; was: (was #659 c4) Each site proposes ordinary ownership or Pool<T>/Id<T>; an empty report says the gc policy can be removed [precut audit: no dev test, golden, case or snapshot proves this today]"
-    },
-    {
-      "at": "2026-11-15T04:43:34.069Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#12: strip debris; proof; was: (was #659 c3) `jet gc report` emits deterministic TTY/NO_COLOR text and --json; malformed, stale, oversized, or incompatible traces fail with coded diagnostics [precut audit: no dev test, golden, case"
-    },
-    {
-      "at": "2026-11-15T04:43:33.175Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#11: strip debris; proof; was: (was #659 c2) Tracing is explicit, zero-cost when off, versioned and bounded when on, and equivalent across AOT and jet dev [precut audit: no dev test, golden, case or snapshot proves this today]"
-    },
-    {
-      "at": "2026-11-15T04:43:32.232Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#10: strip debris; proof; was: (was #659 c1) Trace mode observes every #658 automatic promotion with stable span, effective scope/provenance, reason, identity, allocation count, and retained count without changing collector semanti"
-    },
-    {
-      "at": "2026-11-15T04:43:31.290Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#8: strip debris; wrapper migration dropped: Gc<T> is retired with no migration path (greenfield, syntax-decisions.md D-OPTGC1 section); proof; was: (was #658 c5) Registered diagnostics/UI snapshots and golden examples cover all four echelons, cycles, nested ownership neighbors, provenance, and wrapper migration [precut audit: no dev test, golden,"
-    },
-    {
-      "at": "2026-11-15T04:43:30.304Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#6: strip debris; proof; was: (was #658 c3) JetIR, native emission and jet dev use one Jet-owned collector (was #646's private std collector) as the sole backend with equivalent behavior and no external dependency [precut audit: n"
-    },
-    {
-      "at": "2026-11-15T04:43:29.404Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#5: strip debris; `~` is retired (S1), copy is .copy() (D-COPY-WORD1); proof; was: (was #658 c2) Sema performs automatic traced promotion only inside effective scope and preserves bare read, & write, ^ root transfer, ~ deep copy, and ownership-only escape rejection [precut audit: no"
-    },
-    {
-      "at": "2026-11-15T04:43:28.518Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#4: strip debris; current #Policy spelling; proof; was: (was #658 c1) The gc package key and narrower @Policy(gc) use #657's common matrix with no GC-only inheritance or provenance path [precut audit: no dev test, golden, case or snapshot proves this today"
-    },
-    {
-      "at": "2026-11-15T04:43:27.642Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kyjdtx",
-      "note": "#2: ballot D-GC-OPTIN1 now ratified A; proof; was: The opted form of cycle.jet (per D-GC-OPTIN1's outcome) checks clean, runs on O0/O1/O2 and its cycle is collected (drop observed), with a golden"
-    },
-    {
-      "at": "2026-11-15T04:43:26.761Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0sg79an",
-      "note": "#11 No build setting lets safe code read or write outside a list"
-    },
-    {
-      "at": "2026-11-15T04:43:25.875Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0sg79an",
-      "note": "#10 D-UB-BOUNDARY1=A: the global `--bounds` build flag is remove"
-    },
-    {
-      "at": "2026-11-15T04:41:51.726Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c05efrmn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T04:41:50.828Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c052rw8k",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T04:41:49.933Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c052rw8k",
-      "note": "title,body,plan"
-    },
-    {
-      "at": "2026-11-15T04:41:48.419Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#60"
-    },
-    {
-      "at": "2026-11-15T04:41:47.320Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#59"
-    },
-    {
-      "at": "2026-11-15T04:41:46.365Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-15T04:41:45.402Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-15T04:41:44.428Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T04:41:43.295Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T04:41:42.166Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T04:41:41.152Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-15T04:41:40.240Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T04:41:39.327Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T04:41:38.428Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#58"
-    },
-    {
-      "at": "2026-11-15T04:41:37.537Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-15T04:41:36.642Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#43"
-    },
-    {
-      "at": "2026-11-15T04:41:35.718Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-15T04:41:34.772Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-15T04:41:33.845Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-15T04:41:32.898Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-15T04:41:31.905Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-15T04:41:30.834Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-15T04:41:29.831Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T04:41:28.882Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c052rw8k",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T04:41:27.870Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#18: strip debris; proof; was: (was #2329 c3) `jet inspect guarantees` shows every effective policy rule and grant, including inherited package settings, with deterministic output [precut audit: failing on 9c7ddf1359: C:cli_parts_i"
-    },
-    {
-      "at": "2026-11-15T04:41:26.891Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#17: strip debris; proof; was: (was #2329 c2) Sema and lint enforce the effective policy with registered diagnostics and snapshots. An absent policy block adds no beginner ceremony [precut audit: failing on 9c7ddf1359: C:cli_parts_"
-    },
-    {
-      "at": "2026-11-15T04:41:25.848Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#16: strip debris; proof; was: (was #2329 c1) One package policy block sets effect ceilings, unsafe allowance by path, expert-surface ceilings, dependency allow or deny rules, and diagnostics-as-errors classes [precut audit: failin"
-    },
-    {
-      "at": "2026-11-15T04:41:24.893Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#12: strip debris; proof; was: [#4180] A test replaces Net.HTTP.Get with a typed fake inside a scope, and the same program uses the real network outside it, on every level. Provider lookup is eliminated when release policy denies p"
-    },
-    {
-      "at": "2026-11-15T04:41:23.885Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#11: strip debris; proof; was: [#4165] One qualified-right grammar (`FS.Read:/dir`, `Net.Connect:host`) in #Caps and the manifest, enforced at run time. A program granted one host fails with a typed authority failure on another hos"
-    },
-    {
-      "at": "2026-11-15T04:41:22.688Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#10: proof; was: The cutover updates every affected caller, policy consumer, diagnostic snapshot, executable example and explanation; focused runtime evidence covers c1-c9."
-    },
-    {
-      "at": "2026-11-15T04:41:21.752Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#9: proof; was: Type and memory safety, audited Unsafe, sensitive consent, and independent package/environment/toolchain trust cannot be bypassed by effect trust."
-    },
-    {
-      "at": "2026-11-15T04:41:20.716Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#8: proof; was: Policy changes, cache reuse, dev revisions, and child execution preserve applicable authority and required receipts; caching never suppresses observable effects of a logical invocation."
-    },
-    {
-      "at": "2026-11-15T04:41:19.678Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#7: proof; was: Prep is available without running build, AOT preparation results survive into artifacts, and build remains the AOT executable/library/object production entry."
-    },
-    {
-      "at": "2026-11-15T04:41:18.622Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#6: proof; was: Every applicable execution path and phase uses the same effect facts and authority law, with separate provenance for prep, AOT build, and application execution."
-    },
-    {
-      "at": "2026-11-15T04:41:17.622Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#5: proof; was: Approved enclosing budgets cover inferred helpers, while inner declarations, trusted callers and dependencies cannot silently bypass higher restrictions or third-party boundaries."
-    },
-    {
-      "at": "2026-11-15T04:41:16.592Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#4: proof; was: Positive rows are checked ceilings, not claims of actual use or self-issued authority; negative and empty ceilings are enforced through reachable calls."
-    },
-    {
-      "at": "2026-11-15T04:41:15.684Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#3: proof; was: Effects remain inferred and explainable without annotations; transitive, generated, callback, and opaque-call cases never become falsely pure."
-    },
-    {
-      "at": "2026-11-15T04:41:14.617Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#2: proof; was: The same unchanged program runs without repeated prompts after Always trust and is admitted or refused correctly under restricted policy."
-    },
-    {
-      "at": "2026-11-15T04:41:13.331Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c05efrmn",
-      "note": "#1: proof; was: The trust prompt follows the owner rule of 2026-10-01: one prompt with Always trust / Once / Cancel; Once runs and asks again next run; Always records trust and never asks again for that target; Cance"
-    },
-    {
-      "at": "2026-11-15T04:41:12.249Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c052rw8k",
-      "note": "#57: strip debris; proof; was: (was #1894 c4) harden: true activates containment for every foreign dependency (observable via #1892's sentry path in a targeted runtime test); no gc coupling anywhere [precut audit: failing on 9c7ddf"
-    },
-    {
-      "at": "2026-11-15T04:41:11.177Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c052rw8k",
-      "note": "#56: strip debris; proof; was: (was #1894 c3) jet inspect guarantees renders proven/watched/fenced/TRUSTED for a mixed fixture package; single-file and freestanding runs state their limits; CLI snapshots under tests/cli pin all cas"
-    },
-    {
-      "at": "2026-11-15T04:41:09.857Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c052rw8k",
-      "note": "#55: strip debris; proof; was: (was #1894 c2) contain/harden parse only in package.jet (source-policy spelling is refused with a teaching diagnostic + snapshot); monotonicity enforced with a targeted test [precut audit: failing on "
-    },
-    {
-      "at": "2026-11-15T04:41:08.540Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c052rw8k",
-      "note": "#54: strip debris; proof; was: (was #1894 c1) contain/harden implemented as package-only keys with the named D-PACKAGE-POLICY-SCOPE1 amendment; harden:true = sentries in release AND all deps contained (no TRUSTED rows); jet inspect"
-    },
-    {
-      "at": "2026-11-15T04:41:07.313Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c052rw8k",
-      "note": "#50: strip debris; proof; was: D-AUTHORITY-MEM2=A is built: a denial takes arguments; `!Mem.Alloc` stays plain and `!Mem.Alloc(above: 65536)` bounds the heap any call path may allocate, through every callee; manifests write `deny: "
-    },
-    {
-      "at": "2026-11-15T04:41:06.151Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c052rw8k",
-      "note": "#45: strip debris; state the outcome from done #2846; proof; was: (was #2846 c2) A regression test guards the audit sink location [precut audit: no dev test, golden, case or snapshot proves this today]"
-    },
-    {
-      "at": "2026-11-15T04:41:05.010Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c052rw8k",
-      "note": "#29: strip debris; proof; was: (was #1566 c2) Sema effects, the foundation policy, the package effect budget, build effects, both purity checkers and the REPL authorizer read the one effect-root table and hold no private copy of it"
-    },
-    {
-      "at": "2026-11-15T04:41:03.695Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c052rw8k",
-      "note": "#7: restate ratified JSON; proof; was: {\"decisionId\": \"D-ONCE-GATE1\", \"text\": \"The unsafe policy ladder generalizes: one policy surface names all audited escapes, with the same five scopes and modes. The one-off --allow-impure spelling ret"
-    },
-    {
-      "at": "2026-11-15T04:41:02.161Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c052rw8k",
-      "note": "#6: restate ratified JSON; proof; was: {\"decisionId\": \"D-NOPANIC1\", \"text\": \"Enforce the current -[!Panic]> denial row transitively and reject positive grant; the source report's =[!Panic]=> specimen is historical arrow spelling, not reviv"
-    },
-    {
-      "at": "2026-11-15T04:41:01.249Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c052rw8k",
-      "note": "#2: restate ratified JSON; proof; was: {\"decisionId\": \"D-AUTHORITY-WORD1\", \"text\": \"No user-facing surface uses capability for permissions; diagnostics say write access, effects or authority according to the thing described (D-ABILITY-NAME"
-    },
-    {
-      "at": "2026-11-15T04:41:00.318Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c052rw8k",
-      "note": "#1: restate ratified JSON; proof (Main ruling 2026-11-13: cases rows, not tests/ratified); was: {\"decisionId\": \"D-AUTHORITY-ROOTS1\", \"text\": \"The closed table becomes thirteen roots: the ratified ten plus FFI, Browser, and Secret. The sixteen language roots become leaves: FFI.Go, FFI.Java, FFI.L"
-    },
-    {
-      "at": "2026-11-15T04:40:59.410Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#109 The netrc parser follows the exact netrc rules (default entr"
-    },
-    {
-      "at": "2026-11-15T04:40:58.504Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0dlrfkp",
-      "note": "#8 Unsupported enforcement, denied access, an escape attempt, l"
-    },
-    {
-      "at": "2026-11-15T04:40:57.616Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0dlrfkp",
-      "note": "#7 A launch's plan, transaction, descendants, limits, outputs a"
-    },
-    {
-      "at": "2026-11-15T04:40:56.724Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0dlrfkp",
-      "note": "#6 Declared filesystem, process, network, environment, device a"
-    },
-    {
-      "at": "2026-11-15T04:40:55.595Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0dlrfkp",
-      "note": "#5 A process spec's `.under(grant)` narrows authority through t"
-    },
-    {
-      "at": "2026-11-15T04:40:54.709Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0sttk1s",
-      "note": "#7 D-CRYPTOENV1=A: core.crypto offers misuse-resistant seal, op"
-    },
-    {
-      "at": "2026-11-15T04:40:53.817Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0qtfr3u",
-      "note": "Value tags are enforced: `#PII String` in type position, tag facts flow through dataflow, and only `#Scrub` removes a tag"
-    },
-    {
-      "at": "2026-11-15T04:40:52.537Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c05nw9a0",
-      "note": "Restricted code and sandbox guests: one sandbox package kind, lent Authority, scoped file access and the Capabilities run case"
-    },
-    {
-      "at": "2026-11-15T04:38:54.942Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c06l1r0z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T04:38:53.952Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c06l1r0z",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T04:38:52.215Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06l1r0z",
-      "note": "#39"
-    },
-    {
-      "at": "2026-11-15T04:38:51.264Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06l1r0z",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-15T04:38:50.254Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c06l1r0z",
-      "note": "#32"
     }
   ],
   "nextNum": 368,
