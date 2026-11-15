@@ -1,0 +1,17 @@
+# A hole table read as a value tries every candidate, as the statement form does: each arm's header runs with its own candidate, while a plain table over a call still reads its subject once.
+fixture: hole_table_value_form_tries_every_candidate.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "Fizz Fizz Fizz\nBuzz Buzz Buzz\nFizzBuzz FizzBuzz FizzBuzz\n7 7 7\n  wait 0\n  wait 5\n  wait 30\nred\n  wait 0\n  wait 5\namber\n  read\n2\n"
+stderr: empty
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "Fizz Fizz Fizz\nBuzz Buzz Buzz\nFizzBuzz FizzBuzz FizzBuzz\n7 7 7\n  wait 0\n  wait 5\n  wait 30\nred\n  wait 0\n  wait 5\namber\n  read\n2\n"
+stderr: empty
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "Fizz Fizz Fizz\nBuzz Buzz Buzz\nFizzBuzz FizzBuzz FizzBuzz\n7 7 7\n  wait 0\n  wait 5\n  wait 30\nred\n  wait 0\n  wait 5\namber\n  read\n2\n"
+stderr: empty
