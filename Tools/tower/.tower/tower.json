@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6966,
-    "rev": 105662,
+    "nextNum": 6967,
+    "rev": 105675,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -68993,6 +68993,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T05:23:51.084Z"
+        },
+        {
+          "n": 4,
+          "text": "Child-process-bound workloads cost no more than node: a paired gauntlet cell that spawns 200 short children in sequence shows Jet below node (child_process.spawnSync) and python on wall time and peak memory, live and uncached, and a second program that pipes a child output proves the gain; the fix is general (spawn, wait and pipe path, runtime baseline). Proof: `node Tools/gauntlet/harness/run.mjs --entry spawn-200-children`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:33:27.137Z"
         }
       ],
       "refs": [
@@ -69006,12 +69015,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:17.321Z",
-      "updated": "2026-11-15T05:29:43.611Z",
+      "updated": "2026-11-15T05:33:27.137Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c02a1ynr",
@@ -84059,39 +84068,39 @@
       "criteria": [
         {
           "n": 4,
-          "text": "Root F (proved by G11Speed's bisect, 2026-11-11, $JET_SCRATCH_ROOT/lanes/G11Speed/report-bisect.md): 9afa7da76b (#6206 c22 CheckedText Hole/build) dropped the Distinct-only guard of sema_expression_checked_text_target, so every typed literal and Type.method() call walked every impl with string-cloning name lookups (77.9% of samples on seed-t22). It was amplified by 8c02016476, af8d3e09d0 and 8eaf6f17cc. Fixed by G11Speed-1, which indexes CheckedText impl rows once at registration (same rows, same order). Acceptance: the c1 cell's default-mode CPU-s on the t22 tree is at most 1.10x a0.0.43's per corpus line; comptime.precheck and sema.bodies wall are each at most 1.10x a0.0.43's; and perf shows sema_expression_checked_text_target under 1% of samples. Measured on the fix (n=1, basic): 749 to 164 CPU-s, 6.7K to 14.8K lines/s.",
+          "text": "Root F (proved by G11Speed's bisect, 2026-11-11, $JET_SCRATCH_ROOT/lanes/G11Speed/report-bisect.md): 9afa7da76b (#6206 c22 CheckedText Hole/build) dropped the Distinct-only guard of sema_expression_checked_text_target, so every typed literal and Type.method() call walked every impl with string-cloning name lookups (77.9% of samples on seed-t22). It was amplified by 8c02016476, af8d3e09d0 and 8eaf6f17cc. Fixed by G11Speed-1, which indexes CheckedText impl rows once at registration (same rows, same order). Acceptance: the c1 cell's default-mode CPU-s on the t22 tree is at most 1.10x a0.0.43's per corpus line; comptime.precheck and sema.bodies wall are each at most 1.10x a0.0.43's; and perf shows sema_expression_checked_text_target under 1% of samples. Measured on the fix (n=1, basic): 749 to 164 CPU-s, 6.7K to 14.8K lines/s. Proof: the per-phase receipt of the c1 self-compile cell (`JET_TRACE_FILE` of `jet build Compiler` on the reserved slot, with perf where named).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:37:49.118Z"
+          "at": "2026-11-15T05:33:28.106Z"
         },
         {
           "n": 5,
-          "text": "Root C: 42d3bedfe8 and d17bb32500 (2026-11-08) made `jet build Compiler` build the whole toolchain (runtime pack, IDENTITY) and regenerate the Prelude copies and keyword spans, about 23 s of untraced build steps per build (wall 36 to 74 s with CPU flat). Acceptance: every untraced step of the c1 cell is traced phase by phase and takes at most 2 s of wall, or becomes part of the traced compile.",
+          "text": "Root C: 42d3bedfe8 and d17bb32500 (2026-11-08) made `jet build Compiler` build the whole toolchain (runtime pack, IDENTITY) and regenerate the Prelude copies and keyword spans, about 23 s of untraced build steps per build (wall 36 to 74 s with CPU flat). Acceptance: every untraced step of the c1 cell is traced phase by phase and takes at most 2 s of wall, or becomes part of the traced compile. Proof: the per-phase receipt of the c1 self-compile cell (`JET_TRACE_FILE` of `jet build Compiler` on the reserved slot, with perf where named).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:37:50.846Z"
+          "at": "2026-11-15T05:33:29.176Z"
         },
         {
           "n": 6,
-          "text": "Root B: bb770de593 (2026-11-01, the default level also versions small loops, runs the SSA round trip and the reductions) took ir.opt from 1.2 to 8.9 s wall. Acceptance: ir.opt at the default level costs at most a0_021's per-line cost (1.18 s wall over 646K lines) times 1.10 on the c1 cell, or each pass over that bound has its own named root. Architectural only (owner order 2026-11-11: no small tuning during language churn): the fix is pass scheduling or structure, not per-pass tweaks.",
+          "text": "Root B: bb770de593 (2026-11-01, the default level also versions small loops, runs the SSA round trip and the reductions) took ir.opt from 1.2 to 8.9 s wall. Acceptance: ir.opt at the default level costs at most a0_021's per-line cost (1.18 s wall over 646K lines) times 1.10 on the c1 cell, or each pass over that bound has its own named root. Architectural only (owner order 2026-11-11: no small tuning during language churn): the fix is pass scheduling or structure, not per-pass tweaks. Proof: the per-phase receipt of the c1 self-compile cell (`JET_TRACE_FILE` of `jet build Compiler` on the reserved slot, with perf where named).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:37:52.534Z"
+          "at": "2026-11-15T05:33:30.208Z"
         },
         {
           "n": 7,
-          "text": "Root A: the a0_021 to a0_022 jump (2026-10-28 to 10-30, 54 to 89 CPU-s, compiler side +21% across trees) is attributed by the c1 cell's per-phase CPU on the a0_022 tree, both compilers, to named commits, and each named root is fixed or carded here.",
+          "text": "Root A: the a0_021 to a0_022 jump (2026-10-28 to 10-30, 54 to 89 CPU-s, compiler side +21% across trees) is attributed by the c1 cell's per-phase CPU on the a0_022 tree, both compilers, to named commits, and each named root is fixed or carded here. Proof: the per-phase receipt of the c1 self-compile cell (`JET_TRACE_FILE` of `jet build Compiler` on the reserved slot, with perf where named).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:37:54.299Z"
+          "at": "2026-11-15T05:33:31.316Z"
         },
         {
           "n": 8,
@@ -84113,21 +84122,21 @@
         },
         {
           "n": 10,
-          "text": "Cold script cost: `jet file.jet` for a script importing core.process compiles and runs from cold, with no reuse, in less wall time and peak memory than the original tool it replaces. Today (ScriptAPI-2, PortBars outputs, 2026-11-11) b4 pays 1.1-1.6 s and 355-388 MB per run, against originals of 37-1700 ms and 5.8-57 MB, so all 7 measured tool twins fail the speed and memory bars (e.g. census-snap2 21086 ms / 422 MB vs 1117 ms / 47.5 MB). Acceptance: a per-phase CPU and peak-RSS breakdown of that script on the batch compiler names each root (parse/import/sema/lowering/emit/link of Core modules the script does not reach, eager whole-module work, arena sizing); each root is fixed in the general path and proven on a second script; the PortBars speed and memory bars pass on the census-snap2 and roots-mjs entries with cold compile counted. Reuse is not the fix: the standing order counts cold compile time.",
+          "text": "Cold script cost: `jet file.jet` for a script importing core.process compiles and runs from cold, with no reuse, in less wall time and peak memory than the original tool it replaces. Today (ScriptAPI-2, PortBars outputs, 2026-11-11) b4 pays 1.1-1.6 s and 355-388 MB per run, against originals of 37-1700 ms and 5.8-57 MB, so all 7 measured tool twins fail the speed and memory bars (e.g. census-snap2 21086 ms / 422 MB vs 1117 ms / 47.5 MB). Acceptance: a per-phase CPU and peak-RSS breakdown of that script on the batch compiler names each root (parse/import/sema/lowering/emit/link of Core modules the script does not reach, eager whole-module work, arena sizing); each root is fixed in the general path and proven on a second script; the PortBars speed and memory bars pass on the census-snap2 and roots-mjs entries with cold compile counted. Reuse is not the fix: the standing order counts cold compile time. Proof: `jet Tools/gauntlet/PortBars.jet` speed and memory bars for census-snap2 and roots-mjs, cold compile counted.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T20:31:01.850Z"
+          "at": "2026-11-15T05:33:32.368Z"
         },
         {
           "n": 11,
-          "text": "Checking a root never needs gigabytes. With seed-b6 at d97d742871 and MemoryMax=6G, `jet check` was OOM-killed on 8 roots: Compiler/JetBackend/Tests, Compiler/JetCli, Compiler/JetCli/Commands, Compiler/JetCli/Commands/Tests, Compiler/JetCli/Tests, its GateProjection.fixture and RustForeign.fixture, and Compiler/JetDriver/Tests. Other scopes peaked at 6.0-6.8 GB. A collect-all census records the peak RSS of `jet check` for every in-repo root, and each phase's memory owner (parse, register, comptime, sema, IR) is named from a profile of the worst root. Every root's peak is then at most 3 GB, with no caching or reuse.",
+          "text": "Checking a root never needs gigabytes. With seed-b6 at d97d742871 and MemoryMax=6G, `jet check` was OOM-killed on 8 roots: Compiler/JetBackend/Tests, Compiler/JetCli, Compiler/JetCli/Commands, Compiler/JetCli/Commands/Tests, Compiler/JetCli/Tests, its GateProjection.fixture and RustForeign.fixture, and Compiler/JetDriver/Tests. Other scopes peaked at 6.0-6.8 GB. A collect-all census records the peak RSS of `jet check` for every in-repo root, and each phase's memory owner (parse, register, comptime, sema, IR) is named from a profile of the worst root. Every root's peak is then at most 3 GB, with no caching or reuse. Proof: a committed collect-all census of `jet check` peak RSS for every in-repo root, every row at or under 3 GB.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T23:12:05.126Z"
+          "at": "2026-11-15T05:33:33.385Z"
         },
         {
           "n": 12,
@@ -84147,8 +84156,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T01:36:04.082Z",
-      "updated": "2026-11-14T15:54:17.939Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:33:33.386Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 12
     },
     {
@@ -84638,21 +84647,21 @@
         },
         {
           "n": 2,
-          "text": "With the release-built jet, piping '1 + 2' and ':quit' into jet repl prints '3 : Int' in under 0.3 s wall with peak RSS under 120 MB. The tests/cases REPL rows pass with no REPL process above 1 GB RSS.",
+          "text": "With the release-built jet, piping '1 + 2' and ':quit' into jet repl prints '3 : Int' in under 0.3 s wall with peak RSS under 120 MB. The tests/cases REPL rows pass with no REPL process above 1 GB RSS. Proof: `jet test Compiler --profile cases --filter repl/` and a committed receipt with the profile that names the root removed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T13:11:54.902Z"
+          "at": "2026-11-15T05:33:34.415Z"
         },
         {
           "n": 3,
-          "text": "`jet repl` reaches its prompt sooner than `python3 -q` and IPython on the same host (pty harness, Jet/peer < 1.00) (from #4720 c6)",
+          "text": "`jet repl` reaches its prompt sooner than `python3 -q` and IPython on the same host (pty harness, Jet/peer < 1.00) Proof: a committed pty-harness receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:53:54.638Z"
+          "at": "2026-11-15T05:33:35.667Z"
         }
       ],
       "refs": [],
@@ -84663,8 +84672,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T13:11:44.323Z",
-      "updated": "2026-11-12T19:08:17.441Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:33:35.667Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
     {
@@ -84694,21 +84703,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "With the release-built jet, pipe.sh shows each watched edit's output within 1.5 s of the write, both for a changed program and for the gap case. The receipt names the root removed.",
+          "text": "With the release-built jet, pipe.sh shows each watched edit's output within 1.5 s of the write, both for a changed program and for the gap case. The receipt names the root removed. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/watching_dev_reruns` with the edit-to-output times in its receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T13:54:27.628Z"
+          "at": "2026-11-15T05:33:36.879Z"
         },
         {
           "n": 2,
-          "text": "Both dev_parts_routine watch cases pass three runs in a row inside the full cases suite, using readiness waits instead of fixed sleeps, with the release gate's retry.",
+          "text": "Both dev_parts_routine watch cases pass three runs in a row inside the full cases suite, using readiness waits instead of fixed sleeps, with the release gate's retry. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/` passes three runs in a row.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T13:54:28.668Z"
+          "at": "2026-11-15T05:33:38.245Z"
         }
       ],
       "refs": [],
@@ -84719,8 +84728,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T13:54:22.305Z",
-      "updated": "2026-11-09T19:22:48.192Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:33:38.245Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0zy9mhn",
@@ -86788,12 +86797,12 @@
         },
         {
           "n": 2,
-          "text": "json.parse on the 2.4 MB document from #4667 beats every matched peer (V8 JSON.parse included) in a paired perf cell (Jet/peer below 1.00); the ceiling ratio is reported only.",
+          "text": "json.parse on the 2.4 MB document from #4667 beats every matched peer (V8 JSON.parse included) in a paired perf cell (Jet/peer below 1.00); the ceiling ratio is reported only. Proof: `node Tools/gauntlet/harness/run.mjs --entry json-parse` shows no loss.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:01:41.568Z"
+          "at": "2026-11-15T05:33:39.546Z"
         }
       ],
       "refs": [],
@@ -86804,8 +86813,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T05:54:54.722Z",
-      "updated": "2026-11-13T02:01:41.568Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:33:39.546Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
     {
@@ -113607,6 +113616,68 @@
       "needsAcceptance": false,
       "created": "2026-11-15T05:29:08.825Z",
       "updated": "2026-11-15T05:29:08.825Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0wf4a3e",
+      "num": 6966,
+      "title": "Caches are off by default: every run and build compiles live, and the retired cache stores are gone",
+      "body": "Destination: `jet file.jet`, `jet run` and `jet build` compile live every time by default; no kept program, result cache, build store or incremental state serves a run unless the user opts in through an existing switch; and the retired cache stores and their environment switches are deleted.\n\nWhy: owner order 2026-11-11, caches off. Cold compile time is what users feel, and a cache hides it from every measurement.\n\nDecisions: owner order 2026-11-11 (caches off; any new public opt-in spelling goes to a ballot and nothing else changes until it is ratified). The kept-program cache removal itself is #6328 c24.\n\nSource: #6527 c9 and c12 and #6639 c6, gathered 2026-11-15.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Build reuse and the jet build binary store are off by default, per the standing caches-off order. Found by G11Speed on 2026-11-11: Executor.jet:324 restores any reusable step unconditionally, BuildExecute.jet:188 always opens the store when a build has steps, and Cli/BuildCache.jet:29 keeps the binary store on by default, with no switch (cli.md:504 documents made-or-reused). Fix (G11Speed-7c): a default build opens no store and puts nothing; opting in uses only an existing switch, or the executor API for tests if none exists, and any new public opt-in spelling goes to a ballot. cli.md and the BuildExecutor action-reuse test are updated in the same cutover. Proof: a test shows a default build opens no store; the opted-in reuse test passes; and cold and warm jet build Compiler are measured n=3 before and after.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:33:26.136Z"
+        },
+        {
+          "n": 2,
+          "text": "No BuildCache, RuntimeCache, RunCache, ReceiptStore, BuildPlanReplay or JET_TIMING, JET_RUN_TRACE, JET_RECEIPT_BYPASS, JET_CACHE_DIR or JET_RUNTIME_CACHE_DIR remains, and architecture.md, compiler-speed.md and the syntax-decisions ledger describe the graph, store, units and levels as shipped. Proof: `git grep -n -E \"BuildCache|RuntimeCache|RunCache|ReceiptStore|BuildPlanReplay|JET_TIMING|JET_RUN_TRACE|JET_RECEIPT_BYPASS|JET_CACHE_DIR|JET_RUNTIME_CACHE_DIR\" -- Compiler Core Tools Docs/spec` prints nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:33:26.136Z"
+        },
+        {
+          "n": 3,
+          "text": "Owner order 2026-11-11: the script cache is off by default. `jet file.jet` and `jet run` compile live every time, and no kept program, result cache or incremental state serves a run unless the user opts in. ScriptCache.jet's default flips. The opt-in spelling goes on a ballot (a flag or an environment variable) and nothing else changes until it is ratified. CLI #Tests prove a second run of unchanged sources compiles again by default (no read or write under the scripts dir). Every in-repository caller, doc and test that assumed a cache hit is migrated in the same patch. Proof: `jet test Compiler --profile cases --filter cli_run/second_run_compiles_again_by_default`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:33:26.136Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "performance",
+        "cli",
+        "build"
+      ],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T05:33:26.136Z",
+      "updated": "2026-11-15T05:33:26.136Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -217442,6 +217513,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:33:39.546Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0tpf98i",
+      "note": "#2: proof; was: json.parse on the 2.4 MB document from #4667 beats every matched peer (V8 JSON.parse included) in a paired perf cell (Jet/peer below 1.00); the ceiling ratio is reported only."
+    },
+    {
+      "at": "2026-11-15T05:33:38.245Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0166xrw",
+      "note": "#2: proof; was: Both dev_parts_routine watch cases pass three runs in a row inside the full cases suite, using readiness waits instead of fixed sleeps, with the release gate's retry."
+    },
+    {
+      "at": "2026-11-15T05:33:36.879Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0166xrw",
+      "note": "#1: proof; was: With the release-built jet, pipe.sh shows each watched edit's output within 1.5 s of the write, both for a changed program and for the gap case. The receipt names the root removed."
+    },
+    {
+      "at": "2026-11-15T05:33:35.667Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0wtvbj7",
+      "note": "#3: strip debris; proof; was: `jet repl` reaches its prompt sooner than `python3 -q` and IPython on the same host (pty harness, Jet/peer < 1.00) (from #4720 c6)"
+    },
+    {
+      "at": "2026-11-15T05:33:34.415Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0wtvbj7",
+      "note": "#2: absorbs c1; proof; was: With the release-built jet, piping '1 + 2' and ':quit' into jet repl prints '3 : Int' in under 0.3 s wall with peak RSS under 120 MB. The tests/cases REPL rows pass with no REPL process above 1 GB RSS"
+    },
+    {
+      "at": "2026-11-15T05:33:33.386Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0pjwkhn",
+      "note": "#11: proof; was: Checking a root never needs gigabytes. With seed-b6 at d97d742871 and MemoryMax=6G, `jet check` was OOM-killed on 8 roots: Compiler/JetBackend/Tests, Compiler/JetCli, Compiler/JetCli/Commands, Compile"
+    },
+    {
+      "at": "2026-11-15T05:33:32.368Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0pjwkhn",
+      "note": "#10: proof; was: Cold script cost: `jet file.jet` for a script importing core.process compiles and runs from cold, with no reuse, in less wall time and peak memory than the original tool it replaces. Today (ScriptAPI-"
+    },
+    {
+      "at": "2026-11-15T05:33:31.316Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0pjwkhn",
+      "note": "#7: proof; was: Root A: the a0_021 to a0_022 jump (2026-10-28 to 10-30, 54 to 89 CPU-s, compiler side +21% across trees) is attributed by the c1 cell's per-phase CPU on the a0_022 tree, both compilers, to named commi"
+    },
+    {
+      "at": "2026-11-15T05:33:30.208Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0pjwkhn",
+      "note": "#6: proof; was: Root B: bb770de593 (2026-11-01, the default level also versions small loops, runs the SSA round trip and the reductions) took ir.opt from 1.2 to 8.9 s wall. Acceptance: ir.opt at the default level cos"
+    },
+    {
+      "at": "2026-11-15T05:33:29.176Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0pjwkhn",
+      "note": "#5: proof; was: Root C: 42d3bedfe8 and d17bb32500 (2026-11-08) made `jet build Compiler` build the whole toolchain (runtime pack, IDENTITY) and regenerate the Prelude copies and keyword spans, about 23 s of untraced "
+    },
+    {
+      "at": "2026-11-15T05:33:28.106Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0pjwkhn",
+      "note": "#4: proof; was: Root F (proved by G11Speed's bisect, 2026-11-11, $JET_SCRATCH_ROOT/lanes/G11Speed/report-bisect.md): 9afa7da76b (#6206 c22 CheckedText Hole/build) dropped the Distinct-only guard of sema_expression_ch"
+    },
+    {
+      "at": "2026-11-15T05:33:27.137Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0ta538w",
+      "note": "#4 Child-process-bound workloads cost no more than node: a pair"
+    },
+    {
+      "at": "2026-11-15T05:33:26.136Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0wf4a3e",
+      "note": "Caches are off by default: every run and build compiles live, and the retired cache stores are gone"
+    },
     {
       "at": "2026-11-15T05:32:42.615Z",
       "by": "Main",
