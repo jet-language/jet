@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6932,
-    "rev": 104800,
+    "rev": 104825,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32771,6 +32771,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15 by TowerKeeper-1: every criterion names its case; precut-audit notes on c16-c18 are replaced by the named case."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -32988,7 +32993,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-09-15T00:27:21.584Z",
-      "updated": "2026-11-15T04:41:27.870Z",
+      "updated": "2026-11-15T04:41:51.726Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -44885,21 +44890,26 @@
     {
       "id": "c052rw8k",
       "num": 4268,
-      "title": "Close authority, transitive safety and sandbox boundaries",
-      "body": "Ratified contract scope; no new ballot or default is authorized.\n\n\n**Scope:** Heal the effect root table: FFI languages become leaves; Retire the word capability from surfaces or reserve it for one thing; Safe crypto envelopes; How restricted code receives file authority; Capability-scoped host imports for sandbox guests; How Jet enforces the panic law in libraries; One policy ladder for every audited escape; A value tag in type position is written directly before the type, for exa...; Direct tag facts propagate through dataflow and are rejected at the tag's...\n\n**Decision IDs:** D-AUTHORITY-ROOTS1, D-AUTHORITY-WORD1, D-CRYPTOENV1, D-FILES-SCOPE1, D-FOUND-SANDBOX1, D-NOPANIC1, D-ONCE-GATE1, D-QUAL4, D-TAINT1\n\n**Acceptance criteria / missing boundary:**\n\n- **D-AUTHORITY-ROOTS1:** The closed table becomes thirteen roots: the ratified ten plus FFI, Browser, and Secret. The sixteen language roots become leaves: FFI.Go, FFI.Java, FFI.Lua, and the promised FFI.Py and FFI.Octave arrive as leaves too.\n  - **Gap witness:** PARTIAL — Rust Syntax.rs:347-350 and Syntax/effects_surface.rs:46-66 establish thirteen grant roots and FFI language leaves. Jet effects declarations/checks exist; closed-root parity and flat-language retirement across its registry were not proven. Witness: tests/effect_roots.rs; no both-side completion claim.\n- **D-AUTHORITY-WORD1:** No user-facing surface uses capability for permissions; diagnostics say write access, effects or authority according to the thing described (D-ABILITY-NAME2).\n  - **Gap witness:** CONTRADICTED — Rust crates/jet-codegen/src/Prelude/Core/DevtoolsPanelCatalog.rs:330-334 publishes unavailable reason missing-capability, not missing-authority/effects; :345 names its projection capability. Shared devtools exports carry this user-report vocabulary to Jet. Source #FX/Authority is canonical, but the all-surface vocabulary cutover is incomplete.\n- **D-CRYPTOENV1:** core.crypto uses misuse-resistant seal/open/sign/verify; expert raw/exposure operations require #Unsafe and secret values cannot be ordinarily printed, compared, reflected or serialized. Ruling source: `Docs/spec/syntax-decisions.md:4388`.\n  - **Gap witness:** PARTIAL — Rust `crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:639-679` rejects caller-controlled nonce/algorithm on safe envelope calls and `:682+` checks literal crypto misuse. The Jet sema-core comparison found no equivalent RawNonce/RawAlgorithm check in Compiler/JetSema (only generated Foundation diagnostic rows); the typed Core call path is `Compiler/JetSema/Source/Sema/Calls/Core.jet`. Existing example/fixture leads include `tests/fuzz/sema/differential/ex_crypto_crypto_envelope.jet:1`. Raw gate and complete secret-operation parity remain unestablished; a registry copy does not enforce safe-envelope misuse.\n- **D-FILES-SCOPE1:** Trusted scripts keep direct fs calls. Restricted code derives one opaque scope from Authority and uses familiar methods on it.\n  - **Gap witness:** PARTIAL — Authority/scoped values exist, but Jet Effects/Authority.jet:306-342,398-463 omits expression/header positions handled by the Rust generic authority escape walk. In particular for-header values and counted-loop steps do not participate identically in derived-authority escape checking (parity/SemaOwnershipEffects.md A1). Complete narrowing confinement is not established.\n- **D-FOUND-SANDBOX1:** The guest names the rights it needs. The host lends an Authority value tightened to a folder or host.\n  - **Gap witness:** CONTRADICTED — Shared active diagnostic E1258 at Prelude/Diagnostics.jet:753 still states D-PLUGIN1=B, zero host authority, no imports and no gate/grant may widen it, directly contradicting ratified A host-lent needs/Authority. Rust opaque plugin handles exist (HandlesRaylib.rs:316-329), but Jet host capability-import realization was not established; stale diagnostic itself is a consumer-facing contradiction.\n- **D-NOPANIC1:** Panic becomes a row that the shipped prohibition arrow and the manifest deny list already know how to enforce. A signature writes =[!Panic]=>.\n  - **Gap witness:** PARTIAL — Rust effect source/deny law is registered and positive Panic grant checks are tracked by #3986. Jet failure/effect graph exists, but package/proof projection and unknown-edge bounded proofs differ (parity/SemaOwnershipEffects.md E5/E6). Complete transitive Panic discharge, deny-only admission and all implicit trap sites are not established.\n- **D-ONCE-GATE1:** The unsafe policy ladder generalizes: one policy surface names all audited escapes, with the same five scopes and modes. The one-off --allow-impure spelling retires, replaced by one family flag the org file can refuse — solo scripts need no policy file.\n  - **Gap witness:** PARTIAL — Rust Sema/UnsafeObligations.rs owns organization/package/gate policy and typed obligation discharge. Compiler-wide parity search found no Jet inspector/discharger/stripper or E3107/E3108 producer; Jet only parses __jet_unsafe_assert in Parser/Statements.jet:1447. The complete audited gate ladder is not enforced by the Jet side (parity/SemaOwnershipEffects.md U1).\n- **D-QUAL4:** A value tag in type position is written directly before the type, for example `#PII String`.\n  - **Gap witness:** PARTIAL — Rust accepts value-tag prefixes through its tagged-type parser and taint checks. Jet has semantic Tagged support, but Compiler/JetParser/Source/Parser/Types.jet:295-329 does not dispatch TOKEN_HASH in parse_type_base; TOKEN_HASH only handles fixed-list lengths (:378). No Tagged constructor was found in Compiler/JetParser. Thus the specified #PII String syntax cannot enter the port checker. Parser reviewer independently confirmed the missing producer; no specifically matching open card was established.\n- **D-TAINT1:** Direct tag facts propagate through dataflow and are rejected at the tag's denied destinations. D-TAG-SURFACE1 makes `#Scrub(Tag)` the sole checked removal door and retires Tainted/Sanitizer forms.\n  - **Gap witness:** PARTIAL — Rust carries taint/tag dataflow and denied-sink diagnostics. Jet carries the checking implementation in Compiler/JetSema/Source/Sema/Taint.jet:892-899,1347-1348, including E0721/E0722 and scrub signatures, but the source type-prefix entry point is absent: Compiler/JetParser/Source/Parser/Types.jet:295-329 rejects a hash in type position instead of constructing Tagged. Full direct-tag source-to-flow parity is consequently incomplete.\n\n\nEffective-scope corrections:\nD-NOPANIC1: Enforce the current -[!Panic]> denial row transitively and reject positive grant; the source report's =[!Panic]=> specimen is historical arrow spelling, not revived syntax.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V53 (D-AUTHORITY-WORD1):\nDecision IDs: D-AUTHORITY-WORD1\n\nActive contract: No user-facing surface uses capability for permissions; diagnostics say write access, effects or authority according to the thing described (D-ABILITY-NAME2).\n\nGap evidence (static source witness, not a passing test): Rust crates/jet-codegen/src/Prelude/Core/DevtoolsPanelCatalog.rs:330-334 publishes unavailable reason missing-capability, not missing-authority/effects; :345 names its projection capability. Shared devtools exports carry this user-report vocabulary to Jet. Source #FX/Authority is canonical, but the all-surface vocabulary cutover is incomplete.\n\nCoverage disposition: Same contract boundary is already assigned to P04.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V07 (D-FOUND-SANDBOX1, D-PLUGIN1):\nDecision IDs: D-FOUND-SANDBOX1, D-PLUGIN1\n\nActive contract: The guest names the rights it needs. The host lends an Authority value tightened to a folder or host.\n\nGap evidence (static source witness, not a passing test): Shared active diagnostic E1258 at Prelude/Diagnostics.jet:753 still states D-PLUGIN1=B, zero host authority, no imports and no gate/grant may widen it, directly contradicting ratified A host-lent needs/Authority. Rust opaque plugin handles exist (HandlesRaylib.rs:316-329), but Jet host capability-import realization was not established; stale diagnostic itself is a consumer-facing contradiction.\n\nCoverage disposition: Same contract boundary is already assigned to P04.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.",
+      "title": "Authority law: thirteen roots in one table, the word authority, transitive Panic and memory denials, one policy ladder, and contain/harden",
+      "body": "Destination: the authority model is one closed table of thirteen roots with FFI language leaves (D-AUTHORITY-ROOTS1=A), read by every checker with no private copy; no surface says capability for permissions (D-AUTHORITY-WORD1=A); Panic and memory denials are enforced transitively and take arguments (D-NOPANIC1=A, D-AUTHORITY-MEM2=A); one policy surface names every audited escape (D-ONCE-GATE1=A); and the package keys `contain` and `harden` work as ratified.\n\nWhy: an authority promise that one checker reads differently from another, or that an unknown call can discharge, is not a promise.\n\nSource: the P04 ratified-contract scope (Main's ruling 2026-11-13: the proofs are tests/cases rows, not the proposed tests/ratified suite), with #1566, #1894 and #2846. Sandbox items went to #6930, tags to #6931, crypto to #6925, native sandbox enforcement to #6697 and netrc to #6632.",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e12",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
-      "plan": "1. Rust freeze: do not change Source/, crates/ Rust implementations or add Rust tests. Implement in the Jet compiler, Jet-hosted tooling and owning Jet packages. Core/, Docs/ and canonical Prelude/*.jet are shared inputs to the frozen reference: coordinate owner timing before editing them. Regenerate generated Compiler registries; never hand-edit DiagnosticRows.jet, CoreCallRows.jet or CoreSources.jet. Historical Rust file:line witnesses diagnose the gap; they do not authorize a Rust repair.\n2. Implement only the missing consumer boundary identified by each cited gap witness, preserving working behavior; reuse the owning source, checker, registry and provider seam rather than introduce a parallel mechanism.\n3. [D-AUTHORITY-ROOTS1] The closed table becomes thirteen roots: the ratified ten plus FFI, Browser, and Secret. The sixteen language roots become leaves: FFI.Go, FFI.Java, FFI.Lua, and the promised FFI.Py and FFI.Octave arrive as leaves too. Owning evidence: PARTIAL — Rust Syntax.rs:347-350 and Syntax/effects_surface.rs:46-66 establish thirteen grant roots and FFI language leaves. Jet effects declarations/checks exist; closed-root parity and flat-language retirement across its registry were not proven. Witness: tests/effect_roots.rs; no both-side completion claim.\n4. [D-AUTHORITY-WORD1] No user-facing surface uses capability for permissions; diagnostics say write access, effects or authority according to the thing described (D-ABILITY-NAME2). Owning evidence: CONTRADICTED — Rust crates/jet-codegen/src/Prelude/Core/DevtoolsPanelCatalog.rs:330-334 publishes unavailable reason missing-capability, not missing-authority/effects; :345 names its projection capability. Shared devtools exports carry this user-report vocabulary to Jet. Source #FX/Authority is canonical, but the all-surface vocabulary cutover is incomplete.\n5. [D-CRYPTOENV1] core.crypto uses misuse-resistant seal/open/sign/verify; expert raw/exposure operations require #Unsafe and secret values cannot be ordinarily printed, compared, reflected or serialized. Ruling source: `Docs/spec/syntax-decisions.md:4388`. Owning evidence: PARTIAL — Rust `crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:639-679` rejects caller-controlled nonce/algorithm on safe envelope calls and `:682+` checks literal crypto misuse. The Jet sema-core comparison found no equivalent RawNonce/RawAlgorithm check in Compiler/JetSema (only generated Foundation diagnostic rows); the typed Core call path is `Compiler/JetSema/Source/Sema/Calls/Core.jet`. Existing example/fixture leads include `tests/fuzz/sema/differential/ex_crypto_crypto_envelope.jet:1`. Raw gate and complete secret-operation parity remain unestablished; a registry copy does not enforce safe-envelope misuse.\n6. [D-FILES-SCOPE1] Trusted scripts keep direct fs calls. Restricted code derives one opaque scope from Authority and uses familiar methods on it. Owning evidence: PARTIAL — Authority/scoped values exist, but Jet Effects/Authority.jet:306-342,398-463 omits expression/header positions handled by the Rust generic authority escape walk. In particular for-header values and counted-loop steps do not participate identically in derived-authority escape checking (parity/SemaOwnershipEffects.md A1). Complete narrowing confinement is not established.\n7. [D-FOUND-SANDBOX1] The guest names the rights it needs. The host lends an Authority value tightened to a folder or host. Owning evidence: CONTRADICTED — Shared active diagnostic E1258 at Prelude/Diagnostics.jet:753 still states D-PLUGIN1=B, zero host authority, no imports and no gate/grant may widen it, directly contradicting ratified A host-lent needs/Authority. Rust opaque plugin handles exist (HandlesRaylib.rs:316-329), but Jet host capability-import realization was not established; stale diagnostic itself is a consumer-facing contradiction.\n8. [D-NOPANIC1] Enforce the current -[!Panic]> denial row transitively and reject positive grant; the source report's =[!Panic]=> specimen is historical arrow spelling, not revived syntax. Owning evidence: PARTIAL — Rust effect source/deny law is registered and positive Panic grant checks are tracked by #3986. Jet failure/effect graph exists, but package/proof projection and unknown-edge bounded proofs differ (parity/SemaOwnershipEffects.md E5/E6). Complete transitive Panic discharge, deny-only admission and all implicit trap sites are not established.\n9. [D-ONCE-GATE1] The unsafe policy ladder generalizes: one policy surface names all audited escapes, with the same five scopes and modes. The one-off --allow-impure spelling retires, replaced by one family flag the org file can refuse — solo scripts need no policy file. Owning evidence: PARTIAL — Rust Sema/UnsafeObligations.rs owns organization/package/gate policy and typed obligation discharge. Compiler-wide parity search found no Jet inspector/discharger/stripper or E3107/E3108 producer; Jet only parses __jet_unsafe_assert in Parser/Statements.jet:1447. The complete audited gate ladder is not enforced by the Jet side (parity/SemaOwnershipEffects.md U1).\n10. [D-QUAL4] A value tag in type position is written directly before the type, for example `#PII String`. Owning evidence: PARTIAL — Rust accepts value-tag prefixes through its tagged-type parser and taint checks. Jet has semantic Tagged support, but Compiler/JetParser/Source/Parser/Types.jet:295-329 does not dispatch TOKEN_HASH in parse_type_base; TOKEN_HASH only handles fixed-list lengths (:378). No Tagged constructor was found in Compiler/JetParser. Thus the specified #PII String syntax cannot enter the port checker. Parser reviewer independently confirmed the missing producer; no specifically matching open card was established.\n11. [D-TAINT1] Direct tag facts propagate through dataflow and are rejected at the tag's denied destinations. D-TAG-SURFACE1 makes `#Scrub(Tag)` the sole checked removal door and retires Tainted/Sanitizer forms. Owning evidence: PARTIAL — Rust carries taint/tag dataflow and denied-sink diagnostics. Jet carries the checking implementation in Compiler/JetSema/Source/Sema/Taint.jet:892-899,1347-1348, including E0721/E0722 and scrub signatures, but the source type-prefix entry point is absent: Compiler/JetParser/Source/Parser/Types.jet:295-329 rejects a hash in type position instead of constructing Tagged. Full direct-tag source-to-flow parity is consequently incomplete.\n12. Migrate every affected public caller, example, test and existing doc/changelog section in the same clean cutover. Coordinate overlapping scopes; P23 owns module names, P03 non-Effect enums, #3986 Effect, P12 marker generation, P19 diagnostic templates and P27 fact-query lifetime separation.\n13. D-EXEC1 staging: finish stage zero and semantic/output parity on current engines first; unify the compiled runtime and shared low-level ABI/drop representation next; build Jet O0/O1 x86-64 then aarch64, require whole-example-corpus parity and O0 live function replacement, and only then retire Cranelift/MIREval/--interpret in one cutover. Frozen engine-specific work stays frozen until its step lands. Before retirement retain applicable current-engine proof; after retirement retarget durable tests to O0/O1/O2/web. No early engine deletion or declaration that a surviving old engine is itself a violation.\n14. Deliver the named Jet-side tests/goldens and real consumer receipts in criteria. Main runs verification once on the integrated snapshot; performance/process requirements require their real receipts, not fabricated code.",
+      "plan": "Implement in the Jet compiler, Jet-hosted tooling and the owning Jet packages; regenerate generated registries rather than hand-editing them. Each criterion names its case.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Split 2026-11-15 by TowerKeeper-1: 32 open criteria. This card keeps the authority law (c1, c2, c6, c7, c29, c45, c50, c54-c57). Sandbox items went to #6930, tags to #6931, c3 to #6925, c17/c20/c23/c24 to #6697, c59/c60 to #6632. The ratified JSON blobs are restated as plain criteria; their test names are kept."
+        },
         {
           "at": "2026-11-13",
           "by": "Main",
@@ -45270,11 +45280,12 @@
         {
           "n": 60,
           "text": "netrc parsing keeps credentials out of diagnostics and adds no ambient file discovery or network authentication as a side effect. Proof: `jet test Compiler --profile cases --filter jetpack/netrc_redacts_credentials`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:03:53.012Z"
+          "evidence": "Merged into #6632 c109: the redaction and no-side-effect rules are part of the one netrc criterion",
+          "at": "2026-11-15T04:41:48.419Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -45288,7 +45299,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:05.406Z",
-      "updated": "2026-11-15T04:41:47.320Z",
+      "updated": "2026-11-15T04:41:50.828Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -47983,12 +47994,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "[#4525] D-UNSAFE-EXIT-OBLIGATIONS=A: exit checks on audited #Unsafe blocks use the ratified Requires/Ensures spelling (D-CONTRACT-NAME1=A), including cleanup, return and failure ordering.",
+          "text": "D-UNSAFE-EXIT-OBLIGATIONS=A: the exit checks on an audited #Unsafe block use the ratified Requires/Ensures spelling (D-CONTRACT-NAME1=A), with cleanup, return and failure ordering. Proof: `jet test Compiler --profile cases --filter unsafe/exit_obligations_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:44:32.289Z"
+          "at": "2026-11-15T04:43:44.213Z"
         },
         {
           "n": 2,
@@ -48097,7 +48108,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-04T14:14:26.629Z",
-      "updated": "2026-11-15T03:14:12.135Z",
+      "updated": "2026-11-15T04:43:44.213Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -72717,12 +72728,12 @@
         },
         {
           "n": 2,
-          "text": "The opted form of cycle.jet (per D-GC-OPTIN1's outcome) checks clean, runs on O0/O1/O2 and its cycle is collected (drop observed), with a golden",
+          "text": "D-GC-OPTIN1=A: with `#Policy(gc)` above the declaration of `Person`, cycle.jet checks clean (no E0221), runs on O0, O1 and O2, and its cycle is collected (the drop is observed), with collection only at the D-GC-WHEN1 points; E0221 still fires for the same program without the opt-in. Proof: `jet test Compiler --profile golden --filter memory/gc_optin_cycle_collected` and `jet test Compiler --profile ui --filter shared_cycle_without_gc`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T01:20:50.043Z"
+          "at": "2026-11-15T04:43:27.642Z"
         },
         {
           "n": 3,
@@ -72735,30 +72746,30 @@
         },
         {
           "n": 4,
-          "text": "(was #658 c1) The gc package key and narrower @Policy(gc) use #657's common matrix with no GC-only inheritance or provenance path [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "The gc package key and the narrower `#Policy(gc)` use the common policy matrix, with no GC-only inheritance or provenance path. Proof: `jet test Compiler --profile cases --filter policy_scope/package_gc_policy_applies_once_across_imported_modules` and `--filter policy_scope/hosted_gc_policy_matches_all_tiers`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:49.081Z"
+          "at": "2026-11-15T04:43:28.518Z"
         },
         {
           "n": 5,
-          "text": "(was #658 c2) Sema performs automatic traced promotion only inside effective scope and preserves bare read, & write, ^ root transfer, ~ deep copy, and ownership-only escape rejection [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Sema promotes values to traced storage automatically only inside the effective gc scope, and keeps the meaning of an unmarked read, `&` write, `^` take and `.copy()`, and the ownership-only escape refusal. Proof: `jet test Compiler --profile cases --filter memory/gc_promotion_scope_` and `jet test Compiler --profile ui --filter gc_escape_ownership`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:49.769Z"
+          "at": "2026-11-15T04:43:29.404Z"
         },
         {
           "n": 6,
-          "text": "(was #658 c3) JetIR, native emission and jet dev use one Jet-owned collector (was #646's private std collector) as the sole backend with equivalent behavior and no external dependency [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "JetIR, native emission and `jet dev` use one Jet-owned collector as the only backend, with the same behavior and no external dependency. Proof: `jet test Compiler --profile golden --filter memory/gc_` passes on O0, O1, O2 and under `jet dev`, and git grep finds one collector implementation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:54:47.921Z"
+          "at": "2026-11-15T04:43:30.304Z"
         },
         {
           "n": 7,
@@ -72771,75 +72782,75 @@
         },
         {
           "n": 8,
-          "text": "(was #658 c5) Registered diagnostics/UI snapshots and golden examples cover all four echelons, cycles, nested ownership neighbors, provenance, and wrapper migration [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Registered errors with UI snapshots, and goldens, cover cycles, nested ownership neighbors and provenance under `#Policy(gc)`. Proof: `jet test Compiler --profile ui --filter gc_` and `jet test Compiler --profile golden --filter memory/gc_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:51.652Z"
+          "at": "2026-11-15T04:43:31.290Z"
         },
         {
           "n": 10,
-          "text": "(was #659 c1) Trace mode observes every #658 automatic promotion with stable span, effective scope/provenance, reason, identity, allocation count, and retained count without changing collector semantics [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Trace mode records every automatic gc promotion with a stable span, effective scope and provenance, reason, identity, allocation count and retained count, without changing collector behavior. Proof: `jet test Compiler --profile cases --filter cli_settings/gc_trace_` and `--filter memory_semantics/gc_trace_records_promotions`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:53.082Z"
+          "at": "2026-11-15T04:43:32.232Z"
         },
         {
           "n": 11,
-          "text": "(was #659 c2) Tracing is explicit, zero-cost when off, versioned and bounded when on, and equivalent across AOT and jet dev [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Tracing is explicit, costs nothing when off, is versioned and bounded when on, and behaves the same for built programs and `jet dev`. Proof: `jet test Compiler --profile cases --filter memory_semantics/gc_trace_off_is_free` and `--filter memory_semantics/gc_trace_dev_matches_build`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:53.765Z"
+          "at": "2026-11-15T04:43:33.175Z"
         },
         {
           "n": 12,
-          "text": "(was #659 c3) `jet gc report` emits deterministic TTY/NO_COLOR text and --json; malformed, stale, oversized, or incompatible traces fail with coded diagnostics [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "`jet gc report` prints deterministic terminal and NO_COLOR text and `--json`, and a malformed, stale, oversized or incompatible trace fails with a registered error. Proof: `jet test Compiler --profile cases --filter cli_parts_budget/gc_report_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:54.591Z"
+          "at": "2026-11-15T04:43:34.069Z"
         },
         {
           "n": 13,
-          "text": "(was #659 c4) Each site proposes ordinary ownership or Pool<T>/Id<T>; an empty report says the gc policy can be removed [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "`jet gc report` proposes ordinary ownership or `Pool<T>`/`Id<T>` for each promotion site, and an empty report says the gc policy can be removed. Proof: `jet test Compiler --profile cases --filter cli_parts_budget/gc_report_proposals`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:55.205Z"
+          "at": "2026-11-15T04:43:34.950Z"
         },
         {
           "n": 15,
-          "text": "(was #1895 c1) jet audit memory renders deterministic ledgers for the six cases (empty, gc-only, sentry-only, combined, exact-fix, ambiguous-fix) pinned by CLI snapshots; output names its exercised-runs-only coverage [precut audit: failing on 9c7ddf1359: C:memory_semantics/gc_promotions_append_to_the_configured_cross_run_memory_ledger ERROR capture file: not found during read `ledger-v1.jsonl`: No such file or directory (os error 2) (known-failing #6295: unbuilt: GC promotions do not append to the…]",
+          "text": "`jet audit memory` prints deterministic ledgers for six cases (empty, gc-only, sentry-only, combined, exact-fix, ambiguous-fix) and says it covers exercised runs only. Proof: `jet test Compiler --profile cases --filter memory_semantics/exercised_memory_ledger_reports_empty_gc_sentry_and_combined_runs`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:56.366Z"
+          "at": "2026-11-15T04:43:35.935Z"
         },
         {
           "n": 16,
-          "text": "(was #1895 c2) jet fix memory applies an exactly-one repair (diff proven in a targeted test) and lists options otherwise; jet gc report is unchanged (existing snapshots green) [precut audit: failing on 9c7ddf1359: C:memory_semantics/gc_promotions_append_to_the_configured_cross_run_memory_ledger ERROR capture file: not found during read `ledger-v1.jsonl`: No such file or directory (os error 2) (known-failing #6295: unbuilt: GC promotions do not append to the…]",
+          "text": "`jet fix memory` applies a repair when exactly one exists and lists the options otherwise, and `jet gc report` output is unchanged. Proof: `jet test Compiler --profile cases --filter memory_semantics/fix_memory_exact_repair` and the c12 cases.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:56.954Z"
+          "at": "2026-11-15T04:43:36.932Z"
         },
         {
           "n": 17,
-          "text": "(was #1895 c3) Ledger rows persist across runs in the configured path; missing-ledger error registered + snapshotted beside E2110 [precut audit: failing on 9c7ddf1359: C:memory_semantics/gc_promotions_append_to_the_configured_cross_run_memory_ledger ERROR capture file: not found during read `ledger-v1.jsonl`: No such file or directory (os error 2) (known-failing #6295: unbuilt: GC promotions do not append to the…]",
+          "text": "Ledger rows persist across runs at the configured path, and a missing ledger is a registered error with a snapshot beside E2110. Proof: `jet test Compiler --profile cases --filter memory_semantics/gc_promotions_append_to_the_configured_cross_run_memory_ledger` passes and leaves tests/known-failing.tsv.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:57.564Z"
+          "at": "2026-11-15T04:43:37.913Z"
         }
       ],
       "refs": [],
@@ -72850,8 +72861,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T01:20:50.043Z",
-      "updated": "2026-11-13T02:20:00.180Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:43:37.913Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 17
     },
     {
@@ -74090,57 +74101,75 @@
         },
         {
           "n": 3,
-          "text": "After ratification every inventoried operation has one defined meaning on o0, o1 and o2, each with a test that proves it, and the language spec states the zero-undefined-behavior guarantee and its #Unsafe boundary.",
+          "text": "Every operation in the inventory has one defined meaning on O0, O1 and O2, each with a test, and the language spec states the zero-undefined-behavior guarantee and its `#Unchecked`/#Unsafe boundary (D-UB-BOUNDARY1=A). Proof: `jet test Compiler --profile cases --filter defined_behavior/` passes one case per inventory row.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T15:50:52.921Z"
+          "at": "2026-11-15T04:43:38.841Z"
         },
         {
           "n": 4,
-          "text": "(was #4726) Docs/spec/spec.md has a Defined behavior section with every listed operation class and its result",
+          "text": "Docs/spec/spec.md has a Defined behavior section listing every operation class and its result. Proof: `git grep -n '^## Defined behavior' -- Docs/spec/spec.md` and the c5 guard.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:44:05.964Z"
+          "at": "2026-11-15T04:43:39.748Z"
         },
         {
           "n": 5,
-          "text": "(was #4726) Every row links a conformance program that passes on every applicable tier",
+          "text": "Every row of the Defined behavior section links a conformance program that passes on every applicable tier. Proof: `jet test tests/guards --filter defined_behavior_rows_linked`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:44:06.662Z"
+          "at": "2026-11-15T04:43:40.636Z"
         },
         {
           "n": 7,
-          "text": "(was #4726) Every typing and ownership rule in Docs/spec/spec.md has a row in a checked-in rule table with one program that must compile and one that must be rejected with its named code; a test runs both pairs on the self-hosted `jet check` and fails on any rule without a pair.",
+          "text": "Every typing and ownership rule in Docs/spec/spec.md has a row in a checked-in rule table with one program that must compile and one that must be refused with its named code, and a test runs both on `jet check` and fails on any rule without a pair. Proof: `jet test tests/guards --filter spec_rule_pairs`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:44:08.303Z"
+          "at": "2026-11-15T04:43:41.533Z"
         },
         {
           "n": 8,
-          "text": "(was #4726) A type-checker fuzzer generates well-typed programs, runs each at O0 and O2 and diffs the output; a nightly job runs a fixed seed budget, logs the seeds, and every divergence gets its own card.",
+          "text": "A type-checker fuzzer generates well-typed programs, runs each at O0 and O2 and compares the output; a fixed seed budget runs with its seeds logged, and every divergence gets its own card. Proof: `jet test Compiler/JetSema --filter typed_fuzz_o0_o2_diff` passes its fixed budget.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:44:09.693Z"
+          "at": "2026-11-15T04:43:42.426Z"
         },
         {
           "n": 9,
-          "text": "D-UB-BOUNDARY1=A is built: expert code skips a check only inside a written #Unchecked(<check>) block (bounds first), and the global --bounds flag is removed in the same cutover with every caller migrated. Today #Unchecked(bounds) reports E0927 ('#Unchecked isn't a known applied rule') and jet build --bounds=off still works. A golden shows the block removing the check only in its scope at O0, O1 and O2. No build setting lets safe code read or write outside a list: every out-of-range index outside #Unchecked is stopped with its registered runtime error or rejected at compile time, on O0, O1, O2 and --release (the MemDesign bounds probes; was #5014 c8). Found by the 2026-11-05 Doom port investigation (ratified, not built; compiler 0ccdff27ea).",
+          "text": "D-UB-BOUNDARY1=A: expert code skips a check only inside a written `#Unchecked(<check>)` block (bounds first); today `#Unchecked(bounds)` is E0927 on compiler 0ccdff27ea. The block removes the check only in its scope. Proof: `jet test Compiler --profile golden --filter memory/unchecked_bounds_scope` on O0, O1 and O2. (The flag removal and the every-tier index stop are UBFLAG and UBINDEX.)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:48:48.935Z"
+          "at": "2026-11-15T04:43:43.322Z"
+        },
+        {
+          "n": 10,
+          "text": "D-UB-BOUNDARY1=A: the global `--bounds` build flag is removed (`jet build --bounds=off` is an unknown-flag error), with every caller migrated in the same cutover. Proof: `jet test Compiler --profile cases --filter cli_build/bounds_flag_removed` and git grep finds no `--bounds=` in Compiler, Tools or Examples.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:43:25.875Z"
+        },
+        {
+          "n": 11,
+          "text": "No build setting lets safe code read or write outside a list: every out-of-range index outside `#Unchecked` is stopped with its registered run-time error or refused at compile time, on O0, O1, O2 and --release (the MemDesign bounds probes; from #5014 c8). Proof: `jet test Compiler --profile cases --filter memory/out_of_range_index_stopped_every_tier`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:43:26.761Z"
         }
       ],
       "refs": [],
@@ -74151,9 +74180,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:47.559Z",
-      "updated": "2026-11-13T02:20:01.038Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 9
+      "updated": "2026-11-15T04:43:43.322Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 11
     },
     {
       "id": "c01vsb2c",
@@ -214997,6 +215026,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:43:44.213Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08rdp62",
+      "note": "#1: strip debris; proof; was: [#4525] D-UNSAFE-EXIT-OBLIGATIONS=A: exit checks on audited #Unsafe blocks use the ratified Requires/Ensures spelling (D-CONTRACT-NAME1=A), including cleanup, return and failure ordering."
+    },
+    {
+      "at": "2026-11-15T04:43:43.322Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0sg79an",
+      "note": "#9: split three outcomes into c9, UBFLAG and UBINDEX; was: D-UB-BOUNDARY1=A is built: expert code skips a check only inside a written #Unchecked(<check>) block (bounds first), and the global --bounds flag is removed in the same cutover with every caller migra"
+    },
+    {
+      "at": "2026-11-15T04:43:42.426Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0sg79an",
+      "note": "#8: strip debris; no hosted nightly (removed per #6011 log); proof; was: (was #4726) A type-checker fuzzer generates well-typed programs, runs each at O0 and O2 and diffs the output; a nightly job runs a fixed seed budget, logs the seeds, and every divergence gets its own "
+    },
+    {
+      "at": "2026-11-15T04:43:41.533Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0sg79an",
+      "note": "#7: strip debris; proof; was: (was #4726) Every typing and ownership rule in Docs/spec/spec.md has a row in a checked-in rule table with one program that must compile and one that must be rejected with its named code; a test runs "
+    },
+    {
+      "at": "2026-11-15T04:43:40.636Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0sg79an",
+      "note": "#5: strip debris; proof; was: (was #4726) Every row links a conformance program that passes on every applicable tier"
+    },
+    {
+      "at": "2026-11-15T04:43:39.748Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0sg79an",
+      "note": "#4: strip debris; proof; was: (was #4726) Docs/spec/spec.md has a Defined behavior section with every listed operation class and its result"
+    },
+    {
+      "at": "2026-11-15T04:43:38.841Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0sg79an",
+      "note": "#3: proof; D-UB-BOUNDARY1 is the ratified boundary; was: After ratification every inventoried operation has one defined meaning on o0, o1 and o2, each with a test that proves it, and the language spec states the zero-undefined-behavior guarantee and its #Un"
+    },
+    {
+      "at": "2026-11-15T04:43:37.913Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#17: strip debris; proof (KF row names #6295); was: (was #1895 c3) Ledger rows persist across runs in the configured path; missing-ledger error registered + snapshotted beside E2110 [precut audit: failing on 9c7ddf1359: C:memory_semantics/gc_promotions"
+    },
+    {
+      "at": "2026-11-15T04:43:36.932Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#16: strip debris; proof; was: (was #1895 c2) jet fix memory applies an exactly-one repair (diff proven in a targeted test) and lists options otherwise; jet gc report is unchanged (existing snapshots green) [precut audit: failing o"
+    },
+    {
+      "at": "2026-11-15T04:43:35.935Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#15: strip debris; proof; was: (was #1895 c1) jet audit memory renders deterministic ledgers for the six cases (empty, gc-only, sentry-only, combined, exact-fix, ambiguous-fix) pinned by CLI snapshots; output names its exercised-ru"
+    },
+    {
+      "at": "2026-11-15T04:43:34.950Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#13: strip debris; proof; was: (was #659 c4) Each site proposes ordinary ownership or Pool<T>/Id<T>; an empty report says the gc policy can be removed [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-15T04:43:34.069Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#12: strip debris; proof; was: (was #659 c3) `jet gc report` emits deterministic TTY/NO_COLOR text and --json; malformed, stale, oversized, or incompatible traces fail with coded diagnostics [precut audit: no dev test, golden, case"
+    },
+    {
+      "at": "2026-11-15T04:43:33.175Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#11: strip debris; proof; was: (was #659 c2) Tracing is explicit, zero-cost when off, versioned and bounded when on, and equivalent across AOT and jet dev [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-15T04:43:32.232Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#10: strip debris; proof; was: (was #659 c1) Trace mode observes every #658 automatic promotion with stable span, effective scope/provenance, reason, identity, allocation count, and retained count without changing collector semanti"
+    },
+    {
+      "at": "2026-11-15T04:43:31.290Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#8: strip debris; wrapper migration dropped: Gc<T> is retired with no migration path (greenfield, syntax-decisions.md D-OPTGC1 section); proof; was: (was #658 c5) Registered diagnostics/UI snapshots and golden examples cover all four echelons, cycles, nested ownership neighbors, provenance, and wrapper migration [precut audit: no dev test, golden,"
+    },
+    {
+      "at": "2026-11-15T04:43:30.304Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#6: strip debris; proof; was: (was #658 c3) JetIR, native emission and jet dev use one Jet-owned collector (was #646's private std collector) as the sole backend with equivalent behavior and no external dependency [precut audit: n"
+    },
+    {
+      "at": "2026-11-15T04:43:29.404Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#5: strip debris; `~` is retired (S1), copy is .copy() (D-COPY-WORD1); proof; was: (was #658 c2) Sema performs automatic traced promotion only inside effective scope and preserves bare read, & write, ^ root transfer, ~ deep copy, and ownership-only escape rejection [precut audit: no"
+    },
+    {
+      "at": "2026-11-15T04:43:28.518Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#4: strip debris; current #Policy spelling; proof; was: (was #658 c1) The gc package key and narrower @Policy(gc) use #657's common matrix with no GC-only inheritance or provenance path [precut audit: no dev test, golden, case or snapshot proves this today"
+    },
+    {
+      "at": "2026-11-15T04:43:27.642Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kyjdtx",
+      "note": "#2: ballot D-GC-OPTIN1 now ratified A; proof; was: The opted form of cycle.jet (per D-GC-OPTIN1's outcome) checks clean, runs on O0/O1/O2 and its cycle is collected (drop observed), with a golden"
+    },
+    {
+      "at": "2026-11-15T04:43:26.761Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0sg79an",
+      "note": "#11 No build setting lets safe code read or write outside a list"
+    },
+    {
+      "at": "2026-11-15T04:43:25.875Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0sg79an",
+      "note": "#10 D-UB-BOUNDARY1=A: the global `--bounds` build flag is remove"
+    },
+    {
+      "at": "2026-11-15T04:41:51.726Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c05efrmn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:41:50.828Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c052rw8k",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:41:49.933Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c052rw8k",
+      "note": "title,body,plan"
+    },
+    {
+      "at": "2026-11-15T04:41:48.419Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c052rw8k",
+      "note": "#60"
+    },
     {
       "at": "2026-11-15T04:41:47.320Z",
       "by": "TowerKeeper-1",
