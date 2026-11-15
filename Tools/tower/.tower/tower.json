@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6880,
-    "rev": 103375,
+    "rev": 103400,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61196,6 +61196,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed (Map card): the G3Core lanes landed nearly every item on dev; each is now met with its commit and a passing case on dev 168e1e9e92. c10's two remaining Jetpack workaround sites went to #6661 (#6661 c6); the streamed chars() gate from c18 went to #3262 (#3262 c33)."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "c34 decisions (Main, 2026-11-13, for G3Core-2): (1) D-FIXED-WRAP1 A (ratified 2026-11-04) outranks the older D-POLICY-FILE1. The block marker is #Overflow(.Stop|.Wrapping|.Saturating), which replaces #Policy(arithmetic: .Checked|.Wrapping|.Saturating), and arithmetic is no longer a #Policy setting; placement rules are unchanged. The Data/Syntax row and syntax-decisions.md change in the same SUB. (2) Seed gate: part A (the integer from_* and receiver methods retired, about 3,150 callers rewritten) is seed-safe and lands now. Step (a) makes the compiler accept #Overflow and lands now. Step (b) moves every site and deletes the #Policy(arithmetic:) parser; it needs a seed that knows #Overflow and lands right after the next admit. The gap between (a) and (b) is the bootstrap seam only, as with the @T cutover in #4500. (3) Float-to-integer conversions (from_float, from_f32, from_decimal, from_fraction) are not part of D-FIXED-WRAP1; #6313 owns them."
@@ -61376,11 +61381,11 @@
         {
           "n": 5,
           "text": "(was #4929) Latent power-vs-XOR bugs fixed by the bit-operator migration: add regression tests",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:15:25.749Z"
+          "evidence": "dev 8caed4f145: census of the 27 power-vs-XOR sites; the one any program reaches (Alloc.jet alloc_unsigned_less under the counting allocator) is pinned; the others are unreachable from Jet programs, covered by a C witness, or already tested (commit message lists each). On dev 168e1e9e92, `jet test Compiler --profile cases --filter allocator_families/counting_program_allocator_refuses` PASS 1.",
+          "at": "2026-11-15T03:11:01.657Z"
         },
         {
           "n": 6,
@@ -61412,20 +61417,21 @@
         {
           "n": 9,
           "text": "(was #5037) Prove Jet rejects or traps every V safety failure observed on 2026-10-16 (null field, unfilled ref list, int-to-pointer cast, silent overflow, mismatched C declaration): One example per case",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:19:03.420Z"
+          "evidence": "dev e27083a780. On dev 168e1e9e92 with the gate-p141 compiler, `jet test Compiler --profile cases --filter unsafe_and_runtime/v_safety_failures` PASS 1 (one fixture per V failure).",
+          "at": "2026-11-15T03:11:02.623Z"
         },
         {
           "n": 10,
           "text": "(was #5940) Compiler defects found porting Jetpack (U7), as named by the workaround comments in Jetpack sources: (a) http_server.static_files E0904; (b) a ?? b ?? break scoping (E0107); (c) x == Val(CONST) binds instead of comparing; (d, e) an escaping closure owning a FileReader or ZstdReader; (g) inline #run {} values; (h) a lambda moving a locked value. Each item is fixed, or confirmed as intended with a clear diagnostic, with a UI snapshot or case per item, and its Jetpack workaround comment is removed or rewritten. Item (f) text is lost: if it resurfaces, it gets its own criterion.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T06:31:46.867Z"
+          "evidence": "Moved to #6661 c6: items a, b, c, g and most of (h) landed in 33cd0d50c3 and 62e933686a (b and c also pass as control_and_data cases); two workaround sites remain on dev 168e1e9e92",
+          "at": "2026-11-15T03:11:03.558Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
@@ -61475,137 +61481,137 @@
         {
           "n": 16,
           "text": "(was #4156) [#4515] D-FLOAT-BITS1=A: math.f32_to_bits and math.f32_from_bits are exact and allocation-free on every tier, with NaN and sign-bit parity.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:38:52.183Z"
+          "evidence": "dev c752c8a0dc: math.f32_to_bits and f32_from_bits with a #Test covering quiet and signaling NaN payloads, both signs, negative zero, infinity and the largest subnormal (Core/Math/Math.jet). On dev 168e1e9e92, `jet test Compiler --profile core --filter Core/Math/Math.jet`: 114 rows, 114 passed.",
+          "at": "2026-11-15T03:11:04.482Z"
         },
         {
           "n": 17,
           "text": "(was #4156) [#4434] D-STATS-CANONICAL1=A: overflow-safe, infinity, NaN and tie semantics for core.math.stats have one source meaning, and native routes migrate.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:38:52.965Z"
+          "evidence": "dev c50c58d7d5. On dev 168e1e9e92, `jet test Compiler --profile cases --filter core_math_stats_follow_one_rule` PASS 1.",
+          "at": "2026-11-15T03:11:05.396Z"
         },
         {
           "n": 18,
           "text": "(was #4156) [#4514] D-CHAR-SCALAR1=A: Char.from_u32 and U32.from_char. Streamed chars() lowering is gated on the paired time/allocation win.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:38:53.784Z"
+          "evidence": "dev 9f5adae6f2 (Char.from_u32, U32.from_char). On dev 168e1e9e92, `jet test Compiler --profile cases --filter char_scalar_conversions_agree_on_every_tier` PASS 1. The streamed chars() gate moved to #3262 as its own criterion.",
+          "at": "2026-11-15T03:11:06.315Z"
         },
         {
           "n": 19,
           "text": "(was #6260) f32.convert_i64_u and f32.convert_i64_s give the IEEE round-to-nearest-even f32 for every input; tests cover 2^24+1, 2^53+1, 0x8000_0080_0000_0001, u64 max and i64 min, on `jet run` and `jet run --release`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:38:56.837Z"
+          "evidence": "dev 9e4a59cc4d. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_float_conversions_from_64_bit_integers_round_once_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:07.293Z"
         },
         {
           "n": 20,
           "text": "(was #6260) The L2 disclosure \"u64→f32 rounds twice\" no longer holds and is removed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:53:14.815Z"
+          "evidence": "dev 9e4a59cc4d (G3Core-c19, c20): conversions round once, so the disclosure is gone; `git grep -n -i 'rounds twice'` on dev 168e1e9e92 finds only two unrelated math comments.",
+          "at": "2026-11-15T03:11:08.287Z"
         },
         {
           "n": 21,
           "text": "(was #6260) (from #6259 Plugin host imports are not checked against the loading pack) plugin.load refuses, as PluginError.Denied and before any guest code runs, a component whose host import's right is not in the loading package's `authority.needs`, on `jet run` and `jet run --release`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:38:58.483Z"
+          "evidence": "dev 1ec7bbbc0a (c21-c23). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_load_denies_a_host_import_its_package_does_not_need_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:09.221Z"
         },
         {
           "n": 22,
           "text": "(was #6260) (from #6259 Plugin host imports are not checked against the loading pack) A package with no `needs` loads only import-free components; the existing FS.Read text-import cases declare `needs: [FS.Read]` and still pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:38:59.317Z"
+          "evidence": "dev 1ec7bbbc0a (c21-c23). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
+          "at": "2026-11-15T03:11:10.162Z"
         },
         {
           "n": 23,
           "text": "(was #6260) (from #6259 Plugin host imports are not checked against the loading pack) spec.md's plugin section matches the behaviour.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:53:15.741Z"
+          "evidence": "dev 1ec7bbbc0a (c21-c23) updates spec.md's plugin section. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
+          "at": "2026-11-15T03:11:11.134Z"
         },
         {
           "n": 24,
           "text": "(was #6260) (from #6261 Plugin engine: support multi-value functions) A component using multi-value blocks and multi-result internal functions loads and returns correct results on both hosted tiers.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:39:01.126Z"
+          "evidence": "dev 0c60c9d673 (c24, c26). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_multi_value_functions_and_blocks_return_correct_results_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:12.060Z"
         },
         {
           "n": 25,
           "text": "(was #6260) (from #6261 Plugin engine: support multi-value functions) A lifted export returning a tuple<s64, s64> works through the return area.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:39:02.182Z"
+          "evidence": "dev f32fac9fa6. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_export_returns_a_tuple_through_the_return_area_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:13.011Z"
         },
         {
           "n": 26,
           "text": "(was #6260) (from #6261 Plugin engine: support multi-value functions) The Component.jet multi-value refusal is gone.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:53:16.658Z"
+          "evidence": "dev 0c60c9d673 removes the Component.jet multi-value refusal. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
+          "at": "2026-11-15T03:11:14.003Z"
         },
         {
           "n": 27,
           "text": "(was #6260) (from #6262 Plugin engine: enforce a wall-clock budget per call (PluginL) A guest that runs past the call deadline fails as PluginError.Budget(.Time, fault) with fault.export set and 1-32 frames, on both hosted tiers; the host keeps running.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:39:04.745Z"
+          "evidence": "dev 40ce58f31e (c27, c28). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_call_fails_past_its_time_budget_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:14.970Z"
         },
         {
           "n": 28,
           "text": "(was #6260) (from #6262 Plugin engine: enforce a wall-clock budget per call) spec.md lists the time budget beside the others.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:53:17.647Z"
+          "evidence": "dev 40ce58f31e (c27, c28) lists the time budget in spec.md. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
+          "at": "2026-11-15T03:11:15.967Z"
         },
         {
           "n": 29,
           "text": "(was #6260) (from #6263 Plugin engine: enforce a size limit on values crossing the w) A result or argument over the wire budget fails as PluginError.Budget(.Wire, fault) before the host allocates it, on both hosted tiers.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:39:07.793Z"
+          "evidence": "dev 79ddd5e328 (c29, c30; PG_MAX_WIRE = 1 MiB per Main's 2026-11-13 decision). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_call_fails_a_string_over_the_wire_budget_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:17.016Z"
         },
         {
           "n": 30,
           "text": "(was #6260) (from #6263 Plugin engine: enforce a size limit on values crossing the wire) spec.md lists the wire budget.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:53:18.681Z"
+          "evidence": "dev 79ddd5e328 (c29, c30) records the wire budget in spec.md. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
+          "at": "2026-11-15T03:11:18.069Z"
         },
         {
           "n": 31,
@@ -61637,11 +61643,11 @@
         {
           "n": 34,
           "text": "D-FIXED-WRAP1 A is fully cut over in one batch: the from_* conversion methods and the receiver methods it retires are gone, #Arithmetic is renamed #Overflow, every in-repo caller (about 3,000 calls) is rewritten in the same batch by a one-time in-repo script (no shipped jet fix rule, owner order 2026-11-06), and no old spelling, alias or shim remains. Main-13 lands only the conversion part first (wrapping, saturating and checked around T{x}, a word around a widening refused, runtime and Core narrowings moved to wrapping(T{x})).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:03:05.996Z"
+          "evidence": "dev 0a551202cf (part A: integer from_* and fixed receiver overflow methods retired), 5b04c1faf4 (step a: #Overflow accepted), a1fd654036 (every site written #Overflow) and 15ed40b712 (#Policy(arithmetic:) retired). On dev 168e1e9e92, `git grep -l '#Policy(arithmetic' -- '*.jet'` prints nothing, and `jet test Compiler --profile cases --filter non_arithmetic_checks_remain_checked_inside_wrapping` PASS 1.",
+          "at": "2026-11-15T03:11:19.037Z"
         },
         {
           "n": 35,
@@ -61682,38 +61688,38 @@
         {
           "n": 42,
           "text": "E0313 fix text names a valid rename for every tuple destructure: it fills in the member names the user wrote, in order, and never offers a pattern that repeats one binding name (today it offers `{ _0: name, _1: name }`, which is E0118). A ui snapshot shows the fixed text for a two-member tuple.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T22:42:59.853Z"
+          "evidence": "dev f32fac9fa6 (E0313 fix text). On dev 168e1e9e92, `jet test Compiler --profile ui --filter tuple_destructure_rename_keeps_written_names` PASS.",
+          "at": "2026-11-15T03:11:20.062Z"
         },
         {
           "n": 43,
           "text": "E0357 fix text for a name like `_0` states the real rule broken (a leading underscore followed by a digit is not a valid binding name), not \"a name cannot end with `_`\". A ui snapshot covers `_0`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T22:43:00.786Z"
+          "evidence": "dev f32fac9fa6 (E0357 text). On dev 168e1e9e92, `jet test Compiler --profile ui --filter casing_underscore_digit` PASS.",
+          "at": "2026-11-15T03:11:21.020Z"
         },
         {
           "n": 44,
           "text": "D-COMPONENT-TUPLE1=A is built (ratified 2026-11-13). A plugin tuple's part N is the member `partN`, counting from 0 in the plugin's order, nested tuples and lists of tuples included. Interface.jet names each part part{index} and records its Component position; descriptor fields are ordered by that position, not by name; ir_plugin_invoke_words passes member labels, and ir_route_store_tuple stores by label. The ballot program prints `7 -9` on O0, O1, O2, and the `_0` spelling is gone.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T11:16:35.071Z"
+          "evidence": "dev f32fac9fa6 (D-COMPONENT-TUPLE1=A: part0, part1, ...). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_export_returns_a_tuple_through_the_return_area_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:21.986Z"
         },
         {
           "n": 45,
           "text": "A loop statement whose body holds an expression-position `?? break` (`sum += Int{r.read_u16_le() ?? break}`) keeps every statement after the loop: the program prints both lines at O0, O1 and O2 (today the names declared after the loop report UnknownName). Proof: a case in tests/cases with both loop spellings and exact stdout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T21:35:47.455Z"
+          "evidence": "dev 9fd95d380b (a diverging fallback in any nested expression is a loop exit). On dev 168e1e9e92, `jet test Compiler --profile cases --filter fallback_exit_in_nested_expression_keeps_the_block_after_the_loop` PASS 1.",
+          "at": "2026-11-15T03:11:22.984Z"
         }
       ],
       "refs": [],
@@ -61724,7 +61730,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-15T03:11:00.558Z",
+      "updated": "2026-11-15T03:11:25.854Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -89044,8 +89050,8 @@
     {
       "id": "c0m4deiq",
       "num": 6661,
-      "title": "Language defects behind 19 ported case rows (settled 2026-11-07)",
-      "body": "PortsLead-2 settled the #6651 untracked rows in 92c8dc5914 and parked 19 rows whose root no card owned under #5454. Those roots are language defects, not ported-case ledger work, so they own their rows here. Row list and first errors: tests/known-failing.tsv lines naming this card.",
+      "title": "Language defects found by ports: ported case rows and the last Jetpack workarounds",
+      "body": "Language defects found while porting code to Jet, each with a case and its port workaround removed.\n\nPortsLead-2 settled the #6651 untracked rows in 92c8dc5914 and parked 19 rows whose root no card owned under #5454. Those roots are language defects, not ported-case ledger work, so they own their rows here. Row list and first errors: tests/known-failing.tsv lines naming this card.\n\nThe Jetpack port defects (archived #5940, carried by #5971 c10) were fixed in 33cd0d50c3 and 62e933686a; two workaround sites remain (PD1).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
@@ -89154,7 +89160,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:09:39.678Z",
-      "updated": "2026-11-15T03:10:57.709Z",
+      "updated": "2026-11-15T03:11:24.729Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 6
     },
@@ -208182,6 +208188,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:11:25.854Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c08s0ppt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:11:24.729Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0m4deiq",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:11:22.984Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#45"
+    },
+    {
+      "at": "2026-11-15T03:11:21.986Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-15T03:11:21.020Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-15T03:11:20.062Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#42"
+    },
+    {
+      "at": "2026-11-15T03:11:19.037Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-15T03:11:18.070Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-15T03:11:17.016Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-15T03:11:15.967Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-15T03:11:14.970Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-15T03:11:14.003Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-15T03:11:13.011Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-15T03:11:12.060Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-15T03:11:11.134Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-15T03:11:10.162Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-15T03:11:09.221Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-15T03:11:08.287Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T03:11:07.293Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-15T03:11:06.315Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-15T03:11:05.396Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-15T03:11:04.482Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T03:11:03.558Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T03:11:02.623Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T03:11:01.657Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#5"
+    },
     {
       "at": "2026-11-15T03:11:00.558Z",
       "by": "TowerKeeper-1",
