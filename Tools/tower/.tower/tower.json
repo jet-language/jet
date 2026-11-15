@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6930,
-    "rev": 104746,
+    "nextNum": 6932,
+    "rev": 104750,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92146,6 +92146,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T04:34:50.075Z"
+        },
+        {
+          "n": 5,
+          "text": "A process spec's `.under(grant)` narrows authority through the shared runtime (`jet_std_process_spec_under` is registered). Proof: `jet test Compiler --profile golden --filter under_fx_boundary`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:55.595Z"
         }
       ],
       "refs": [],
@@ -92156,9 +92165,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T18:43:54.516Z",
-      "updated": "2026-11-15T04:34:50.075Z",
+      "updated": "2026-11-15T04:40:55.595Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c028lxdd",
@@ -94685,48 +94694,6 @@
       "completedAt": "2026-11-14T03:02:07.220Z"
     },
     {
-      "id": "c0g1f1kd",
-      "num": 6744,
-      "title": "A jet run stack overflow under the seed launcher takes about 8 s and is killed under a 4 GiB memory cap",
-      "body": "The same program built at O0 reports the overflow in 0.013 s; under jet run the stop is slow and memory-hungry. Found by the 2026-11-09 native-debugger probes (DebuggerProposal).",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A stack overflow under jet run reports its stop in well under a second and within the memory a built O0 binary uses (a case that runs it under a 4 GiB cap).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "meet-G5c on dev 5d60ee4241 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-11 23:4x: Case landed in cfaceffcbc. jet test Compiler --profile cases tests/cases/runtime_stops/stack_overflow_under_jet_run_stops_within_a_second_and_4_gib.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. It runs under a 4 GiB cap with a 1 s bound.",
-          "at": "2026-11-12T04:38:58.478Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G5"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T16:00:05.159Z",
-      "updated": "2026-11-12T04:39:04.474Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-12T04:39:04.474Z"
-    },
-    {
       "id": "c0miof6j",
       "num": 6748,
       "title": "MIT crypto and TLS: rewrite core.crypto and core.net.tls from the specifications, with the same module boundaries, replacing the Apache-2.0 mbedtls translation",
@@ -95388,57 +95355,6 @@
       "updated": "2026-11-12T11:07:48.005Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
-    },
-    {
-      "id": "c0s6y4cj",
-      "num": 6757,
-      "title": "sort_by with a Float key is an internal compiler error (ir.build unlowered)",
-      "body": "Found by G4Ports-1 on seed-b9 (dev f1a0ad460d), 2026-11-11: a sort_by call whose key function returns Float reaches codegen and fails with 'ir.build unlowered: ... sort_by with a Float key'. A backend rejection of checked code is an I2 internal error; sema owns the check (I3).",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "sort_by with a Float key has one checked meaning on every tier: either it sorts by a total order on Float that the Core API documents (NaN placement stated), or sema refuses it with a registered diagnostic naming the key type and the fix (sort_by_total or a key that is Ord). No path reaches ir.build unlowered. Cases on O0/O1/O2, plus a UI snapshot if it is a refusal.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "meet-G5c on dev 5d60ee4241 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-11 23:4x: Fix landed in 8d18ac4cad (G5DevX-sortby-float). jet test Compiler --profile cases tests/cases/core_and_closures/sort_by_a_float_key_orders_by_total_order_on_every_tier.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. The case runs O0, O1 and O2; core-library.md states NaN placement (negative NaN first, positive NaN last).",
-          "at": "2026-11-12T04:38:56.353Z"
-        },
-        {
-          "n": 2,
-          "text": "min_by and max_by with a Float key follow the same total-order contract as sort_by: no ir.build unlowered from ir_closure_extreme_by. Cases on O0/O1/O2, with NaN placement stated in the Core docs. Found by G5DevX-1, 2026-11-11.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "meet-G5c on dev 5d60ee4241 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-11 23:4x: Same commit. jet test Compiler --profile cases tests/cases/core_and_closures/min_by_and_max_by_with_a_float_key_use_total_order_on_every_tier.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. List and Iter on each tier.",
-          "at": "2026-11-12T04:38:57.337Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G5"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-12T03:31:46.868Z",
-      "updated": "2026-11-12T04:39:01.839Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-12T04:39:01.839Z"
     },
     {
       "id": "c0d72itt",
@@ -109061,6 +108977,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T04:34:48.238Z"
+        },
+        {
+          "n": 7,
+          "text": "D-CRYPTOENV1=A: core.crypto offers misuse-resistant seal, open, sign and verify; the expert raw and exposure operations (a raw nonce or algorithm) require #Unsafe; and a secret value cannot be printed, compared, reflected or serialized in ordinary code (Docs/spec/syntax-decisions.md). Proof: `jet test Compiler --profile cases --filter crypto/d_cryptoenv1_contract`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:54.709Z"
         }
       ],
       "refs": [],
@@ -109074,8 +108999,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:34:48.239Z",
-      "updated": "2026-11-15T04:34:48.239Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T04:40:54.709Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 7
     },
     {
       "id": "c0dbs1yh",
@@ -109401,6 +109327,201 @@
       "needsAcceptance": false,
       "created": "2026-11-15T04:38:01.643Z",
       "updated": "2026-11-15T04:38:01.643Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c05nw9a0",
+      "num": 6930,
+      "title": "Restricted code and sandbox guests: one sandbox package kind, lent Authority, scoped file access and the Capabilities run case",
+      "body": "Destination: `target: sandbox` is the only package-kind spelling (no `plugin` word left for it); a sandbox guest names the rights it needs and the host lends an Authority value tightened to a folder or host (D-FOUND-SANDBOX1=A); restricted code derives one opaque file scope from Authority while trusted scripts keep direct fs calls (D-FILES-SCOPE1=A); every tier calls the one canonical resource, no-follow and IOError policy; and the sandbox foundation runs end to end with a generated guest snapshot.\n\nWhy: a guest that can reach past its lent authority, or two spellings for one package kind, breaks the authority promise.\n\nSource: #4268 c4, c5, c33-c36, c41-c44 and c58 (ratified contracts from #1731, #2786 and #2805, and #6753 c2). Build-graph plugins are a different word and stay.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-FILES-SCOPE1=A: trusted scripts keep direct fs calls, while restricted code derives one opaque scope from Authority and uses the familiar methods on it; folder and host narrowing hold, and a derived Authority escaping through a loop header or step is refused. Proof: `jet test Compiler --profile cases --filter authority/d_files_scope1_contract`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:52.537Z"
+        },
+        {
+          "n": 2,
+          "text": "D-FOUND-SANDBOX1=A: a sandbox guest declares the imports it needs, the host lends an Authority value tightened to a folder or host, and a missing grant fails before any side effect. Proof: `jet test Compiler --profile cases --filter authority/d_found_sandbox1_contract`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:52.537Z"
+        },
+        {
+          "n": 3,
+          "text": "`target: sandbox` is the only manifest spelling for the package kind; `target: plugin` is gone with no rewrite or alias (PackageModel Targets.jet and PackageViews.jet still map `.Plugin` on dev 02cb957084). Proof: `jet test Compiler --profile packages --filter manifest_target_sandbox`, and git grep finds no `.Plugin` package-kind case in Jetpack.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:52.537Z"
+        },
+        {
+          "n": 4,
+          "text": "Errors, spec pages and examples call the package kind sandbox, and wasm appears only where it names the browser instruction set. Proof: `jet test tests/guards --filter sandbox_package_kind_word`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:52.537Z"
+        },
+        {
+          "n": 5,
+          "text": "No plugin spelling remains as a package-kind word in Compiler, Jetpack, Docs/spec or Examples (on dev 6a06b917cb, PackageViews.jet:238, architecture.md:1878 and syntax-decisions.md:3975 still said plugin or core.plugin). Proof: `jet test tests/guards --filter sandbox_package_kind_word` ratchets to zero.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:52.537Z"
+        },
+        {
+          "n": 6,
+          "text": "Rows E1257, E1258 and E1259 in Compiler/Prelude/Diagnostics.jet and their UI and CLI snapshots say `sandbox`. Proof: `jet test Compiler --profile ui --filter E1257` (and E1258, E1259).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:52.537Z"
+        },
+        {
+          "n": 7,
+          "text": "The sandbox guest and host enforce a declared, resource-scoped FS.Read: reads inside the root work and reads outside it are really denied. Proof: `jet test Compiler --profile golden --filter Foundations/sandbox_fs_read`, with a guest build.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:52.537Z"
+        },
+        {
+          "n": 8,
+          "text": "A Component guest exports a typed Codable record-list function, and the host consumes it with no scalar-only substitute. Proof: `jet test Compiler --profile cases --filter authority/sandbox_record_list_export`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:52.537Z"
+        },
+        {
+          "n": 9,
+          "text": "The direct host FileScope API and every O0, O1, O2 and compile-time path call the one canonical resource, no-follow and IOError policy. Proof: `jet test Compiler --profile cases --filter authority/file_scope_policy_`, with a denial case per tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:52.537Z"
+        },
+        {
+          "n": 10,
+          "text": "The sandbox foundation runs with a generated guest snapshot, goldens on every applicable tier and a service execution case. Proof: `jet test Compiler --profile golden --filter Foundations/sandbox_` and `jet test Compiler --profile cases --filter authority/sandbox_service_execution`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:52.537Z"
+        },
+        {
+          "n": 11,
+          "text": "tests/run/Foundations/Capabilities passes as a run case: a sandbox build target produces guest/build/capability_guest.wasm, the host loads it, and the compiler reads its Component interface. Proof: `jet test Compiler --profile cases --filter Foundations/Capabilities` passes, and its row leaves tests/known-failing.tsv.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:52.537Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "authority",
+        "sandbox"
+      ],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:40:52.537Z",
+      "updated": "2026-11-15T04:40:52.537Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0qtfr3u",
+      "num": 6931,
+      "title": "Value tags are enforced: `#PII String` in type position, tag facts flow through dataflow, and only `#Scrub` removes a tag",
+      "body": "Destination: D-QUAL4=A (a value tag in type position is written directly before the type, `#PII String`) and D-TAINT1=A (direct tag facts propagate through branches, containers and calls and are refused at the tag's denied destinations; D-TAG-SURFACE1 makes `#Scrub(Tag)` the only checked removal) are built, and secret provenance errors fire only on real secret leaks.\n\nWhy: a tag that drops silently through a container or a call is a false promise about where sensitive data can go.\n\nSource: #4268 c8, c9 and c25 (ratified contracts; #1333). Tag declarations as rows live on #6854 (G6).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-QUAL4=A: a value tag in type position parses directly before the type (`#PII String`). Proof: `jet test Compiler --profile cases --filter tags/d_qual4_contract`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:53.816Z"
+        },
+        {
+          "n": 2,
+          "text": "D-TAINT1=A: tag facts propagate through branches, containers and calls, denied sinks refuse a tagged value with a registered error, and only a checked `#Scrub(Tag)` removes a tag. Proof: `jet test Compiler --profile cases --filter tags/d_taint1_contract` and `jet test Compiler --profile ui --filter taint_denied_sink_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:53.816Z"
+        },
+        {
+          "n": 3,
+          "text": "The crypto secret provenance errors (the E0311 family) fire only on a real secret leak, and the nested-provenance program checks clean. Proof: `jet test Compiler --profile ui --filter crypto_secret_nested_provenance`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:40:53.816Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "authority",
+        "tags",
+        "taint"
+      ],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:40:53.816Z",
+      "updated": "2026-11-15T04:40:53.816Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -214820,6 +214941,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:40:55.595Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0dlrfkp",
+      "note": "#5 A process spec's `.under(grant)` narrows authority through t"
+    },
+    {
+      "at": "2026-11-15T04:40:54.709Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0sttk1s",
+      "note": "#7 D-CRYPTOENV1=A: core.crypto offers misuse-resistant seal, op"
+    },
+    {
+      "at": "2026-11-15T04:40:53.817Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0qtfr3u",
+      "note": "Value tags are enforced: `#PII String` in type position, tag facts flow through dataflow, and only `#Scrub` removes a tag"
+    },
+    {
+      "at": "2026-11-15T04:40:52.537Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c05nw9a0",
+      "note": "Restricted code and sandbox guests: one sandbox package kind, lent Authority, scoped file access and the Capabilities run case"
+    },
     {
       "at": "2026-11-15T04:38:54.942Z",
       "by": "TowerKeeper-1",

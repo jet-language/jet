@@ -99234,6 +99234,103 @@
       "completedAt": "2026-11-12T04:06:55.473Z",
       "questions": [],
       "retiredAt": "2026-11-15T04:06:55.722Z"
+    },
+    {
+      "id": "c0g1f1kd",
+      "num": 6744,
+      "title": "A jet run stack overflow under the seed launcher takes about 8 s and is killed under a 4 GiB memory cap",
+      "body": "The same program built at O0 reports the overflow in 0.013 s; under jet run the stop is slow and memory-hungry. Found by the 2026-11-09 native-debugger probes (DebuggerProposal).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A stack overflow under jet run reports its stop in well under a second and within the memory a built O0 binary uses (a case that runs it under a 4 GiB cap).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5c on dev 5d60ee4241 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-11 23:4x: Case landed in cfaceffcbc. jet test Compiler --profile cases tests/cases/runtime_stops/stack_overflow_under_jet_run_stops_within_a_second_and_4_gib.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. It runs under a 4 GiB cap with a 1 s bound.",
+          "at": "2026-11-12T04:38:58.478Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T16:00:05.159Z",
+      "updated": "2026-11-12T04:39:04.474Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-12T04:39:04.474Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T04:40:52.705Z"
+    },
+    {
+      "id": "c0s6y4cj",
+      "num": 6757,
+      "title": "sort_by with a Float key is an internal compiler error (ir.build unlowered)",
+      "body": "Found by G4Ports-1 on seed-b9 (dev f1a0ad460d), 2026-11-11: a sort_by call whose key function returns Float reaches codegen and fails with 'ir.build unlowered: ... sort_by with a Float key'. A backend rejection of checked code is an I2 internal error; sema owns the check (I3).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "sort_by with a Float key has one checked meaning on every tier: either it sorts by a total order on Float that the Core API documents (NaN placement stated), or sema refuses it with a registered diagnostic naming the key type and the fix (sort_by_total or a key that is Ord). No path reaches ir.build unlowered. Cases on O0/O1/O2, plus a UI snapshot if it is a refusal.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5c on dev 5d60ee4241 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-11 23:4x: Fix landed in 8d18ac4cad (G5DevX-sortby-float). jet test Compiler --profile cases tests/cases/core_and_closures/sort_by_a_float_key_orders_by_total_order_on_every_tier.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. The case runs O0, O1 and O2; core-library.md states NaN placement (negative NaN first, positive NaN last).",
+          "at": "2026-11-12T04:38:56.353Z"
+        },
+        {
+          "n": 2,
+          "text": "min_by and max_by with a Float key follow the same total-order contract as sort_by: no ir.build unlowered from ir_closure_extreme_by. Cases on O0/O1/O2, with NaN placement stated in the Core docs. Found by G5DevX-1, 2026-11-11.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5c on dev 5d60ee4241 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-11 23:4x: Same commit. jet test Compiler --profile cases tests/cases/core_and_closures/min_by_and_max_by_with_a_float_key_use_total_order_on_every_tier.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. List and Iter on each tier.",
+          "at": "2026-11-12T04:38:57.337Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T03:31:46.868Z",
+      "updated": "2026-11-12T04:39:01.839Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-12T04:39:01.839Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T04:40:52.705Z"
     }
   ]
 }
