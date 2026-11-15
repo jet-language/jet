@@ -71,7 +71,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     polls := 0
     loop listening.readiness() != .Ready && polls < 400 {
         time.sleep(5ms)
-        polls = polls + 1
+        polls += 1
     }
     print("3. serving: readiness {listening.readiness()}, probe {probe(addr)}")
 
@@ -80,7 +80,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     polls = 0
     loop pool.receipt().leased == 0 && polls < 400 {
         time.sleep(5ms)
-        polls = polls + 1
+        polls += 1
     }
     print("4. a handler holds {pool.receipt().leased} lease")
 
@@ -90,7 +90,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     polls = 0
     loop listening.readiness() != .Draining && polls < 400 {
         time.sleep(5ms)
-        polls = polls + 1
+        polls += 1
     }
     print("5. shutting down: readiness {listening.readiness()}, probe {probe(addr)}")
     report: stopping.join()
@@ -101,8 +101,10 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     // The pool drains only after admission stopped; a bounded drain while the
     // handler still holds its lease fails, and says why.
     if pool.drain(deadline: 20ms) == {
-        .Ok(_) -> print("8. pool drained while a lease was out")
-        .Err(_) -> print("8. pool drain within 20ms refused: {pool.receipt().leased} lease still out")
+        .Ok(_) -> { print("8. pool drained while a lease was out") }
+        .Err(_) -> {
+            print("8. pool drain within 20ms refused: {pool.receipt().leased} lease still out")
+        }
     }
 
     response: read_all(client)

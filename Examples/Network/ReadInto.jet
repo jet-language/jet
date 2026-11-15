@@ -9,9 +9,9 @@ package: {
 use {
     web: core.web
     files: core.files
-    server: core.http.server
+    core.http.server
     net: core.net
-    tls: core.net.tls
+    core.net.tls
     os: core.sys
 }
 
@@ -41,7 +41,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     }
     print("tcp: {tcp_buffer.len()} bytes: {String.from_bytes(tcp_buffer) ?? "?"}")
     if client.read_into(tcp_buffer, 0) == {
-        .Ok(_) -> print("tcp limit 0: accepted")
+        .Ok(_) -> { print("tcp limit 0: accepted") }
         .Err(err) -> print("tcp limit 0: {err}")
     }
     print("tcp at end: {client.read_into(tcp_buffer, 8) ?? panic("tcp read at end")}")
@@ -92,7 +92,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     response: String.from_bytes(tls_buffer) ?? "?"
     print("tls: status 200: {response.starts_with("HTTP/1.1 200")}, body ends the buffer: {response.ends_with("served by read_into")}")
     if secure.read_into(tls_buffer, 0, deadline: 5s) == {
-        .Ok(_) -> print("tls limit 0: accepted")
+        .Ok(_) -> { print("tls limit 0: accepted") }
         .Err(err) -> print("tls limit 0: {err}")
     }
     secure.close() ?? panic("close TLS")
@@ -113,8 +113,10 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     }
     print("file: {chunks.join("|")}")
     if reader.read_into(chunk, -1) == {
-        .Ok(_) -> print("file limit -1: accepted")
-        .Err(err) -> print("file limit -1: rejected: {"{err}".ends_with("read_into needs a positive byte count, got -1")}")
+        .Ok(_) -> { print("file limit -1: accepted") }
+        .Err(err) -> {
+            print("file limit -1: rejected: {"{err}".ends_with("read_into needs a positive byte count, got -1")}")
+        }
     }
     files.remove(file_path) ?? panic("remove file")
 }

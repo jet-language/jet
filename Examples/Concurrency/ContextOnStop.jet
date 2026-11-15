@@ -23,13 +23,9 @@ kind_name: fn(kind: dbg.StopKind) -> String {
     }
 }
 
-show_stop: fn(stop: dbg.Stop) {
-    print("on_stop: {kind_name(stop.kind)}: {stop.message}")
-}
+show_stop: fn(stop: dbg.Stop) { print("on_stop: {kind_name(stop.kind)}: {stop.message}") }
 
-outer_stop: fn(stop: dbg.Stop) {
-    print("outer on_stop: {kind_name(stop.kind)}: {stop.message}")
-}
+outer_stop: fn(stop: dbg.Stop) { print("outer on_stop: {kind_name(stop.kind)}: {stop.message}") }
 
 failing_assert: fn() -> Int {
     assert(false, "expected condition")
@@ -41,7 +37,7 @@ out_of_bounds: fn(at: Int) -> Int {
     items[at]
 }
 
-report: fn(&&handle: Task<Int>) {
+report: fn(handle: &&Task<Int>) {
     if handle.join() == {
         .Ok(value) -> { print("task: {value}") }
         .Err(_) -> { print("task: stopped") }

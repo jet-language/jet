@@ -9,7 +9,7 @@ package: {
 }
 
 use {
-    server: core.http.server
+    core.http.server
     web: core.web
 }
 
@@ -27,6 +27,4 @@ build: fn(settings: Settings) -> App {
     web.app().get("/", fn() { Ok(server.response(200, "orders on {url}, pool of {size}")) })
 }
 
-run: fn() {
-    web.serve<Settings>(prefix: "APP_", build: build)
-}
+run: fn() { web.serve<Settings>(prefix: "APP_", build: build) }

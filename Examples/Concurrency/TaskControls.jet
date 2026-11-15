@@ -26,7 +26,7 @@ run: fn() {
     t.resume()
     t.cancel()
     if t.join() == {
-        .Ok(value) -> print(value)
+        .Ok(value) -> { print(value) }
         .Err(_) -> print("cancelled before it ran")
     }
 
@@ -35,15 +35,13 @@ run: fn() {
     // stops the loop there, paused or not.
     spinner: task {
         n := 0
-        loop {
-            n += 1
-        }
+        loop -> n += 1
     }
     spinner.pause(mode: .CheckLoops)
     spinner.resume()
     spinner.cancel()
     if spinner.join() == {
-        .Ok(_) -> print("spinner finished")
+        .Ok(_) -> { print("spinner finished") }
         .Err(_) -> print("spinner stopped")
     }
 

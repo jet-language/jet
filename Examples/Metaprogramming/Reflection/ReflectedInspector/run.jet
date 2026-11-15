@@ -2,27 +2,25 @@
 // `Door`. `#Engine.Entity` writes each one's inspector rows, its `Edit` impl,
 // `diff`, `save` and `load` from the struct's fields, so a new field shows up
 // in the inspector, the patches and the files with no registry edit.
-use engine
 use {
+    engine
     fs: core.files
 }
 
 #Engine.Entity(version: 2)
 Rock: struct {
-    name: String {"rock"}
-    size: Float {Float{1.5}}
+    name: String{"rock"}
+    size: Float{Float{1.5}}
     // Editor policy: the inspector leaves `cache` out; `save` still writes it.
-    #Engine.Hidden
-    cache: Int {0}
+    #Engine.Hidden cache: Int{0}
     // Added in version 2: a version-1 file has no `glow` line.
-    #Engine.Since(version: 2)
-    glow: Bool {false}
+    #Engine.Since(version: 2) glow: Bool{false}
 }
 
 #Engine.Entity(version: 1)
 Door: struct {
-    label: String {"door"}
-    open: Bool {false}
+    label: String{"door"}
+    open: Bool{false}
 }
 
 // Lists the fields of any entity the marker covers; a greyed row still has
@@ -39,7 +37,7 @@ run: fn() {
     rock := Rock{}
     show("new rock", rock)
 
-    before: rock.copy() // copy: `before` keeps the pre-edit value for the diff
+    before: rock.copy()  // copy: `before` keeps the pre-edit value for the diff
     print("set size 2.5: {rock.set("size", "2.5")}")
     print("set name boulder: {rock.set("name", "boulder")}")
     print("set cache 7: {rock.set("cache", "7")}")

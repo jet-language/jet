@@ -1,6 +1,6 @@
 // IANA IPv4 Special-Purpose Address Space, updated 2025-10-09.
 // More-specific rows override parents. Blank global fields keep Core's policy.
-use ip: core.net.ip
+use core.net.ip
 
 ProfileRow: struct {
     cidr: String
@@ -62,7 +62,7 @@ run: fn() {
     loop row in rows {
         start: ip.ipv4_int(ip.ipv4(row.a, row.b, row.c, row.d) ?? panic("profile start"))
         size := 1
-        loop _ in 0..<32 - row.prefix -> size = size * 2
+        loop _ in 0..<32 - row.prefix -> size *= 2
         end: start + size - 1
         check_address(start, row.global)
         check_address(end, row.global)
@@ -77,7 +77,7 @@ run: fn() {
         check_address(ip.ipv4_int(ip.ipv4(a, 0, 0, 0) ?? panic("octet start")), global && a != 192)
         check_address(ip.ipv4_int(ip.ipv4(a, 1, 2, 3) ?? panic("octet host")), global)
         check_address(ip.ipv4_int(ip.ipv4(a, 255, 255, 255) ?? panic("octet end")), global)
-        if ip.is_reserved(ip.ipv4(a, 1, 2, 3) ?? panic("reserved octet")) -> reserved_octets = reserved_octets + 1
+        if ip.is_reserved(ip.ipv4(a, 1, 2, 3) ?? panic("reserved octet")) -> reserved_octets += 1
     }
     assert(reserved_octets == 16)
     print("first-octets:256:ok")

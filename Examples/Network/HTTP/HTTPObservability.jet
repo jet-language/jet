@@ -7,8 +7,8 @@ package: {
 use {
     web: core.web
     files: core.files
-    client: core.http.client
-    server: core.http.server
+    core.http.client
+    core.http.server
     testing: core.testing
 }
 
@@ -19,12 +19,12 @@ run: fn() {
     path := Path.from(root).join("index.txt").to_string()
     files.write(path, "hello") ?? return
     if server.static_file(path, "text/plain") == {
-        .Ok(_) -> print("static:ok")
+        .Ok(_) -> { print("static:ok") }
         .Err(_) -> print("static:error")
     }
     app: web.app()
     if app.bind("127.0.0.1:65536") == {
-        .Ok(_) -> print("bind:ok")
+        .Ok(_) -> { print("bind:ok") }
         .Err(_) -> print("bind:error")
     }
     files.remove_all(root) ?? return

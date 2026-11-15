@@ -6,20 +6,18 @@ package: {
 }
 
 use {
-    client: core.http.client
-    server: core.http.server
+    core.http.client
+    core.http.server
     net: core.net
     web: core.web
 }
 
 CacheRoutes: struct {
-    #Server.Get("/marked/:key")
-    read: fn(self, key: String) -> HTTPResponse HTTPError! {
+    #Server.Get("/marked/:key") read: fn(self, key: String) -> HTTPResponse HTTPError! {
         Ok(server.response(200, "marked {key}"))
     }
 
-    #Server.Custom("PURGE", "/marked/:key")
-    purge: fn(self, key: String) -> HTTPResponse HTTPError! {
+    #Server.Custom("PURGE", "/marked/:key") purge: fn(self, key: String) -> HTTPResponse HTTPError! {
         Ok(server.response(200, "marked purged {key}"))
     }
 }
@@ -53,9 +51,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         (method: "PURGE", path: "/marked/d"),
     }
     serving: task {
-        loop _ in 0..<9 {
-            mux.serve_once(listener)
-        }
+        loop _ in 0..<9 { mux.serve_once(listener) }
     }
     loop send in sends {
         reply: client.request(send.method, "http://{addr}{send.path}").send()

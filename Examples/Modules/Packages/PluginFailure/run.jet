@@ -38,7 +38,9 @@ run: fn() {
             assert(fault.frames.len() > 0 && fault.frames.len() <= 32)
             print("spin:Budget Fuel export={fault.export}")
         }
-        .Ok(_) | .Err(.Guest(_)) | .Err(.Denied(_)) | .Err(.Budget(.Memory, _)) | .Err(.Budget(.Table, _)) | .Err(.Budget(.Time, _)) | .Err(.Budget(.Wire, _)) | .Err(.Defect(_)) -> assert(false)
+        .Ok(_) | .Err(.Guest(_)) | .Err(.Denied(_)) | .Err(.Budget(.Memory, _)) | .Err(.Budget(.Table, _)) | .Err(.Budget(.Time, _)) | .Err(.Budget(.Wire, _)) | .Err(.Defect(_)) -> {
+            assert(false)
+        }
     }
     normal: plugin.load("failure_guest.wat", policy)
     value: normal.normal()

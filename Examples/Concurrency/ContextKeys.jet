@@ -9,7 +9,9 @@ package: {
 // the region keeps the value its parent set after the region ends.
 
 #ContextKey request_id: 0
+
 #ContextKey user_name: "anonymous"
+
 #ContextKey trace_tag: String?{None}
 
 describe: fn() -> String {
@@ -20,13 +22,11 @@ describe: fn() -> String {
 }
 
 spawn_tagged: fn() -> Task<String> {
-    #Context(request_id: 9, trace_tag: "spawned") {
-        return task describe()
-    }
+    #Context(request_id: 9, trace_tag: "spawned") { return task describe() }
     task describe()
 }
 
-report: fn(label: String, &&handle: Task<String>) {
+report: fn(label: String, handle: &&Task<String>) {
     if handle.join() == {
         .Ok(text) -> { print("{label}: {text}") }
         .Err(_) -> { print("{label}: failed") }
@@ -37,9 +37,7 @@ run: fn() {
     print(describe())
     #Context(request_id: 7, user_name: "ada") {
         print(describe())
-        #Context(request_id: 8, trace_tag: "inner") {
-            print(describe())
-        }
+        #Context(request_id: 8, trace_tag: "inner") { print(describe()) }
         print(describe())
         inside: task describe()
         report("task inside", inside)

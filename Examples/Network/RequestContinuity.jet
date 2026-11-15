@@ -18,7 +18,9 @@ use {
     web: core.web
 }
 
-Ledger: struct { lines: [String] }
+Ledger: struct {
+    lines: [String]
+}
 
 note: fn(ledger: Shared<Ledger>, line: String) {
     guard := ledger.guard_edit()
@@ -48,9 +50,7 @@ pay: fn(path: String, ledger: Shared<Ledger>, request: HTTPRequest) -> HTTPRespo
     if mode == "hold rollback" {
         tx.rollback() ?? return Ok(http_server.response(503, "rollback"))
         outcome = "rolled back"
-    } else {
-        tx.commit() ?? return Ok(http_server.response(503, "commit"))
-    }
+    } else { tx.commit() ?? return Ok(http_server.response(503, "commit")) }
     _: conn.close()
     note(ledger, "{who}: {outcome}")
     Ok(http_server.response(200, "{who}: {outcome}"))
@@ -124,7 +124,7 @@ run: fn() (HTTPError | NetError | TaskFailure | IOError)! {
     polls := 0
     loop ledger_size(ledger) < 3 && polls < 400 {
         time.sleep(5ms)
-        polls = polls + 1
+        polls += 1
     }
     print("cy hung up before the reply")
 

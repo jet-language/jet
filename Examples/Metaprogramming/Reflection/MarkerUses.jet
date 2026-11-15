@@ -4,7 +4,7 @@
 // count below cost nothing at run time.
 Route: struct {
     path: String
-    method: String { "GET" }
+    method: String{"GET"}
 
     impl Marker {
         sites: [.Function]
@@ -17,11 +17,9 @@ Entity: struct {
     }
 }
 
-#Route("/")
-home: fn() -> String { "home" }
+#Route("/") home: fn() -> String { "home" }
 
-#Route("/items", method: "POST")
-add_item: fn() -> String { "added" }
+#Route("/items", method: "POST") add_item: fn() -> String { "added" }
 
 #Entity
 Player: struct {
@@ -47,6 +45,8 @@ ENTITY_COUNT: #run Entity.reflect().uses.len()
 run: fn() {
     print("entities: {ENTITY_COUNT}")
     loop entry in ENTITIES -> print("entity: {entry.site.name} ({entry.site.kind})")
-    loop entry in ROUTES -> print("route: {entry.route.method} {entry.route.path} -> {entry.site.name} ({entry.site.kind})")
+    loop entry in ROUTES {
+        print("route: {entry.route.method} {entry.route.path} -> {entry.site.name} ({entry.site.kind})")
+    }
     print("{home()} {add_item()} {Scenery{hp: 1}.hp}")
 }

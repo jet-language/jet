@@ -6,7 +6,9 @@ Inner: enum {
     B(float: Bool)
 }
 
-Size: struct { n: Int }
+Size: struct {
+    n: Int
+}
 
 Op: enum {
     Wrap(op: Inner)
@@ -21,16 +23,14 @@ Row: struct {
     op: Op
 }
 
-row: fn(name: String, op: Op) -> Row Never! {
-    Row{name: name, op: op}
-}
+row: fn(name: String, op: Op) -> Row Never! { Row{name: name, op: op} }
 
 ROWS: #run { [Row]{
     row("wrap", Op.Wrap{op: Inner.B{float: true}}),
     row("sized", Op.Sized{size: Size{n: 3}}),
     row("many", Op.Many{items: [Inner]{Inner.A, Inner.A}}),
     row("maybe", Op.Maybe{item: None}),
-    row("plain", Op.Plain)
+    row("plain", Op.Plain),
 } }
 
 inner_name: fn(inner: Inner) -> String {

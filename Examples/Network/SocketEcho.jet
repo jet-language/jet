@@ -12,8 +12,7 @@ use {
 }
 
 // Every network wait in the example ends within 10 s.
-#Deadline(10s)
-run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
+#Deadline(10s) run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     typed: net.socket_addr("127.0.0.1", 0) ?? panic("address")
     listener: net.tcp_listen_addr(typed) ?? panic("listen")
     local: net.listener_local_socket_addr(listener) ?? panic("local address")

@@ -18,7 +18,9 @@ outer: fn(next: HTTPHandler) -> HTTPHandler {
             .Ok(response) -> {
                 return Ok(http_server.response(response.status(), "outer>{response.text() ?? "invalid body"}<outer"))
             }
-            .Err(error) -> { return Err(error) }
+            .Err(error) -> {
+                return Err(error)
+            }
         }
     }
 }
@@ -31,7 +33,9 @@ inner: fn(next: HTTPHandler) -> HTTPHandler {
             .Ok(response) -> {
                 return Ok(http_server.response(response.status(), "inner>{response.text() ?? "invalid body"}<inner"))
             }
-            .Err(error) -> { return Err(error) }
+            .Err(error) -> {
+                return Err(error)
+            }
         }
     }
 }

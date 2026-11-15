@@ -29,7 +29,9 @@ profile_verdict: fn(name: String) -> String {
 }
 
 run: fn(args: Endpoint) {
-    loop name in ["bidi-2024.11", "bidi-2025.5", "rolling"] -> print("profile {name}: {profile_verdict(name)}")
+    loop name in ["bidi-2024.11", "bidi-2025.5", "rolling"] {
+        print("profile {name}: {profile_verdict(name)}")
+    }
     profile: browser.profile("bidi-2025.5")
     timeout: browser.timeout(500)
     session: browser.connect_profile(args.url, profile, timeout)
