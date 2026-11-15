@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6975,
-    "rev": 106111,
+    "rev": 106112,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101223,11 +101223,11 @@
         {
           "n": 12,
           "text": "The runtime's address API (rt_text_word, sync_load, rt_text_store, jet_rt_alloc and jet_rt_free; about 13,400 call sites, 97 E3114 hits in Alloc, RawWords, Sync, Fault, Thread and Secret, plus 6 in fixtures) moves to typed owners and views under D-MEM-CHOKEPOINT1=A, so the E3114 address rule needs no scope for the runtime identities (jet_runtime, jet_runtime_tests). Today that scope keeps E3114 at its state before the cutover, while E3113 holds everywhere. Proof: the scope is deleted, and jet check of Compiler/JetRuntime and its fixtures reports E3114=0.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:40:14.066Z"
+          "evidence": "dev 50b866567e (b7deb87e67, CardCloser-3-runtime-kernel-priv-r2), batch compiler p174 built from it, 2026-11-15:\n(1) jet check Compiler/JetRuntime reports E3114 0 and E3113 0. RuntimePack unit --check (the runtime composed with every Fragments.fixture source) reports E3114 0 and E3113 0; its rc 1 comes from the same 5 errors outside the unit that dev had before (sys, files and process defined twice; SysTargetPointer $layout; the stalled comptime graph).\n(2) The scope is deleted: git grep sema_unsafe_runtime_package in JetSema/Source shows only its definition and its one use in sema_unsafe_unit_map, which now applies E3114 to a composed runtime unit.\n(3) Guard: Compiler/JetSema/Tests/UnsafeObligations.fixture runs rc 0. runtime_kernel expects 2 E3114, and runtime_unit_refused expects 1 E3114 for a public kernel fn and none for a priv one, so a new public raw-address runtime function is refused.\n(4) Symbols are unchanged: runtime.exports and runtime.abi.json (jq -S) are identical between the p173 and p174 packs.\nRoute, recorded on 2026-11-14: 88 runtime and 6 fragment helpers whose every caller is inside the runtime became priv, and no outside Jet caller needed a typed view. The 13,400-site typed-owner migration the criterion's first sentence names was not done. E3114 now holds for the runtime with no scope, which is what the proof line requires.",
+          "at": "2026-11-15T11:12:08.188Z"
         },
         {
           "n": 13,
@@ -101256,7 +101256,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T10:43:36.217Z",
+      "updated": "2026-11-15T11:12:08.188Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -217477,6 +217477,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T11:12:08.188Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oo8eeq",
+      "note": "#12"
+    },
     {
       "at": "2026-11-15T11:09:26.882Z",
       "by": "Main",
