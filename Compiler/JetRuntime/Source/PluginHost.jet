@@ -106,17 +106,16 @@ pg_put_u32: fn(address: I64, value: I64) {
     rt_text_put(wrapping(address + I64{3}), (value >> I64{24}).bit_and(I64{255}))
 }
 
+// A guest's linear memory or table: `bytes` of fresh zeroed pages, or 0.
 pg_mmap: fn(bytes: I64) -> I64 {
-    // PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE: zeroed, lazily backed.
-    address: trap_syscall(I64{9}, I64{0}, bytes, I64{3}, I64{16418}, I64{-1}, I64{0})
+    // MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE: lazily backed.
+    address: trap_map(I64{0}, bytes, I64{16418})
     if (address < I64{0}) -> return I64{0}
     address
 }
 
 pg_munmap: fn(address: I64, bytes: I64) {
-    if (address != I64{0}) {
-        _ := trap_syscall(I64{11}, address, bytes, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    if (address != I64{0}) -> trap_unmap(address, bytes)
 }
 
 pg_call: fn(code: I64, op: I64, instance: I64, area: I64) -> I64 {

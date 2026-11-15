@@ -23,6 +23,29 @@ trap_syscall: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I
     }
 }
 
+// The runtime's own anonymous mappings: `bytes` read-write at `hint` (0 for
+// anywhere) with mmap `flags`, MAP_PRIVATE|MAP_ANONYMOUS among them. The
+// address, or mmap's negative errno. A mapping's whole pages are live to the
+// memory sentry until trap_unmap takes them back.
+trap_map: fn(hint: I64, bytes: I64, flags: I64) -> I64 {
+    address: trap_syscall(I64{9}, hint, bytes, I64{3}, flags, I64{-1}, I64{0})
+    if (address < I64{0}) -> return address
+    jet_rt_sentry_register_allocation(address, trap_pages(bytes))
+    address
+}
+
+// Unmaps `bytes` at `address` of a trap_map mapping; its pages leave the
+// sentry's live storage first.
+trap_unmap: fn(address: I64, bytes: I64) {
+    jet_rt_sentry_unmap(address, trap_pages(bytes))
+    _ := trap_syscall(I64{11}, address, bytes, I64{0}, I64{0}, I64{0}, I64{0})
+}
+
+// `bytes` rounded up to whole 4 KiB pages, as the system maps them.
+trap_pages: fn(bytes: I64) -> I64 Never! {
+    wrapping(bytes + I64{4095}).bit_and(I64{-4096})
+}
+
 // The stop rail's root half (Scheduler.jet jet_rt_trap_root): a code word
 // that every control's creation installs (scheduler_control_new). Only a
 // control holds a capture or makes a stop the root's, so the paths below

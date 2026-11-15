@@ -206,7 +206,7 @@ compiler_mapped_unregister: fn(key: I64) {
     length: rt_text_word(wrapping(map + I64{40}))
     slot: rt_text_word(wrapping(map + I64{56}))
     held: slot != I64{0} && compiler_mapped_close_slot(slot)
-    if (length != I64{0}) -> _ := host_call(I64{11}, rt_text_word(wrapping(map + I64{32})), length, I64{0})
+    if (length != I64{0}) -> compiler_mapped_munmap(rt_text_word(wrapping(map + I64{32})), length)
     if held -> compiler_mapped_unlease(jet_fd_number_raw(file))
     if (slot != I64{0}) {
         spare: sync_load(wrapping(slot + I64{16}))
@@ -231,11 +231,25 @@ compiler_mapped_unregister: fn(key: I64) {
     rt_text_word(wrapping(map + I64{48}))
 }
 // mmap of `length` read-only private bytes of descriptor `fd` from its start:
-// the address, or the negative errno.
+// the address, or the negative errno. The mapping's whole pages are live to
+// the memory sentry until compiler_mapped_munmap.
 compiler_mapped_mmap: fn(fd: I64, length: I64) -> I64 {
+    pointer := I64{0}
     #Unsafe("the descriptor is this map's own; mmap creates exactly length read-only private bytes; the map owner alone unmaps them") {
-        return os_syscall_i64(I64{9}, I64{0}, length, I64{1}, I64{2}, fd, I64{0})
+        pointer = os_syscall_i64(I64{9}, I64{0}, length, I64{1}, I64{2}, fd, I64{0})
     }
+    if (pointer >= I64{0} || pointer < I64{-4095}) -> jet_rt_sentry_register_allocation(pointer, compiler_mapped_pages(length))
+    pointer
+}
+// Unmaps a compiler_mapped_mmap mapping: its pages leave the sentry's live
+// storage first.
+compiler_mapped_munmap: fn(pointer: I64, length: I64) {
+    jet_rt_sentry_unmap(pointer, compiler_mapped_pages(length))
+    _ := host_call(I64{11}, pointer, length, I64{0})
+}
+// `length` rounded up to whole 4 KiB pages, as the system maps them.
+compiler_mapped_pages: fn(length: I64) -> I64 Never! {
+    wrapping(length + I64{4095}).bit_and(I64{-4096})
 }
 compiler_mapped_close: fn(fd: I64) {
     #Unsafe("closes a temp-file descriptor this map alone owns") {
@@ -376,7 +390,7 @@ compiler_mapped_hold: fn(fd: I64, spare: I64, length: I64) -> I64 {
     if granted -> return slot
     // No lease was taken, so no break names the slot: it is free again.
     sync_store(slot, I64{0})
-    _ := host_call(I64{11}, pointer, length, I64{0})
+    compiler_mapped_munmap(pointer, length)
     I64{0}
 }
 // The lease slots, with the lease-break handler installed by the first call.

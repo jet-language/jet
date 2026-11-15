@@ -66,7 +66,10 @@ production_receipt_write: fn(code: I64, file: I64, file_len: I64, line: I64, fun
     production_receipt_unmap(scratch, scratch_bytes)
 }
 
-// A fresh zero-filled private mapping of `bytes`, or 0.
+// A fresh zero-filled private mapping of `bytes`, or 0. A stop writes the
+// receipt, possibly with the allocator failing, so the scratch is mapped
+// without trap_map, whose sentry account allocates; only this file's
+// runtime code reads it.
 production_receipt_map: fn(bytes: I64) -> I64 {
     address: trap_syscall(I64{9}, I64{0}, bytes, I64{3}, I64{34}, I64{-1}, I64{0})
     if (address < I64{0}) -> return I64{0}
