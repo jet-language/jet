@@ -516,9 +516,10 @@ ir_core_image_fits: fn(p: IRProgram) -> Bool Never! {
 // IRChecks.core, a non-generic call of a function with the library's stock
 // bounds checks (ir_bounds_mode) that the image exports (its key on the row
 // of its ir_core_symbol) at the IR signature the call passes and returns
-// (ir_core_call_signature).
+// (ir_core_call_signature). A function marked `#Inline(Always)` is never
+// bound: the program builds it, so its optimizer can keep the mark's promise.
 ir_core_bound: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [Type], slots: [Int], span: Span) -> String Never! {
-    if p.checks.core == None || type_args.len() > 0 || ir_bounds_mode(p, row) != .Fatal -> return ""
+    if p.checks.core == None || type_args.len() > 0 || p.functions[row].is_inline_always || ir_bounds_mode(p, row) != .Fatal -> return ""
     if p.checks.core == .Val(image) {
         symbol: ir_core_symbol(p.functions[row].key)
         found: ir_core_image_row(image.exports, symbol) ?? return ""

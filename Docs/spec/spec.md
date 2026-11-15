@@ -5666,13 +5666,16 @@ promise a particular byte-size ratio (S15). Example:
 [`tests/run/Tooling/BuildDebugInfo`](../../tests/run/Tooling/BuildDebugInfo/run.jet).
 
 `inline` says which callees the optimizer inlines at `optimize: O1` and
-`O2` (`O0` inlines none). `auto` (the stock) picks them by size, within the
-level's limits. `always_marked` takes only the functions marked
-`#Inline(Always)`, at every direct call the inliner can splice, whatever their
-size and with no per-caller budget (`small` does not limit them). The inliner
+`O2` (`O0` inlines none). A function marked `#Inline(Always)` is inlined at
+every direct call the inliner can splice, whatever its size and with no
+per-caller budget (`small` does not limit it), under `auto` and
+`always_marked` alike: the mark is a promise, not a hint. `auto` (the stock)
+also picks unmarked callees by size, within the level's limits.
+`always_marked` takes only the marked functions. The inliner
 cannot splice a recursive callee, a callee that writes a parameter, an
 `#FFI(asm)` leaf, or a callee from another file whose arithmetic can stop.
-`off` inlines nothing. `build: fn` writes `b.inline(.AlwaysMarked)`, and the
+`off` inlines nothing, marked functions included. `build: fn` writes
+`b.inline(.AlwaysMarked)`, and the
 flag writes `--inline=always_marked`. Example:
 [`tests/run/Tooling/BuildInline`](../../tests/run/Tooling/BuildInline/run.jet).
 

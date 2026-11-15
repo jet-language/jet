@@ -32,8 +32,11 @@ Pool: struct<T> {}
 
 Pin: struct<T> {}
 
-
-#Unsafe("`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer") from_addr: fn<T>(addr: Int) -> *T Never! {
+// Every raw memory primitive here is a compiler intrinsic (the list above
+// `__type_size`) or `#Inline(Always)`, so a call of one costs what the
+// direct spelling costs at O1 and O2.
+#[Inline(Always), Unsafe("`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer")]
+from_addr: fn<T>(addr: Int) -> *T Never! {
     mem.Ptr<T>.from_addr(addr)
 }
 

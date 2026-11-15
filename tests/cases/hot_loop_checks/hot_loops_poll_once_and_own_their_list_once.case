@@ -1,7 +1,8 @@
-# Hot loops keep only the checks they need once calls are inlined. A stop
-# poll that checks no call folds into the next one, so `step`'s three
-# inlined Vec3 operators keep one poll between them (`jet inspect decisions`
-# prints the slot IR before and after the passes: three polls, then one).
+# Hot loops keep only the checks they need once calls are inlined. The stop
+# poll after a call tests only what the call reported, and `step`'s three
+# Vec3 operators report none (no call, no stopping arithmetic), so each
+# poll goes with its inlined call (`jet inspect decisions` prints the slot
+# IR before and after the passes: three polls, then none).
 # At O1 and O2 a `&` list parameter is made the function's own once, before the
 # loop writing it, rather than on every write; when only direct calls reach
 # the function, that step moves to its callers, so `bump` itself tests
@@ -13,12 +14,12 @@ step: jet inspect decisions -O1 main.jet
 env: JET_OPT_DUMP=step
 exit: 0
 stdout: ~ "O1:" # optimize: O1 runs the O1 passes
-stdout: count "jet_ir_stop_poll" = 4 # three polls before the passes, one after
+stdout: count "jet_ir_stop_poll" = 3 # three polls before the passes, none after
 step: jet inspect decisions --release main.jet
 env: JET_OPT_DUMP=step
 exit: 0
 stdout: ~ "O2:" # --release runs the O2 passes
-stdout: count "jet_ir_stop_poll" = 4 # three polls before the passes, one after
+stdout: count "jet_ir_stop_poll" = 3 # three polls before the passes, none after
 step: jet inspect decisions --release main.jet
 exit: 0
 stdout: ~ "unique hoisted 1," # bump's list is made its own once, before its loop

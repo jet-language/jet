@@ -28,9 +28,20 @@
 // changes no pass's view of the code. The debug info makes each site an
 // inlined frame (X64Select.jet ir_x64_inline_ranges, Dwarf.jet).
 //
-// Under `inline: always_marked` (IROptInline.Marked) only a callee marked
-// `#Inline(Always)` (IRFunction.inline_always) is taken, at every call site
-// that passes the checks above but the size limits and the budget.
+// The stop point the call left after itself (`stopped := poll(); if
+// stopped { E }`, past the call's drops) tests only what the call reported
+// (X64Select.jet ir_x64_stop_point). A quiet body (ir_opt_inline_quiet)
+// reports none, so that stop point goes with the call: the inlined loop
+// body is the one the direct spelling builds, and the loop's own turn poll
+// stays at its head rather than folding into the leftover one
+// (OptStops.jet ir_opt_fold_polls).
+//
+// A callee marked `#Inline(Always)` (IRFunction.inline_always) is taken at
+// every call site that passes the checks above but the size limits and the
+// budget, under `inline: auto` too (a cold or `small` caller included), and
+// its copy draws on neither the budget nor the growth cap: the mark is a
+// promise (sema refuses one that can't keep it), not a hint. Under
+// `inline: always_marked` (IROptInline.Marked) only those callees are taken.
 //
 // Each site taken is one IROptReport.inlines row with the reason it was
 // taken; `jet inspect choices` lists them as its inlining choices.
@@ -67,8 +78,8 @@ IROptInlined: struct {
 // g's size is past ir_opt_inline_reach (it is never inlined); the caller's
 // own row and the rows of recursive functions are never read. `sites[g]`
 // counts the direct calls of g in the module; `once_called` takes the
-// once-called ones (O2); `inline` which callees are taken (Auto by size,
-// Marked only the `#Inline(Always)` ones).
+// once-called ones (O2); `inline` which callees are taken (Auto by size and
+// every `#Inline(Always)` one, Marked only the `#Inline(Always)` ones).
 ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, recursive: [Bool], sites: [Int], once_called: Bool, level: Int, inline: IROptInline, report: &IROptReport) -> IRFunction? Never! {
     limit: if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
     budget := if level >= 2 -> IR_OPT_INLINE_BUDGET_O2 else -> IR_OPT_INLINE_BUDGET_O1
@@ -79,9 +90,13 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     loop at in 0..<caller.op.len() {
         selected := false
         reason := ""
-        if inline == .Marked {
-            selected = caller.op[at] == .Call && ir_opt_inline_marked(bodies, caller.a[at]) && ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_MARKED) >= 0
-            if selected -> reason = "marked #Inline(Always)"
+        marked: caller.op[at] == .Call && ir_opt_inline_marked(bodies, caller.a[at])
+        if marked || inline == .Marked {
+            selected = marked && ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_MARKED) >= 0
+            if selected {
+                reason = "marked #Inline(Always)"
+                grown += ir_opt_size(bodies[caller.a[at]][0])
+            }
         } else {
             once: once_called && caller.op[at] == .Call && caller.a[at] >= 0 && caller.a[at] < sites.len() && sites[caller.a[at]] == 1
             cost: if caller.op[at] != .Call -> -1 else if once -> ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_ONCE_O2) else -> ir_opt_inline_size(m, bodies, caller, at, recursive, limit)
@@ -119,10 +134,21 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     out.slot_fixed = caller.slot_fixed.copy()
     out.result = caller.result
     loop value in caller.args -> out.args.push(value)
+    poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
+    // The stop point after a quiet site goes (its poll through its If's End).
+    skip_from := -1
+    skip_to := -1
     loop at in 0..<caller.op.len() {
+        if at >= skip_from && at <= skip_to -> next
         if selected_sites[at] {
             ir_opt_splice(m, out, caller, at, bodies[caller.a[at]][0])
             report.inlined_calls += 1
+            after := at + 1
+            loop after < caller.op.len() && caller.op[after] == .Drop -> after += 1
+            if ir_opt_stops_any_poll(caller, poll, poll, after) && ir_opt_inline_quiet(m, bodies[caller.a[at]][0]) {
+                skip_from = after
+                skip_to = caller.c[after + 1]
+            }
         } else {
             _ := ir_emit(out, caller.op[at], caller.dst[at], caller.a[at], caller.b[at], caller.c[at], caller.code_line[at])
         }
@@ -188,15 +214,15 @@ ir_opt_inline_cost: fn(m: IRModule, f: IRFunction) -> Int Never! {
 }
 
 // The largest ir_opt_inline_cost of `callee` that ir_opt_inline_build may
-// inline at one of its call sites: the once-called limit for a callee
-// called once (`once_called`, O2), else the level's callee limit. Under
-// `inline` Marked a `marked` callee has no limit and no other callee is
-// inlined; under Off none is (-1).
+// inline at one of its call sites: none for a `marked` callee, else the
+// once-called limit for a callee called once (`once_called`, O2), else the
+// level's callee limit. Under `inline` Marked no unmarked callee is inlined;
+// under Off none is (-1).
 ir_opt_inline_reach: fn(sites: [Int], callee: Int, once_called: Bool, level: Int, inline: IROptInline, marked: Bool) -> Int Never! {
     if inline == {
         .Off -> return -1
         .Marked -> return if marked -> IR_OPT_INLINE_MARKED else -> -1
-        .Auto -> {}
+        .Auto -> if marked -> return IR_OPT_INLINE_MARKED
     }
     if once_called && callee >= 0 && callee < sites.len() && sites[callee] == 1 -> return IR_OPT_INLINE_ONCE_O2
     if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
@@ -205,6 +231,19 @@ ir_opt_inline_reach: fn(sites: [Int], callee: Int, once_called: Bool, level: Int
 // Whether function `callee` has a body here and is marked `#Inline(Always)`.
 ir_opt_inline_marked: fn(bodies: [[IRFunction]], callee: Int) -> Bool Never! {
     callee >= 0 && callee < bodies.len() && bodies[callee].len() > 0 && bodies[callee][0].inline_always
+}
+
+// Whether body `f` can report no stop to a caller: it calls no function
+// (no body, stop point or value), and no instruction's selection publishes
+// a stop of its own (OptStops.jet ir_opt_stops_quiet). A runtime routine's
+// stop with no poll after it in the body is not reported to the caller
+// either (OptStops.jet ir_opt_stops_starts): the next poll observes it.
+ir_opt_inline_quiet: fn(m: IRModule, f: IRFunction) -> Bool Never! {
+    loop at in 0..<f.op.len() {
+        op: f.op[at]
+        if op == .Call || op == .CallIndirect || !ir_opt_stops_quiet(m, f, at) -> return false
+    }
+    true
 }
 
 // Whether selection reports a stop of instruction `at` at the function's
@@ -347,4 +386,49 @@ ir_opt_emit_mapped: fn(f: &IRFunction, callee: IRFunction, k: Int, map: [Int], l
     _ := ir_emit(f, IROp.Return, -1, n, -1, -1, 5)
     assert_eq(ir_opt_size(f), 12)
     assert_eq(ir_opt_inline_cost(m, f), 7)
+}
+
+// The calls left in a caller of `g` once `g` (whose body is one `op` of its
+// Int parameter with itself, returned) is inlined into it: the call is
+// followed by its stop point.
+ir_opt_inline_test_calls_left: fn(op: IROp) -> Int Never! {
+    m := ir_module_new()
+    poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+    name_rows_set(m.name_rows, IR_STOP_POLL_KEY, poll)
+    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    g := ir_function_new("g", "test:quiet.jet::g", "", "quiet.jet", 1)
+    n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
+    g.result = int
+    v: ir_slot(g, int, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, op, v, n, n, -1, 2)
+    _ := ir_emit(g, IROp.Return, -1, v, -1, -1, 2)
+    f := ir_function_new("f", "test:quiet.jet::f", "", "quiet.jet", 4)
+    x: ir_slot(f, int, IRSlotKind.Param, -1, 4)
+    f.result = int
+    r: ir_slot(f, int, IRSlotKind.Temp, -1, 0)
+    stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    passed: ir_args(f, [Int]{x})
+    _ := ir_emit(f, IROp.Call, r, poll + 1, passed, 1, 5)
+    none: ir_args(f, [Int]{})
+    _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 5)
+    _ := ir_open_if(f, stopped, 5)
+    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 5)
+    ir_end(f, 5)
+    _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 6)
+    bodies: [[IRFunction]]{[IRFunction]{}, [IRFunction]{g.move()}, [IRFunction]{}}
+    report := ir_opt_report(1)
+    out: ir_opt_inline_build(m, bodies, f, [Bool]{false, false, false}, [Int]{0, 1, 0}, false, 1, IROptInline.Auto, report) ?? panic("g was not inlined")
+    calls := 0
+    loop code in out.op {
+        if code == .Call -> calls += 1
+    }
+    calls
+}
+
+#Test("An inlined quiet body takes the stop point after its call with it") {
+    // An Int add publishes no stop: the poll tested only what g reported.
+    assert_eq(ir_opt_inline_test_calls_left(IROp.Add), 0)
+    // An Int shift can stop, and the poll after the body delivers it.
+    assert_eq(ir_opt_inline_test_calls_left(IROp.Shl), 1)
 }
