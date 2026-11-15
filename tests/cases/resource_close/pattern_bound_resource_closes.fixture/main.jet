@@ -1,0 +1,29 @@
+// A `Close` resource bound by a pattern from a temporary is closed when its
+// branch or match ends, as a plain binding of it is; one moved on from the
+// pattern is closed once, by its new owner.
+Buf: struct {
+    priv data: [I64]
+
+    impl Close {
+        close: fn(&&self) { print("closed {self.data[0]}") }
+    }
+}
+
+make: fn(tag: I64) -> Buf? { .Val(Buf{data: [I64]{tag}}) }
+
+keep: fn(buf: &&Buf) { print("kept {buf.data[0]}") }
+
+run: fn() {
+    if make(1) == .Val(b) {
+        print("bound {b.data[0]}")
+    }
+    if make(2) == .Val(b) {
+        keep(b)
+    }
+    if make(4) == {
+        .Val(b) -> print("arm {b.data[0]}")
+        .None -> {}
+    }
+    plain: make(3) ?? panic("none")
+    print("plain {plain.data[0]}")
+}

@@ -5822,11 +5822,15 @@ ir_binding_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, bin
     }
 }
 
+// A fresh subject is held in a scope of the match's own (ir_hold_closing):
+// it ends, and a payload no arm moved on closes, when the match ends.
 ir_match: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, arms: [BodyMatchArm], else_body: [Int]?, span: Span) Never! {
     value: ir_subject(m, p, b, subject, span)
     if ir_failed(b) {
         return
     }
+    ir_scope_open(b)
+    ir_hold_closing(m, p, b, value, span)
     b.subjects.push(value)
     // Each arm starts from the ownership before the match; the arms' paths
     // meet innermost first as their Ifs close (ir_close_arms).
@@ -5861,6 +5865,7 @@ ir_match: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, arms: [Bod
     ir_close_arms(m, b, tests, arm_states, arm_leaves, rest_leaves)
     _: b.subjects.pop()
     ir_release(m, b, value)
+    ir_scope_close(m, b)
 }
 
 // A switch or pattern subject: a plain `T Never!` call result is boxed
@@ -5875,7 +5880,7 @@ ir_subject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, span: Sp
 }
 
 // The test of an `if` pattern condition on `subject`. A fresh carrier box
-// tested is held (ir_hold) for the payload bindings borrowing it.
+// tested is held (ir_hold_closing) for the payload bindings borrowing it.
 ir_option_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: BodyPatternShape, subject: Int, span: Span) -> Int Never! {
     subject_ty: ir_ty(p, b, subject)
     if !ir_carrier_type(subject_ty) {
@@ -5883,7 +5888,7 @@ ir_option_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: BodyPattern
         if ir_failed(b) || value < 0 {
             return ir_fail_slot(b, span, "pattern condition on {ir_type_name(subject_ty)}")
         }
-        ir_hold(m, b, value)
+        ir_hold_closing(m, p, b, value, span)
         from: b.pending.len()
         test: ir_pattern_test(m, p, b, value, shape, span)
         ir_pending_windows(p, b, subject, from)
@@ -5891,11 +5896,21 @@ ir_option_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: BodyPattern
     }
     value: ir_subject(m, p, b, subject, span)
     if ir_failed(b) -> return -1
-    ir_hold(m, b, value)
+    ir_hold_closing(m, p, b, value, span)
     from: b.pending.len()
     test: ir_carrier_shape_test(m, p, b, value, shape, span)
     ir_pending_windows(p, b, subject, from)
     test
+}
+
+// ir_hold, and a held value that closes is closed when its scope ends, as a
+// `let` of it is (ir_close_arm). A payload a name binds from it is a part of
+// a closing value (ir_close_note), so moving that name on disarms the part
+// and the value closes exactly once.
+ir_hold_closing: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) Never! {
+    fresh: value >= 0 && b.fresh[value]
+    ir_hold(m, b, value)
+    if fresh && !b.fresh[value] -> ir_close_arm(m, p, b, value, false, span)
 }
 
 // A fresh box `value` a test reads (or a fresh inline Option, whose payload
