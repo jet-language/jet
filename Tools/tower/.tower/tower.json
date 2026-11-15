@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106074,
+    "rev": 106075,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -86365,59 +86365,6 @@
       "completedAt": "2026-11-14T08:10:07.272Z"
     },
     {
-      "id": "c0iqh0og",
-      "num": 6580,
-      "title": "jet prove capture is slow: prove_replay_rejects_schema_and_identity_changes_as_typed_failures times out (first capture ~104 s)",
-      "body": "BallotDesign-3 (dev ddcd8c2319, pre-Rand jet): the case's first capture alone takes about 104 s, so the row TIMEOUTs. Profile the capture path, fix the root cost, and keep the case under its time bound on o0.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "All criteria met (c1). Closed by Main."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Speed defect: G11 by the owner's 2026-11-09 ruling (speed and size are G11)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "prove_replay_rejects_schema_and_identity_changes_as_typed_failures passes within its time bound on O0, with the capture path's root cost fixed.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Meet g11a8 (Lander5 meetrun, 2026-11-12 03:3x) on dev 95dd5a300b with seed-b11 jet@a0.0.45#3667b9a1 (built at 19333b2bb3), under GNU time: jet test Compiler --profile cases tests/cases/prove/prove_replay_rejects_schema_and_identity_changes_as_typed_failures.case gives PASS 1, zero FAIL/KF/ERROR/TIMEOUT, wall 0.17 s at O0, well inside its bound. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g11a8/1.out. G11Speed-4 checked the capture path's cost: by hand on seed-b11 the steps take 0.01, 0.00 and 0.01 s. Under strace the capture makes one execve, no clone or connect, and opens no file outside the fixture dir; peak RSS 44 MB. The result is not reused: TestReuse.jet is reachable only behind BUILD_REUSE_SAVED_WORK = false (JetFoundation/Source/Registry/BuildOptions.jet:786), and each case step gets a scratch HOME and XDG_CACHE_HOME (JetTestKit/Source/Exec.jet:59, 162). The capture is fast on every release since jet prove first shipped (a0_026 0.05 s, a0_030..a0_040 0.06-0.07 s, a0.0.43 0.36 s, b1 0.15 s, b11 0.01 s; replay1 gives E3620 and replay2 gives E3621 on each), and no commit in ddcd8c2319..95dd5a300b changes the capture path's shape. So the capture path carries no root cost on any measured compiler. The 104 s recorded on ddcd8c2319 by BallotDesign-3 was not reproduced, and it predates the first release with jet prove (a0_025 answers E2104). Script: $JET_SCRATCH_ROOT/lanes/G11Speed/work/gen/p6580/run.sh.",
-          "at": "2026-11-12T08:28:47.225Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G11"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-05T22:37:00.296Z",
-      "updated": "2026-11-12T08:28:48.879Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-12T08:28:48.879Z"
-    },
-    {
       "id": "c0t9jcat",
       "num": 6582,
       "title": "Port JetDevserver to Jet: jet check reports 0 problems",
@@ -101876,6 +101823,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "Kernel cells on p160r (dev c6bef63395: one-header, the branchless alloc fast path, alloc-try-no-poll, the leaf register pool and clobber facts, the Result out slot on every tier), cycles vs the asm reference (code bytes vs asm): mapping 4.73x (26.3x; p157 5.31x), allocfree 2.77x (24.4x; p157 3.36x), compare 3.19x (1.04x), resize 1.88x (10.9x; p157 1.98x), rawword 1.35x (0.80x), atomics 1.00x (1.56x). All but atomics are still over 1.00."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c11 allocfree root (CardCloser-3, p157 release build, disassembly and perf): both fast paths are hit (alloc_try's thread-cache path; free's cache push; 0 samples in refill, slab, validate and lock). Per operation: 361 instructions and 108 cycles; cycles: run loop 47%, alloc 42%, free 11%. Roots: (1) the Core wrapper adds a 16 B header on top of the runtime's 24 B, so a 1-byte request takes 41 B and lands in the 64 B class; (2) the alloc fast path is about 75 instructions (a class ladder, 5 callee-saved pushes, two header stores), and free recomputes the class from the size; (3) the loop carries a stop poll after every call and int_clone tests on Int. Order: (1), (2), then the Result out slot (mapping), then (3) in codegen."
         },
         {
@@ -102095,7 +102047,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T07:25:38.113Z",
+      "updated": "2026-11-15T08:37:14.115Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -218216,6 +218168,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T08:37:14.115Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T08:28:28.774Z",
       "by": "Main",
