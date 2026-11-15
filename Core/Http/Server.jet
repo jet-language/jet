@@ -125,10 +125,10 @@ HTTPCorsPolicy: struct {
 HTTPServerTLS: struct {
     cert_pem: String
     key_pem: String
-    __ops: Shared<__HTTPTLSOps>
+    __ops: Shared<HTTPTLSOps>
 }
 
-__HTTPTLSOps: struct {
+priv HTTPTLSOps: struct {
     // The bind-time identity check: "" or the reason the identity is unusable.
     check: fn(String, String) -[Net]> String Never!
     // The server handshake over an accepted stream, within the budget; None
@@ -136,7 +136,7 @@ __HTTPTLSOps: struct {
     // the stream arrives as the one item of a shared list the handshake pops
     // it from: the TLS stream is then its one owner, and the caller, whose
     // list is empty, does not close it again.
-    accept: fn(Shared<[TCPStream]>, String, String, Duration) -[Net, Time.Wait]> __HTTPSecure? Never!
+    accept: fn(Shared<[TCPStream]>, String, String, Duration) -[Net, Time.Wait]> HTTPSecure? Never!
 }
 
 /// What one served lifetime did: connections accepted, refused (over the
@@ -163,14 +163,14 @@ HTTPReadiness: enum {
     impl Display { display: fn(self) -> String { readiness_word(self) } }
 }
 
-__HTTPHandlerCell: struct {
+priv HTTPHandlerCell: struct {
     call: fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!
 }
 
 /// A request handler: what a route runs and what middleware wraps. Copies
 /// share the one handler.
 HTTPHandler: struct {
-    __cell: Shared<__HTTPHandlerCell>
+    __cell: Shared<HTTPHandlerCell>
 
     handle: fn(self, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
         guard: self.__cell.guard_read()
@@ -179,7 +179,7 @@ HTTPHandler: struct {
 }
 
 __handler: fn(call: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -> HTTPHandler Never! {
-    HTTPHandler{__cell: Shared{__HTTPHandlerCell{call: call.move()}}}
+    HTTPHandler{__cell: Shared{HTTPHandlerCell{call: call.move()}}}
 }
 
 __HTTPSegment: enum {
@@ -188,7 +188,7 @@ __HTTPSegment: enum {
     CatchAll(String)
 }
 
-__HTTPRoute: struct {
+priv HTTPRoute: struct {
     method: String
     pattern: String
     segments: [__HTTPSegment]
@@ -201,7 +201,7 @@ __HTTPRoute: struct {
     at: SourceLocation
 }
 
-__HTTPParsedRoute: struct {
+priv HTTPParsedRoute: struct {
     segments: [__HTTPSegment]
     problem: String
 }
@@ -209,20 +209,20 @@ __HTTPParsedRoute: struct {
 // A layer builds the handler that wraps `next`; the handler's own row
 // (`HTTPHandler.handle`) is the layer's, as a lambda body's row is its
 // enclosing function's.
-__HTTPLayerCell: struct {
+priv HTTPLayerCell: struct {
     wrap: fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler
 }
 
-__HTTPMuxState: struct {
-    routes: [__HTTPRoute]
-    layers: [Shared<__HTTPLayerCell>]
+priv HTTPMuxState: struct {
+    routes: [HTTPRoute]
+    layers: [Shared<HTTPLayerCell>]
     request_seq: Int
 }
 
 /// One route table: routes and middleware layers. A `web.app()` owns one and
 /// so does an `http.router()`; copies share the one table.
 HTTPMux: struct {
-    __state: Shared<__HTTPMuxState>
+    __state: Shared<HTTPMuxState>
 }
 
 // A route whose pattern was checked while building: its contract is the one
@@ -255,7 +255,7 @@ priv route_add_custom: fn(mux: HTTPMux, method: String, pattern: String, handler
 // A middleware layer: the first registered layer is the outermost.
 priv layer_add: fn(mux: HTTPMux, layer: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) Never! {
     guard := mux.__state.guard_edit()
-    guard.value.layers.push(Shared{__HTTPLayerCell{wrap: layer.move()}})
+    guard.value.layers.push(Shared{HTTPLayerCell{wrap: layer.move()}})
 }
 
 priv mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [__HTTPSegment], handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
@@ -264,7 +264,7 @@ priv mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [
         if existing.method == method && route_shape(existing.segments) == shape -> route_stop("E2804", "Two routes both match `{method} {pattern}`; the other is `{existing.pattern}` at {existing.at.file}:{existing.at.line}.", at)
     }
     guard := mux.__state.guard_edit()
-    guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: segments, handler: handler, contract: contract, at: at})
+    guard.value.routes.push(HTTPRoute{method: method, pattern: pattern, segments: segments, handler: handler, contract: contract, at: at})
 }
 
 // A refused registration, reported at the registering call in the stop
@@ -280,7 +280,7 @@ priv route_stop: fn(code: String, message: String, at: SourceLocation) -> Never 
 // the drain budget `shutdown` set (-1 until it does), and `drained` marks
 // that budget run out: a connection whose handler is still running then
 // never sends its response.
-__HTTPServerState: struct {
+priv HTTPServerState: struct {
     phase: Int
     stopping: Bool
     report: HTTPShutdownReport?
@@ -296,7 +296,7 @@ __HTTPServerState: struct {
 /// `shutdown` or a cancelled accept; the report is the same for every caller.
 /// The listener closes when the drain ends, so nothing listens after serving.
 HTTPServer: struct {
-    __state: Shared<__HTTPServerState>
+    __state: Shared<HTTPServerState>
     // The bound listener, the one item until serving closes it
     // (server_close_listener).
     __listener: Shared<[TCPListener]>
@@ -468,7 +468,7 @@ priv server_mark_stopping: fn(server: HTTPServer) Never! {
     guard.value.stopping = true
 }
 
-priv server_readiness: fn(state: Shared<__HTTPServerState>) -> HTTPReadiness Never! {
+priv server_readiness: fn(state: Shared<HTTPServerState>) -> HTTPReadiness Never! {
     guard: state.guard_read()
     if {
         guard.value.phase == 2 -> HTTPReadiness.Closed
@@ -505,7 +505,7 @@ priv server_request_stop: fn(server: HTTPServer, grace: Duration) -> Int Never! 
 // How long serving waits for the connections in flight once accepting
 // stops: the grace `shutdown` gave, else (a cancelled accept: the serving
 // task's cancel or a delivered signal) one connection deadline.
-priv drain_budget: fn(state: Shared<__HTTPServerState>, deadline: Duration?) -> Int Never! {
+priv drain_budget: fn(state: Shared<HTTPServerState>, deadline: Duration?) -> Int Never! {
     guard: state.guard_read()
     if guard.value.grace_ns >= 0 -> return guard.value.grace_ns
     if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
@@ -513,7 +513,7 @@ priv drain_budget: fn(state: Shared<__HTTPServerState>, deadline: Duration?) -> 
 
 // The drain's end: the connections still open are cancelled, and from now
 // on one whose handler returns sends nothing (drain_ended).
-priv drain_close: fn(state: Shared<__HTTPServerState>, accepted: Int, overloaded: Int) -> HTTPShutdownReport Never! {
+priv drain_close: fn(state: Shared<HTTPServerState>, accepted: Int, overloaded: Int) -> HTTPShutdownReport Never! {
     guard := state.guard_edit()
     guard.value.drained = true
     HTTPShutdownReport{accepted: accepted, overloaded: overloaded, completed: guard.value.completed, cancelled: guard.value.live}
@@ -521,7 +521,7 @@ priv drain_close: fn(state: Shared<__HTTPServerState>, accepted: Int, overloaded
 
 // Whether the drain of `server` (None: a lone `serve_once` connection, which
 // no drain ends) ran out before this connection's handler returned.
-priv drain_ended: fn(server: Shared<__HTTPServerState>?) -> Bool Never! {
+priv drain_ended: fn(server: Shared<HTTPServerState>?) -> Bool Never! {
     state: server ?? return false
     guard: state.guard_read()
     guard.value.drained
@@ -541,7 +541,7 @@ priv peer_host: fn(stream: TCPStream) -[Net]> String Never! {
 }
 
 // Count a connection in, unless the server or its peer is at the limit.
-priv admit: fn(state: Shared<__HTTPServerState>, peer: String) -> Bool Never! {
+priv admit: fn(state: Shared<HTTPServerState>, peer: String) -> Bool Never! {
     guard := state.guard_edit()
     held: guard.value.peers.get(peer) ?? 0
     if guard.value.live >= C_MAX_CONNECTIONS || held >= C_MAX_PEER_CONNECTIONS -> return false
@@ -552,7 +552,7 @@ priv admit: fn(state: Shared<__HTTPServerState>, peer: String) -> Bool Never! {
 
 // Count a connection taken while draining in, unless the server or its peer
 // is at the limit. It is not work, so the drain does not wait for it.
-priv admit_refusing: fn(state: Shared<__HTTPServerState>, peer: String) -> Bool Never! {
+priv admit_refusing: fn(state: Shared<HTTPServerState>, peer: String) -> Bool Never! {
     guard := state.guard_edit()
     held: guard.value.peers.get(peer) ?? 0
     if guard.value.live + guard.value.refusing >= C_MAX_CONNECTIONS || held >= C_MAX_PEER_CONNECTIONS -> return false
@@ -562,7 +562,7 @@ priv admit_refusing: fn(state: Shared<__HTTPServerState>, peer: String) -> Bool 
 }
 
 // One connection of `peer` gives its count back.
-priv peer_leave: fn(state: &__HTTPServerState, peer: String) Never! {
+priv peer_leave: fn(state: &HTTPServerState, peer: String) Never! {
     held: state.peers.get(peer) ?? 1
     if held <= 1 {
         _: state.peers.remove(peer)
@@ -574,7 +574,7 @@ priv peer_leave: fn(state: &__HTTPServerState, peer: String) Never! {
 // One admitted connection's task: the TLS handshake and its request, then its
 // count given back, all shielded from cancellation so a signal lets the
 // request finish and the count reach the drain.
-priv serve_admitted: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
+priv serve_admitted: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
     #Shield {
         answered: serve_taken(state, handoff, tls, mux, deadline, false)
         guard := state.guard_edit()
@@ -603,7 +603,7 @@ priv take_while_draining: fn(server: HTTPServer, stream: &&TCPStream) Never! -[N
 
 // A connection taken while draining: its request is answered 503, or by the
 // readiness probe, and its count given back.
-priv serve_refusing: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
+priv serve_refusing: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
     #Shield {
         _: serve_taken(state, handoff, tls, mux, deadline, true)
         guard := state.guard_edit()
@@ -614,7 +614,7 @@ priv serve_refusing: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPSt
 
 // The handed-off stream's handshake and request; true when it was answered.
 // A `refusing` connection, taken while draining, is answered 503.
-priv serve_taken: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPStream]>, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?, refusing: Bool) -[Net, FS.Read, Time]> Bool Never! {
+priv serve_taken: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?, refusing: Bool) -[Net, FS.Read, Time]> Bool Never! {
     stream: taken_stream(handoff) ?? return false
     conn: accept_conn(stream, tls, deadline) ?? return false
     serve_connection(conn, mux, deadline, Val(state), refusing)
@@ -636,7 +636,7 @@ priv refuse: fn(stream: &&TCPStream, tls: HTTPServerTLS?) Never! -[Net, Time]> {
     }
 }
 
-__live: fn(state: Shared<__HTTPServerState>) -> Int Never! {
+__live: fn(state: Shared<HTTPServerState>) -> Int Never! {
     guard: state.guard_read()
     guard.value.live
 }
@@ -676,7 +676,7 @@ priv accept_transient_code: fn(os_code: Int?) -> Bool Never! {
 // An empty route table: a `web.app()`'s, and the one an `http.router()`
 // routes with.
 priv mux_new: fn() -> HTTPMux Never! {
-    HTTPMux{__state: Shared{__HTTPMuxState{routes: [__HTTPRoute]{}, layers: [Shared<__HTTPLayerCell>]{}, request_seq: 0}}}
+    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0}}}
 }
 
 // Answer one connection the listener accepts (`app.serve_once(listener)`).
@@ -686,7 +686,7 @@ priv server_serve_once: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net
         return Err(.IO{operation: "accept: {err}"})
     }
     peer: peer_host(stream)
-    _: serve_connection(__HTTPConn{tcp: Val(stream), tls: None, peer: peer}, mux, None, None, false)
+    _: serve_connection(HTTPConn{tcp: Val(stream), tls: None, peer: peer}, mux, None, None, false)
     Ok()
 }
 
@@ -709,7 +709,7 @@ priv server_bind: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: 
 priv server_on: fn(listener: TCPListener, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -> HTTPServer Never! {
     pair: core.tasks.__channel_bounded<Int>(1)
     HTTPServer{
-        __state: Shared{__HTTPServerState{phase: 0, stopping: false, report: None}},
+        __state: Shared{HTTPServerState{phase: 0, stopping: false, report: None}},
         __listener: Shared{[TCPListener]{listener}},
         __mux: mux,
         __deadline: deadline,
@@ -721,7 +721,7 @@ priv server_on: fn(listener: TCPListener, mux: HTTPMux, tls: HTTPServerTLS?, dea
 
 // `app.static_files(prefix, root)`: GET `{prefix}/*` answers from `root`.
 priv mount_static_files: fn(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?, at: SourceLocation) Never! {
-    mount: __HTTPStaticMount{root: root, index: index ?? true, dotfiles: dotfiles ?? false, follow_links: follow_links ?? false}
+    mount: HTTPStaticMount{root: root, index: index ?? true, dotfiles: dotfiles ?? false, follow_links: follow_links ?? false}
     base: trim_trailing_slashes(prefix)
     route_add(mux, "GET", "{base}/*jet_static_path", __handler(fn(request: HTTPRequest) { Ok(static_serve(mount, request)) }), "", at)
 }
@@ -770,7 +770,7 @@ static_file_range: fn(request: HTTPRequest, path: String, content_type: String) 
 }
 
 tls: fn(cert: String, key: String) -> HTTPServerTLS Never! {
-    HTTPServerTLS{cert_pem: cert, key_pem: key, __ops: Shared{__HTTPTLSOps{check: tls_check, accept: tls_accept}}}
+    HTTPServerTLS{cert_pem: cert, key_pem: key, __ops: Shared{HTTPTLSOps{check: tls_check, accept: tls_accept}}}
 }
 
 priv tls_check: fn(cert_pem: String, key_pem: String) -[Net]> String Never! {
@@ -784,11 +784,11 @@ priv taken_stream: fn(accepted: Shared<[TCPStream]>) -> TCPStream? Never! {
     guard.value.pop()
 }
 
-priv tls_accept: fn(accepted: Shared<[TCPStream]>, cert_pem: String, key_pem: String, budget: Duration) -[Net, Time.Wait]> __HTTPSecure? Never! {
+priv tls_accept: fn(accepted: Shared<[TCPStream]>, cert_pem: String, key_pem: String, budget: Duration) -[Net, Time.Wait]> HTTPSecure? Never! {
     tcp: taken_stream(accepted) ?? return None
     secure: server_tls.__server(tcp, cert_pem, key_pem, [String]{}, budget) ?? return None
     staged: Shared{[U8]{}}
-    Val(__HTTPSecure{
+    Val(HTTPSecure{
         read_into: fn(limit: Int, deadline: Duration) {
             guard := staged.guard_edit()
             secure.read_into(guard.value, limit, deadline: deadline)
@@ -925,12 +925,12 @@ priv request_id_apply: fn(next: HTTPHandler, request: HTTPRequest) -> HTTPRespon
 // ---------------------------------------------------------------------------
 // Dispatch
 
-priv mux_routes: fn(mux: HTTPMux) -> [__HTTPRoute] Never! {
+priv mux_routes: fn(mux: HTTPMux) -> [HTTPRoute] Never! {
     guard: mux.__state.guard_read()
     guard.value.routes.copy()
 }
 
-priv mux_layers: fn(mux: HTTPMux) -> [Shared<__HTTPLayerCell>] Never! {
+priv mux_layers: fn(mux: HTTPMux) -> [Shared<HTTPLayerCell>] Never! {
     guard: mux.__state.guard_read()
     guard.value.layers.copy()
 }
@@ -1003,14 +1003,14 @@ priv with_request_id: fn(mux: HTTPMux, request: HTTPRequest) -> HTTPRequest Neve
 
 // The route a request selects, or the answer it gets without one: OPTIONS *,
 // 400, 404 or 405. `index` is the selected route's position in `routes`.
-__HTTPPick: struct {
+priv HTTPPick: struct {
     answer: HTTPResponse?
     index: Int
     request: HTTPRequest
-    routes: [__HTTPRoute]
+    routes: [HTTPRoute]
 }
 
-priv mux_pick: fn(mux: HTTPMux, request: HTTPRequest) -> __HTTPPick Never! {
+priv mux_pick: fn(mux: HTTPMux, request: HTTPRequest) -> HTTPPick Never! {
     routes: mux_routes(mux)
     if request.method == "OPTIONS" && request.path == "*" {
         everything := [String]{}
@@ -1019,9 +1019,9 @@ priv mux_pick: fn(mux: HTTPMux, request: HTTPRequest) -> __HTTPPick Never! {
         }
         allowed := empty_response(204)
         allowed.headers = http.headers_set(allowed.headers, "Allow", allow_value(everything))
-        return __HTTPPick{answer: Val(allowed), index: -1, request: request, routes: routes}
+        return HTTPPick{answer: Val(allowed), index: -1, request: request, routes: routes}
     }
-    segments: path_segments(access_log_path(request.path)) ?? return __HTTPPick{answer: Val(status_page(400)), index: -1, request: request, routes: routes}
+    segments: path_segments(access_log_path(request.path)) ?? return HTTPPick{answer: Val(status_page(400)), index: -1, request: request, routes: routes}
     best := -1
     matched := [String]{}
     loop index in 0..<routes.len() {
@@ -1032,15 +1032,15 @@ priv mux_pick: fn(mux: HTTPMux, request: HTTPRequest) -> __HTTPPick Never! {
         if best < 0 || route_better(route.segments, routes[best].segments) -> best = index
     }
     if best < 0 {
-        if matched.len() == 0 -> return __HTTPPick{answer: Val(status_page(404)), index: -1, request: request, routes: routes}
+        if matched.len() == 0 -> return HTTPPick{answer: Val(status_page(404)), index: -1, request: request, routes: routes}
         refused := status_page(405)
         refused.headers = http.headers_set(refused.headers, "Allow", allow_value(matched))
-        return __HTTPPick{answer: Val(refused), index: -1, request: request, routes: routes}
+        return HTTPPick{answer: Val(refused), index: -1, request: request, routes: routes}
     }
     routed := request.copy()
     routed.__params = route_params(routes[best].segments, segments)
     routed.__route_template = Val(routes[best].pattern)
-    __HTTPPick{answer: None, index: best, request: routed, routes: routes}
+    HTTPPick{answer: None, index: best, request: routed, routes: routes}
 }
 
 priv select: fn(mux: HTTPMux, request: HTTPRequest) -> HTTPResponse HTTPError! {
@@ -1125,8 +1125,8 @@ priv comma_items: fn(list: String) -> [String] Never! {
 // Route patterns: `/`, static segments, `:name` parameters and one final
 // `*name` catch-all.
 
-priv route_problem: fn(problem: String) -> __HTTPParsedRoute Never! {
-    __HTTPParsedRoute{segments: [__HTTPSegment]{}, problem: problem}
+priv route_problem: fn(problem: String) -> HTTPParsedRoute Never! {
+    HTTPParsedRoute{segments: [__HTTPSegment]{}, problem: problem}
 }
 
 priv route_name_ok: fn(name: [U8]) -> Bool Never! {
@@ -1140,11 +1140,11 @@ priv route_name_ok: fn(name: [U8]) -> Bool Never! {
     true
 }
 
-priv route_parse: fn(pattern: String) -> __HTTPParsedRoute Never! {
+priv route_parse: fn(pattern: String) -> HTTPParsedRoute Never! {
     raw: pattern.bytes()
     if raw.len() == 0 || raw[0] != (U8{47}) -> return route_problem("a route starts with `/`")
     segments := [__HTTPSegment]{}
-    if raw.len() == 1 -> return __HTTPParsedRoute{segments: segments, problem: ""}
+    if raw.len() == 1 -> return HTTPParsedRoute{segments: segments, problem: ""}
     names := [String]{}
     closed := false
     start := 1
@@ -1176,7 +1176,7 @@ priv route_parse: fn(pattern: String) -> __HTTPParsedRoute Never! {
         }
         i = i + 1
     }
-    __HTTPParsedRoute{segments: segments, problem: ""}
+    HTTPParsedRoute{segments: segments, problem: ""}
 }
 
 priv route_shape: fn(segments: [__HTTPSegment]) -> String Never! {
@@ -1445,17 +1445,17 @@ priv route_better: fn(candidate: [__HTTPSegment], current: [__HTTPSegment]) -> B
 // One connection: read one request, answer it, close.
 
 #Error
-__HTTPFault: enum {
+priv HTTPFault: enum {
     Reply(Int)
     Drop
 }
 
-__HTTPWire: struct {
+priv HTTPWire: struct {
     buffer: [U8]
     end_ns: Int
 }
 
-__HTTPChunked: struct {
+priv HTTPChunked: struct {
     body: [U8]
     trailers: Headers
 }
@@ -1463,9 +1463,9 @@ __HTTPChunked: struct {
 // One accepted connection: exactly one of tcp/tls. A server bound with
 // `tls: server.tls(cert, key)` serves the TCP stream after the TLS handshake
 // (Docs/spec/syntax-decisions.md:5083).
-__HTTPConn: struct {
+priv HTTPConn: struct {
     tcp: TCPStream?
-    tls: __HTTPSecure?
+    tls: HTTPSecure?
     // The peer's address without its port, which a request carries as
     // `__peer` for per-network limits ("" when the socket has none).
     peer: String{""}
@@ -1473,7 +1473,7 @@ __HTTPConn: struct {
 
 // A TLS connection's stream, held only by these operations; `tls_accept`
 // builds them, so a server without `tls:` reaches no TLS code.
-__HTTPSecure: struct {
+priv HTTPSecure: struct {
     // Appends up to the limit's plaintext bytes to `staged`: the count, 0 at
     // the end of the stream. `staged` keeps its capacity across reads.
     read_into: fn(Int, Duration) -[Net, Time.Wait]> Int IOError!
@@ -1487,16 +1487,16 @@ __HTTPSecure: struct {
 // The accepted stream, which the connection now owns, after the server
 // handshake within the connection budget when the server has a TLS identity;
 // None drops a failed handshake.
-priv accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> __HTTPConn? Never! {
+priv accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> HTTPConn? Never! {
     peer: peer_host(stream)
     if tls == .Val(identity) {
         budget: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
         ops: identity.__ops.guard_read()
         accepted: Shared{[TCPStream]{stream.move()}}
         secure: ops.value.accept(accepted, identity.cert_pem, identity.key_pem, Duration{ns: budget}) ?? return None
-        return Val(__HTTPConn{tcp: None, tls: Val(secure), peer: peer})
+        return Val(HTTPConn{tcp: None, tls: Val(secure), peer: peer})
     }
-    Val(__HTTPConn{tcp: Val(stream), tls: None, peer: peer})
+    Val(HTTPConn{tcp: Val(stream), tls: None, peer: peer})
 }
 
 // Whether the connection's request was answered by the mux. A request the
@@ -1506,9 +1506,9 @@ priv accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duratio
 // cancelled, so its response is not sent and the socket just closes. The
 // server answers the readiness probe, and a `refusing` connection, itself
 // (server_answer).
-priv serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?, server: Shared<__HTTPServerState>?, refusing: Bool) -[Net, FS.Read, Time]> Bool Never! {
+priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, server: Shared<HTTPServerState>?, refusing: Bool) -[Net, FS.Read, Time]> Bool Never! {
     budget: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
-    wire := __HTTPWire{buffer: [U8]{}, end_ns: rt.clock_mono_ns() + budget}
+    wire := HTTPWire{buffer: [U8]{}, end_ns: rt.clock_mono_ns() + budget}
     answered := false
     upgraded := false
     if read_request(stream, wire) == {
@@ -1559,7 +1559,7 @@ priv serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?,
 // `ready` or 503 with the state, unless a route of the app takes that path;
 // and a 503 for any other request on a `refusing` connection. None: the mux
 // answers. A lone `serve_once` connection (no `server`) has neither.
-priv server_answer: fn(server: Shared<__HTTPServerState>?, mux: HTTPMux, request: HTTPRequest, refusing: Bool) -> HTTPResponse? Never! {
+priv server_answer: fn(server: Shared<HTTPServerState>?, mux: HTTPMux, request: HTTPRequest, refusing: Bool) -> HTTPResponse? Never! {
     state: server ?? return None
     if request.method == "GET" && request.path == C_READY_PATH && mux_pick(mux, request).answer == .Val(_) {
         readiness: server_readiness(state)
@@ -1570,7 +1570,7 @@ priv server_answer: fn(server: Shared<__HTTPServerState>?, mux: HTTPMux, request
     None
 }
 
-__send: fn(stream: __HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {
+__send: fn(stream: HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {
     remaining: end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return false
     if stream.tls == .Val(secure) -> return secure.write_all(bytes, Duration{ns: remaining})
@@ -1585,7 +1585,7 @@ __send: fn(stream: __HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool
 
 // Append what the peer sends next; false at end of stream. Both streams
 // append with read_into, so a connection's reads reuse their buffers.
-priv wire_fill: fn(stream: __HTTPConn, &wire: __HTTPWire) -[Net, Time.Wait]> Bool __HTTPFault! {
+priv wire_fill: fn(stream: HTTPConn, &wire: HTTPWire) -[Net, Time.Wait]> Bool HTTPFault! {
     remaining: wire.end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return Err(.Reply(408))
     if stream.tls == .Val(secure) {
@@ -1610,7 +1610,7 @@ priv wire_fill: fn(stream: __HTTPConn, &wire: __HTTPWire) -[Net, Time.Wait]> Boo
 }
 
 // Fill until `need` bytes are buffered; a short stream is a bad request.
-priv wire_need: fn(stream: __HTTPConn, &wire: __HTTPWire, need: Int) __HTTPFault! -[Net, Time.Wait]> {
+priv wire_need: fn(stream: HTTPConn, &wire: HTTPWire, need: Int) HTTPFault! -[Net, Time.Wait]> {
     loop wire.buffer.len() < need {
         more: wire_fill(stream, wire) ?? return Err(err)
         if !more -> return Err(.Reply(400))
@@ -1619,7 +1619,7 @@ priv wire_need: fn(stream: __HTTPConn, &wire: __HTTPWire, need: Int) __HTTPFault
 }
 
 // The index of the CRLF ending the line at `from`, filling as needed.
-priv wire_line: fn(stream: __HTTPConn, &wire: __HTTPWire, from: Int) -[Net, Time.Wait]> Int __HTTPFault! {
+priv wire_line: fn(stream: HTTPConn, &wire: HTTPWire, from: Int) -[Net, Time.Wait]> Int HTTPFault! {
     at := crlf_at(wire.buffer, from)
     loop at < 0 {
         if wire.buffer.len() - from > C_MAX_LINE_BYTES -> return Err(.Reply(400))
@@ -1658,7 +1658,7 @@ priv field_line: fn(raw: [U8]) -> Header? Never! {
     Val(Header{name: name, value: http.trim(value)})
 }
 
-priv read_request: fn(stream: __HTTPConn, &wire: __HTTPWire) -[Net, Time.Wait]> HTTPRequest __HTTPFault! {
+priv read_request: fn(stream: HTTPConn, &wire: HTTPWire) -[Net, Time.Wait]> HTTPRequest HTTPFault! {
     split := http.find_double_crlf(wire.buffer)
     loop split < 0 {
         if wire.buffer.len() > C_MAX_HEAD_BYTES -> return Err(.Reply(431))
@@ -1758,7 +1758,7 @@ priv chunk_size: fn(line: [U8]) -> Int? Never! {
     Val(size)
 }
 
-priv read_chunked: fn(stream: __HTTPConn, &wire: __HTTPWire, start: Int, declared: [String]) -[Net, Time.Wait]> __HTTPChunked __HTTPFault! {
+priv read_chunked: fn(stream: HTTPConn, &wire: HTTPWire, start: Int, declared: [String]) -[Net, Time.Wait]> HTTPChunked HTTPFault! {
     at := start
     body := [U8]{}
     loop {
@@ -1782,7 +1782,7 @@ priv read_chunked: fn(stream: __HTTPConn, &wire: __HTTPWire, start: Int, declare
         trailers.fields.push(field)
         at = line_end + 2
     }
-    Ok(__HTTPChunked{body: body, trailers: trailers})
+    Ok(HTTPChunked{body: body, trailers: trailers})
 }
 
 priv error_wire: fn(status: Int) -[Time]> [U8] Never! {
@@ -1856,19 +1856,19 @@ priv response_wire: fn(method: String, reply: HTTPResponse) -[Net, Time]> [U8] H
 // ---------------------------------------------------------------------------
 // Static files
 
-__HTTPStaticMount: struct {
+priv HTTPStaticMount: struct {
     root: String
     index: Bool
     dotfiles: Bool
     follow_links: Bool
 }
 
-__HTTPStaticFile: struct {
+priv HTTPStaticFile: struct {
     path: String
     modified_seconds: Int
 }
 
-__HTTPRange: struct {
+priv HTTPRange: struct {
     start: Int
     end: Int
 }
@@ -1894,7 +1894,7 @@ priv bytes_response: fn(status: Int, bytes: [U8], content_type: String) -> HTTPR
 }
 
 // `bytes=a-b`, `bytes=a-` or `bytes=-n` against `length` bytes; one range.
-priv range_spec: fn(spec: String, length: Int) -> __HTTPRange? Never! {
+priv range_spec: fn(spec: String, length: Int) -> HTTPRange? Never! {
     if length == 0 || !spec.starts_with("bytes=") -> return None
     raw: spec.bytes()
     rest: raw.slice(6, raw.len())
@@ -1907,15 +1907,15 @@ priv range_spec: fn(spec: String, length: Int) -> __HTTPRange? Never! {
         suffix: http.parse_decimal(right) ?? return None
         if suffix == 0 -> return None
         first: if suffix >= length -> 0 else -> length - suffix
-        return Val(__HTTPRange{start: first, end: length - 1})
+        return Val(HTTPRange{start: first, end: length - 1})
     }
     first: http.parse_decimal(left) ?? return None
     if first >= length -> return None
-    if right == "" -> return Val(__HTTPRange{start: first, end: length - 1})
+    if right == "" -> return Val(HTTPRange{start: first, end: length - 1})
     asked: http.parse_decimal(right) ?? return None
     last: if asked > length - 1 -> length - 1 else -> asked
     if first > last -> return None
-    Val(__HTTPRange{start: first, end: last})
+    Val(HTTPRange{start: first, end: last})
 }
 
 priv mime: fn(path: String) -> String Never! {
@@ -1939,7 +1939,7 @@ priv mime: fn(path: String) -> String Never! {
 
 // The file a mounted request names, refusing dot-files, links and anything
 // that resolves outside the root.
-priv static_target: fn(mount: __HTTPStaticMount, relative: String) -[FS.Read]> __HTTPStaticFile? Never! {
+priv static_target: fn(mount: HTTPStaticMount, relative: String) -[FS.Read]> HTTPStaticFile? Never! {
     current := trim_trailing_slashes(mount.root)
     loop segment in relative.split("/").to_list() {
         if segment == "" -> next
@@ -1962,7 +1962,7 @@ priv static_target: fn(mount: __HTTPStaticMount, relative: String) -[FS.Read]> _
     root: core.files.canonicalize(mount.root) ?? return None
     resolved: core.files.canonicalize(current) ?? return None
     if !resolved.starts_with("{trim_trailing_slashes(root)}/") -> return None
-    Val(__HTTPStaticFile{path: resolved, modified_seconds: info.modified.to_timestamp()})
+    Val(HTTPStaticFile{path: resolved, modified_seconds: info.modified.to_timestamp()})
 }
 
 priv etag_matches: fn(list: String, etag: String) -> Bool Never! {
@@ -1973,7 +1973,7 @@ priv etag_matches: fn(list: String, etag: String) -> Bool Never! {
     false
 }
 
-priv static_serve: fn(mount: __HTTPStaticMount, request: HTTPRequest) -[FS.Read]> HTTPResponse Never! {
+priv static_serve: fn(mount: HTTPStaticMount, request: HTTPRequest) -[FS.Read]> HTTPResponse Never! {
     relative: request.param("jet_static_path") ?? ""
     target: static_target(mount, relative) ?? return status_page(404)
     bytes: core.files.read_bytes(target.path) ?? return status_page(404)

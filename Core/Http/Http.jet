@@ -154,7 +154,7 @@ HeaderValue: struct {
 priv body_carrier: module {
     BodyStream: struct {
         held: [U8]
-        live: Shared<provider.__LiveBody>?
+        live: Shared<provider.LiveBody>?
     }
 }
 
@@ -199,12 +199,12 @@ C_BODY_CHUNK_BYTES: 65536
 
 // A message body is read once, shared by every copy of its message: the
 // first `text`/`json` read takes it and later reads fail with BodyConsumed.
-__HTTPBodyCell: struct { taken: Bool }
+priv HTTPBodyCell: struct { taken: Bool }
 
 // A server request carries its connection's plain TCP socket (-1 over TLS),
 // shared by every copy, so core.net.ws.upgrade can take the connection over.
 // An upgraded connection gets no HTTP response from the server.
-__HTTPUpgradeCell: struct {
+priv HTTPUpgradeCell: struct {
     fd: Int
     upgraded: Bool
 }
@@ -236,8 +236,8 @@ HTTPRequest: struct {
     __cookies: [Header]{[]}
     __form: [Header]{[]}
     __multipart: [Header]{[]}
-    __cell: Shared<__HTTPBodyCell>?{None}
-    __upgrade: Shared<__HTTPUpgradeCell>?{None}
+    __cell: Shared<HTTPBodyCell>?{None}
+    __upgrade: Shared<HTTPUpgradeCell>?{None}
     // The server side's peer address without its port, which per-network
     // limits count (`app.Limit`); "" on a client request.
     __peer: String{""}
@@ -411,7 +411,7 @@ HTTPResponse: struct {
     __reused: Bool{false}
     __raw_encoding: String?{None}
     __body_error: HTTPError?{None}
-    __cell: Shared<__HTTPBodyCell>?{None}
+    __cell: Shared<HTTPBodyCell>?{None}
 
     status: fn(self) -> Int Never! { self.status }
     body: fn(self) -> Body Never! { self.body.copy() }
@@ -461,7 +461,7 @@ HTTPBodyChunks: struct {
     __bytes: [U8]
     __max: Int
     __error: HTTPError?{None}
-    __live: Shared<provider.__LiveBody>?{None}
+    __live: Shared<provider.LiveBody>?{None}
 
     impl Iterable {
         Iter: __HTTPBodyCursor
@@ -478,7 +478,7 @@ __HTTPBodyCursor: struct {
     at: Int
     error: HTTPError?
     done: Bool
-    live: Shared<provider.__LiveBody>?
+    live: Shared<provider.LiveBody>?
 
     impl Iterator {
         Item: Result<[U8], HTTPError>
@@ -546,7 +546,7 @@ priv body_text_of: fn(raw: [U8]) -> String HTTPError! {
 
 // The first read of a message body takes it; a transport failure met while
 // the body arrived surfaces at that read, as the reference's lazy body did.
-priv take_body: fn(cell: Shared<__HTTPBodyCell>?, failure: HTTPError?) HTTPError! {
+priv take_body: fn(cell: Shared<HTTPBodyCell>?, failure: HTTPError?) HTTPError! {
     if cell == .Val(state) {
         guard := state.guard_edit()
         if guard.value.taken -> return Err(.BodyConsumed)
@@ -556,11 +556,11 @@ priv take_body: fn(cell: Shared<__HTTPBodyCell>?, failure: HTTPError?) HTTPError
     Ok()
 }
 
-priv upgrade_cell: fn(fd: Int) -> Shared<__HTTPUpgradeCell> Never! {
-    Shared{__HTTPUpgradeCell{fd: fd, upgraded: false}}
+priv upgrade_cell: fn(fd: Int) -> Shared<HTTPUpgradeCell> Never! {
+    Shared{HTTPUpgradeCell{fd: fd, upgraded: false}}
 }
 
-priv cell_upgraded: fn(cell: Shared<__HTTPUpgradeCell>) -> Bool Never! {
+priv cell_upgraded: fn(cell: Shared<HTTPUpgradeCell>) -> Bool Never! {
     guard: cell.guard_read()
     guard.value.upgraded
 }
@@ -576,15 +576,15 @@ priv upgrade_claim: fn(request: HTTPRequest) -> Int? Never! {
 }
 
 __request: fn(method: String, url: String) -> HTTPRequest Never! {
-    HTTPRequest{method: method, path: request_target_path(url), body: body_empty(), headers: headers(), __url: url, __cell: Val(Shared{__HTTPBodyCell{taken: false}})}
+    HTTPRequest{method: method, path: request_target_path(url), body: body_empty(), headers: headers(), __url: url, __cell: Val(Shared{HTTPBodyCell{taken: false}})}
 }
 
 priv server_request: fn(method: String, path: String, body: Body, fields: Headers) -> HTTPRequest Never! {
-    HTTPRequest{method: method, path: path, body: body, headers: fields, __url: path, __body_set: true, __cell: Val(Shared{__HTTPBodyCell{taken: false}})}
+    HTTPRequest{method: method, path: path, body: body, headers: fields, __url: path, __body_set: true, __cell: Val(Shared{HTTPBodyCell{taken: false}})}
 }
 
 priv make_response: fn(status: Int, body: &&Body, fields: &&Headers) -> HTTPResponse Never! {
-    HTTPResponse{status: status, body: body, headers: fields, __cell: Val(Shared{__HTTPBodyCell{taken: false}})}
+    HTTPResponse{status: status, body: body, headers: fields, __cell: Val(Shared{HTTPBodyCell{taken: false}})}
 }
 
 // A text response; an out-of-range status is a 500.
@@ -603,7 +603,7 @@ priv client_response: fn(status: Int, body: Body, fields: Headers, redirect_hist
         status: status, body: body, headers: fields,
         __redirect_history: redirect_history, __timings: timings, __reused: reused,
         __raw_encoding: raw_encoding, __body_error: body_error,
-        __cell: Val(Shared{__HTTPBodyCell{taken: false}}),
+        __cell: Val(Shared{HTTPBodyCell{taken: false}}),
     }
 }
 
@@ -671,7 +671,7 @@ headers_set_raw: fn(h: Headers, name: String, value: String) -> Headers Never! {
 /// routes. Copies share the one route table; routes match as an App's do.
 HTTPRouter: struct {
     __mux: HTTPMux
-    __state: Shared<__HTTPRouterState>
+    __state: Shared<HTTPRouterState>
 
     // `router.get(pattern, handler)` and its sibling verbs land here with the
     // route's checked contract (sema sema_call_try_http_router). The route
@@ -683,32 +683,32 @@ HTTPRouter: struct {
         index: router_handler_count(self.__state)
         routes.route_add(self.__mux, method, pattern, routes.__handler(fn(request: HTTPRequest) { router_call(state, index, request) }), contract, at)
         guard := self.__state.guard_edit()
-        guard.value.handlers.push(__HTTPRouterHandler{call: handler.move()})
+        guard.value.handlers.push(HTTPRouterHandler{call: handler.move()})
     }
 }
 
 // A router's handlers, in registration order: the `index`th is the handler
 // of the table's `index`th route.
-__HTTPRouterState: struct {
-    handlers: [__HTTPRouterHandler]
+priv HTTPRouterState: struct {
+    handlers: [HTTPRouterHandler]
 }
 
-__HTTPRouterHandler: struct {
+priv HTTPRouterHandler: struct {
     call: fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!
 }
 
-priv router_handler_count: fn(state: Shared<__HTTPRouterState>) -> Int Never! {
+priv router_handler_count: fn(state: Shared<HTTPRouterState>) -> Int Never! {
     guard: state.guard_read()
     guard.value.handlers.len()
 }
 
-priv router_call: fn(state: Shared<__HTTPRouterState>, index: Int, request: HTTPRequest) -[Net]> HTTPResponse HTTPError! {
+priv router_call: fn(state: Shared<HTTPRouterState>, index: Int, request: HTTPRequest) -[Net]> HTTPResponse HTTPError! {
     guard: state.guard_read()
     guard.value.handlers[index].call(request)
 }
 
 router: fn() -> HTTPRouter Never! {
-    HTTPRouter{__mux: routes.mux_new(), __state: Shared{__HTTPRouterState{handlers: [__HTTPRouterHandler]{}}}}
+    HTTPRouter{__mux: routes.mux_new(), __state: Shared{HTTPRouterState{handlers: [HTTPRouterHandler]{}}}}
 }
 
 // The router's route table, for `web.openapi(router)`.
@@ -944,7 +944,7 @@ body_text: fn(text: String) -> Body Never! { body_bytes(text.bytes()) }
 body_bytes: fn(bytes: [U8]) -> Body Never! { Body{stream: body_carrier.BodyStream{held: bytes, live: None}} }
 
 // A client response's body still on its connection.
-priv body_live: fn(live: &&provider.__LiveBody) -> Body Never! { Body{stream: body_carrier.BodyStream{held: [U8]{}, live: Val(Shared{live})}} }
+priv body_live: fn(live: &&provider.LiveBody) -> Body Never! { Body{stream: body_carrier.BodyStream{held: [U8]{}, live: Val(Shared{live})}} }
 
 // The `http.Body.text(text, media_type)`, `http.Body.form(fields)` and
 // `http.Body.json(value)` constructors: sema checks the call and runs these.

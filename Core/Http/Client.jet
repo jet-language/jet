@@ -560,7 +560,7 @@ priv build_fail: fn(message: String) -> __BuildHTTPFailure Never! { __BuildHTTPF
 // the dial got. A replay's buffer starts as the taped bytes, `sends` counts
 // the sends left, and `ending` fails the send after them or the read past
 // the tape.
-__BuildWire: struct {
+priv BuildWire: struct {
     tcp: TCPStream?
     tls: build_tls.TLSStream?
     buffer: [U8]
@@ -575,11 +575,11 @@ __BuildWire: struct {
     addresses: [[U8]]
 }
 
-__BuildSpan: struct { from: Int, to: Int }
+priv BuildSpan: struct { from: Int, to: Int }
 
 // state 0 parsed, 1 empty, 2 invalid digit, 3 above u64::MAX; big marks a
 // value above Int's range (value unused then).
-__BuildNumber: struct { state: Int, value: Int, big: Bool }
+priv BuildNumber: struct { state: Int, value: Int, big: Bool }
 
 jet_http_build_get: fn(host: String, authority: String, target: String, secure: Bool, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
     if port < 0 || port > 65535 || timeout_ms < 0 || limit < 0 -> return Err(build_fail("out of range integral type conversion attempted"))
@@ -587,7 +587,7 @@ jet_http_build_get: fn(host: String, authority: String, target: String, secure: 
     end_ns: if timeout_ms > (C_BUILD_INT_MAX - now) /% 1000000 -> C_BUILD_INT_MAX else -> now + timeout_ms * 1000000
     portable := ""
     tcp := build_connect(addresses, port, end_ns, portable) ?? return Err(err)
-    wire := __BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: end_ns, idle_ns: 0, prove: 0, taped: [U8]{}, sends: 0, ending: "", stage: C_CLIENT_STAGE_EXCHANGE, addresses: [[U8]]{}}
+    wire := BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: end_ns, idle_ns: 0, prove: 0, taped: [U8]{}, sends: 0, ending: "", stage: C_CLIENT_STAGE_EXCHANGE, addresses: [[U8]]{}}
     if secure {
         remaining: end_ns - rt.clock_mono_ns()
         if remaining <= 0 -> return Err(build_fail("timed out"))
@@ -613,7 +613,7 @@ jet_http_build_get: fn(host: String, authority: String, target: String, secure: 
     result
 }
 
-priv build_exchange: fn(&wire: __BuildWire, request: [U8], limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
+priv build_exchange: fn(&wire: BuildWire, request: [U8], limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
     _: build_send(wire, request) ?? return Err(err)
     build_response(wire, limit)
 }
@@ -653,7 +653,7 @@ __build_socket: fn(address: [U8], port: Int) -> SocketAddr Never! {
     }
 }
 
-priv build_send: fn(&wire: __BuildWire, bytes: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+priv build_send: fn(&wire: BuildWire, bytes: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
     if wire.prove == C_CLIENT_PROVE_REPLAY {
         if wire.sends == 0 -> return Err(build_fail(build_ending_message(wire.ending)))
         wire.sends -= 1
@@ -704,7 +704,7 @@ priv build_send: fn(&wire: __BuildWire, bytes: [U8]) -[Net, Time.Wait]> Int __Bu
 
 // Time left for one wire operation: the exchange deadline, narrowed to the
 // current phase's per-operation bound when one is set.
-priv build_remaining: fn(wire: __BuildWire) -[Time.Wait]> Int Never! {
+priv build_remaining: fn(wire: BuildWire) -[Time.Wait]> Int Never! {
     left: wire.end_ns - rt.clock_mono_ns()
     if wire.idle_ns > 0 && wire.idle_ns < left -> return wire.idle_ns
     left
@@ -714,7 +714,7 @@ priv build_remaining: fn(wire: __BuildWire) -[Time.Wait]> Int Never! {
 // cleared and read into, so its capacity carries over between reads. A
 // replay's buffer started as the whole tape, so a read past it is the
 // recorded ending.
-priv build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+priv build_fill: fn(&wire: BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
     if wire.prove == C_CLIENT_PROVE_REPLAY {
         if wire.ending != "eof" -> return Err(build_fail(build_ending_message(wire.ending)))
         wire.buffer = [U8]{}
@@ -765,7 +765,7 @@ priv build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailur
 // deadline has passed) as the stream's ending and fails with the message a
 // replay rebuilds from that name, so both runs classify it alike
 // (client_timed_out, client_body_error).
-priv build_tape_fail: fn(&wire: __BuildWire, name: String, message: String) -[Time.Wait]> __BuildHTTPFailure Never! {
+priv build_tape_fail: fn(&wire: BuildWire, name: String, message: String) -[Time.Wait]> __BuildHTTPFailure Never! {
     if wire.prove != C_CLIENT_PROVE_CAPTURE -> return build_fail(message)
     wire.ending = if rt.clock_mono_ns() >= wire.end_ns -> "timed_out" else -> name.copy()
     build_fail(build_ending_message(wire.ending))
@@ -831,7 +831,7 @@ priv build_errno_portable: fn(code: Int?) -> String Never! {
 
 // BufReader + Take(limit): appends at most `limit` bytes to `out`, stopping
 // after the first newline when `line`; the appended count.
-priv build_read: fn(&wire: __BuildWire, limit: Int, line: Bool, &out: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+priv build_read: fn(&wire: BuildWire, limit: Int, line: Bool, &out: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
     taken := 0
     loop taken < limit {
         if wire.at == wire.buffer.len() {
@@ -858,7 +858,7 @@ priv build_read: fn(&wire: __BuildWire, limit: Int, line: Bool, &out: [U8]) -[Ne
     Ok(taken)
 }
 
-priv build_response: fn(&wire: __BuildWire, limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
+priv build_response: fn(&wire: BuildWire, limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
     over: if limit == C_BUILD_INT_MAX -> limit else -> limit + 1
     rows := [[U8]]{}
     status := [U8]{}
@@ -901,7 +901,7 @@ priv build_response: fn(&wire: __BuildWire, limit: Int) -[Net, Time.Wait]> [[U8]
         // Content-Length is transport framing, not response-size policy. A
         // malformed length takes nothing; the Driver interprets the head.
         found := false
-        number := __BuildNumber{state: 0, value: 0, big: false}
+        number := BuildNumber{state: 0, value: 0, big: false}
         loop header in rows {
             colon: build_colon(header)
             if colon >= 0 && build_named(header, 0, colon, "content-length") {
@@ -926,7 +926,7 @@ priv build_response: fn(&wire: __BuildWire, limit: Int) -[Net, Time.Wait]> [[U8]
     Ok(rows)
 }
 
-priv build_chunked_body: fn(&wire: __BuildWire, limit: Int, over: Int, &body: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+priv build_chunked_body: fn(&wire: BuildWire, limit: Int, over: Int, &body: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
     loop {
         line := [U8]{}
         _: build_read(wire, over, true, line) ?? return Err(err)
@@ -977,12 +977,12 @@ priv build_colon: fn(raw: [U8]) -> Int Never! {
     -1
 }
 
-priv build_trim: fn(raw: [U8], start: Int, end: Int) -> __BuildSpan Never! {
+priv build_trim: fn(raw: [U8], start: Int, end: Int) -> BuildSpan Never! {
     from := start
     to := end
     loop from < to && build_space(Int{raw[from]}) -> from += 1
     loop to > from && build_space(Int{raw[to - 1]}) -> to -= 1
-    __BuildSpan{from: from, to: to}
+    BuildSpan{from: from, to: to}
 }
 
 // A Transfer-Encoding header naming chunked among its comma parts.
@@ -1006,10 +1006,10 @@ priv build_chunked: fn(rows: [[U8]]) -> Bool Never! {
 // u64 parsing as Rust's FromStr/from_str_radix: one leading '+', stopping at
 // the first invalid digit or overflow. High/low 32-bit limbs keep the u64
 // overflow check exact.
-priv build_parse_u64: fn(raw: [U8], start: Int, end: Int, radix: Int) -> __BuildNumber Never! {
+priv build_parse_u64: fn(raw: [U8], start: Int, end: Int, radix: Int) -> BuildNumber Never! {
     from := start
     if end - start > 1 && raw[start] == (U8{43}) -> from += 1
-    if from == end -> return __BuildNumber{state: if end == start -> 1 else -> 2, value: 0, big: false}
+    if from == end -> return BuildNumber{state: if end == start -> 1 else -> 2, value: 0, big: false}
     high := 0
     low := 0
     loop at in from..<end {
@@ -1020,14 +1020,14 @@ priv build_parse_u64: fn(raw: [U8], start: Int, end: Int, radix: Int) -> __Build
             radix == 16 && byte >= 65 && byte <= 70 -> byte - 55
             else -> -1
         }
-        if digit < 0 -> return __BuildNumber{state: 2, value: 0, big: false}
+        if digit < 0 -> return BuildNumber{state: 2, value: 0, big: false}
         low = low * radix + digit
         high = high * radix + low /% 4294967296
         low = low % 4294967296
-        if high > 4294967295 -> return __BuildNumber{state: 3, value: 0, big: false}
+        if high > 4294967295 -> return BuildNumber{state: 3, value: 0, big: false}
     }
-    if high > 2147483647 -> return __BuildNumber{state: 0, value: 0, big: true}
-    __BuildNumber{state: 0, value: high * 4294967296 + low, big: false}
+    if high > 2147483647 -> return BuildNumber{state: 0, value: 0, big: true}
+    BuildNumber{state: 0, value: high * 4294967296 + low, big: false}
 }
 
 priv build_parse_message: fn(state: Int) -> String Never! {
@@ -1050,10 +1050,10 @@ C_CLIENT_UPLOAD_BYTES: 8388608
 C_CLIENT_INTERIM: 16
 C_CLIENT_BOUNDARY: "jet-http-boundary-"
 
-__ClientURL: struct { scheme: String, host: String, port: Int, authority: String, target: String }
+priv ClientURL: struct { scheme: String, host: String, port: Int, authority: String, target: String }
 
 // One phase's per-operation timeout and the send's absolute deadline.
-__ClientPhases: struct {
+priv ClientPhases: struct {
     connect_ns: Int
     tls_ns: Int
     write_ns: Int
@@ -1063,13 +1063,13 @@ __ClientPhases: struct {
 }
 
 // A reply's body is `body`, or `live` when it is still on the connection.
-__ClientReply: struct {
+priv ClientReply: struct {
     status: Int
     headers: http.Headers
     body: [U8]
     body_error: HTTPError?
     raw_encoding: String?
-    live: __LiveBody?{None}
+    live: LiveBody?{None}
 }
 
 __send: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
@@ -1108,7 +1108,7 @@ __send: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
 // The phase timeouts of a one-shot send: each phase takes its own timeout,
 // else the blanket one (30 s by default); only an explicit total timeout
 // bounds the whole send.
-priv client_phases: fn(req: HTTPRequest) -[Time.Wait]> __ClientPhases HTTPError! {
+priv client_phases: fn(req: HTTPRequest) -[Time.Wait]> ClientPhases HTTPError! {
     blanket: req.__timeout_ms ?? C_CLIENT_TIMEOUT_MS
     if blanket < 0 -> return Err(.Timeout{phase: "transport"})
     now: rt.clock_mono_ns()
@@ -1123,7 +1123,7 @@ priv client_phases: fn(req: HTTPRequest) -[Time.Wait]> __ClientPhases HTTPError!
     write: client_phase(req.__write_timeout_ms, blanket) ?? return Err(err)
     first_byte: client_phase(req.__first_byte_timeout_ms, blanket) ?? return Err(err)
     read: client_phase(req.__read_timeout_ms, blanket) ?? return Err(err)
-    Ok(__ClientPhases{connect_ns: connect, tls_ns: tls, write_ns: write, first_byte_ns: first_byte, read_ns: read, end_ns: end_ns})
+    Ok(ClientPhases{connect_ns: connect, tls_ns: tls, write_ns: write, first_byte_ns: first_byte, read_ns: read, end_ns: end_ns})
 }
 
 priv client_phase: fn(explicit: Int?, blanket: Int) -> Int HTTPError! {
@@ -1273,7 +1273,7 @@ priv client_multipart: fn(pairs: [http.Header], boundary: String) -> String Neve
 }
 
 // An absolute http(s) URL without userinfo or fragment.
-priv client_url: fn(url: String) -> __ClientURL HTTPError! {
+priv client_url: fn(url: String) -> ClientURL HTTPError! {
     raw: url.bytes()
     sep := -1
     i := 0
@@ -1350,7 +1350,7 @@ priv client_url: fn(url: String) -> __ClientURL HTTPError! {
     }
     lower := [U8]{}
     loop byte in host -> lower.push(U8{build_lower(Int{byte})})
-    Ok(__ClientURL{
+    Ok(ClientURL{
         scheme: scheme,
         host: String.from_bytes(lower) ?? return Err(.InvalidURL),
         port: port,
@@ -1370,7 +1370,7 @@ priv client_ctl_or_space: fn(n: Int) -> Bool Never! { n < 33 || n == 127 }
 
 // A redirect `Location` resolved against the request URL: absolute,
 // scheme-relative, absolute-path, or relative to the target's directory.
-priv client_redirect_url: fn(base: __ClientURL, location: String) -> String HTTPError! {
+priv client_redirect_url: fn(base: ClientURL, location: String) -> String HTTPError! {
     if location.starts_with("http://") || location.starts_with("https://") {
         _: client_url(location) ?? return Err(err)
         return Ok(location.copy())
@@ -1394,14 +1394,14 @@ priv client_safe_method: fn(method: String) -> Bool Never! {
 // Redirects: same-origin credentials kept, no https to http downgrade,
 // 301/302/303 turn a POST into a bodyless GET, and a 307/308 replays the
 // body.
-priv client_follow: fn(original_method: String, original_url: String, original_fields: [http.Header], original_body: [U8]?, phases: __ClientPhases, limit: Int, explicit_limit: Bool, proxy_text: String?) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+priv client_follow: fn(original_method: String, original_url: String, original_fields: [http.Header], original_body: [U8]?, phases: ClientPhases, limit: Int, explicit_limit: Bool, proxy_text: String?) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     method := original_method.copy()
     url := original_url.copy()
     fields := original_fields
     body := original_body
     visited := [String]{}
     history := [String]{}
-    proxy := __ClientURL?{None}
+    proxy := ClientURL?{None}
     if proxy_text == .Val(text) {
         if text != "" -> proxy = Val(client_url(text) ?? return Err(.Proxy{stage: "transport"}))
     }
@@ -1450,7 +1450,7 @@ priv client_follow: fn(original_method: String, original_url: String, original_f
     Err(.Redirect{reason: "limit"})
 }
 
-priv client_finish: fn(reply: &&__ClientReply, history: [String]) -> HTTPResponse Never! {
+priv client_finish: fn(reply: &&ClientReply, history: [String]) -> HTTPResponse Never! {
     out := reply
     body: if out.live.move() == {
         .Val(live) -> http.body_live(live)
@@ -1474,7 +1474,7 @@ C_LIVE_LINE_BYTES: 8192
 // (C_CLIENT_BODY_BYTES, counted in `total`) is InvalidFraming. `kept` holds
 // what whole-body reads took, so a later read sees it again; `streamed`
 // marks bytes handed out by chunks and not kept.
-__LiveBody: struct {
+priv LiveBody: struct {
     tcp: TCPStream?
     tls: build_tls.TLSStream?
     buffer: [U8]
@@ -1491,7 +1491,7 @@ __LiveBody: struct {
 
 // The body's bytes, reading on until `want` of them are kept or the body
 // has ended; a body chunks already streamed past is BodyConsumed.
-priv live_kept: fn(cell: Shared<__LiveBody>, want: Int) -[Net]> [U8] HTTPError! {
+priv live_kept: fn(cell: Shared<LiveBody>, want: Int) -[Net]> [U8] HTTPError! {
     guard := cell.guard_edit()
     if guard.value.streamed -> return Err(.BodyConsumed)
     loop guard.value.kept.len() < want {
@@ -1504,7 +1504,7 @@ priv live_kept: fn(cell: Shared<__LiveBody>, want: Int) -[Net]> [U8] HTTPError! 
 }
 
 // The bytes read so far.
-priv live_seen: fn(cell: Shared<__LiveBody>) -> [U8] Never! {
+priv live_seen: fn(cell: Shared<LiveBody>) -> [U8] Never! {
     guard: cell.guard_read()
     guard.value.kept.copy()
 }
@@ -1512,7 +1512,7 @@ priv live_seen: fn(cell: Shared<__LiveBody>) -> [U8] Never! {
 // The next piece of at most `max` bytes for a chunk cursor `at` bytes in:
 // kept bytes first, then the connection's, which are not kept. The count,
 // 0 once the body has ended.
-priv live_next: fn(cell: Shared<__LiveBody>, at: Int, max: Int, &out: [U8]) -[Net]> Int HTTPError! {
+priv live_next: fn(cell: Shared<LiveBody>, at: Int, max: Int, &out: [U8]) -[Net]> Int HTTPError! {
     guard := cell.guard_edit()
     held: guard.value.kept.len()
     if at < held {
@@ -1527,7 +1527,7 @@ priv live_next: fn(cell: Shared<__LiveBody>, at: Int, max: Int, &out: [U8]) -[Ne
 // Appends at most `max` body bytes to `out`; the count, 0 once the body has
 // ended. The connection closes when the body ends or fails, and a failure
 // is returned again by every later read.
-priv live_take: fn(&live: __LiveBody, max: Int, &out: [U8]) -[Net]> Int HTTPError! {
+priv live_take: fn(&live: LiveBody, max: Int, &out: [U8]) -[Net]> Int HTTPError! {
     if live.failure == .Val(error) -> return Err(error)
     if live.done -> return Ok(0)
     if live_step(live, max, out) == {
@@ -1549,7 +1549,7 @@ priv live_take: fn(&live: __LiveBody, max: Int, &out: [U8]) -[Net]> Int HTTPErro
     }
 }
 
-priv live_step: fn(&live: __LiveBody, max: Int, &out: [U8]) -[Net]> Int HTTPError! {
+priv live_step: fn(&live: LiveBody, max: Int, &out: [U8]) -[Net]> Int HTTPError! {
     if live.framing == C_LIVE_CHUNKED && live.left == 0 {
         size: live_chunk_size(live) ?? return Err(err)
         if size == 0 -> return Ok(0)
@@ -1577,7 +1577,7 @@ priv live_step: fn(&live: __LiveBody, max: Int, &out: [U8]) -[Net]> Int HTTPErro
 
 // A chunk head's size; a head that is not hex or is past Int is
 // InvalidFraming.
-priv live_chunk_size: fn(&live: __LiveBody) -[Net]> Int HTTPError! {
+priv live_chunk_size: fn(&live: LiveBody) -[Net]> Int HTTPError! {
     line: live_line(live) ?? return Err(err)
     end := 0
     loop end < line.len() && line[end] != (U8{59}) -> end += 1
@@ -1588,7 +1588,7 @@ priv live_chunk_size: fn(&live: __LiveBody) -[Net]> Int HTTPError! {
 }
 
 // One line through its LF; the end of the stream first is IO.
-priv live_line: fn(&live: __LiveBody) -[Net]> [U8] HTTPError! {
+priv live_line: fn(&live: LiveBody) -[Net]> [U8] HTTPError! {
     line := [U8]{}
     loop {
         ready: live_fill(live) ?? return Err(err)
@@ -1603,7 +1603,7 @@ priv live_line: fn(&live: __LiveBody) -[Net]> [U8] HTTPError! {
 
 // The count of buffered bytes, reading the connection once when the buffer
 // is drained; 0 at the end of the stream.
-priv live_fill: fn(&live: __LiveBody) -[Net]> Int HTTPError! {
+priv live_fill: fn(&live: LiveBody) -[Net]> Int HTTPError! {
     if live.at < live.buffer.len() -> return Ok(live.buffer.len() - live.at)
     live.buffer.clear()
     live.at = 0
@@ -1650,12 +1650,12 @@ priv live_tls_error: fn(error: IOError) -> HTTPError Never! {
 // it (`live`). Under `jet prove` a capture
 // journals the hop (`hop` redirects in) and a replay answers it from the
 // journal instead of the network.
-__client_once: fn(method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?, hop: Int) -[Net, Time.Wait]> __ClientReply HTTPError! {
+__client_once: fn(method: String, url: ClientURL, fields: [http.Header], body: [U8]?, phases: ClientPhases, proxy: ClientURL?, hop: Int) -[Net, Time.Wait]> ClientReply HTTPError! {
     if method == "" || !valid_method(method) -> return Err(.InvalidHeader)
     prove: build_tls.prove_net_mode()
     if prove == C_CLIENT_PROVE_REPLAY -> return client_replayed(method, url, fields, body, phases, proxy, hop)
-    wire := __BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: phases.end_ns, idle_ns: 0, prove: prove, taped: [U8]{}, sends: 0, ending: "", stage: C_CLIENT_STAGE_RESOLVE, addresses: [[U8]]{}}
-    reply := __ClientReply?{None}
+    wire := BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: phases.end_ns, idle_ns: 0, prove: prove, taped: [U8]{}, sends: 0, ending: "", stage: C_CLIENT_STAGE_RESOLVE, addresses: [[U8]]{}}
+    reply := ClientReply?{None}
     failure := HTTPError?{None}
     if client_dial_exchange(wire, method, url, fields, body, phases, proxy) == {
         .Ok(got) -> reply = Val(got)
@@ -1675,7 +1675,7 @@ __client_once: fn(method: String, url: __ClientURL, fields: [http.Header], body:
 }
 
 // A body the exchange left on the connection, given the connection.
-priv live_attach: fn(pending: &&__LiveBody?, tcp: &&TCPStream?, tls: &&build_tls.TLSStream?) -> __LiveBody? Never! {
+priv live_attach: fn(pending: &&LiveBody?, tcp: &&TCPStream?, tls: &&build_tls.TLSStream?) -> LiveBody? Never! {
     body := pending ?? return None
     body.tcp = tcp
     body.tls = tls
@@ -1684,7 +1684,7 @@ priv live_attach: fn(pending: &&__LiveBody?, tcp: &&TCPStream?, tls: &&build_tls
 
 // The live hop. Each dial failure leaves its stage and portable name on the
 // wire for a capture to record.
-priv client_dial_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?) -[Net, Time.Wait]> __ClientReply HTTPError! {
+priv client_dial_exchange: fn(&wire: BuildWire, method: String, url: ClientURL, fields: [http.Header], body: [U8]?, phases: ClientPhases, proxy: ClientURL?) -[Net, Time.Wait]> ClientReply HTTPError! {
     destination: proxy ?? url
     connect_end: client_until(phases.connect_ns, phases.end_ns)
     if connect_end <= rt.clock_mono_ns() {
@@ -1718,7 +1718,7 @@ priv client_dial_exchange: fn(&wire: __BuildWire, method: String, url: __ClientU
         if proxy != None {
             // The tunnel runs on its own wire so the socket can move back
             // out; what it read and sent carries over to the hop's wire.
-            tunnel := __BuildWire{tcp: Val(tcp), tls: None, buffer: [U8]{}, at: 0, end_ns: wire.end_ns, idle_ns: phases.tls_ns, prove: wire.prove, taped: [U8]{}, sends: 0, ending: "", stage: wire.stage, addresses: [[U8]]{}}
+            tunnel := BuildWire{tcp: Val(tcp), tls: None, buffer: [U8]{}, at: 0, end_ns: wire.end_ns, idle_ns: phases.tls_ns, prove: wire.prove, taped: [U8]{}, sends: 0, ending: "", stage: wire.stage, addresses: [[U8]]{}}
             _: client_tunnel(tunnel, url) ?? {
                 client_carry(wire, tunnel)
                 client_close(tunnel)
@@ -1751,7 +1751,7 @@ priv client_dial_exchange: fn(&wire: __BuildWire, method: String, url: __ClientU
 
 // Moves a proxy tunnel's progress onto the hop's wire: the unread bytes and
 // idle bound it leaves, and for a capture what it read, sent and how it ended.
-priv client_carry: fn(&wire: __BuildWire, tunnel: __BuildWire) Never! {
+priv client_carry: fn(&wire: BuildWire, tunnel: BuildWire) Never! {
     wire.buffer = tunnel.buffer.copy()
     wire.at = tunnel.at
     wire.idle_ns = tunnel.idle_ns
@@ -1771,7 +1771,7 @@ priv client_resolve_portable: fn(message: String) -> String Never! {
 // of the network. The wire starts as the recorded stream, so the exchange
 // parses exactly the bytes the capture read. A record the run does not hold
 // next ends the hop as IO; the parent reports the divergence (E3623).
-priv client_replayed: fn(method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?, hop: Int) -[Net, Time.Wait]> __ClientReply HTTPError! {
+priv client_replayed: fn(method: String, url: ClientURL, fields: [http.Header], body: [U8]?, phases: ClientPhases, proxy: ClientURL?, hop: Int) -[Net, Time.Wait]> ClientReply HTTPError! {
     record: build_tls.prove_net_take(__client_net_request(hop, method, url, fields, body))
     stage: client_take_u64(record, 0)
     sends: client_take_u64(record, 8)
@@ -1783,7 +1783,7 @@ priv client_replayed: fn(method: String, url: __ClientURL, fields: [http.Header]
         if stage == C_CLIENT_STAGE_RESOLVE -> return Err(.Resolve{host: "<redacted>"})
         return Err(.Connect{address: "<redacted>"})
     }
-    wire := __BuildWire{tcp: None, tls: None, buffer: build_slice(record, 24, 24 + size), at: 0, end_ns: phases.end_ns, idle_ns: 0, prove: C_CLIENT_PROVE_REPLAY, taped: [U8]{}, sends: sends, ending: ending, stage: stage, addresses: [[U8]]{}}
+    wire := BuildWire{tcp: None, tls: None, buffer: build_slice(record, 24, 24 + size), at: 0, end_ns: phases.end_ns, idle_ns: 0, prove: C_CLIENT_PROVE_REPLAY, taped: [U8]{}, sends: sends, ending: ending, stage: stage, addresses: [[U8]]{}}
     if url.scheme == "https" {
         if proxy != None {
             wire.idle_ns = phases.tls_ns
@@ -1801,7 +1801,7 @@ priv client_replayed: fn(method: String, url: __ClientURL, fields: [http.Header]
 // numbers, each text or byte string after its u64 length): the hop, method,
 // scheme, host, port, target, the field count and each (name, value), then 1
 // and the body, or 0 for none.
-__client_net_request: fn(hop: Int, method: String, url: __ClientURL, fields: [http.Header], body: [U8]?) -> [U8] Never! {
+__client_net_request: fn(hop: Int, method: String, url: ClientURL, fields: [http.Header], body: [U8]?) -> [U8] Never! {
     out := [U8]{}
     client_put_u64(out, hop)
     client_put_bytes(out, method.bytes())
@@ -1828,7 +1828,7 @@ __client_net_request: fn(hop: Int, method: String, url: __ClientURL, fields: [ht
 // header fields of the reply the program saw (0 when it saw none), and the
 // ending: `eof` once the stream ended or the run read no further, else a
 // portable error name (`unmapped` when the failure has none).
-__client_net_tape: fn(hop: Int, method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, wire: __BuildWire, seen: __ClientReply?) -> [U8] Never! {
+__client_net_tape: fn(hop: Int, method: String, url: ClientURL, fields: [http.Header], body: [U8]?, wire: BuildWire, seen: ClientReply?) -> [U8] Never! {
     out := __client_net_request(hop, method, url, fields, body)
     client_put_u64(out, wire.stage)
     client_put_u64(out, wire.addresses.len())
@@ -1877,7 +1877,7 @@ priv client_take_u64: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // A TLS stream owns its socket until closed: close it so the peer sees
 // close_notify; the reply is already decided either way.
-priv client_close: fn(&wire: __BuildWire) Never! -[Net, Time.Wait]> {
+priv client_close: fn(&wire: BuildWire) Never! -[Net, Time.Wait]> {
     if wire.tls == .Val(stream) {
         if stream.close() == {
             .Ok(_) -> {}
@@ -1887,7 +1887,7 @@ priv client_close: fn(&wire: __BuildWire) Never! -[Net, Time.Wait]> {
 }
 
 // `CONNECT host:port` through an http proxy; any failure is Proxy.
-priv client_tunnel: fn(&wire: __BuildWire, url: __ClientURL) HTTPError! -[Net, Time.Wait]> {
+priv client_tunnel: fn(&wire: BuildWire, url: ClientURL) HTTPError! -[Net, Time.Wait]> {
     authority: "{url.host}:{url.port}"
     _: build_send(wire, "CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\nProxy-Connection: keep-alive\r\n\r\n".bytes()) ?? return Err(.Proxy{stage: "transport"})
     head: client_head(wire) ?? return Err(.Proxy{stage: "transport"})
@@ -1896,7 +1896,7 @@ priv client_tunnel: fn(&wire: __BuildWire, url: __ClientURL) HTTPError! -[Net, T
     Ok()
 }
 
-priv client_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxied: Bool) -[Net, Time.Wait]> __ClientReply HTTPError! {
+priv client_exchange: fn(&wire: BuildWire, method: String, url: ClientURL, fields: [http.Header], body: [U8]?, phases: ClientPhases, proxied: Bool) -[Net, Time.Wait]> ClientReply HTTPError! {
     target: if proxied && url.scheme == "http" -> "{url.scheme}://{url.authority}{url.target}" else -> url.target.copy()
     head := "{method} {target} HTTP/1.1\r\nHost: {url.authority}\r\n"
     has_length := false
@@ -1979,8 +1979,8 @@ priv client_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL, f
             length == None -> C_LIVE_EOF
             else -> C_LIVE_LENGTH
         }
-        live: __LiveBody{tcp: None, tls: None, buffer: wire.buffer.copy(), at: wire.at, read_ns: read_bound, framing: framing, left: length ?? 0, total: 0, done: false, failure: None, kept: [U8]{}, streamed: false}
-        return Ok(__ClientReply{status: reply.status, headers: reply.headers, body: [U8]{}, body_error: None, raw_encoding: raw_encoding, live: Val(live)})
+        live: LiveBody{tcp: None, tls: None, buffer: wire.buffer.copy(), at: wire.at, read_ns: read_bound, framing: framing, left: length ?? 0, total: 0, done: false, failure: None, kept: [U8]{}, streamed: false}
+        return Ok(ClientReply{status: reply.status, headers: reply.headers, body: [U8]{}, body_error: None, raw_encoding: raw_encoding, live: Val(live)})
     }
     if !bodyless {
         if transfer.len() > 0 {
@@ -2010,7 +2010,7 @@ priv client_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL, f
         }
         fields_out = http.Headers{fields: kept}
     }
-    Ok(__ClientReply{status: reply.status, headers: fields_out, body: payload, body_error: failure, raw_encoding: raw_encoding})
+    Ok(ClientReply{status: reply.status, headers: fields_out, body: payload, body_error: failure, raw_encoding: raw_encoding})
 }
 
 priv client_length: fn(text: String) -> Int? Never! {
@@ -2028,20 +2028,20 @@ priv client_length: fn(text: String) -> Int? Never! {
 
 // A transport failure is Timeout when the stream reports one or the send's
 // deadline has passed, else IO.
-priv client_timed_out: fn(wire: __BuildWire, message: String) -[Time.Wait]> Bool Never! {
+priv client_timed_out: fn(wire: BuildWire, message: String) -[Time.Wait]> Bool Never! {
     // Under `jet prove` the recorded ending decides (build_tape_fail), so a
     // replay classifies the failure as its capture did.
     if wire.prove != 0 -> return message.contains("timed out")
     message.contains("timed out") || message.contains("timeout") || rt.clock_mono_ns() >= wire.end_ns
 }
 
-priv client_wire_error: fn(wire: __BuildWire, failure: __BuildHTTPFailure) -[Time.Wait]> HTTPError Never! {
+priv client_wire_error: fn(wire: BuildWire, failure: __BuildHTTPFailure) -[Time.Wait]> HTTPError Never! {
     if client_timed_out(wire, failure.message) -> return HTTPError.Timeout{phase: "transport"}
     HTTPError.IO{operation: "transport"}
 }
 
 // Body framing faults are InvalidFraming; a short or broken stream is IO.
-priv client_body_error: fn(wire: __BuildWire, failure: __BuildHTTPFailure) -[Time.Wait]> HTTPError Never! {
+priv client_body_error: fn(wire: BuildWire, failure: __BuildHTTPFailure) -[Time.Wait]> HTTPError Never! {
     message: failure.message
     if client_timed_out(wire, message) -> return HTTPError.Timeout{phase: "transport"}
     if message.starts_with("invalid") || message.contains("chunk head") || message.contains("digit") || message.contains("number") -> return HTTPError.InvalidFraming
@@ -2049,7 +2049,7 @@ priv client_body_error: fn(wire: __BuildWire, failure: __BuildHTTPFailure) -[Tim
 }
 
 // The head bytes through the blank line (at most 64 KiB); EOF first is IO.
-priv client_head: fn(&wire: __BuildWire) -[Net, Time.Wait]> [U8] HTTPError! {
+priv client_head: fn(&wire: BuildWire) -[Net, Time.Wait]> [U8] HTTPError! {
     head := [U8]{}
     loop {
         n: head.len()
@@ -2062,7 +2062,7 @@ priv client_head: fn(&wire: __BuildWire) -[Net, Time.Wait]> [U8] HTTPError! {
 
 // The status line and header fields: names lowercased, values trimmed of
 // spaces and tabs, at most 100 fields.
-priv client_parse_head: fn(head: [U8]) -> __ClientReply HTTPError! {
+priv client_parse_head: fn(head: [U8]) -> ClientReply HTTPError! {
     text: String.from_bytes(head) ?? return Err(.InvalidHeader)
     lines: build_slice_text(text, 0, text.bytes().len() - 4).split("\r\n").to_list()
     if lines.len() == 0 -> return Err(.InvalidFraming)
@@ -2087,7 +2087,7 @@ priv client_parse_head: fn(head: [U8]) -> __ClientReply HTTPError! {
         if !http.client_header_name(name) || !http.client_header_value(value) -> return Err(.InvalidHeader)
         fields.push(http.Header{name: ascii_lower(name), value: client_trim_ows(value)})
     }
-    Ok(__ClientReply{status: status, headers: http.Headers{fields: fields}, body: [U8]{}, body_error: None, raw_encoding: None})
+    Ok(ClientReply{status: status, headers: http.Headers{fields: fields}, body: [U8]{}, body_error: None, raw_encoding: None})
 }
 
 // `str::parse::<i64>`: an optional sign and decimal digits.
