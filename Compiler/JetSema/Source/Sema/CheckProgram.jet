@@ -4804,21 +4804,16 @@ sema_check_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegi
     jobs
 }
 
+// A method a compiler thread may check: not already checked by comptime, and
+// with a memory plan row. A generic owner's method is one too: its owner's
+// generic parameters come with its input (SemaMethodInput.generic_params) and
+// the thread checks it on its own copy of the environment with them set
+// (sema_function_check_registered_on_thread), as the lead does.
 sema_check_method_parallel_eligible: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, comptime_rows: [String:Int]) -> Bool {
     if comptime_rows.get("{source_module.module_identity.id}\n{symbol_table_key(graph.symbols, registered.symbol.id)}") != None {
         return false
     }
-    if memory_plan.positions.get(sema_function_memory_key(source_module.module_identity, sema_serde_named_leaf(sema_type_graph_base_name(owner_type) ?? ""), registered.declaration.name, registered.declaration.span)) == None {
-        return false
-    }
-    // A concrete generic owner still has declared generics, even when
-    // owner-generic normalization would return no unresolved parameters.
-    owner_row := sema_type_resolve_nominal_row(graph, owner_type, source_module.module_identity)
-    if owner_row == .Val(found) {
-        return graph.modules[found.module_index].nominals[found.row].generic_params.len() == 0
-    }
-    if owner_type == .Apply(_, _) -> return false
-    true
+    memory_plan.positions.get(sema_function_memory_key(source_module.module_identity, sema_serde_named_leaf(sema_type_graph_base_name(owner_type) ?? ""), registered.declaration.name, registered.declaration.span)) != None
 }
 
 sema_check_parallel_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, generic_params: [TGenericParam], all_jobs: [SemaBodyJob], comptime_rows: [String:Int], weights: &[Int]) -> [SemaBodyJob] {
