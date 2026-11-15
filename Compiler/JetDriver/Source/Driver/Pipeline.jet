@@ -1690,13 +1690,15 @@ jet_driver_comptime_closure_prefetch: fn(environment: &SemaScopeEnvironment, pro
 
 // The functions the complete prechecks of the pass's items reach first, as
 // each item's closure queues them (jet_driver_comptime_function_closure).
+// An item its precheck folded lands that fold at its turn and has no
+// closure, so it seeds nothing: most of a pass's items are folded tables.
 jet_driver_comptime_prefetch_seeds: fn(program: SemaProgramTables, index: &JetDriverComptimeRunIndex, prechecks: [SemaComptimeItemCheck?], seen: &[Int:Bool]) -> [SemaComptimeFunctionJob] {
     jobs := [SemaComptimeFunctionJob]{}
     graph_option: program.registration_graph
     graph: graph_option ?? return jobs
     loop at in 0..<prechecks.len() {
         if prechecks[at] == .Val(check) {
-            if !check.complete || check.waiting_dependencies.len() > 0 -> next
+            if !check.complete || check.waiting_dependencies.len() > 0 || check.folded != None -> next
             if check.request == .Val(request) {
                 loop call in request.calls {
                     jet_driver_comptime_prefetch_add(index, seen, jobs, call.module_identity, call.callee_key)
