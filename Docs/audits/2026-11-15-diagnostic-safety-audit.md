@@ -31,7 +31,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0002 | UnterminatedText | Compiler/JetLexer/Source/Lexer/Payload.jet:845 | no opt-in decides where unterminated text ends |
 | E0003 | InvalidStatement | Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet:54 | no opt-in gives an incomplete statement a meaning |
 | E0029 | DuplicateAccessMarker | Compiler/JetParser/Source/Parser/Items.jet:935 | one parameter has one access mode; write the one meant |
-| E0035 | InvalidEnumDiscriminant | Compiler/JetSema/Source/Sema/CheckProgram.jet:9908 | the layout needs a known number that fits the representation |
+| E0035 | InvalidEnumDiscriminant | Compiler/JetSema/Source/Sema/CheckProgram.jet:9907 | the layout needs a known number that fits the representation |
 | E0064 | InvalidForeignBody | Compiler/JetParser/Source/Parser/Items.jet:1563 | the foreign body is the code; no opt-in supplies it |
 | E0067 | ReservedDunderName | Compiler/JetSema/Source/Sema/Calls/Core.jet:1506 | the reserved names belong to generated code |
 | E0072 | CollectingLoopNotFinite | Compiler/JetParser/Source/Parser/ExpressionForms/Loops.jet:286 | no opt-in finishes a loop that has no exit |
@@ -112,7 +112,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0332 | CaseGroupAsValue | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:947 | a value is one variant |
 | E0336 | PatchableGenericStruct | Compiler/JetSema/Source/Sema/Registration/Checked.jet:2504 | the patch type is generated for a concrete struct |
 | E0337 | PatchableFunctionField | Compiler/JetSema/Source/Sema/Registration/Checked.jet:2509 | store a callable handle type, which a patch can hold |
-| E0338 | ComputedFieldCycle | Compiler/JetSema/Source/Sema/CheckProgram.jet:9928 | no opt-in gives a cyclic formula a value |
+| E0338 | ComputedFieldCycle | Compiler/JetSema/Source/Sema/CheckProgram.jet:9927 | no opt-in gives a cyclic formula a value |
 | E0339 | ComputedFieldAssigned | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:676 | write the stored fields the formula reads |
 | E0343 | SwitchOffAsExpression | Compiler/JetParser/Source/Parser/Expressions.jet:1140 | `#Off` applies to whole statements |
 | E0344 | DuplicateSwitchOff | Compiler/JetParser/Source/Parser/Statements.jet:2194 | one statement has one switch |
@@ -163,10 +163,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0516 | DeepCheckPropagatesFailure | Compiler/JetSema/Source/Sema/Statements.jet:7437 | handle the failure inside the body |
 | E0517 | DeepCheckChangesState | Compiler/JetSema/Source/Sema/Ownership/Checks.jet:3066 | change a copy the body makes itself |
 | E0603 | UseTargetNotFound | Compiler/JetCli/Source/Cli/Inspect.jet:1508 | no opt-in imports a file that is not there |
-| E0604 | UseCycle | Compiler/JetDriver/Source/Driver/Loader.jet:2545 | move the shared names into a module both import |
+| E0604 | UseCycle | Compiler/JetDriver/Source/Driver/Loader.jet:2547 | move the shared names into a module both import |
 | E0605 | PrivateItem | Compiler/JetSema/Source/Sema/Calls/Core.jet:429 | reach the item through its module's public declarations |
 | E0606 | AmbiguousModule | Compiler/JetCli/Source/Cli/Project.jet:111 | the full module path names one module |
-| E0607 | ModuleFileNotFound | Compiler/JetDriver/Source/Driver/Loader.jet:2531 | no opt-in declares a module without its file |
+| E0607 | ModuleFileNotFound | Compiler/JetDriver/Source/Driver/Loader.jet:2533 | no opt-in declares a module without its file |
 | E0608 | UnknownInlineModuleFunction | Compiler/JetSema/Source/Sema/InlineModules.jet:828 | no opt-in calls a function the module does not define |
 | E0609 | UsePrivateModuleItem | Compiler/JetSema/Source/Sema/InlineModules.jet:923 | reach the item through its enclosing module's public declarations |
 | E0610 | UseAliasNotModule | Compiler/JetSema/Source/Sema/Diagnostics.jet:264 | a `use` path starts at a module in scope |
@@ -177,10 +177,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0616 | SetupNotFirst | Compiler/JetSema/Source/Sema/ScopeMembers.jet:329 | `.setup` is the test's first statement |
 | E0617 | ScopeMemberArgumentMismatch | Compiler/JetSema/Source/Sema/Statements.jet:7496 | a member takes its declared arguments |
 | E0618 | NestedScopeMember | Compiler/JetSema/Source/Sema/ScopeMembers.jet:339 | members sit at the top level of the marker block |
-| E0621 | TopLevelStatementsBesideRun | Compiler/JetSema/Source/Sema/CheckProgram.jet:11244 | a program has one entry |
+| E0621 | TopLevelStatementsBesideRun | Compiler/JetSema/Source/Sema/CheckProgram.jet:11243 | a program has one entry |
 | E0622 | ModuleGlobalNotLiteral | Compiler/JetSema/Source/Sema/Registration/Checked.jet:4153 | a global without `#Persist` may compute its starting value |
-| E0624 | DuplicatePackageName | Compiler/JetDriver/Source/Driver/Loader.jet:3065 | each top-level name belongs to one file of the package |
-| E0625 | RunInLibrary | Compiler/JetDriver/Source/Driver/Loader.jet:3078 | an executable package declares the entry |
+| E0624 | DuplicatePackageName | Compiler/JetDriver/Source/Driver/Loader.jet:3068 | each top-level name belongs to one file of the package |
+| E0625 | RunInLibrary | Compiler/JetDriver/Source/Driver/Loader.jet:3081 | an executable package declares the entry |
 | E0626 | DependencyCheckFailed | Compiler/JetDriver/Source/Driver/Pipeline.jet:410 | the dependency's errors are fixed in the dependency |
 | E0628 | ModuleFileItemMember | Compiler/JetSema/Source/Sema/Diagnostics.jet:271 | the file is reached at the start of a `use` path |
 | E0629 | ModuleAsValue | Compiler/JetSema/Source/Sema/Diagnostics.jet:277 | a module is not a value |
@@ -190,7 +190,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0636 | TypeAsValue | Compiler/JetSema/Source/Sema/Diagnostics.jet:283 | a type is not a value |
 | E0638 | NestedFnFailureMismatch | Compiler/JetSema/Source/Sema/Diagnostics.jet:506 | wrap the held functions in the form the destination needs |
 | E0640 | CompileTimeReadsRuntimeValue | Compiler/JetSema/Source/Sema/Diagnostics.jet:418 | compile-time code reads compile-time values |
-| E0643 | ModuleValueNotBuilt | Compiler/JetDriver/Source/Driver/Pipeline.jet:2258 | compute the value inside `run: fn` |
+| E0643 | ModuleValueNotBuilt | Compiler/JetDriver/Source/Driver/Pipeline.jet:2262 | compute the value inside `run: fn` |
 | E0702 | FfiBoundaryTypeNotAllowed | Compiler/JetSema/Source/Sema/Effects/Checks.jet:3568 | the boundary takes types with an agreed foreign layout |
 | E0703 | MissingCargo | Jetpack/Integrations/Source/Foreign/RustBridge/BuildBridge.jet:133 | install `cargo` to build `extern rust` crates |
 | E0704 | ForeignCrateBuildFailed | Jetpack/Integrations/Source/Foreign/RustBridge/BuildBridge.jet:279 | the crate builds before its functions are called |
@@ -323,12 +323,12 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0996 | InvalidMembersList | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:410 | `members:` evaluates to `[String]` |
 | E0997 | MembersDirectoryNotFound | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:557 | the directory exists relative to `workspace.jet` |
 | E0998 | InvalidOverlayPolicy | Jetpack/CLI/Source/Commands/ExplainCommand.jet:79 | the overlay policy is written in its declared form |
-| E1001 | UnknownCoreModule | Compiler/JetDriver/Source/Driver/Loader.jet:4596 | Core's runtime units are imported only by Core sources |
-| E1002 | ReservedRootShadowed | Compiler/JetDriver/Source/Driver/Loader.jet:3150 | a local module takes a name outside the reserved roots |
+| E1001 | UnknownCoreModule | Compiler/JetDriver/Source/Driver/Loader.jet:4609 | Core's runtime units are imported only by Core sources |
+| E1002 | ReservedRootShadowed | Compiler/JetDriver/Source/Driver/Loader.jet:3153 | a local module takes a name outside the reserved roots |
 | E1003 | IntegerOutOfRange | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:2836 | the value fits the width, or stays an exact `Int` |
 | E1004 | UnknownCoreItem | Compiler/JetSema/Source/Sema/Calls/Core.jet:514 | no opt-in imports an item the module does not define |
 | E1005 | InvalidOverflowOptIn | Compiler/JetSema/Source/Sema/Calls/Direct.jet:50 | the opt-in wraps exactly one integer operation or narrowing conversion |
-| E1006 | RuntimeCeilingExceeded | Compiler/JetSema/Source/Sema/CheckProgram.jet:10072 | the ceiling is raised where the package declares it |
+| E1006 | RuntimeCeilingExceeded | Compiler/JetSema/Source/Sema/CheckProgram.jet:10071 | the ceiling is raised where the package declares it |
 | E1007 | InvalidBitWidth | Compiler/JetParser/Source/Parser/Patterns.jet:221 | holes are `U<1..64>` with an optional `be` or `le` |
 | E1008 | InvalidEndianSuffix | Compiler/JetSema/Source/Sema/Patterns.jet:1136 | multi-byte reads state `be` or `le` |
 | E1009 | MisplacedRestCapture | Compiler/JetParser/Source/Parser/Patterns.jet:331 | the rest capture is the pattern's last part |
@@ -379,8 +379,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1216 | UnknownTargetsField | Jetpack/PackageModel/Source/Manifest/Manifest.jet:498 | `targets:` takes its declared fields |
 | E1219 | UnknownProfile | Compiler/JetCli/Source/Cli/Front.jet:1360 | the profile is built in or declared in `package.jet` |
 | E1220 | DependencyAuthorityExceeded | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:548 | the effect is added to the dependency's grant line |
-| E1221 | InvalidAuthorityBlock | Compiler/JetDriver/Source/Driver/Loader.jet:263 | `authority:` is written in its one block form |
-| E1222 | InvalidProgramAllocator | Compiler/JetDriver/Source/Driver/Loader.jet:678 | `mem.Heap` or a counting allocator over it with a valid cap |
+| E1221 | InvalidAuthorityBlock | Compiler/JetDriver/Source/Driver/Loader.jet:265 | `authority:` is written in its one block form |
+| E1222 | InvalidProgramAllocator | Compiler/JetDriver/Source/Driver/Loader.jet:680 | `mem.Heap` or a counting allocator over it with a valid cap |
 | E1224 | PackageFileOperationFailed | Compiler/JetCli/Source/Cli/Host.jet:2935 | the file is readable and writable |
 | E1227 | EngineProtocolMismatch | Compiler/JetCli/Source/Cli/InspectB.jet:662 | `jet` and its engines come from one toolchain |
 | E1228 | MissingEngine | Compiler/JetCli/Source/Cli/InspectB.jet:643 | install the engine with the toolchain |
@@ -425,7 +425,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1274 | MissingStoreRecord | Jetpack/CLI/Source/Commands/DiscoveryCommands.jet:216 | the package is realized here first |
 | E1276 | OfflineNeedsNetwork | Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:520 | the verb runs online |
 | E1292 | MissingRandomness | Jetpack/Publication/Source/Sign.jet:185 | the operating system provides randomness |
-| E1294 | UnknownJob | Compiler/JetIR/Source/Build.jet:1741 | the name is a `#Job fn` of the entry |
+| E1294 | UnknownJob | Compiler/JetIR/Source/Build.jet:1743 | the name is a `#Job fn` of the entry |
 | E1295 | UnknownGitRef | Jetpack/Environment/Source/Workspace/MemberSelect.jet:341 | the ref names a commit |
 | E1297 | ToolJobConflict | Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:714 | the tool or the job takes another name |
 | E1298 | ToolProviderUnavailable | Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:717 | use a provider with a handler |
@@ -472,16 +472,16 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1351 | NixExecutionUnavailable | Jetpack/Store/Source/Shell/NixProjection.jet:221 | the host supports the isolated projection |
 | E1355 | OutsideProjectEnvironment | Compiler/JetCli/Source/Cli/EnvBoundary.jet:63 | the command runs inside `jetpack env` |
 | E1358 | InvalidRef | Jetpack/CLI/Source/Output/RefErrorReport.jet:7 | the ref is written `package@source` or as a local path |
-| E1361 | DuplicateInlinePackage | Compiler/JetDriver/Source/Driver/Loader.jet:3420 | one `package:` block per file |
-| E1362 | MalformedInlinePackage | Compiler/JetDriver/Source/Driver/Loader.jet:3416 | the block is balanced |
-| E1363 | InlinePackageConflict | Compiler/JetDriver/Source/Driver/Loader.jet:1162 | the facts live in one place |
+| E1361 | DuplicateInlinePackage | Compiler/JetDriver/Source/Driver/Loader.jet:3423 | one `package:` block per file |
+| E1362 | MalformedInlinePackage | Compiler/JetDriver/Source/Driver/Loader.jet:3419 | the block is balanced |
+| E1363 | InlinePackageConflict | Compiler/JetDriver/Source/Driver/Loader.jet:1164 | the facts live in one place |
 | E1403 | NestingTooDeep | Compiler/JetSema/Source/Sema/Expressions.jet:7543 | deep nesting is split into named pieces |
 | E1410 | DuplicateDevtoolsPanel | Compiler/JetSema/Source/Sema/Calls/Devtools.jet:154 | one panel per identity |
 | E1411 | InvalidDevtoolsPanel | Compiler/JetSema/Source/Sema/Calls/Devtools.jet:158 | the panel matches the public contract |
 | E1412 | UnknownDevtoolsField | Compiler/JetSema/Source/Sema/Calls/Devtools.jet:41 | the publication names a marked panel field |
 | E1803 | ApplicationAuthorityDenied | Compiler/JetCli/Source/Cli/Authority.jet:394 | the deny row or `--deny` no longer names the right |
 | E1805 | RemoteSourceRefused | Compiler/JetCli/Source/Cli/RemoteRun.jet:123 | an `https://` address whose bytes match the pin |
-| E2001 | EditionTooNew | Compiler/JetDriver/Source/Driver/Loader.jet:1474 | build with a Jet that knows the edition |
+| E2001 | EditionTooNew | Compiler/JetDriver/Source/Driver/Loader.jet:1476 | build with a Jet that knows the edition |
 | E2002 | DeprecatedPastWindow | Compiler/JetSema/Source/Sema/Edition.jet:172 | the item's replacement is used |
 | E2101 | UnknownCommand | Compiler/JetCli/Source/Cli/Front.jet:741 | the command is spelled under its area |
 | E2102 | UnknownFlag | Compiler/JetCli/Source/Cli/Bindings.jet:17 | the flag is spelled as Jet defines it |
