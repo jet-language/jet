@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6953,
-    "rev": 105200,
+    "rev": 105225,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32639,57 +32639,57 @@
         },
         {
           "n": 6,
-          "text": "Native translated-recipe builds are exercised beyond fixture/prebuilt catalog paths. Any binary reuse separately proves native references, integrity, target compatibility and license preservation; copying a Nix closure does not satisfy this criterion.",
+          "text": "Translated recipes build natively beyond the fixture and prebuilt-catalog paths, and any binary reuse separately proves native references, integrity, target compatibility and license preservation (copying a Nix closure does not count). Proof: `jet test Compiler --profile packages --filter NixTranslate/native_build_` and `--filter NixTranslate/binary_reuse_proofs`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-13T13:59:55.740Z"
+          "at": "2026-11-15T05:05:27.828Z"
         },
         {
           "n": 7,
-          "text": "Existing project trust, precedence, limits, locked/offline behavior and supported inputs remain correct on the declared native systems. Unsupported valid package cases remain defects or uncovered scope, never silent fallback or a complete-compatibility claim.",
+          "text": "Existing project trust, precedence, limits, locked and offline behavior and supported inputs stay correct on the declared native systems, and an unsupported valid package is a reported defect, never a silent fallback or a full-compatibility claim. Proof: `jet test Compiler --profile packages --filter NixTranslate/unsupported_is_reported`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-13T13:59:55.740Z"
+          "at": "2026-11-15T05:05:29.276Z"
         },
         {
           "n": 8,
-          "text": "The entire #410 native build-and-boot no-Nix contract remains intact; the adapter is bypassed for native Jet packages and supplies no boot-time Nix authority.",
+          "text": "The native build-and-boot no-Nix contract (#410) holds: the adapter is bypassed for native Jet packages and supplies no boot-time Nix authority. Proof: `jet test Compiler --profile packages --filter NixTranslate/native_packages_bypass_adapter`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-13T13:59:55.740Z"
+          "at": "2026-11-15T05:05:30.658Z"
         },
         {
           "n": 10,
-          "text": "Jet-owned code remains MIT; incorporated permissive dependencies retain required notices, and managed packages retain their own licenses. No incompatible Nix implementation code is imported or relicensed.",
+          "text": "Jet-owned code stays MIT, incorporated permissive dependencies keep their required notices, managed packages keep their own licenses, and no incompatible Nix implementation code is imported or relicensed. Proof: `jet test tests/guards --filter license_notices`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-13T13:59:55.740Z"
+          "at": "2026-11-15T05:05:32.069Z"
         },
         {
           "n": 11,
-          "text": "C9 proof runs through the Jet-built jetpack (`jet test Compiler --profile packages` plus a mixed native/Nixpkgs env realize/run/update/remove on O0, O1 and O2); the E1272 postgres@nixpkgs hole is replaced by real native realization.",
+          "text": "The mixed native and Nixpkgs env realizes, runs, updates and removes through the Jet-built jetpack on O0, O1 and O2, and the E1272 postgres@nixpkgs hole in tests/fixtures/jetpack-project/env.jet becomes a real native realization. Proof: `jet test Compiler --profile packages --filter NixTranslate` and `jet test Compiler --profile cases --filter jetpack_nix/postgres_nixpkgs_realizes`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:28:46.941Z"
+          "at": "2026-11-15T05:05:33.351Z"
         },
         {
           "n": 12,
-          "text": "[#3036] Reconstruct canonical NAR from narinfo-authorized hints and verified CAS units. StorePath, NarHash, NarSize and References agree before publication. Unit hashes are integrity facts only. Hangar identity, closure and atomic publication match the whole-NAR route. Hostile plans fail without publication. The planner picks whole NAR when delta is uneconomic, and measurements include metadata overhead. One unit/assembler path. Proof: `--area Store --tests` CHECK OK with the NixCasDelta claims.",
+          "text": "A canonical NAR is rebuilt from narinfo-authorized hints and verified content-addressed units: StorePath, NarHash, NarSize and References agree before publication, unit hashes are integrity facts only, Hangar identity, closure and atomic publication match the whole-NAR route, hostile plans fail without publication, and the planner picks the whole NAR when a delta is uneconomic, counting metadata overhead. Proof: `jet test Compiler --profile packages --filter NixCasDelta`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:58:33.923Z"
+          "at": "2026-11-15T05:05:34.649Z"
         },
         {
           "n": 13,
@@ -32742,7 +32742,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-09-13T11:40:48.925Z",
-      "updated": "2026-11-15T05:05:26.139Z",
+      "updated": "2026-11-15T05:05:34.649Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
@@ -45688,20 +45688,22 @@
         {
           "n": 26,
           "text": "[#4279] D-ENV-FACET1, D-ENV-FILES1, D-ENV-FLAKEGRAPH1, D-ENV-FLAKEPARTS1, D-ENV-LANGPACK1 and D-ENV-LIFECYCLE2: the typed environment graph, files and lifecycle, plus --env versus --preset.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:45:06.552Z"
+          "evidence": "Moved to #4275 c152: split per decision into FACET, FILES, FLAKEGRAPH, FLAKEPARTS and LANGPACK; D-ENV-LIFECYCLE2 is #6937 c1",
+          "at": "2026-11-15T05:06:24.384Z",
+          "closure": "obsolete"
         },
         {
           "n": 27,
           "text": "[#4270] Ratified activation, secrets and trust contracts: • D-ENVHOOK1: activation hook. • D-JPK-BUILDSCRIPT1: unreviewed hooks are held. • D-JPK-FRESHNESS1: the 24 h freshness wait. • D-JPK-SECRETCOMPOSE1 and D-JPK-SECRETMETA1: typed secrets and templates. • D-REGCURATE1: the curated registry tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:45:07.929Z"
+          "evidence": "Moved to #4275 c157: split per decision into ENVHOOK, BUILDSCRIPT, FRESHNESS and REGCURATE; the secrets contracts are #6939 c2 and c3",
+          "at": "2026-11-15T05:06:25.308Z",
+          "closure": "obsolete"
         },
         {
           "n": 28,
@@ -45750,39 +45752,39 @@
         },
         {
           "n": 142,
-          "text": "(was #653 c3, #654 c3, #851 c3, #1014 c3, #1017 c3, #1015 c3, #1018 c3, #852 c3) Reject conflicting, cyclic, escaping, ambiguous, or stale package facts before state changes. Give a precise diagnostic with source provenance [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Conflicting, cyclic, escaping, ambiguous or stale package facts are refused before any state change, each with a precise error carrying source provenance. Proof: `jet test Compiler --profile packages --filter manifest_facts_refused_before_state_change_`, one case per kind.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:46:05.728Z"
+          "at": "2026-11-15T05:06:21.611Z"
         },
         {
           "n": 143,
-          "text": "(was #2511 c2) The probe program (package authority.holds allow [FS, Time]; own fn fetch declares -[Net]> and calls http.get) fails jet check and jet build with the registered authority diagnostic naming fetch and Net, with a UI snapshot; the same program passes once Net is added to the allow list. Own code is in scope because D-AUTHORITY-MANIFEST1 makes the authority block the package bound and D-EFFBUDGET1 enforces it over the whole graph; narrowing that scope would need its own ballot [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "With `authority.holds allow [FS, Time]`, a package whose own fn `fetch` declares `-[Net]>` and calls http.get fails `jet check` and `jet build` with the registered authority error naming fetch and Net, and passes once Net is allowed; own code is in scope (D-AUTHORITY-MANIFEST1, D-EFFBUDGET1). Proof: `jet test Compiler --profile ui --filter authority_manifest_own_code_net`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:46:06.347Z"
+          "at": "2026-11-15T05:06:22.563Z"
         },
         {
           "n": 148,
-          "text": "(was #6067 c9, earlier #2161 c2) JET_ROOT, TZDIR, JET_ENV_DISABLE, the Linux loader path and the one-time cleanup behaviour are modelled through ratified typed mechanisms, each proven by a test, golden, case or snapshot.",
+          "text": "JET_ROOT, TZDIR, JET_ENV_DISABLE, the Linux loader path and the one-time cleanup behavior are each modelled through a ratified typed mechanism. Proof: `jet test Compiler --profile packages --filter env_variables_typed_`, one case per variable.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T19:04:30.096Z"
+          "at": "2026-11-15T05:06:23.466Z"
         },
         {
           "n": 149,
-          "text": "The inline `package {}` header of a single-file package is parsed into ordinary package info, and E1362 and E1363 cover a malformed header and a header plus a manifest. Proof: `jet test Compiler --profile ui --filter E1362` and `--filter E1363`.",
+          "text": "A user inline `package {}` header of a single-file package is parsed and validated into ordinary package info before authorized-source loading (D-ECO-INLINEPACKAGE1), with E1360-E1363 covering its errors, including a malformed header and a header plus a manifest. Proof: `jet test Compiler --profile ui --filter E1360`, `--filter E1361`, `--filter E1362` and `--filter E1363`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:52:45.843Z"
+          "at": "2026-11-15T05:06:20.623Z"
         },
         {
           "n": 150,
@@ -45801,6 +45803,123 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T05:03:39.899Z"
+        },
+        {
+          "n": 152,
+          "text": "D-ENV-FACET1=A: environment facet selection is explicit, and the active facet is disclosed. Proof: `jet test Compiler --profile packages --filter d_env_facet1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:08.115Z"
+        },
+        {
+          "n": 153,
+          "text": "D-ENV-FILES1=A: one managed file graph with safe shorthand and exact sync policy. Proof: `jet test Compiler --profile packages --filter d_env_files1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:09.204Z"
+        },
+        {
+          "n": 154,
+          "text": "D-ENV-FLAKEGRAPH1=A: one flake-class graph for Jet environments. Proof: `jet test Compiler --profile packages --filter d_env_flakegraph1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:10.231Z"
+        },
+        {
+          "n": 155,
+          "text": "D-ENV-FLAKEPARTS1=A: a beginner env and expert flake-parts composition are one surface, and `--env` and `--preset` select distinctly (D-CONF-WORD1 presets). Proof: `jet test Compiler --profile packages --filter d_env_flakeparts1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:11.259Z"
+        },
+        {
+          "n": 156,
+          "text": "D-ENV-LANGPACK1=A: language tooling packs add a language toolchain to an env in one entry. Proof: `jet test Compiler --profile packages --filter d_env_langpack1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:12.204Z"
+        },
+        {
+          "n": 157,
+          "text": "D-ENVHOOK1=A: shell auto-activation enters and leaves the env on directory change. Proof: `jet test Compiler --profile packages --filter d_envhook1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:13.187Z"
+        },
+        {
+          "n": 158,
+          "text": "D-JPK-BUILDSCRIPT1=D: unreviewed upstream build and install hooks are held until approved. Proof: `jet test Compiler --profile packages --filter d_jpk_buildscript1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:14.128Z"
+        },
+        {
+          "n": 159,
+          "text": "D-JPK-FRESHNESS1=D: a new release waits out the 24-hour maturity default before automatic selection. Proof: `jet test Compiler --profile packages --filter d_jpk_freshness1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:15.053Z"
+        },
+        {
+          "n": 160,
+          "text": "D-REGCURATE1=C: the community package channel follows the ratified curated-tier trust model. Proof: `jet test Compiler --profile packages --filter d_regcurate1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:15.987Z"
+        },
+        {
+          "n": 161,
+          "text": "D-BOUND-BIND1=A: `jet bind` writes a #Codable struct from a data schema or sample. Proof: `jet test Compiler --profile packages --filter d_bound_bind1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:16.869Z"
+        },
+        {
+          "n": 162,
+          "text": "D-BOUND-PROV1=A: `jet inspect provenance` reads dependency provenance with the ratified default posture. Proof: `jet test Compiler --profile packages --filter d_bound_prov1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:17.778Z"
+        },
+        {
+          "n": 163,
+          "text": "D-BOUND-SINK1=A: libraries declare their own checked text types (checked text heads). Proof: `jet test Compiler --profile packages --filter d_bound_sink1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:18.734Z"
+        },
+        {
+          "n": 164,
+          "text": "D-META-DSL1=A: library text-block language rules follow who may declare a text block language. Proof: `jet test Compiler --profile packages --filter d_meta_dsl1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:06:19.714Z"
         }
       ],
       "refs": [],
@@ -45814,12 +45933,12 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:54.174Z",
-      "updated": "2026-11-15T05:03:39.899Z",
+      "updated": "2026-11-15T05:06:25.308Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 151
+      "criteriaLastN": 164
     },
     {
       "id": "c0699zei",
@@ -216007,6 +216126,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:06:25.308Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0jm0xjt",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-15T05:06:24.384Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0jm0xjt",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-15T05:06:23.467Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#148: strip debris; proof; was: (was #6067 c9, earlier #2161 c2) JET_ROOT, TZDIR, JET_ENV_DISABLE, the Linux loader path and the one-time cleanup behaviour are modelled through ratified typed mechanisms, each proven by a test, golde"
+    },
+    {
+      "at": "2026-11-15T05:06:22.563Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#143: strip debris; proof; was: (was #2511 c2) The probe program (package authority.holds allow [FS, Time]; own fn fetch declares -[Net]> and calls http.get) fails jet check and jet build with the registered authority diagnostic nam"
+    },
+    {
+      "at": "2026-11-15T05:06:21.611Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#142: strip debris; proof; was: (was #653 c3, #654 c3, #851 c3, #1014 c3, #1017 c3, #1015 c3, #1018 c3, #852 c3) Reject conflicting, cyclic, escaping, ambiguous, or stale package facts before state changes. Give a precise diagnostic"
+    },
+    {
+      "at": "2026-11-15T05:06:20.623Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#149: absorbs c29; was: The inline `package {}` header of a single-file package is parsed into ordinary package info, and E1362 and E1363 cover a malformed header and a header plus a manifest. Proof: `jet test Compiler --pro"
+    },
+    {
+      "at": "2026-11-15T05:06:19.714Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#164 D-META-DSL1=A: library text-block language rules follow who "
+    },
+    {
+      "at": "2026-11-15T05:06:18.734Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#163 D-BOUND-SINK1=A: libraries declare their own checked text ty"
+    },
+    {
+      "at": "2026-11-15T05:06:17.778Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#162 D-BOUND-PROV1=A: `jet inspect provenance` reads dependency p"
+    },
+    {
+      "at": "2026-11-15T05:06:16.869Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#161 D-BOUND-BIND1=A: `jet bind` writes a #Codable struct from a "
+    },
+    {
+      "at": "2026-11-15T05:06:15.987Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#160 D-REGCURATE1=C: the community package channel follows the ra"
+    },
+    {
+      "at": "2026-11-15T05:06:15.053Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#159 D-JPK-FRESHNESS1=D: a new release waits out the 24-hour matu"
+    },
+    {
+      "at": "2026-11-15T05:06:14.129Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#158 D-JPK-BUILDSCRIPT1=D: unreviewed upstream build and install "
+    },
+    {
+      "at": "2026-11-15T05:06:13.187Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#157 D-ENVHOOK1=A: shell auto-activation enters and leaves the en"
+    },
+    {
+      "at": "2026-11-15T05:06:12.204Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#156 D-ENV-LANGPACK1=A: language tooling packs add a language too"
+    },
+    {
+      "at": "2026-11-15T05:06:11.259Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#155 D-ENV-FLAKEPARTS1=A: a beginner env and expert flake-parts c"
+    },
+    {
+      "at": "2026-11-15T05:06:10.231Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#154 D-ENV-FLAKEGRAPH1=A: one flake-class graph for Jet environme"
+    },
+    {
+      "at": "2026-11-15T05:06:09.204Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#153 D-ENV-FILES1=A: one managed file graph with safe shorthand a"
+    },
+    {
+      "at": "2026-11-15T05:06:08.115Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0jm0xjt",
+      "note": "#152 D-ENV-FACET1=A: environment facet selection is explicit, and"
+    },
+    {
+      "at": "2026-11-15T05:05:34.649Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#12: strip debris; proof (the retired --area Store CHECK script); was: [#3036] Reconstruct canonical NAR from narinfo-authorized hints and verified CAS units. StorePath, NarHash, NarSize and References agree before publication. Unit hashes are integrity facts only. Hanga"
+    },
+    {
+      "at": "2026-11-15T05:05:33.351Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#11: proof; was: C9 proof runs through the Jet-built jetpack (`jet test Compiler --profile packages` plus a mixed native/Nixpkgs env realize/run/update/remove on O0, O1 and O2); the E1272 postgres@nixpkgs hole is repl"
+    },
+    {
+      "at": "2026-11-15T05:05:32.069Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#10: proof; was: Jet-owned code remains MIT; incorporated permissive dependencies retain required notices, and managed packages retain their own licenses. No incompatible Nix implementation code is imported or relicen"
+    },
+    {
+      "at": "2026-11-15T05:05:30.658Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#8: proof; was: The entire #410 native build-and-boot no-Nix contract remains intact; the adapter is bypassed for native Jet packages and supplies no boot-time Nix authority."
+    },
+    {
+      "at": "2026-11-15T05:05:29.276Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#7: proof; was: Existing project trust, precedence, limits, locked/offline behavior and supported inputs remain correct on the declared native systems. Unsupported valid package cases remain defects or uncovered scop"
+    },
+    {
+      "at": "2026-11-15T05:05:27.828Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#6: proof; was: Native translated-recipe builds are exercised beyond fixture/prebuilt catalog paths. Any binary reuse separately proves native references, integrity, target compatibility and license preservation; cop"
+    },
     {
       "at": "2026-11-15T05:05:26.139Z",
       "by": "TowerKeeper-1",
