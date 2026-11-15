@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6880,
-    "rev": 103371,
+    "rev": 103375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30210,6 +30210,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:03:34.953Z"
+        },
+        {
+          "n": 33,
+          "text": "`s.chars()` lowers as a stream without building a list only when a paired measurement cell (list against stream: wall time and allocations) shows the win (D-CHAR-SCALAR1=A). Proof: the paired cell row in the measurement manifest, and `jet test Compiler --profile golden --filter text/` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:10:58.620Z"
         }
       ],
       "refs": [
@@ -30226,13 +30235,13 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:46.432Z",
-      "updated": "2026-11-15T03:03:34.954Z",
+      "updated": "2026-11-15T03:10:58.620Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 218,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 32
+      "criteriaLastN": 33
     },
     {
       "id": "c0t54oz7",
@@ -61340,11 +61349,11 @@
         {
           "n": 2,
           "text": "(was #4721) Compiler defects found porting CLI rooted store (CliSeams1, 2026-10-07)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:09:07.074Z"
+          "evidence": "Items 1-4: G3Core-t1b 7dfa3007a5 regression cases. Item 5 (files.map(p).path ICE): c08bb8c6ad. On dev 6aaa5c8879, `jet test Compiler --profile cases --filter resource_close/mapped_file_reads_its_path` PASS 1.",
+          "at": "2026-11-15T03:10:59.603Z"
         },
         {
           "n": 3,
@@ -61358,11 +61367,11 @@
         {
           "n": 4,
           "text": "(was #4906) Comparison equality uses canonical typed facts on every tier: the Jet classifiers consume the existing declared_equal fact, and every runtime, history and compile-time supplier uses canonical typed comparison.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:53:13.042Z"
+          "evidence": "dev 0ec31b69b6 (classifiers read declared_equal) and 9cf1e7f361 (runtime and history suppliers; Dyn.equal_unordered compares Number lexemes by exact decimal value per Main's 2026-11-13 ruling). On dev 168e1e9e92, `jet test Compiler --profile cases --filter encoding_parity/dyn_number_equal_unordered` PASS 1.",
+          "at": "2026-11-15T03:11:00.558Z"
         },
         {
           "n": 5,
@@ -61715,8 +61724,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-14T21:35:47.455Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:11:00.558Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
@@ -89126,6 +89135,15 @@
           "verifiedBy": null,
           "evidence": "(a) jet test Compiler --profile golden --filter RawPointerTools: 3 PASS (O0/O1/O2) with dev's own Core; (b) cases corelib/a_reader_over_temporary_fills_a_lent_reader_parameter_on_every_tier (dev 291197b25e): 1 PASS on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 291197b25e",
           "at": "2026-11-14T23:34:27.839Z"
+        },
+        {
+          "n": 6,
+          "text": "The last two Jetpack workarounds for port-found defects go: Jetpack/Store/Source/Nar/NarCodec.jet:45 (`workaround #5940(d,e)`: the NarByteInput enum instead of an escaping lambda owning the reader) and Jetpack/Publication/Source/Tuf.jet:392 (`workaround #5940(h)`: a `path.copy()` local before a lambda capture) use the fixed forms, as 62e933686a did for the other sites. Proof: `git grep -n 'workaround #5940' -- Jetpack` prints nothing, and `jet test Jetpack/Store` and `jet test Jetpack/Publication` pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:10:57.709Z"
         }
       ],
       "refs": [],
@@ -89136,9 +89154,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:09:39.678Z",
-      "updated": "2026-11-14T23:34:27.839Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5
+      "updated": "2026-11-15T03:10:57.709Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 6
     },
     {
       "id": "c0kbej10",
@@ -208164,6 +208182,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:11:00.558Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T03:10:59.603Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T03:10:58.620Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0uyfbge",
+      "note": "#33 `s.chars()` lowers as a stream without building a list only "
+    },
+    {
+      "at": "2026-11-15T03:10:57.709Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0m4deiq",
+      "note": "#6 The last two Jetpack workarounds for port-found defects go: "
+    },
     {
       "at": "2026-11-15T03:08:39.769Z",
       "by": "Main",
