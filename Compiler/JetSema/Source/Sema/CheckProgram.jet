@@ -5631,7 +5631,6 @@ sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, g
             return
         }
         raw: graph.modules[module_index].source.bytes()
-        codes: loop byte in raw -> (Int{byte})
         seen := [Int:Bool]{}
         skipped := 0
         loop (index, reference) in module_result.name_references {
@@ -5643,7 +5642,7 @@ sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, g
             }
             owner: reference.symbol.module_identity
             if module_is_none(owner) || owner == graph.modules[module_index].module_identity -> next
-            leaf: sema_soft_public_written_leaf(raw, codes, reference.span) ?? next
+            leaf: sema_soft_public_written_leaf(raw, reference.span) ?? next
             sema_soft_public_warn(leaf, seen, module_result.diagnostics)
         }
         // A call's callee is a call fact, not a name reference.
@@ -5655,15 +5654,15 @@ sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, g
             if skipped < generated_calls.len() && index >= generated_calls[skipped].start -> next
             callee: call.callee ?? next
             if symbol_is_local(callee) -> next
+            leaf: sema_soft_public_written_leaf(raw, call.span) ?? next
             callee_key: sema_program_symbol_key(program, callee)
             owner_and_rest: callee_key.split_once(":") ?? next
             module_and_rest: owner_and_rest.after.split_once(":") ?? next
             owner: module_and_rest.before
             if owner == "" || owner == module_identity -> next
-            leaf: sema_soft_public_written_leaf(raw, codes, call.span) ?? next
             sema_soft_public_warn(leaf, seen, module_result.diagnostics)
         }
-        sema_check_soft_public_signatures(graph.modules[module_index], codes, raw, seen, module_result.diagnostics)
+        sema_check_soft_public_signatures(graph.modules[module_index], raw, seen, module_result.diagnostics)
     }
 }
 
@@ -5874,25 +5873,25 @@ sema_soft_public_warn: fn(leaf: (start: Int, name: String), seen: &[Int:Bool], d
 // outside; an unqualified `_Shape` is outside unless the module declares it
 // (a local declaration wins over an imported one) or the function's own
 // type parameters name it.
-sema_check_soft_public_signatures: fn(source_module: SemaRegistrationModule, codes: [Int], raw: [U8], seen: &[Int:Bool], diagnostics: &[Diagnostic]) {
+sema_check_soft_public_signatures: fn(source_module: SemaRegistrationModule, raw: [U8], seen: &[Int:Bool], diagnostics: &[Diagnostic]) {
     loop item in source_module.declarations {
         if item == {
             .Func(function) -> {
-                sema_check_soft_public_signature(function, source_module.declaration_positions, codes, raw, seen, diagnostics)
+                sema_check_soft_public_signature(function, source_module.declaration_positions, raw, seen, diagnostics)
             }
             .Impl(implementation) -> {
                 loop method in implementation.methods {
-                    sema_check_soft_public_signature(method, source_module.declaration_positions, codes, raw, seen, diagnostics)
+                    sema_check_soft_public_signature(method, source_module.declaration_positions, raw, seen, diagnostics)
                 }
             }
             .Struct(definition) -> {
                 loop method in definition.methods {
-                    sema_check_soft_public_signature(method, source_module.declaration_positions, codes, raw, seen, diagnostics)
+                    sema_check_soft_public_signature(method, source_module.declaration_positions, raw, seen, diagnostics)
                 }
             }
             .Enum(definition) -> {
                 loop method in definition.methods {
-                    sema_check_soft_public_signature(method, source_module.declaration_positions, codes, raw, seen, diagnostics)
+                    sema_check_soft_public_signature(method, source_module.declaration_positions, raw, seen, diagnostics)
                 }
             }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -5900,7 +5899,7 @@ sema_check_soft_public_signatures: fn(source_module: SemaRegistrationModule, cod
     }
 }
 
-sema_check_soft_public_signature: fn(function: Func, declared: [String:Int], codes: [Int], raw: [U8], seen: &[Int:Bool], diagnostics: &[Diagnostic]) {
+sema_check_soft_public_signature: fn(function: Func, declared: [String:Int], raw: [U8], seen: &[Int:Bool], diagnostics: &[Diagnostic]) {
     if function.compiler_generated {
         return
     }
@@ -5912,45 +5911,46 @@ sema_check_soft_public_signature: fn(function: Func, declared: [String:Int], cod
     // A bound runs from the parameter's name to its `,`, `>` or default `=`.
     loop parameter in function.type_params {
         end := parameter.name_span.end
-        loop end < codes.len() && codes[end] != 44 && codes[end] != 62 && codes[end] != 61 {
+        loop end < raw.len() && raw[end] != 44 && raw[end] != 62 && raw[end] != 61 {
             end += 1
         }
         ranges.push(Span{start: parameter.name_span.end, end: end})
     }
     loop range in ranges {
         at := if range.start < 0 -> 0 else -> range.start
-        limit: if range.end > codes.len() -> codes.len() else -> range.end
+        limit: if range.end > raw.len() -> raw.len() else -> range.end
         loop at < limit {
-            if codes[at] != 95 || (at > 0 && sema_soft_public_word_byte(codes[at - 1])) {
+            if raw[at] != 95 || (at > 0 && sema_soft_public_word_byte(raw[at - 1])) {
                 at += 1
                 next
             }
             start: at
-            loop at < limit && sema_soft_public_word_byte(codes[at]) -> at += 1
+            loop at < limit && sema_soft_public_word_byte(raw[at]) -> at += 1
             name: String.from_bytes(raw[start..<at]) ?? next
-            qualified: start > 0 && codes[start - 1] == 46
+            qualified: start > 0 && raw[start - 1] == 46
             if !qualified && (declared.has_key(name) || local.contains(name)) -> next
             sema_soft_public_warn((start: start, name: name), seen, diagnostics)
         }
     }
 }
 
-// The name a use site writes, with its byte offset in the source: the last
-// identifier of the span (`n._title` gives `_title`). A span over a whole
-// call names the identifier just before the argument list that its last
-// `)` closes (type arguments skipped). A written name is a whole token of
-// the source, so a span that cuts an identifier is no use site of this text
-// (a span another source owns) and names nothing.
-sema_soft_public_written_leaf: fn(raw: [U8], codes: [Int], span: Span) -> (start: Int, name: String)? Never! {
-    if span.start < 0 || span.end > codes.len() || span.start >= span.end -> return None
+// The soft-public candidate a use site writes, with its byte offset in the
+// source: the last identifier of the span (`n._title` gives `_title`) when it
+// starts with `_`, as every soft-public name does. A span over a whole call
+// names the identifier just before the argument list that its last `)`
+// closes (type arguments skipped). A written name is a whole token of the
+// source, so a span that cuts an identifier is no use site of this text (a
+// span another source owns) and names nothing.
+sema_soft_public_written_leaf: fn(raw: [U8], span: Span) -> (start: Int, name: String)? Never! {
+    if span.start < 0 || span.end > raw.len() || span.start >= span.end -> return None
     end := span.end
-    loop end > span.start && (codes[end - 1] == 32 || codes[end - 1] == 10) -> end -= 1
-    if end > span.start && codes[end - 1] == 41 {
+    loop end > span.start && (raw[end - 1] == 32 || raw[end - 1] == 10) -> end -= 1
+    if end > span.start && raw[end - 1] == 41 {
         index := end - 1
         depth := 0
         loop index >= span.start {
-            if codes[index] == 41 -> depth += 1
-            if codes[index] == 40 {
+            if raw[index] == 41 -> depth += 1
+            if raw[index] == 40 {
                 depth -= 1
                 if depth == 0 -> break
             }
@@ -5959,28 +5959,28 @@ sema_soft_public_written_leaf: fn(raw: [U8], codes: [Int], span: Span) -> (start
         if index <= span.start -> return None
         end = index
     }
-    if end > span.start && codes[end - 1] == 62 {
+    if end > span.start && raw[end - 1] == 62 {
         angle := 0
         loop end > span.start {
             end -= 1
-            if codes[end] == 62 -> angle += 1
-            if codes[end] == 60 {
+            if raw[end] == 62 -> angle += 1
+            if raw[end] == 60 {
                 angle -= 1
                 if angle == 0 -> break
             }
         }
     }
     start := end
-    loop start > span.start && sema_soft_public_word_byte(codes[start - 1]) -> start -= 1
-    if start == end -> return None
-    if (start > 0 && sema_soft_public_word_byte(codes[start - 1])) || (end < codes.len() && sema_soft_public_word_byte(codes[end])) {
+    loop start > span.start && sema_soft_public_word_byte(raw[start - 1]) -> start -= 1
+    if start == end || raw[start] != 95 -> return None
+    if (start > 0 && sema_soft_public_word_byte(raw[start - 1])) || (end < raw.len() && sema_soft_public_word_byte(raw[end])) {
         return None
     }
     name: String.from_bytes(raw[start..<end]) ?? return None
     Val((start: start, name: name))
 }
 
-sema_soft_public_word_byte: fn(byte: Int) -> Bool Never! {
+sema_soft_public_word_byte: fn(byte: U8) -> Bool Never! {
     byte == 95 || (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
 }
 
