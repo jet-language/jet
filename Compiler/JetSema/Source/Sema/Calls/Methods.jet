@@ -1903,7 +1903,9 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
         if sema_call_builtin_method_arities(Type.List{element: element}, method).len() > 0 -> return sema_error("E0102", span, "`{display}` has no method `{method}`", "`{display}` is a one-pass source; `{method}` needs a materialized list, so collection consumes the source and allocates the list", "materialize it first with `.to_list()`; this consumes the source and allocates a list")
     }
     suggestion: sema_call_method_suggestion(method, nominal, actual, environment, program)
-    protected: sema_call_core_nominal(nominal, environment, program) || (!source_owned && (sema_reserved_type_name(display) || type_name_value.starts_with("<corelib>/")))
+    // A module-qualified receiver name (`module::Type`) names its module.
+    owner_module: if type_name_value.contains("::") -> type_name_value.slice(0, type_name_value.rfind("::")) else -> ""
+    protected: sema_call_core_nominal(nominal, environment, program) || (!source_owned && (sema_reserved_type_name(display) || sema_module_is_core_source(owner_module)))
     if protected {
         reached: if suggestion == None -> sema_call_method_reached_through(method, nominal, environment, program) else -> None
         fix: reached ?? sema_call_method_fix(suggestion, "use a documented method on `{display}`")
