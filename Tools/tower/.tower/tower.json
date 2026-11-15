@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106300,
+    "rev": 106325,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -84223,12 +84223,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "One golden rule for Examples: each of the 18 examples with no expected stream gets a real one (or a ratified exemption), and io/path prints the same output whatever the working directory. Proof: `jet test Compiler --profile golden` gives a verdict, not a skip, for every example at O0, O1 and O2.",
+          "text": "Every example under Examples/ has an expected stream, so no golden row FAILs with 'missing expected stream' (Compiler/JetTestKit/Source/Golden.jet:318). Proof: `jet test Compiler --profile golden` gives a verdict, not a missing-stream FAIL, for every example at O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:06:47.847Z"
+          "at": "2026-11-15T11:38:07.991Z"
         },
         {
           "n": 2,
@@ -84284,7 +84284,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T09:11:08.072Z",
-      "updated": "2026-11-15T11:37:49.498Z",
+      "updated": "2026-11-15T11:38:07.991Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 6
     },
@@ -94132,30 +94132,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Stores through a &struct field place reach the O2 fill leaf the same as stores to a local: the renderer's fill through a field place runs within 1.2x of the local form. Proof: a paired timed row in the renderer's Micro.jet (field place against local), plus an IR case showing the fill leaf for the field-place loop.",
+          "text": "Stores through a &struct field place reach the O2 fill leaf, as stores to a local do. Proof: `jet test Compiler --profile cases --filter fill_leaf_through_a_struct_field_place` shows the fill leaf in the O2 IR of the field-place loop.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T09:02:35.608Z"
+          "at": "2026-11-15T11:38:08.896Z"
         },
         {
           "n": 2,
-          "text": "U64 arithmetic at O2 compiles to native 64-bit instructions with no per-operation call or check beyond Jet's overflow meaning: the Micro.jet U64 loop at O2 runs at least 5x faster than at O0. Proof: a timed row at O0 and O2, plus an IR case.",
+          "text": "U64 arithmetic at O2 compiles to native 64-bit instructions with no per-operation call or check beyond Jet's overflow meaning. Proof: `jet test Compiler --profile cases --filter u64_arithmetic_is_native_at_o2` (the O2 IR of the loop has no runtime call).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T09:02:37.479Z"
+          "at": "2026-11-15T11:38:09.808Z"
         },
         {
           "n": 3,
-          "text": "An O0 indexed store costs no more than the bounds check plus the store (target ≤1 ns per element on the renderer row), so per-pixel code can redraw 1080p in a few ms under jet run. Proof: the Micro.jet indexed-store row at O0.",
+          "text": "An O0 indexed store costs no more than the bounds check plus the store, so per-pixel code can redraw 1080p in a few ms under jet run. Proof: `node Tools/gauntlet/harness/run.mjs --entry pixel-loops` reports at most 1 ns per element for the O0 indexed-store row.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T09:02:39.265Z"
+          "at": "2026-11-15T11:38:10.702Z"
         }
       ],
       "refs": [],
@@ -94166,8 +94166,8 @@
       "parentId": "c0f9brds",
       "needsAcceptance": false,
       "created": "2026-11-09T13:21:28.909Z",
-      "updated": "2026-11-14T09:02:39.265Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:10.702Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 3
     },
     {
@@ -96428,12 +96428,12 @@
         },
         {
           "n": 2,
-          "text": "The Rust-era __jet__ runtime layer is retired and the lookup fallback from c1 is removed: RuntimeHandles key rows, IR_GENERATED_RECORDS schemas and IR_HANDLE_FIELDS rows are derived from (or checked against) RUNTIME_C_EXPORTS, so every handle, record and field row names a symbol the runtime exports under Core's own field names. Scope found by Lander5: 33 key rows with an exported bare twin; 61 key rows with no exported drop; 29 __jet__ generated record schemas (DataEvent, JetHTTPHeaders, JetDecimal and JetFraction have no bare schema; JetCoord2 is shared by 12 rows); the DataError cause schema (OptRec EncodingError against the bare Tag form); three EncodingLimits handle kinds (CSVReader, CSVWriter, XMLReader); and two orphan ZonedDateTime field rows. Proof: ir_runtime_handle has no fallback branch, a #Test asserts every row in the three tables resolves to an export, and the encoding, data and time case corpora pass on O0, O1 and O2.",
+          "text": "Every RuntimeHandles key row names a handle symbol the runtime exports (RUNTIME_C_EXPORTS) under Core's own type names: the 33 key rows with an exported bare twin use the twin, the 61 key rows with no exported drop get one or are deleted, and the three EncodingLimits handle kinds (CSVReader, CSVWriter, XMLReader) resolve. Proof: `jet test Compiler/JetIR --filter runtime_handle_rows_name_exports` (a #Test asserting every key row resolves to an export).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T05:09:20.484Z"
+          "at": "2026-11-15T11:38:11.590Z"
         },
         {
           "n": 3,
@@ -96462,7 +96462,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:55:11.076Z",
-      "updated": "2026-11-15T11:37:54.234Z",
+      "updated": "2026-11-15T11:38:11.590Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 4
     },
@@ -97218,12 +97218,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "ir_route_can_stop answers from a stops receipt built from the runtime IR at library build (the closure of routes that can publish a stop, with allocation failure, capacity panic and invalid layout declared fatal), and the hand-kept list and the uncalled RUNTIME_STOP_EXPORTS are deleted. Proof: a case shows a call to a quiet runtime route (for example jet_time_sleep_until is not quiet, a pure scalar route is) followed by no stop poll in the lowered IR, and the cancellation and deadline cases pass at O0, O1 and O2.",
+          "text": "ir_route_can_stop answers from a stops receipt built from the runtime IR at library build (the closure of routes that can publish a stop, with allocation failure, capacity panic and invalid layout declared fatal), and the hand-kept list and the uncalled RUNTIME_STOP_EXPORTS are deleted. Proof: `jet test Compiler --profile cases --filter stop_poll_follows_the_runtime_stops_receipt` (a call to a pure scalar runtime route has no stop poll after it in the lowered IR; a call to jet_time_sleep_until has one), and the cancellation and deadline cases pass at O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T09:02:24.058Z"
+          "at": "2026-11-15T11:38:12.537Z"
         }
       ],
       "refs": [],
@@ -97234,8 +97234,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T10:15:23.686Z",
-      "updated": "2026-11-14T09:02:24.058Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:12.538Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 1
     },
     {
@@ -98414,12 +98414,12 @@
         },
         {
           "n": 3,
-          "text": "Crewboard's \"assigned to you\" push is sent only after update_task's transaction commits, and a rolled-back write sends nothing. This uses the after-commit outbox card from R2-6 item 12. Proof: `jet test Compiler --profile cases --filter web_app/assignee_push_is_sent_after_commit_only`.",
+          "text": "Crewboard's \"assigned to you\" push is sent only after update_task's transaction commits, and a rolled-back write sends nothing. This uses the after-commit outbox (#6825 c1). Proof: `jet test Compiler --profile cases --filter web_app/assignee_push_is_sent_after_commit_only`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:14.329Z"
+          "at": "2026-11-15T11:38:21.205Z"
         }
       ],
       "refs": [],
@@ -98430,8 +98430,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:41.131Z",
-      "updated": "2026-11-14T03:24:51.330Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:21.205Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 3
     },
     {
@@ -98791,12 +98791,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "kit views export their role, name and state: through AccessKit on desktops (UIA, NSAccessibility, AT-SPI), through UIAccessibility on iOS and AccessibilityNodeInfo on Android, and as semantic HTML with ARIA on the web. move_button in examples/access.jet is a button named \"Move <title> to <status>\" on every target. Proof: `jet test Compiler --profile cases --filter native_app/access_tree_names_kit_views` and `jet test Compiler --profile cases --filter web_app/kit_views_render_semantic_html`.",
+          "text": "kit views export their role, name and state: through AccessKit on desktops (UIA, NSAccessibility, AT-SPI), through UIAccessibility on iOS and AccessibilityNodeInfo on Android (the web is a separate criterion). move_button in examples/access.jet is a button named \"Move <title> to <status>\" on every native target. Proof: `jet test Compiler --profile cases --filter native_app/access_tree_names_kit_views`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:34.134Z"
+          "at": "2026-11-15T11:38:22.203Z"
         },
         {
           "n": 2,
@@ -98834,7 +98834,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:50.597Z",
-      "updated": "2026-11-15T11:37:56.114Z",
+      "updated": "2026-11-15T11:38:22.203Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 4
     },
@@ -99101,12 +99101,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "With .stream(after: 50ms), the server sends the shell with each still-running read's Loading branch after 50 ms, then each region's HTML as its read finishes. A page whose reads finish within 50 ms is sent whole. Proof: `jet test Compiler --profile cases --filter web_app/stream_sends_the_shell_then_each_region`.",
+          "text": "With .stream(after: 50ms), the server sends the shell with each still-running read's Loading branch after 50 ms, then each region's HTML as its read finishes. A page whose reads finish within 50 ms is sent whole. Proof: `jet test Compiler --profile cases --filter web_app/stream_sends_the_shell_then_each_region`. Where a page splits into regions follows open decision D-STREAM-REGION1.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:48.712Z"
+          "at": "2026-11-15T11:38:23.253Z"
         },
         {
           "n": 2,
@@ -99126,8 +99126,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:57.804Z",
-      "updated": "2026-11-15T11:37:47.472Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-15T11:38:23.253Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 2
     },
     {
@@ -99845,6 +99845,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:29:47.445Z"
+        },
+        {
+          "n": 3,
+          "text": "get, put, insert and query on a typed table record read and write sets for D-INVALIDATE1, so a query's read set invalidates a live query after a write. Proof: `jet test Compiler --profile cases --filter web_app/table_read_set_invalidates_live_query`. The table declaration form follows open decision D-DB-TABLE1.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:38:00.604Z"
+        },
+        {
+          "n": 4,
+          "text": "get, put, insert and query carry DB.Read and DB.Write: a put in a function without DB.Write is an effect error. Proof: `jet test Compiler --profile ui --filter table_put_without_db_write`. The table declaration form follows open decision D-DB-TABLE1.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:38:01.626Z"
         }
       ],
       "refs": [],
@@ -99855,9 +99873,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:36.307Z",
-      "updated": "2026-11-15T11:37:47.472Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 2
+      "updated": "2026-11-15T11:38:01.626Z",
+      "updatedBy": "TowerKeeper-2",
+      "criteriaLastN": 4
     },
     {
       "id": "c0aqtwkf",
@@ -100139,6 +100157,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:49:24.720Z"
+        },
+        {
+          "n": 10,
+          "text": "Each push or mail a job sends gets its own key, made from the run key, the recipient and the send open: or link: value, sent hashed to fit each transport limit. app.notify and app.mail pass it to the transport: APNs apns-collapse-id, FCM android.notification.tag on a non-collapsible message, Web Push Topic header and notification tag, and mail Message-ID. A retried run repeats each key even when its query returns rows in another order, so a repeat replaces its earlier copy, and two different sends from one job never share a key. Proof: `jet test Compiler --profile cases --filter web_app/job_sends_repeat_their_keys_on_retry`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:38:02.576Z"
         }
       ],
       "refs": [],
@@ -100149,9 +100176,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-15T02:49:24.720Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 9
+      "updated": "2026-11-15T11:38:02.576Z",
+      "updatedBy": "TowerKeeper-2",
+      "criteriaLastN": 10
     },
     {
       "id": "c0b5xq4b",
@@ -100216,6 +100243,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T18:43:07.776Z"
+        },
+        {
+          "n": 6,
+          "text": "auth.Accounts.reset_password works end to end on the test host: a reset link is single-use and expires in an hour. Proof: `jet test Compiler --profile cases --filter web_app/account_reset_link_is_single_use_and_expires`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:38:03.473Z"
+        },
+        {
+          "n": 7,
+          "text": "auth.Accounts.passkeys works end to end on the test host: a WebAuthn passkey signs in. Proof: `jet test Compiler --profile cases --filter web_app/account_passkey_signs_in`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:38:04.364Z"
+        },
+        {
+          "n": 8,
+          "text": "auth.Accounts.two_factor works end to end on the test host: once turned on, a TOTP code is required, and recovery codes sign in. Proof: `jet test Compiler --profile cases --filter web_app/account_two_factor_requires_totp_with_recovery_codes`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:38:05.260Z"
+        },
+        {
+          "n": 9,
+          "text": "auth.Accounts.limit_sign_in(per_minute:) works end to end on the test host: the sixth failed sign-in in a minute for one address waits. Proof: `jet test Compiler --profile cases --filter web_app/account_limit_sign_in_per_minute`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:38:06.160Z"
+        },
+        {
+          "n": 10,
+          "text": "Membership: set_role, remove_member and leave keep at least one owner (LastOwner); a removed member's open live queries re-run and are refused; jobs that push check membership first. Proof: `jet test Compiler --profile cases --filter web_app/membership_lifecycle_keeps_an_owner_and_refuses_the_removed`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T11:38:07.074Z"
         }
       ],
       "refs": [],
@@ -100226,9 +100298,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:12.993Z",
-      "updated": "2026-11-14T03:25:40.629Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5
+      "updated": "2026-11-15T11:38:07.074Z",
+      "updatedBy": "TowerKeeper-2",
+      "criteriaLastN": 10
     },
     {
       "id": "c0w7y8wz",
@@ -100545,12 +100617,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The object writer emits extended section numbering (SHN_XINDEX, .symtab_shndx) when an object has 65280 or more sections, and a generated program whose object has more than 70000 sections links and runs on O0, O1 and O2. Proof: a case under tests/cases that builds that program.",
+          "text": "The object writer emits extended section numbering (SHN_XINDEX, .symtab_shndx) when an object has 65280 or more sections, and a generated program whose object has more than 70000 sections links and runs on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter object_writer_extended_section_numbering` (it builds that program and runs it on O0, O1 and O2).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T20:22:15.728Z"
+          "at": "2026-11-15T11:38:13.483Z"
         }
       ],
       "refs": [],
@@ -100561,8 +100633,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T20:22:10.960Z",
-      "updated": "2026-11-13T20:22:15.728Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:13.483Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 1
     },
     {
@@ -101107,12 +101179,12 @@
         },
         {
           "n": 22,
-          "text": "Registering a route charges only what registration runs. Sema folds a lambda`s effects and call edges into the function that writes it (sema_effect_merge_lambda, JetSema Effects/Checks.jet:2605, called at :3370), so App.__route`s call_edges contain __app_page_response, and route() with a pure handler reaches FS.Read, Net and Time.Wait through the spooled body reader (Http.jet:967). Interim (2026-11-14): the send_fn_lowering and app-handler fixtures declare those effects, with a comment, which is sound because serving needs them. Fix: a TEffectFacts field that keeps edges from lambdas filling closed-row slots apart from a Core function`s own calls, charged where the lambda runs (app.serve()), not at registration. Proof: a case where route() with a pure handler reaches nothing and serve() reaches FS.Read, Net and Time.Wait; then the fixture rows narrow back.",
+          "text": "Registering a route charges only what registration runs. Sema folds a lambda`s effects and call edges into the function that writes it (sema_effect_merge_lambda, JetSema Effects/Checks.jet:2605, called at :3370), so App.__route`s call_edges contain __app_page_response, and route() with a pure handler reaches FS.Read, Net and Time.Wait through the spooled body reader (Http.jet:967). Interim (2026-11-14): the send_fn_lowering and app-handler fixtures declare those effects, with a comment, which is sound because serving needs them. Fix: a TEffectFacts field that keeps edges from lambdas filling closed-row slots apart from a Core function`s own calls, charged where the lambda runs (app.serve()), not at registration. Proof: `jet test Compiler --profile cases --filter effects/route_registration_charges_only_registration` (route() with a pure handler reaches nothing; serve() reaches FS.Read, Net and Time.Wait), and the send_fn_lowering and app-handler fixtures drop their interim effect declarations.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T03:43:19.027Z"
+          "at": "2026-11-15T11:38:14.366Z"
         },
         {
           "n": 23,
@@ -101125,12 +101197,12 @@
         },
         {
           "n": 24,
-          "text": "The collect-all sweep of 2026-11-15 on batch compiler p162 (dev b80809b698), compared with the p126 sweep, found 90 rows: ui 15 new FAIL (pass 2814); cases 32 new FAIL among 77 (pass 4766, 16 fixed since p126); golden 15 new failing files among 41 rows (pass 4889); core 2 TLS dudect rows; plus UNEXPECTED-PASS rows with stale annotations. The full list is at $JET_SCRATCH_ROOT/lanes/Main/sweep162-new.tsv; suspected roots: file-writer ImmutableAssignment, runtime_fragments, the stop-report snapshots, derived-item location paths, BreakingSchemaChange not firing, markers, debug DAP. Every row is fixed (each proved with its case or file on a batch compiler) or carries a written cause. The view-in-record rows belong to #6842 c9. Owner: worker SweepFix-162.",
+          "text": "The collect-all sweep of 2026-11-15 on batch compiler p162 (dev b80809b698), compared with the p126 sweep, found 90 rows: ui 15 new FAIL (pass 2814); cases 32 new FAIL among 77 (pass 4766, 16 fixed since p126); golden 15 new failing files among 41 rows (pass 4889); core 2 TLS dudect rows; plus UNEXPECTED-PASS rows with stale annotations. The full list is at $JET_SCRATCH_ROOT/lanes/Main/sweep162-new.tsv; suspected roots: file-writer ImmutableAssignment, runtime_fragments, the stop-report snapshots, derived-item location paths, BreakingSchemaChange not firing, markers, debug DAP. Every row is fixed (each proved with its case or file on a batch compiler) or carries a written cause. The view-in-record rows belong to #6842 c9. Owner: worker SweepFix-162. Proof: each row of sweep162-new.tsv passes with its own `jet test Compiler --profile <ui|cases|golden|core> --filter <row>` on one batch compiler, or that file names its written cause.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T09:27:19.133Z"
+          "at": "2026-11-15T11:38:15.329Z"
         }
       ],
       "refs": [],
@@ -101141,8 +101213,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-15T10:12:02.200Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:15.329Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 24
     },
     {
@@ -101232,48 +101304,48 @@
         },
         {
           "n": 2,
-          "text": "Every new user surface this needs (an instrumentation hook, a #Profile-style marker, compiler-event APIs, debugger commands) is on a ratified Tower ballot before it is built. Proof: the ballot IDs, ratified.",
+          "text": "Every new user surface this needs (an instrumentation hook, a #Profile-style marker, compiler-event APIs, debugger commands) is on a ratified Tower ballot before it is built. Proof: `tower decision show <ID>` reports ratified for each ballot ID listed on this card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T14:55:13.513Z"
+          "at": "2026-11-15T11:38:16.321Z"
         },
         {
           "n": 3,
-          "text": "A user-written compile-time program instruments every function of a package with profiling spans through reflection and compiler events, with no change to the profiled source. It produces a jet perf view, and the instrumented program prints the same output on O0, O1 and O2. Proof: an Examples/Tooling/Performance example with golden output on every tier.",
+          "text": "A user-written compile-time program instruments every function of a package with profiling spans through reflection and compiler events, with no change to the profiled source. It produces a jet perf view, and the instrumented program prints the same output on O0, O1 and O2. The instrumentation also sends meta.events call timings to a sink (merged from #4632 c7). Proof: `jet test Compiler --profile golden --filter Tooling/Performance/InstrumentEveryFunction` passes on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T14:55:15.188Z"
+          "at": "2026-11-15T11:38:17.304Z"
         },
         {
           "n": 4,
-          "text": "Debugger display and watch expressions come from the compiler's type facts (reflection), so every Jet type shows as its Jet value in jet debug and over DAP, with no hand-written per-type formatter. Proof: a tests/cases debug row covering a struct, enum, list, map, String, Decimal and bignum Int on the native tier (with #6730 c2/c3 met).",
+          "text": "Debugger display and watch expressions come from the compiler's type facts (reflection), so every Jet type shows as its Jet value in jet debug and over DAP, with no hand-written per-type formatter. Proof: `jet test Compiler --profile cases --filter debug/type_facts_display_every_kind` on the native tier (with #6730 c2/c3 met).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T14:55:16.821Z"
+          "at": "2026-11-15T11:38:18.373Z"
         },
         {
           "n": 5,
-          "text": "jet perf and jet debug both work on the self-hosted toolchain end to end: Compiler/JetDebug checks and builds, and the Examples/Tooling/Debugging and Performance examples pass their goldens on O0, O1 and O2. Proof: jet test Compiler --profile golden --filter Examples/Tooling, and jet check Compiler/JetDebug.",
+          "text": "jet perf and jet debug work on the self-hosted toolchain end to end: the Examples/Tooling/Debugging and Performance examples pass their goldens on O0, O1 and O2 (the Compiler/JetDebug package check is #6730 c25). Proof: `jet test Compiler --profile golden --filter Tooling/`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T14:55:18.450Z"
+          "at": "2026-11-15T11:38:19.301Z"
         },
         {
           "n": 6,
-          "text": "Instrumentation costs nothing when it is off and stays within a measured budget when it is on, so a profiled build keeps Jet's performance gate. Proof: a paired two-program cell (instrumented and plain) in the canonical perf manifest showing the overhead.",
+          "text": "Instrumentation costs nothing when it is off and stays within a measured budget when it is on, so a profiled build keeps Jet's performance gate. Proof: `node Tools/gauntlet/harness/run.mjs --entry profile-overhead` reports the instrumented and plain pair from the canonical perf manifest.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T14:55:19.956Z"
+          "at": "2026-11-15T11:38:20.209Z"
         }
       ],
       "refs": [],
@@ -101284,8 +101356,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-14T20:15:00.185Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:20.209Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 6
     },
     {
@@ -218014,6 +218086,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T11:38:23.253Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c02vkuef",
+      "note": "#1: Links the open decision that shapes it.; was: With .stream(after: 50ms), the server sends the shell with each still-running read's Loading branch after 50 ms, then each region's HTML as its read finishes. A page whose reads finish within 50 ms is"
+    },
+    {
+      "at": "2026-11-15T11:38:22.203Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0rom5jy",
+      "note": "#1: Split: the web half has its own proof.; was: kit views export their role, name and state: through AccessKit on desktops (UIA, NSAccessibility, AT-SPI), through UIAccessibility on iOS and AccessibilityNodeInfo on Android, and as semantic HTML wit"
+    },
+    {
+      "at": "2026-11-15T11:38:21.205Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0f4o904",
+      "note": "#3: Current reference.; was: Crewboard's \"assigned to you\" push is sent only after update_task's transaction commits, and a rolled-back write sends nothing. This uses the after-commit outbox card from R2-6 item 12. Proof: `jet te"
+    },
+    {
+      "at": "2026-11-15T11:38:20.209Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0nwrfck",
+      "note": "#6: One exact proof command.; was: Instrumentation costs nothing when it is off and stays within a measured budget when it is on, so a profiled build keeps Jet's performance gate. Proof: a paired two-program cell (instrumented and plai"
+    },
+    {
+      "at": "2026-11-15T11:38:19.301Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0nwrfck",
+      "note": "#5: One proof; the JetDebug check is #6730 c25.; was: jet perf and jet debug both work on the self-hosted toolchain end to end: Compiler/JetDebug checks and builds, and the Examples/Tooling/Debugging and Performance examples pass their goldens on O0, O1 "
+    },
+    {
+      "at": "2026-11-15T11:38:18.373Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0nwrfck",
+      "note": "#4: One exact proof command.; was: Debugger display and watch expressions come from the compiler's type facts (reflection), so every Jet type shows as its Jet value in jet debug and over DAP, with no hand-written per-type formatter. Pr"
+    },
+    {
+      "at": "2026-11-15T11:38:17.304Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0nwrfck",
+      "note": "#3: One exact proof command; #4632 c7 merged here.; was: A user-written compile-time program instruments every function of a package with profiling spans through reflection and compiler events, with no change to the profiled source. It produces a jet perf v"
+    },
+    {
+      "at": "2026-11-15T11:38:16.321Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0nwrfck",
+      "note": "#2: One exact proof command.; was: Every new user surface this needs (an instrumentation hook, a #Profile-style marker, compiler-event APIs, debugger commands) is on a ratified Tower ballot before it is built. Proof: the ballot IDs, ra"
+    },
+    {
+      "at": "2026-11-15T11:38:15.329Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#24: Per-row proof clause added; text only (SweepFix-162 works it).; was: The collect-all sweep of 2026-11-15 on batch compiler p162 (dev b80809b698), compared with the p126 sweep, found 90 rows: ui 15 new FAIL (pass 2814); cases 32 new FAIL among 77 (pass 4766, 16 fixed si"
+    },
+    {
+      "at": "2026-11-15T11:38:14.366Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#22: One exact proof command.; was: Registering a route charges only what registration runs. Sema folds a lambda`s effects and call edges into the function that writes it (sema_effect_merge_lambda, JetSema Effects/Checks.jet:2605, calle"
+    },
+    {
+      "at": "2026-11-15T11:38:13.483Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0pv78gy",
+      "note": "#1: One exact proof command.; was: The object writer emits extended section numbering (SHN_XINDEX, .symtab_shndx) when an object has 65280 or more sections, and a generated program whose object has more than 70000 sections links and ru"
+    },
+    {
+      "at": "2026-11-15T11:38:12.538Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0g4h3r9",
+      "note": "#1: One exact proof command.; was: ir_route_can_stop answers from a stops receipt built from the runtime IR at library build (the closure of routes that can publish a stop, with allocation failure, capacity panic and invalid layout dec"
+    },
+    {
+      "at": "2026-11-15T11:38:11.590Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0on083p",
+      "note": "#2: Split into the handle rows (c2), the record and field rows, and the fallback removal, each with one proof.; was: The Rust-era __jet__ runtime layer is retired and the lookup fallback from c1 is removed: RuntimeHandles key rows, IR_GENERATED_RECORDS schemas and IR_HANDLE_FIELDS rows are derived from (or checked a"
+    },
+    {
+      "at": "2026-11-15T11:38:10.702Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0qoe1b9",
+      "note": "#3: Micro.jet is gone; the proof is the pixel-loops gauntlet entry.; was: An O0 indexed store costs no more than the bounds check plus the store (target ≤1 ns per element on the renderer row), so per-pixel code can redraw 1080p in a few ms under jet run. Proof: the Micro.je"
+    },
+    {
+      "at": "2026-11-15T11:38:09.808Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0qoe1b9",
+      "note": "#2: Micro.jet is gone; the proof is an IR case.; was: U64 arithmetic at O2 compiles to native 64-bit instructions with no per-operation call or check beyond Jet's overflow meaning: the Micro.jet U64 loop at O2 runs at least 5x faster than at O0. Proof: a"
+    },
+    {
+      "at": "2026-11-15T11:38:08.896Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0qoe1b9",
+      "note": "#1: Micro.jet is gone; the proof is an IR case.; was: Stores through a &struct field place reach the O2 fill leaf the same as stores to a local: the renderer's fill through a field place runs within 1.2x of the local form. Proof: a paired timed row in th"
+    },
+    {
+      "at": "2026-11-15T11:38:07.991Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0zn6gbs",
+      "note": "#1: Split: the one remaining runner is the testkit golden suite (the node runner was deleted in c515c4ea10, #6035 c3); the Path half is its own criterion.; was: One golden rule for Examples: each of the 18 examples with no expected stream gets a real one (or a ratified exemption), and io/path prints the same output whatever the working directory. Proof: `jet "
+    },
+    {
+      "at": "2026-11-15T11:38:07.074Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-add",
+      "ref": "c0b5xq4b",
+      "note": "#10 Membership: set_role, remove_member and leave keep at least "
+    },
+    {
+      "at": "2026-11-15T11:38:06.160Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-add",
+      "ref": "c0b5xq4b",
+      "note": "#9 auth.Accounts.limit_sign_in(per_minute:) works end to end on"
+    },
+    {
+      "at": "2026-11-15T11:38:05.260Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-add",
+      "ref": "c0b5xq4b",
+      "note": "#8 auth.Accounts.two_factor works end to end on the test host: "
+    },
+    {
+      "at": "2026-11-15T11:38:04.364Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-add",
+      "ref": "c0b5xq4b",
+      "note": "#7 auth.Accounts.passkeys works end to end on the test host: a "
+    },
+    {
+      "at": "2026-11-15T11:38:03.473Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-add",
+      "ref": "c0b5xq4b",
+      "note": "#6 auth.Accounts.reset_password works end to end on the test ho"
+    },
+    {
+      "at": "2026-11-15T11:38:02.576Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-add",
+      "ref": "c0se7lpr",
+      "note": "#10 Each push or mail a job sends gets its own key, made from th"
+    },
+    {
+      "at": "2026-11-15T11:38:01.626Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-add",
+      "ref": "c0429qak",
+      "note": "#4 get, put, insert and query carry DB.Read and DB.Write: a put"
+    },
+    {
+      "at": "2026-11-15T11:38:00.604Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-add",
+      "ref": "c0429qak",
+      "note": "#3 get, put, insert and query on a typed table record read and "
+    },
     {
       "at": "2026-11-15T11:37:59.406Z",
       "by": "TowerKeeper-2",
