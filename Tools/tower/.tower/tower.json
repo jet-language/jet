@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6953,
-    "rev": 105184,
+    "rev": 105200,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32603,39 +32603,39 @@
         },
         {
           "n": 2,
-          "text": "An ordinary standalone Jet/Jetpack installation includes Nixpkgs translation and can mix native Jet packages with Nixpkgs packages without installing or configuring Nix or an extra provider.",
+          "text": "An ordinary standalone Jet installation includes Nixpkgs translation and mixes native Jet packages with Nixpkgs packages in one env without installing or configuring Nix or an extra provider. Proof: `jet test Compiler --profile cases --filter jetpack_nix/mixed_native_and_nixpkgs_env` run with Nix absent.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-13T13:59:55.740Z"
+          "at": "2026-11-15T05:05:21.860Z"
         },
         {
           "n": 3,
-          "text": "Translated requests use the same checked package/build graph and native lifecycle as authored Jet packages; dependency resolution, acquisition, building, installation, updates and removal are Jetpack operations, not delegated Nix operations.",
+          "text": "Translated requests use the same checked package and build graph and native lifecycle as authored Jet packages: resolution, acquisition, building, installation, updates and removal are Jetpack operations, never delegated Nix operations. Proof: `jet test Compiler --profile packages --filter NixTranslate/native_lifecycle_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-13T13:59:55.740Z"
+          "at": "2026-11-15T05:05:23.275Z"
         },
         {
           "n": 4,
-          "text": "Only Hangar stores realized artifacts and closures. No /nix/store tree, mounted compatibility store, alternate physical Nix store, Nix profile, Nix daemon, or runtime Nix-store path dependency is required.",
+          "text": "Only Hangar stores realized artifacts and closures: no /nix/store tree, mounted compatibility store, alternate Nix store, Nix profile, Nix daemon or runtime Nix-store path is needed. Proof: `jet test Compiler --profile cases --filter jetpack_nix/mixed_native_and_nixpkgs_env` asserts no /nix path in the realized closure.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-13T13:59:55.740Z"
+          "at": "2026-11-15T05:05:24.759Z"
         },
         {
           "n": 5,
-          "text": "Package semantics and provenance survive translation: source identities, dependency edges, builder inputs, evaluation-triggered build dependencies, path/string contexts, platform constraints and update identity are explicit native facts.",
+          "text": "Package meaning and provenance survive translation: source identities, dependency edges, builder inputs, evaluation-triggered build dependencies, path and string contexts, platform constraints and update identity are explicit native facts. Proof: `jet test Compiler --profile packages --filter NixTranslate/provenance_facts_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-13T13:59:55.740Z"
+          "at": "2026-11-15T05:05:26.139Z"
         },
         {
           "n": 6,
@@ -32708,6 +32708,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T04:52:49.493Z"
+        },
+        {
+          "n": 15,
+          "text": "The installed-Nix fallback is deleted: Jetpack/Nix/Source/Fallback/ (FallbackPolicy, FallbackImport, FallbackIdentity), its Nix/Tests/Fallback*.jet claims, the JETPACK_NIX_FALLBACK_POLICY and JETPACK_NIX_FALLBACK_BIN variables, their flags and callers, with no disabled path left. Proof: `git ls-files Jetpack/Nix/Source/Fallback` and `git grep -n JETPACK_NIX_FALLBACK` print nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:05:20.321Z"
         }
       ],
       "refs": [
@@ -32733,12 +32742,12 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-09-13T11:40:48.925Z",
-      "updated": "2026-11-15T04:52:49.493Z",
+      "updated": "2026-11-15T05:05:26.139Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 14
+      "criteriaLastN": 15
     },
     {
       "id": "c09ok528",
@@ -61465,93 +61474,94 @@
       "criteria": [
         {
           "n": 1,
-          "text": "D-INSTALL1 is ratified, and the install page documents only the channel it picks.",
+          "text": "D-INSTALL1 is ratified and the install page documents only the channel it picks. Proof: `jet test tests/guards --filter install_page_single_channel` (owner-gated: D-INSTALL1 is not yet a ballot on Tower; see owner-gates.tsv).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:02:34.272Z"
+          "at": "2026-11-15T05:04:43.273Z"
         },
         {
           "n": 2,
-          "text": "On a clean Linux x86-64 container with no Nix and no Jet, the documented install command installs `jet`; `jet new hello && cd hello && jet run` then prints the greeting. The release gate runs this on every release.",
+          "text": "On a clean Linux x86-64 container with no Nix and no Jet, the documented install command installs `jet`, and `jet new hello && cd hello && jet run` prints the greeting; the release gate runs this on every release. Proof: the release gate's committed install receipt for the release.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:59:09.619Z"
+          "at": "2026-11-15T05:04:44.197Z"
         },
         {
           "n": 3,
-          "text": "`nix run github:<org>/jet -- --version` prints the release version: flake.nix exports `packages.<system>.default` built from the pinned seed release asset.",
+          "text": "`nix run github:<org>/jet -- --version` prints the release version: flake.nix exports `packages.<system>.default` built from the pinned seed release asset (D-SEED-DIST1=A). Proof: `nix flake show` lists `packages.x86_64-linux.default`, and the release receipt records the `--version` output.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:02:34.272Z"
+          "at": "2026-11-15T05:04:45.137Z"
         },
         {
           "n": 4,
-          "text": "The install page is generated from the tested install script; no page names an install command that the release gate does not run.",
+          "text": "The install page is generated from the tested install script, so no page names an install command the release gate does not run. Proof: `jet test tests/guards --filter install_page_generated`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:59:10.495Z"
+          "at": "2026-11-15T05:04:46.055Z"
         },
         {
           "n": 5,
-          "text": "The installed `jet` runs `jet run hello.jet` with JET_TOOLCHAIN_ROOT and JET_COMPILER_IDENTITY unset: Core ships inside the binary or the install root (test unsets both).",
+          "text": "The installed `jet` runs `jet run hello.jet` with JET_TOOLCHAIN_ROOT and JET_COMPILER_IDENTITY unset, because Core ships inside the binary or the install root. Proof: `jet test Compiler --profile cases --filter install/runs_without_toolchain_env`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:06:13.561Z"
+          "at": "2026-11-15T05:04:47.003Z"
         },
         {
           "n": 7,
-          "text": "The same one-line install works on macOS arm64 and on Windows x64 (`irm … | iex`), and `jet run hello.jet` prints the greeting on both, checked by the release gate.",
+          "text": "The same one-line install works on macOS arm64 and Windows x64 (`irm … | iex`), and `jet run hello.jet` prints the greeting on both. Proof: the release gate's committed install receipts for both hosts (parked by the owner's standing order on macOS and Windows; 2026-11-09 log).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:59:11.292Z"
+          "at": "2026-11-15T05:04:48.063Z"
         },
         {
           "n": 8,
-          "text": "(was #4) Real aarch64/QEMU freestanding CI run [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "A freestanding aarch64 program runs under QEMU in the release gate and prints its expected output. Proof: the release gate's committed receipt of the QEMU run (waits for hosted CI, which returns with a pinned native seed release; owner ruling 2026-11-08).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:49:00.724Z"
+          "at": "2026-11-15T05:04:49.100Z"
         },
         {
           "n": 10,
           "text": "(was #2855 c1) Implementation-only closure: jet package materializes a real deterministic desktop bundle, installer metadata, signing hooks, updater artifact, and byte/digest/mode receipt from the checked package plan without a placeholder archive or second bundler [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:49:02.098Z"
+          "evidence": "Moved to #6810 c4: desktop bundles belong with desktop install and signing on #6810",
+          "at": "2026-11-15T05:04:52.132Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
-          "text": "(was #679 c2, #1032 c2, #1034 c2, #1037 c2, #1035 c2, #1036 c2) Install, scaffold, resolve, run, diagnose, test, edit, and learn use consistent commands and source on every supported beginner host [precut audit: failing on 9c7ddf1359: C:onboarding_recovery/entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts KNOWN-FAILING #6068 unbuilt: jet run does not migrate retired entry layouts (main.jet to run.jet): wrong file kind: legacy/run.jet (known-failing #6068: unbuilt: jet run does not migrate…] (was #6068 c7)",
+          "text": "The install, scaffold, run, check, test and edit commands named in the getting-started docs are the same on every supported beginner host, and each runs as documented. Proof: `jet test Compiler --profile cases --filter onboarding/beginner_path_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:38:04.778Z"
+          "at": "2026-11-15T05:04:50.098Z"
         },
         {
           "n": 13,
-          "text": "(was #679 c3, #1034 c3, #1037 c3) Missing entry, ambiguous project, unsupported host, install failure, invalid code, and offline state offer a tested recovery path [precut audit: failing on 9c7ddf1359: C:onboarding_recovery/entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts KNOWN-FAILING #6068 unbuilt: jet run does not migrate retired entry layouts (main.jet to run.jet): wrong file kind: legacy/run.jet (known-failing #6068: unbuilt: jet run does not migrate…] (was #6068 c8)",
+          "text": "A missing entry, an ambiguous project, an unsupported host, an install failure, invalid code and offline state each give a registered error with a tested next step; retired entry layouts get no migration (owner order 2026-11-06), so the case's legacy-layout step is removed. Proof: `jet test Compiler --profile cases --filter onboarding_recovery/entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts` with its known-failing row removed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:38:10.078Z"
+          "at": "2026-11-15T05:04:51.107Z"
         },
         {
           "n": 14,
@@ -61573,7 +61583,7 @@
       "parentId": "c0h4r83r",
       "needsAcceptance": false,
       "created": "2026-10-28T11:02:34.272Z",
-      "updated": "2026-11-15T05:03:57.821Z",
+      "updated": "2026-11-15T05:04:52.132Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
@@ -99190,6 +99200,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T16:43:45.812Z"
+        },
+        {
+          "n": 4,
+          "text": "`jet package` builds a real, deterministic desktop bundle from the checked package plan, with installer metadata, signing hooks, an updater artifact and a byte, digest and mode receipt, with no placeholder archive and no second bundler. Proof: `jet test Compiler --profile cases --filter package/desktop_bundle_deterministic`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:04:42.245Z"
         }
       ],
       "refs": [],
@@ -99200,9 +99219,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:54.979Z",
-      "updated": "2026-11-14T03:25:12.372Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3
+      "updated": "2026-11-15T05:04:42.245Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 4
     },
     {
       "id": "c0gvf2dr",
@@ -215988,6 +216007,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:05:26.139Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#5: proof; was: Package semantics and provenance survive translation: source identities, dependency edges, builder inputs, evaluation-triggered build dependencies, path/string contexts, platform constraints and updat"
+    },
+    {
+      "at": "2026-11-15T05:05:24.759Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#4: proof; was: Only Hangar stores realized artifacts and closures. No /nix/store tree, mounted compatibility store, alternate physical Nix store, Nix profile, Nix daemon, or runtime Nix-store path dependency is requ"
+    },
+    {
+      "at": "2026-11-15T05:05:23.275Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#3: proof; was: Translated requests use the same checked package/build graph and native lifecycle as authored Jet packages; dependency resolution, acquisition, building, installation, updates and removal are Jetpack "
+    },
+    {
+      "at": "2026-11-15T05:05:21.860Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#2: proof; was: An ordinary standalone Jet/Jetpack installation includes Nixpkgs translation and can mix native Jet packages with Nixpkgs packages without installing or configuring Nix or an extra provider."
+    },
+    {
+      "at": "2026-11-15T05:05:20.322Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0svneex",
+      "note": "#15 The installed-Nix fallback is deleted: Jetpack/Nix/Source/Fa"
+    },
+    {
+      "at": "2026-11-15T05:04:52.133Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c050uwwc",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T05:04:51.107Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c050uwwc",
+      "note": "#13: strip debris; proof; was: (was #679 c3, #1034 c3, #1037 c3) Missing entry, ambiguous project, unsupported host, install failure, invalid code, and offline state offer a tested recovery path [precut audit: failing on 9c7ddf1359"
+    },
+    {
+      "at": "2026-11-15T05:04:50.098Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c050uwwc",
+      "note": "#12: strip debris; proof; was: (was #679 c2, #1032 c2, #1034 c2, #1037 c2, #1035 c2, #1036 c2) Install, scaffold, resolve, run, diagnose, test, edit, and learn use consistent commands and source on every supported beginner host [pr"
+    },
+    {
+      "at": "2026-11-15T05:04:49.100Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c050uwwc",
+      "note": "#8: strip debris; proof; was: (was #4) Real aarch64/QEMU freestanding CI run [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-15T05:04:48.063Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c050uwwc",
+      "note": "#7: proof; was: The same one-line install works on macOS arm64 and on Windows x64 (`irm … | iex`), and `jet run hello.jet` prints the greeting on both, checked by the release gate."
+    },
+    {
+      "at": "2026-11-15T05:04:47.003Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c050uwwc",
+      "note": "#5: proof; was: The installed `jet` runs `jet run hello.jet` with JET_TOOLCHAIN_ROOT and JET_COMPILER_IDENTITY unset: Core ships inside the binary or the install root (test unsets both)."
+    },
+    {
+      "at": "2026-11-15T05:04:46.055Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c050uwwc",
+      "note": "#4: proof; was: The install page is generated from the tested install script; no page names an install command that the release gate does not run."
+    },
+    {
+      "at": "2026-11-15T05:04:45.137Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c050uwwc",
+      "note": "#3: proof; was: `nix run github:<org>/jet -- --version` prints the release version: flake.nix exports `packages.<system>.default` built from the pinned seed release asset."
+    },
+    {
+      "at": "2026-11-15T05:04:44.197Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c050uwwc",
+      "note": "#2: proof; was: On a clean Linux x86-64 container with no Nix and no Jet, the documented install command installs `jet`; `jet new hello && cd hello && jet run` then prints the greeting. The release gate runs this on "
+    },
+    {
+      "at": "2026-11-15T05:04:43.273Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c050uwwc",
+      "note": "#1: proof; gate; was: D-INSTALL1 is ratified, and the install page documents only the channel it picks."
+    },
+    {
+      "at": "2026-11-15T05:04:42.245Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0s5hn28",
+      "note": "#4 `jet package` builds a real, deterministic desktop bundle fr"
+    },
     {
       "at": "2026-11-15T05:04:09.364Z",
       "by": "Main",
