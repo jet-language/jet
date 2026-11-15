@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6864,
-    "rev": 103170,
+    "nextNum": 6867,
+    "rev": 103175,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97489,6 +97489,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:49:30.082Z"
+        },
+        {
+          "n": 3,
+          "text": "One struct-declared rule set (its validate block, D-VALIDATE1=A) gives the same field paths and reasons for JSON decode, `T.validate` and form submission, and a field's error clears on the next valid submit. Proof: `jet test Compiler --profile golden --filter Web/FormValidationOneMeaning` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:18.408Z"
+        },
+        {
+          "n": 4,
+          "text": "kit.Form<T> runs the submission lifecycle (editing, submitting, accepted, refused with field errors) and the use-site validation chain of D-VALIDATE1=A, with goldens on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter Web/FormSubmission`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:19.417Z"
         }
       ],
       "refs": [],
@@ -97499,9 +97517,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:33.941Z",
-      "updated": "2026-11-15T02:49:30.082Z",
+      "updated": "2026-11-15T02:52:19.417Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 2
+      "criteriaLastN": 4
     },
     {
       "id": "c0429qak",
@@ -101077,6 +101095,226 @@
       "needsAcceptance": false,
       "created": "2026-11-15T02:49:14.678Z",
       "updated": "2026-11-15T02:49:14.678Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0drmvwg",
+      "num": 6864,
+      "title": "Typed routes: checked paths and search params, loader boundaries and route data freshness",
+      "body": "Destination: a route declares typed path and search parameters, a loader and its navigation contract; a wrong route or parameter is a compile error; a loader's pending, error and not-found states render; and route data stays fresh by the compiler's read sets.\n\nWhy it matters: routing and data loading are the spine of every web app; untyped routes are the most common source of broken links and stale pages.\n\nDecisions: D-ROUTE-ONE1=A (one route table on web.app()), D-ROUTE-FILES2=A (page file words become the address), D-INVALIDATE1=A (the compiler decides what a write makes stale), D-WEBAPP-SHAPE1=A.\n\nSource: #6552 c8, c10, c11, c12 (from archived #2472). Parent: #6552.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A route declares typed path and search parameters, its loader and its navigation contract; a link or navigation to an unknown route or with a wrong parameter type is a compile error with a registered diagnostic and a UI snapshot. Proof: `jet test Compiler --profile ui --filter web_route_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:15.741Z"
+        },
+        {
+          "n": 2,
+          "text": "A route loader's pending, error and not-found boundaries render, and an aborted navigation cancels its preload, on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter Web/RouteLoaderBoundaries`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:15.741Z"
+        },
+        {
+          "n": 3,
+          "text": "Route data is keyed by its route and arguments, turns stale when a write meets its read set (D-INVALIDATE1=A), refetches, and is dropped after its last screen leaves. Proof: `jet test Compiler --profile cases --filter web_app/route_data_lifecycle`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:15.741Z"
+        },
+        {
+          "n": 4,
+          "text": "Browser code that uses a server-only capability, or server code that uses a browser-only one, is refused at the app boundary with a registered diagnostic, one UI snapshot per rejection kind. Proof: `jet test Compiler --profile ui --filter web_capability_boundary_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:15.741Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "routing"
+      ],
+      "goals": [
+        "G9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:52:15.741Z",
+      "updated": "2026-11-15T02:52:15.741Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0sf9ixl",
+      "num": 6865,
+      "title": "Endpoints: one checked contract drives dispatch, the typed client, schema, form and OpenAPI",
+      "body": "Destination: an endpoint is declared once (a marked method or route) and its contract derives dispatch, the typed client, the JSON schema, the form and the OpenAPI document; all of them agree with an independent HTTP client.\n\nWhy it matters: hand-kept clients and schemas drift from the server; one derived contract removes that whole class of bug.\n\nDecisions: D-ENDPOINT-SHAPE1=A (contracts derived from typed handlers), D-ROUTE-ONE1=A, D-HTTP-ROUTE-EXPOSE1=A (route markers on struct methods, added with one call), D-FOUND-COREAPI1, D-WEBAPP-SHAPE1=A.\n\nSource: #6552 c20, c28, c29, c34 (from archived #2962, #3304, #2852). Parent: #6552.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A typed endpoint is admitted, lowered to one descriptor, invoked, and encoded through the native and web codecs, with goldens on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter Web/TypedEndpoint`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:16.627Z"
+        },
+        {
+          "n": 2,
+          "text": "Renaming a public input changes the derived client, schema and form in one place, and an independent client (curl) sees the same typed errors, auth requirements and HTTP statuses as the typed client. Proof: `jet test Compiler --profile cases --filter endpoint_contract_replay` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:16.627Z"
+        },
+        {
+          "n": 3,
+          "text": "Malformed path, query or body input is refused before the handler, private result fields never cross the public boundary, and optional, nested, enum, list and recursive schema references appear only where the endpoint declares them. Proof: `jet test Compiler --profile cases --filter endpoint_contract_boundary`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:16.627Z"
+        },
+        {
+          "n": 4,
+          "text": "web.openapi(app) derives one deterministic OpenAPI document from the route table (D-ROUTE-ONE1=A): stable operation IDs, typed input, success, failure, auth and status, and no internal or visual routes. Proof: `jet test Compiler --profile golden --filter Web/AppOpenapi` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:16.627Z"
+        },
+        {
+          "n": 5,
+          "text": "Route markers on struct methods are added to the app with one call (D-HTTP-ROUTE-EXPOSE1=A): a jokes API with GET and POST routes serves identically on O0, O1 and O2, `web.openapi` renders both routes, and a bad path parameter is a compile error with a UI snapshot. Proof: `jet test Compiler --profile golden --filter Web/JokesApi`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:16.627Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "http",
+        "api"
+      ],
+      "goals": [
+        "G9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:52:16.627Z",
+      "updated": "2026-11-15T02:52:16.627Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c06sazo9",
+      "num": 6866,
+      "title": "Browser tests in jet test: scaffold, UI mode, retry traces and cross-browser runs",
+      "body": "Destination: `jet test` drives real browsers for an app: a scaffold sets up the browser test project, a UI mode shows one run in full, a retry records a trace you can open locally, and runs across browsers are deterministic and keep Jet's diagnostics and source positions.\n\nWhy it matters: end-to-end browser tests are where web apps break; parity with the best browser test runner (Playwright) is part of the web framework's parity bar.\n\nSource: #6552 c15-c18 (from archived #2498 c2-c5). Parent: #6552.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The browser test scaffold creates an isolated browser test project with its configured browsers and a reusable `jet dev` web server, then runs a first passing test. Proof: `jet test Compiler --profile cases --filter browser_test_scaffold`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:17.496Z"
+        },
+        {
+          "n": 2,
+          "text": "UI mode shows the test tree, filters, timeline, DOM snapshots, source, logs, errors, console, network, attachments and watch updates from one test run. Proof: `jet test Compiler --profile cases --filter browser_test_ui_mode`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:17.496Z"
+        },
+        {
+          "n": 3,
+          "text": "A retried test records a bounded trace that opens in the local viewer with action snapshots, source, DOM, logs and network details, and page payloads are left out unless asked for. Proof: `jet test Compiler --profile cases --filter browser_test_retry_trace`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:17.496Z"
+        },
+        {
+          "n": 4,
+          "text": "Runs across browsers are deterministic in contexts, retries, reporters and failure exit status, and failures keep Jet's diagnostic and source positions. Proof: `jet test Compiler --profile cases --filter browser_test_cross_browser`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:52:17.496Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "testing"
+      ],
+      "goals": [
+        "G9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:52:17.496Z",
+      "updated": "2026-11-15T02:52:17.496Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -206496,6 +206734,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:52:19.417Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00xuadc",
+      "note": "#4 kit.Form<T> runs the submission lifecycle (editing, submitti"
+    },
+    {
+      "at": "2026-11-15T02:52:18.408Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00xuadc",
+      "note": "#3 One struct-declared rule set (its validate block, D-VALIDATE"
+    },
+    {
+      "at": "2026-11-15T02:52:17.496Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c06sazo9",
+      "note": "Browser tests in jet test: scaffold, UI mode, retry traces and cross-browser runs"
+    },
+    {
+      "at": "2026-11-15T02:52:16.627Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0sf9ixl",
+      "note": "Endpoints: one checked contract drives dispatch, the typed client, schema, form and OpenAPI"
+    },
+    {
+      "at": "2026-11-15T02:52:15.741Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0drmvwg",
+      "note": "Typed routes: checked paths and search params, loader boundaries and route data freshness"
+    },
     {
       "at": "2026-11-15T02:50:52.722Z",
       "by": "TowerKeeper-1",
