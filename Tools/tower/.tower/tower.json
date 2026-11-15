@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6861,
-    "rev": 103061,
+    "rev": 103075,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48127,66 +48127,66 @@
         },
         {
           "n": 2,
-          "text": "If A: `नमस्ते: 1` and NFD `café` both compile; NFC and NFD spellings of one name are the same binding on every engine; jet fmt rewrites the file to NFC.",
+          "text": "`नमस्ते: 1` and an NFD-typed `café` both compile, the NFC and NFD spellings of one name are the same binding on O0, O1 and O2, and `jet fmt` rewrites names to NFC (D-IDENT-CHARS1=A). Proof: `jet test Compiler --profile golden --filter Basics/UnicodeNames` and `jet test Compiler --profile cases --filter fmt_names_to_nfc`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:47.274Z"
+          "at": "2026-11-15T02:44:12.896Z"
         },
         {
           "n": 3,
-          "text": "If A: two names in one package with the same UTS #39 skeleton (Latin `a` and Cyrillic `а`) warn once, naming both declarations; the warning never blocks (D-LINTPOLICY1).",
+          "text": "Two names in one package with the same UTS #39 skeleton (Latin `a` and Cyrillic `а`) are one tidy error naming both declarations: `jet check` and `jet build` list it, `jet run` and `jet dev` never stop on it (D-IDENT-CHARS1=A under D-NO-WARNINGS1=A, which replaced non-blocking warnings). Proof: `jet test Compiler --profile ui --filter lookalike_names_skeleton`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:47.274Z"
+          "at": "2026-11-15T02:44:13.857Z"
         },
         {
           "n": 5,
-          "text": "The lexer and the casing check read one generated character table; a parity fixture over boundary scalars passes (shares #4426's pinned UCD).",
+          "text": "The lexer and the casing check read one generated character table from the pinned UCD (#4426). Proof: `jet test Compiler --profile cases --filter identifier_table_parity` (a parity fixture over boundary scalars).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:34.680Z"
+          "at": "2026-11-15T02:44:14.751Z"
         },
         {
           "n": 6,
-          "text": "spec.md identifier rule, syntax registry, editor grammars and `jet explain` text are regenerated from the one home; obsolete hand-written ranges are deleted.",
+          "text": "spec.md's identifier rule, the syntax registry, the editor grammars and the `jet explain` text are generated from the one character table, and the hand-written ranges are deleted. Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty and `jet test tests/guards --filter syntax_reconciliation` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:47.274Z"
+          "at": "2026-11-15T02:44:15.748Z"
         },
         {
           "n": 7,
-          "text": "If A: the casing check (D-CASE-LAW1) reads the same character table, so uncased scripts pass as today and combining marks count as word characters; a Hindi type name and value name check clean (UI snapshot).",
+          "text": "The casing check (D-CASE-LAW1=A) reads the same character table, so uncased scripts pass and combining marks count as word characters: a Hindi type name and value name check clean (D-IDENT-CHARS1=A). Proof: `jet test Compiler --profile ui --filter casing_uncased_script_names`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:47.274Z"
+          "at": "2026-11-15T02:44:16.754Z"
         },
         {
           "n": 8,
-          "text": "If A: jet fmt normalizes names only; string and comment contents are byte-identical before and after (fixture with NFD text inside quotes).",
+          "text": "`jet fmt` normalizes names only: string and comment contents are byte-identical before and after. Proof: `jet test Compiler --profile cases --filter fmt_nfc_leaves_strings_alone` (a fixture with NFD text inside quotes).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:47.274Z"
+          "at": "2026-11-15T02:44:17.758Z"
         },
         {
           "n": 9,
-          "text": "If A: a single name that mixes scripts to look like another word gets the same non-blocking look-alike warning (UTS #39 mixed-script check).",
+          "text": "A single name that mixes scripts to look like another word is the same look-alike tidy error (UTS #39 mixed-script check). Proof: `jet test Compiler --profile ui --filter lookalike_mixed_script_name`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:47.274Z"
+          "at": "2026-11-15T02:44:18.755Z"
         },
         {
           "n": 10,
@@ -48246,8 +48246,8 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.274Z",
-      "updated": "2026-11-14T03:01:41.341Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:44:18.755Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
@@ -49995,21 +49995,48 @@
         },
         {
           "n": 5,
-          "text": "D-VIS-REEXPORT1=A: Every original module/field privacy criterion retained; all pub use forms migrate to bare-path re-export declarations written name: path (clamp: core.math.clamp, D-DECL-COLON1=A); use stays local; the pub keyword is removed and gets no teaching diagnostic; kind-resolved target casing and canonical identity preserve original home/privacy/generics/defaults/named args/effects/borrow/move/constructors/patterns/methods/traits; forward chains resolve and rootless cycles diagnose; duplicate, parenthesized and private-module errors carry exact fixes; doc/API record lists target signatures and publication diffs; no pub/priv use remains in live source.",
+          "text": "A bare-path re-export declaration `clamp: core.math.clamp` re-exports a declaration with its canonical identity: home, privacy, generics, defaults, named arguments, effects, borrow and move, constructors, patterns, methods and traits (D-VIS-REEXPORT1=A, D-DECL-COLON1=A). `use` stays local. Today re-exports are still `pub use` (Examples/Modules/ModuleReexport). Proof: `jet test Compiler --profile golden --filter Modules/ModuleReexport` passes on o0, o1 and o2 with no `pub use`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-07T21:05:33.865Z"
+          "at": "2026-11-15T02:44:19.697Z"
         },
         {
           "n": 6,
-          "text": "Aliases (D-DECL-COLON1=A and D-ALIAS-GENERIC1=A; supersedes D-ALIAS-BIND2=B's alias keyword): a generic alias writes its parameters on its name (Grid<T>: [[T]]) and aliases a type expression or type-valued recipe call; a non-generic alias stays E0324 (Jet keeps aliases for generic spellings, unchanged by #6176); aliases preserve identity/home/privacy and distinct protection; hover and errors show the source name plus a single expansion; forward chains cycle-diagnose rather than crash; the alias constructor (Grid<Int>{[1, 2], [3]}, Table<Int>{\"a\": 1}) works.",
+          "text": "Hover and errors name a generic alias by its source name plus a single expansion, and an alias keeps the identity, home and privacy of its target (D-ALIAS-GENERIC1=A). The alias constructor (88cb1947d0, tests/cases/generics/an_alias_constructor_builds_its_list_or_map_target) and cycle errors (tests/ui/type_alias_cycle) have landed, and non-generic aliases such as `Spot: Point` are allowed by owner ruling #6176. Proof: `jet test Compiler --profile ui --filter alias_shows_source_name_and_expansion`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T14:29:49.220Z"
+          "at": "2026-11-15T02:44:20.866Z"
+        },
+        {
+          "n": 7,
+          "text": "Re-export chains resolve forward, and a rootless cycle, a duplicate, a parenthesized target and a private-module target each get a registered error with an exact fix (D-VIS-REEXPORT1=A). Proof: `jet test Compiler --profile ui --filter reexport_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:44:09.998Z"
+        },
+        {
+          "n": 8,
+          "text": "The doc and API record list each re-export's target signature, and a publication diff shows a re-export change (D-VIS-REEXPORT1=A). Proof: `jet test Compiler --profile cases --filter doc_reexport_target_signature`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:44:11.003Z"
+        },
+        {
+          "n": 9,
+          "text": "`pub` is removed: every `pub use` and `pub` declaration (20 files on dev 72a8142651, including Compiler/Prelude/core/prelude.jet, Core/Encoding/Hex.jet and Core/Testing/Testing.jet) migrates to a bare-path re-export or a plain declaration in one cutover, K_PUB leaves the lexer, and `pub` gets the generic parse error with no teaching. Proof: `git grep -l -E '^\\s*pub ' -- '*.jet'` lists only foreign-language fixtures, and `git grep -n K_PUB -- Compiler` prints nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:44:11.975Z"
         }
       ],
       "refs": [],
@@ -50019,12 +50046,12 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-07T11:23:08.090Z",
-      "updated": "2026-11-14T14:29:49.220Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:44:20.866Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 6
+      "criteriaLastN": 9
     },
     {
       "id": "c038vt4s",
@@ -68245,21 +68272,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A dated audit in Docs/audits lists every Odin array/matrix/quaternion/simd/soa feature with Jet status and probe; every row is PASS or has a linked card or owner ballot.",
+          "text": "A dated audit in Docs/audits lists every Odin array, matrix, quaternion, simd and soa feature with its Jet status and probe; every row is PASS or links a card or an owner ballot. Proof: the audit file exists (`git ls-files 'Docs/audits/*odin-arrays*'`) and has no row without a status.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-29T13:58:56.482Z"
+          "at": "2026-11-15T02:44:22.309Z"
         },
         {
           "n": 2,
-          "text": "Numeric fixed arrays [T#N] support element-wise + - * / % and bit operators with another [T#N] and with a scalar, unary minus and ==, as goldens on O0/O1/O2; length or element mismatches are registered diagnostics with UI snapshots.",
+          "text": "Numeric fixed arrays `[T#N]` support element-wise + - * / % and bit operators with another `[T#N]` and with a scalar, unary minus and ==; a length or element mismatch is a registered error. Proof: `jet test Compiler --profile golden --filter LowLevel/FixedArrayArithmetic` on o0, o1 and o2 and `jet test Compiler --profile ui --filter fixed_array_elementwise_mismatch`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-29T13:58:56.482Z"
+          "at": "2026-11-15T02:44:23.844Z"
         },
         {
           "n": 3,
@@ -68297,8 +68324,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T13:58:56.482Z",
-      "updated": "2026-11-13T02:08:18.741Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:44:23.844Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 7
     },
     {
@@ -206056,6 +206083,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:44:23.844Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05gn07n",
+      "note": "#2: add proof; was: Numeric fixed arrays [T#N] support element-wise + - * / % and bit operators with another [T#N] and with a scalar, unary minus and ==, as goldens on O0/O1/O2; length or element mismatches are registere"
+    },
+    {
+      "at": "2026-11-15T02:44:22.309Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05gn07n",
+      "note": "#1: add proof; was: A dated audit in Docs/audits lists every Odin array/matrix/quaternion/simd/soa feature with Jet status and probe; every row is PASS or has a linked card or owner ballot."
+    },
+    {
+      "at": "2026-11-15T02:44:20.866Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06m6abh",
+      "note": "#6: the constructor, the cycle errors and the alias keyword's removal have landed; #6176 allows non-generic aliases, replacing the old E0324 clause; was: Aliases (D-DECL-COLON1=A and D-ALIAS-GENERIC1=A; supersedes D-ALIAS-BIND2=B's alias keyword): a generic alias writes its parameters on its name (Grid<T>: [[T]]) and aliases a type expression or type-v"
+    },
+    {
+      "at": "2026-11-15T02:44:19.697Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c06m6abh",
+      "note": "#5: split: the declaration form here, errors (new), docs (new) and the pub removal (new) on their own criteria; was: D-VIS-REEXPORT1=A: Every original module/field privacy criterion retained; all pub use forms migrate to bare-path re-export declarations written name: path (clamp: core.math.clamp, D-DECL-COLON1=A); u"
+    },
+    {
+      "at": "2026-11-15T02:44:18.755Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0441rvj",
+      "note": "#9: D-NO-WARNINGS1=A: tidy error, not a warning; 'If A' guard dropped; add proof; was: If A: a single name that mixes scripts to look like another word gets the same non-blocking look-alike warning (UTS #39 mixed-script check)."
+    },
+    {
+      "at": "2026-11-15T02:44:17.758Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0441rvj",
+      "note": "#8: 'If A' guard dropped; add proof; was: If A: jet fmt normalizes names only; string and comment contents are byte-identical before and after (fixture with NFD text inside quotes)."
+    },
+    {
+      "at": "2026-11-15T02:44:16.754Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0441rvj",
+      "note": "#7: 'If A' guard dropped; add proof; was: If A: the casing check (D-CASE-LAW1) reads the same character table, so uncased scripts pass as today and combining marks count as word characters; a Hindi type name and value name check clean (UI sna"
+    },
+    {
+      "at": "2026-11-15T02:44:15.748Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0441rvj",
+      "note": "#6: add proof; was: spec.md identifier rule, syntax registry, editor grammars and `jet explain` text are regenerated from the one home; obsolete hand-written ranges are deleted."
+    },
+    {
+      "at": "2026-11-15T02:44:14.751Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0441rvj",
+      "note": "#5: add proof; was: The lexer and the casing check read one generated character table; a parity fixture over boundary scalars passes (shares #4426's pinned UCD)."
+    },
+    {
+      "at": "2026-11-15T02:44:13.858Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0441rvj",
+      "note": "#3: D-NO-WARNINGS1=A (2026-11-10) leaves no warnings: the look-alike report is a tidy error; 'If A' guard dropped; was: If A: two names in one package with the same UTS #39 skeleton (Latin `a` and Cyrillic `а`) warn once, naming both declarations; the warning never blocks (D-LINTPOLICY1)."
+    },
+    {
+      "at": "2026-11-15T02:44:12.896Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0441rvj",
+      "note": "#2: D-IDENT-CHARS1=A is ratified (2026-10-05): drop the 'If A' guard; add proof; was: If A: `नमस्ते: 1` and NFD `café` both compile; NFC and NFD spellings of one name are the same binding on every engine; jet fmt rewrites the file to NFC."
+    },
+    {
+      "at": "2026-11-15T02:44:11.975Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c06m6abh",
+      "note": "#9 `pub` is removed: every `pub use` and `pub` declaration (20 "
+    },
+    {
+      "at": "2026-11-15T02:44:11.003Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c06m6abh",
+      "note": "#8 The doc and API record list each re-export's target signatur"
+    },
+    {
+      "at": "2026-11-15T02:44:09.998Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c06m6abh",
+      "note": "#7 Re-export chains resolve forward, and a rootless cycle, a du"
+    },
     {
       "at": "2026-11-15T02:42:20.973Z",
       "by": "TowerKeeper-1",
