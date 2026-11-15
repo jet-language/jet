@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106436,
+    "rev": 106438,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74573,6 +74573,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "Regression and gap (Main, 2026-11-15, gate p183 at 41f95a5016). The self-build went from 28.90 s (p182) to 38.31 s: the runtime step's Core compile spends 8.02 s in sema.bodies, against about 2.7 s in its finalize before. Suspect b193e874a1 (core-bodies-all keeps Core modules off the threads, which serializes a compile of Core itself). Separately, the gate-built jet loads no Core bodies: RunColdContext outside the tree shows bodies_loaded 0 and bodies_from_text 2362, and jet check is 1.2-2.0 s against p182's 1.27-1.52 s. Both went back to PrecompiledCore-4 as top priority; b193e874a1 is reverted if no fix lands in the next batch."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c22 progress and decisions (Main, 2026-11-15). Landed: core-bodies-capture f62c88ad4c and core-bodies-load bce840440f (Prelude function checks load from core.bodies on bound runs). Queued: core-bodies-all (every Core function check loads in the module pass and the Core demand waves; target sema.core_demand on RunColdContext, 1405 ms CPU before). Measured on p182 with RunColdContext: jet run 1.05 s wall, with load 330 ms (the Core parse waves about 200 ms) and the backend about 100 ms, so skipping the parse of loaded Core text is next. Decision: jet build at O2 keeps lowering the Core it reaches with the program instead of binding to the prebuilt jet_core.o, because cross-module inlining of Core feeds the run-time peer gate. Revisit only with a paired measurement showing no run-time or peak-memory regression on two programs."
         },
         {
@@ -75351,7 +75356,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T13:42:47.138Z",
+      "updated": "2026-11-15T14:13:11.339Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -104280,7 +104285,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Decision for c3 (Main, 2026-11-15): guarded tables judge an ambient, task-keyed caller in core.app, set by the request layer and by as_caller(who, fn); a live binding keeps the caller that created it. With no caller the policy sees Who.Anonymous (fail-closed), never System; System comes only from an explicit job or system run. No per-table acting(who) override, so the ambient caller is the one mechanism and no path can bypass it. c2 uses the same API. Owner: GoalsB-5-2."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -104331,8 +104342,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:11.163Z",
-      "updated": "2026-11-15T02:54:11.163Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T14:13:10.400Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c00bn0zc",
@@ -218029,6 +218040,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T14:13:11.339Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T14:13:10.400Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ems7zb",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T14:06:25.597Z",
       "by": "Main",
