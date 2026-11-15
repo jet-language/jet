@@ -41,11 +41,13 @@ is the folder and `new.files` the files it wrote.
 `--ast` the parsed syntax tree (parsing only), and `--ir` the slot IR `jet build`
 builds from the checked functions of the entry package (every checked function
 for a program without an entry). `--ir` checks the file in Run mode: errors stop
-it and visible lints go to stderr. `--fn NAME` keeps one function. Each tier is
-one tree. The text form indents each child two spaces. `--json` writes the same
-tree as the `emit` status, a `{kind, text, children}` node per line. A function
-the IR builder cannot build is reported as E2104 with its name, key and source
-span.
+it and visible lints go to stderr. `--fn NAME` keeps one function. An IR
+function's header names its result type in carrier spelling: `Int` for a plain
+return, `Int ! Err` for a function that can fail, and `none` when it returns no
+value. Each tier is one tree. The text form indents each child two spaces.
+`--json` writes the same tree as the `emit` status, a `{kind, text, children}`
+node per line. A function the IR builder cannot build is reported as E2104 with
+its name, key and source span.
 
 `jet self devtools new-ui <name>` writes `tests/ui/<name>.jet` and its
 diagnostic snapshot using the same compiler and renderer as the UI harness.

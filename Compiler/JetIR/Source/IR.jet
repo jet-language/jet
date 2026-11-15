@@ -876,12 +876,15 @@ ir_op_code: fn(op: IROp) -> Int Never! {
     }
 }
 
-// Text form for dumps and diffs: one line per slot (a fixed one ends in
+// Text form for dumps and diffs: the header names the function's result by
+// its carrier spelling (`Int` for a plain return, `Int ! Err` for one that
+// can fail, `none` without one), then one line per slot (a fixed one ends in
 // `fixed`, IRFunction.slot_fixed), then one per instruction, indented by
 // structured nesting. Names and data resolve through `m`, so the text is
 // the function's content.
 ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
-    lines := [String]{"fn {f.name} [{f.key}] params={f.param_count} result={f.result}"}
+    result: if f.result >= 0 -> ir_type_name(m.types[f.result].ty) else -> "none"
+    lines := [String]{"fn {f.name} [{f.key}] params={f.param_count} result={result}"}
     if f.asm == .Val(leaf) {
         code: loop byte in leaf.code -> "{byte}"
         regs: loop register in leaf.regs -> "{register}"
