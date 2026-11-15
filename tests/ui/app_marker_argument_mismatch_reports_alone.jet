@@ -1,0 +1,16 @@
+use {
+    app
+    web: core.web
+}
+
+Crew: struct {
+    name: String
+
+    #App.Public(limit: "many")
+    status: fn(self) -> String { "{self.name} is up" }
+}
+
+run: fn() {
+    served: web.app().mount("/api", Crew{name: "crew"})
+    print(served.routes().len())
+}

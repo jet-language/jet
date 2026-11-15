@@ -10191,6 +10191,22 @@ sema_collect_comptime_declarations: fn(graph: &&SemaRegistrationGraph, package_p
     loop diagnostic in graph.diagnostics -> diagnostics.push(diagnostic)
     complete := graph.complete
     module_count: graph.modules.len()
+    // A registration stopped before it bound the imports (a marker-law error)
+    // leaves every imported name unknown, so a declaration check would report
+    // each one, in Core sources as in the program's own. No module is
+    // checked: the registration's reports stand alone.
+    if !graph.imports_bound {
+        return SemaComptimeDeclarationStage{
+            modules: [SemaGraphModuleResult]{},
+            imports: [SemaRegistrationImport]{},
+            package_policies: package_policies,
+            names: sema_name_facts_empty(),
+            sources: [SemaComptimeItemSource]{},
+            diagnostics: diagnostics,
+            complete: false,
+            graph: Val(graph.move()),
+        }
+    }
     modules := [SemaGraphModuleResult]{}
     body_values := sema_comptime_body_values_freeze([SemaComptimeBodyValue]{}, sema_comptime_body_work_new(trace_sink), false)
     facts := sema_pass_facts_new()

@@ -895,6 +895,10 @@ SemaRegistrationGraph: struct {
     // bound.
     package_reach_slots: [String:Int]{[String:Int]{}}
     package_reach: [[Bool]]{[[Bool]]{}}
+    // Whether registration bound every module's imports. A marker-law error
+    // stops registration before then (sema_registration_prepare_graph), and a
+    // check of such a graph would find no imported name in any module.
+    imports_bound: Bool{false}
     // Compiler-owned nominal name (`Err`, `Ordering`, `RemoveBy`) -> its row.
     compiler_builtin_rows: [String:SemaRegistrationRowRef]{[String:SemaRegistrationRowRef]{}}
     // Resolved trait symbol id -> the impl rows implementing it, in
@@ -5213,6 +5217,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         sema_inline_modules_check_imports(graph, module_index)
         module_index += 1
     }
+    graph.imports_bound = true
     sema_registration_index_package_reach(graph)
     graph = sema_comptime_use_check(graph, threads)
     graph = sema_registration_canonicalize_qualified_types(graph, threads)
