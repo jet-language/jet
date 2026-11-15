@@ -2,17 +2,21 @@
 // state on a detached task (JetDriverCompileRequest.release_state_aside,
 // Pipeline.jet jet_driver_release_aside): the compile stopped before lowering
 // returns the same result and lowering inputs as one that drops it in place.
+// A compile of fewer than JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS checked
+// functions drops it in place even so; `steps` extra functions put the
+// fixture past that bound.
 use {
     jet_driver.[
-        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+        JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode, JetDriverCoreSource, JetDriverLoweringInputsResult, jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request]
     jet_sema.[SchemaSnapshot]
 }
 
-release_aside_front: fn(aside: Bool) -> JetDriverLoweringInputsResult {
-    source: "Shape: enum {{\n    Circle(radius: Int)\n    Square(side: Int)\n}}\narea: fn(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(radius) -> radius * radius * 3\n        .Square(side) -> side * side\n    }}\n}}\nlabel: fn(shape: Shape) -> String {{ \"area {{area(shape)}}\" }}\nrun: fn() {{\n    print(label(.Circle(radius: 2)))\n    print(label(.Square(side: 3)))\n}}\n"
+release_aside_front: fn(aside: Bool, steps: Int) -> JetDriverLoweringInputsResult {
+    source := "Shape: enum {{\n    Circle(radius: Int)\n    Square(side: Int)\n}}\narea: fn(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(radius) -> radius * radius * 3\n        .Square(side) -> side * side\n    }}\n}}\nlabel: fn(shape: Shape) -> String {{ \"area {{area(shape)}}\" }}\nrun: fn() {{\n    print(label(.Circle(radius: 2)))\n    print(label(.Square(side: 3)))\n}}\n"
+    loop step in 0..<steps -> source = "{source}step{step}: fn(x: Int) -> Int {{ x + {step} }}\n"
     snapshot: JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
             canonical_path: "/release-aside",
@@ -44,11 +48,13 @@ release_aside_rows: fn(front: JetDriverLoweringInputsResult) -> [String] {
 }
 
 #Test("release_state_aside") {
-    in_place: release_aside_rows(release_aside_front(false))
-    // Several compiles in a row, each releasing its state on its own task
-    // while the next one runs.
-    loop _ in 0..<3 {
-        assert_eq(release_aside_rows(release_aside_front(true)), in_place)
+    loop steps in ([Int]{0, JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS}) {
+        in_place: release_aside_rows(release_aside_front(false, steps))
+        // Several compiles in a row, each releasing its state on its own
+        // task while the next one runs, past the bound.
+        loop _ in 0..<3 {
+            assert_eq(release_aside_rows(release_aside_front(true, steps)), in_place)
+        }
+        if in_place.len() <= 4 + steps || in_place[0] != "complete true internal None held false" -> panic("the fixture did not compile: {in_place:Debug}")
     }
-    if in_place.len() <= 4 || in_place[0] != "complete true internal None held false" -> panic("the fixture did not compile: {in_place:Debug}")
 }

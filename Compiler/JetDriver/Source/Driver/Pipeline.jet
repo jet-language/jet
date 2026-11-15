@@ -5767,7 +5767,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     result.command_record = command_record
     jet_driver_trace_result_built(request.trace_sink, result.diagnostics.len())
     if request.release_state_aside {
-        jet_driver_release_aside(JetDriverHeldState{
+        jet_driver_release_aside(lowering_rows.len(), JetDriverHeldState{
             load: load.move(),
             registration: registration_graph.move(),
             checked: checked_graph.move(),
@@ -5783,12 +5783,22 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     result
 }
 
+// The fewest checked functions whose compile state drops on a task of its
+// own (jet_driver_release_aside). Measured: a process's first task spawn and
+// join costs 0.2-0.6 ms, the thread start included, while compile state
+// drops in about 15 us per function (the runtime unit's `driver.release`:
+// 127 ms over 8278 functions), so a smaller state drops sooner on the
+// compile's thread, and a small program starts no thread for it.
+JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS: 16
+
 // Drops `state` on a detached task, so the host's IR build runs while the
 // graphs drop instead of after (JetDriverCompileRequest.release_state_aside).
 // The task owns the state alone; a process that exits first hands its pages
-// back to the kernel.
-jet_driver_release_aside: fn(state: &&JetDriverHeldState) {
+// back to the kernel. The state of a compile that checked fewer than
+// JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS functions (`checked`) drops here.
+jet_driver_release_aside: fn(checked: Int, state: &&JetDriverHeldState) {
     held: state.move()
+    if checked < JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS -> return
     released: task &&held { held.functions.len() }
     released.detach()
 }

@@ -113,7 +113,8 @@ ir_build_waves_kept: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool,
 }
 
 // ir_build_waves_kept on `count` parts. A part that fails ends the build,
-// which panics naming the function the part was building.
+// which panics naming the function the part was building; one part runs on
+// the calling thread, where the failing job's own panic ends it.
 ir_build_waves_parted: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool, count: Int) -> IRBuildKept Never! {
     p := program.move()
     slots := [Shared<IRWaveWorker>]{}
@@ -306,8 +307,11 @@ ir_build_claim: fn(queue: Shared<IRBuildQueue>, part: Int, busy: Bool) -> IRBuil
 // thread watches, until the queue is drained or a part fails; returns how
 // they ended. A failed part never rings for the jobs it held, so its
 // watcher stops the build and rings: the parts waiting on it end instead
-// of spinning forever.
+// of spinning forever. A build of one part runs it on the calling thread,
+// so a small program starts no thread; a failure there is the job's own
+// panic, which no watcher names.
 ir_build_parts: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], queue: Shared<IRBuildQueue>, bell: Shared<IRBuildBell>, at: Int) -> IRBuildPartsEnd {
+    if slots.len() == 1 && at == 0 -> return ir_build_part(inputs, slots[0], queue, bell, 0)
     ended := IRBuildPartsEnd{built: 0, stop: "", job: -1}
     if at >= slots.len() -> return ended
     task.group ir_build_threads {
@@ -331,7 +335,7 @@ ir_build_parts: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], 
 }
 
 // A failed part's panic text with the function it was building, so an
-// internal error reads the same with any thread count.
+// internal error reads the same on any count of parts above one.
 ir_build_stop_text: fn(jobs: [IRWaveJob], ended: IRBuildPartsEnd) -> String {
     if ended.job < 0 -> return "the IR build stopped: {ended.stop}"
     "the IR build of {jobs[ended.job].key} stopped: {ended.stop}"
@@ -446,7 +450,7 @@ ir_build_stop_test_run: fn(count: Int) -> String Never! {
 }
 
 #Test("a build part that fails ends the build, naming the function it was building") {
-    loop count in 1..<4 {
+    loop count in 2..<4 {
         stop := ""
         task.group ir_build_stop_test {
             run: task ir_build_stop_test_run(count)
@@ -454,4 +458,15 @@ ir_build_stop_test_run: fn(count: Int) -> String Never! {
         }
         assert(stop.contains("the IR build of test:stop.jet::gone stopped: "), stop)
     }
+}
+
+// One part runs on the calling thread, so the build's stop is the job's own:
+// reading row 0 of a program that holds no function.
+#Test("a one-part build runs on the calling thread, so its failure is the job's own") {
+    stop := ""
+    task.group ir_build_stop_test {
+        run: task ir_build_stop_test_run(1)
+        stop = run.join() ?? compiler_threads_failure_text(err)
+    }
+    assert(stop.contains("position 0 doesn't exist") && !stop.contains("the IR build of"), stop)
 }
