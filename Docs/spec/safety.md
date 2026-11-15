@@ -237,7 +237,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1420,
+  "total": 1424,
   "counts": {
     "Compiler": 651,
     "Core": 178,
@@ -245,7 +245,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     "Examples": 42,
     "Jetpack": 8,
     "Tools": 11,
-    "tests": 520
+    "tests": 524
   },
   "regions": [
     {
@@ -1329,7 +1329,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 2063,
+      "line": 2097,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -7271,6 +7271,27 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/cases/single_use/holder_consumed_compiles.fixture/main.jet",
+      "line": 27,
+      "column": 5,
+      "reason": "the lease's job is done by hand here"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/single_use/holder_consumed_compiles.fixture/main.jet",
+      "line": 36,
+      "column": 5,
+      "reason": "the slot's lease is done by hand here"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/single_use/holder_dropped_is_e0140.fixture/main.jet",
+      "line": 33,
+      "column": 5,
+      "reason": "the lease's job is done by hand here"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/single_use/reuse_after_drop_is_e0121.fixture/source-1.jet",
       "line": 15,
       "column": 5,
@@ -10099,6 +10120,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/ui/ownership/single_use_holder_dropped_owes_consume.jet",
+      "line": 33,
+      "column": 5,
+      "reason": "the lease's job is done by hand here"
+    },
+    {
+      "package": "tests",
       "file": "tests/ui/secrets_expiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet",
       "line": 13,
       "column": 9,
@@ -10202,8 +10230,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 11 |
-| tests | 520 |
-| **total** | **1420** |
+| tests | 524 |
+| **total** | **1424** |
 
 ### Regions
 
@@ -10363,7 +10391,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2375:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2385:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2487:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2063:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2097:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 166:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 174:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 197:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -11212,6 +11240,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/single_use/drop_inside_unsafe_block_satisfies_single_use.fixture/source-1.jet | 15:5 | "the resource is already gone; nothing to release" |
 | tests | tests/cases/single_use/drop_inside_unsafe_fn_satisfies_single_use.fixture/source-1.jet | 13:1 | "voids a freshly-acquired lock whose resource is already gone" |
 | tests | tests/cases/single_use/drop_inside_unsafe_fn_satisfies_single_use.fixture/source-1.jet | 19:5 | "calling the audited voider" |
+| tests | tests/cases/single_use/holder_consumed_compiles.fixture/main.jet | 27:5 | "the lease's job is done by hand here" |
+| tests | tests/cases/single_use/holder_consumed_compiles.fixture/main.jet | 36:5 | "the slot's lease is done by hand here" |
+| tests | tests/cases/single_use/holder_dropped_is_e0140.fixture/main.jet | 33:5 | "the lease's job is done by hand here" |
 | tests | tests/cases/single_use/reuse_after_drop_is_e0121.fixture/source-1.jet | 15:5 | "done with it" |
 | tests | tests/cases/target_machines/fixtures/selected_target_machine_rejects_direct_mmio_outside_region/main.jet | 4:5 | "this address is intentionally outside the board MMIO region" |
 | tests | tests/cases/target_machines/fixtures/selected_target_machine_validates_direct_mmio_accesses/main.jet | 4:5 | "timer register is mapped by board.sensor_v1" |
@@ -11616,6 +11647,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/ui/module_write_from_fn_is_e0111.jet | 11:5 | "this program starts no task, so nothing else writes `raw`" |
 | tests | tests/ui/ownership/raw_window_read_after_its_owner_is_released.jet | 11:5 | "the cells hold no resource, so spending them frees nothing" |
 | tests | tests/ui/ownership/raw_window_read_after_its_owner_is_released.jet | 18:5 | "the window covers exactly the two Int fields, which `cells` keeps" |
+| tests | tests/ui/ownership/single_use_holder_dropped_owes_consume.jet | 33:5 | "the lease's job is done by hand here" |
 | tests | tests/ui/secrets_expiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet | 13:9 | "attempt to discard a loan" |
 | tests | tests/ui/unsafe_and_runtime/volatile_write_emit_is_byte_exact/run.jet | 2:1 | "UART TX register is mapped by the target machine" |
 | tests | tests/ui/unsafe_block_after_statement_parse_error.jet | 8:5 | "target outlives the read in this frame" |
