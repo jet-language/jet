@@ -9,7 +9,10 @@
 // takes once the callee-saved ones are taken; in a leaf (a function whose
 // selection makes no call but of the stop poll, ir_x64_leaf) every slot's
 // range is silent, and one whose range keeps rsi and rdi too
-// (ir_x64_leaf_open) takes them before any other, so a small leaf saves no
+// (ir_x64_leaf_open) takes them before any other; then the slots of each
+// callee-saved register, and each one left in its home, move onto rdx, rcx,
+// r11, r10 or rax where no instruction over their ranges uses that one as
+// scratch (ir_x64_scratches, ir_x64_leaf_scratch), so a small leaf saves no
 // register. Around each route call inside its range a routed slot is
 // stored to its frame home and loaded back, as a Float slot is (X64Select.jet
 // ir_x64_keep_routed). A Float slot's register is one of xmm2-xmm15, which
@@ -21,8 +24,8 @@
 // per call inside its range at that level or hotter (ir_x64_heat,
 // ir_x64_clobbers) lives in its home instead. Selection then uses rax, rcx,
 // rdx, rsi, rdi, r8-r11, xmm0 and xmm1 as scratch inside one instruction
-// only (r8 and r9 only for the arguments of a call no route makes, rsi and
-// rdi never across a leaf's open slot, and
+// only (r8 and r9 only for the arguments of a call no route makes, and in
+// a leaf none that a slot over the instruction holds, and
 // xmm0-xmm7 for the Float arguments of a call), and structured control
 // never needs moves on its edges.
 //
@@ -58,6 +61,10 @@ IR_X64_SLOT_REGISTERS: [Int]{3, 12, 13, 14, 15}
 // take, and those first (ir_x64_leaf_open).
 IR_X64_LEAF_REGISTERS: [Int]{8, 9, 3, 12, 13, 14, 15, 6, 7}
 IR_X64_LEAF_WIDE: 7
+// The scratch registers a leaf's slots move onto past its pool where no
+// template writes them (ir_x64_leaf_scratch), rdx first: the fewest write
+// it.
+IR_X64_LEAF_SCRATCH: [Int]{2, 1, 11, 10, 0}
 // Any other function's: the callee-saved ones, then r8 and r9 for a slot
 // whose range holds no instruction that may call (ir_x64_silent) but the
 // exact Int routes (ir_x64_int_calls).
@@ -403,19 +410,73 @@ ir_x64_silent_slots: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int
 
 // Per slot of a leaf: whether it is a `general` slot other than a parameter
 // (whose import reads the argument registers) whose range holds only
-// instructions that keep rsi and rdi (ir_x64_leaf_keeps), so rsi and rdi may
-// hold it.
-ir_x64_leaf_open: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], general: [Bool], starts: [Int], ends: [Int]) -> [Bool] Never! {
+// instructions that leave rsi and rdi alone (`masks`, ir_x64_scratches), so
+// rsi and rdi may hold it.
+ir_x64_leaf_open: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [Int], ends: [Int]) -> [Bool] Never! {
     // Per instruction, how many before it may write rsi or rdi.
     writers := [Int]{0}
-    loop at in 0..<f.op.len() -> writers.push(writers[at] + (if ir_x64_leaf_keeps(m, f, consts, values, at) -> 0 else -> 1))
+    loop at in 0..<f.op.len() -> writers.push(writers[at] + (if masks[at].bit_and(IR_X64_LEAF_OPEN_MASK) == 0 -> 0 else -> 1))
     loop slot in 0..<starts.len() -> general[slot] && slot >= f.param_count && starts[slot] >= 0 && writers[ends[slot] + 1] == writers[starts[slot]]
 }
 
-// Whether selecting instruction `at` of a leaf leaves rsi and rdi alone
-// (ir_x64_scratch), so a value held in them lives across it.
-ir_x64_leaf_keeps: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: Int) -> Bool Never! {
-    ir_x64_scratch(m, f, consts, values, at).bit_and(IR_X64_LEAF_OPEN_MASK) == 0
+// A leaf's slots moved onto IR_X64_LEAF_SCRATCH, the first register there
+// that no instruction over their ranges writes (`masks`, ir_x64_scratches)
+// and no other slot holds: the slots of each callee-saved register together,
+// so the copies riding on it and the ranges sharing it stay together and the
+// leaf saves it no more, then each slot the scan sent home. A parameter
+// stays, as its import reads the argument registers in order. Bounded by
+// IR_X64_FILL_WORK.
+ir_x64_leaf_scratch: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [Int], ends: [Int], regs: &[Int]) Never! {
+    count: starts.len()
+    // Per instruction (from -1, a parameter's start): the registers slots
+    // hold there, one bit each.
+    span: f.op.len() + 1
+    held := loop _ in 0..<span -> 0
+    loop slot in 0..<count {
+        if regs[slot] < 0 || starts[slot] > ends[slot] -> next
+        loop at in (starts[slot] + 1)..<(ends[slot] + 2) -> held[at] = held[at].bit_or(1 << regs[slot])
+    }
+    work := IR_X64_FILL_WORK * (span + count)
+    groups := [Int]{}
+    loop reg in IR_X64_SLOT_REGISTERS -> groups.push(reg)
+    groups.push(-1)
+    loop reg in groups {
+        // A callee-saved register's slots move as one; each homed one alone.
+        members := [Int]{}
+        movable := true
+        loop slot in 0..<count {
+            if regs[slot] != reg || starts[slot] > ends[slot] -> next
+            if !general[slot] || slot < f.param_count || starts[slot] < 0 {
+                movable = false
+                next
+            }
+            members.push(slot)
+        }
+        if !movable && reg >= 0 -> next
+        batches := [[Int]]{}
+        if reg >= 0 {
+            batches.push(members.move())
+        } else {
+            loop member in members -> batches.push([Int]{member})
+        }
+        loop batch in batches {
+            barred := 0
+            loop slot in batch {
+                work -= ends[slot] - starts[slot] + 1
+                loop at in starts[slot]..<(ends[slot] + 1) -> barred = barred.bit_or(masks[at]).bit_or(held[at + 1])
+            }
+            if work < 0 -> return
+            target := -1
+            loop candidate in IR_X64_LEAF_SCRATCH {
+                if target < 0 && barred.bit_and(1 << candidate) == 0 -> target = candidate
+            }
+            if target < 0 -> next
+            loop slot in batch {
+                regs[slot] = target
+                loop at in (starts[slot] + 1)..<(ends[slot] + 2) -> held[at] = held[at].bit_or(1 << target)
+            }
+        }
+    }
 }
 
 // Register masks: bit r for general register r (X64_RAX 0 ... X64_R11 11).
@@ -448,22 +509,20 @@ IR_X64_ASM_SCRATCH: 0xcc7
 // or a count. A value in a caller-saved register lives across `at` only
 // outside its mask. Structure writes none: a Block, Loop, Br (a rotated
 // back edge repeats the Loop's head, whose own masks cover every value
-// live there) or Unreachable, and a Return, which leaves. A constant, a
-// frame address, an If's or BrIf's test (ir_x64_truth) and a stop poll
-// (X64Select.jet ir_x64_stop_poll) write rax; an Offset rax and rcx (an
-// offset past an imm32); an inline-range test rax and rdx (ir_x64_int_big);
-// a byte copy rax, rdx and r11, and rsi, rdi and rcx past 64 bytes
-// (ir_x64_copy_bytes); an Else r10 (a select's then arm). A call that is no
-// tail call, stop poll or quiet template writes them all.
+// live there), Else or End but a select's (ir_x64_scratches), Unreachable,
+// and a Return, which leaves. A constant, a frame address, an If's or
+// BrIf's test (ir_x64_truth) and a stop poll (X64Select.jet
+// ir_x64_stop_poll) write rax; an Offset rax and rcx (an offset past an
+// imm32); an inline-range test rax and rdx (ir_x64_int_big); a byte copy
+// rax, rdx and r11, and rsi, rdi and rcx past 64 bytes (ir_x64_copy_bytes).
+// A call that is no tail call, stop poll or quiet template writes them all.
 ir_x64_scratch: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: Int) -> Int Never! {
     op: f.op[at]
     if op == {
-        .Nop | .Block | .Loop | .Br | .Unreachable | .Return -> 0
+        .Nop | .Block | .Loop | .Else | .End | .Br | .Unreachable | .Return -> 0
         .Const | .StackAddress | .If | .BrIf -> 0x1
         .Offset -> 0x3
         .IntBig -> 0x5
-        .Else -> 0x400
-        .End -> IR_X64_PICK_SCRATCH
         .Load | .Store | .StreamStore -> IR_X64_MEMORY_SCRATCH
         .CopyBytes -> if f.c[at] > 64 -> 0x8c7 else -> 0x805
         .Call -> {
@@ -477,6 +536,34 @@ ir_x64_scratch: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at
             if op == .Mul -> IR_X64_QUIET_SCRATCH + 0x4 else -> IR_X64_QUIET_SCRATCH
         }
     }
+}
+
+// Per instruction of `f`, its scratch registers (ir_x64_scratch), and a
+// select's: an If with an Else whose arms hold only constants and word
+// arithmetic may run both and pick at its End (X64Select.jet
+// ir_x64_selectable), so its Else writes r10, which keeps the then arm's
+// value, and its End IR_X64_PICK_SCRATCH.
+ir_x64_scratches: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int]) -> [Int] Never! {
+    masks := loop at in 0..<f.op.len() -> ir_x64_scratch(m, f, consts, values, at)
+    loop at in 0..<f.op.len() {
+        otherwise: f.b[at]
+        if f.op[at] != .If || otherwise <= at || f.c[at] <= otherwise || f.c[at] >= f.op.len() -> next
+        armed := true
+        k := at + 1
+        loop armed && k < f.c[at] {
+            if k != otherwise -> armed = ir_x64_arm_op(f.op[k])
+            k += 1
+        }
+        if !armed -> next
+        masks[otherwise] = 0x400
+        masks[f.c[at]] = IR_X64_PICK_SCRATCH
+    }
+    masks
+}
+
+// Whether a select's arm may hold `op` (X64Select.jet ir_x64_select_safe).
+ir_x64_arm_op: fn(op: IROp) -> Bool Never! {
+    op == .Nop || op == .Const || op == .Add || op == .Sub || op == .Mul || op == .BitAnd || op == .BitOr || op == .BitXor || op == .Div || op == .FloorDiv || op == .Shl || op == .Shr
 }
 
 // Per instruction, its heat for the Float cost rule: the loops whose turns
@@ -917,7 +1004,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     // for those whose ranges hold no instruction that may call (r8 and r9
     // carry only the arguments of calls: ir_x64_silent), r8 and r9 first (in
     // a leaf every slot's range is such a one, and those that keep rsi and
-    // rdi take them before any: ir_x64_leaf_open), and for those whose ranges
+    // rdi take them before any: ir_x64_leaf_open; then its slots move onto
+    // the scratch registers no template over them writes:
+    // ir_x64_leaf_scratch), and for those whose ranges
     // also hold exact Int routes (ir_x64_int_calls), whose calls are all in
     // slow paths, r8 and r9 once the callee-saved registers are taken; the
     // Float slots worth a register (ir_x64_clobbers) over xmm8-xmm15 and, for
@@ -943,8 +1032,11 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     silent: if leaf -> [Bool]{} else -> ir_x64_silent_slots(m, f, consts, values, general, starts, ends, false)
     regs: if {
         leaf -> {
-            spare: ir_x64_leaf_open(m, f, consts, values, general, starts, ends)
-            ir_x64_scan(starts, ends, weights, general, spare, spare, IR_X64_LEAF_WIDE, IR_X64_LEAF_WIDE, fresh, partners, phis, aliases, IR_X64_LEAF_REGISTERS)
+            masks: ir_x64_scratches(m, f, consts, values)
+            spare: ir_x64_leaf_open(f, masks, general, starts, ends)
+            scanned := ir_x64_scan(starts, ends, weights, general, spare, spare, IR_X64_LEAF_WIDE, IR_X64_LEAF_WIDE, fresh, partners, phis, aliases, IR_X64_LEAF_REGISTERS)
+            ir_x64_leaf_scratch(f, masks, general, starts, ends, scanned)
+            scanned
         }
         else -> ir_x64_scan(starts, ends, weights, general, ir_x64_silent_slots(m, f, consts, values, general, starts, ends, true), silent, IR_X64_SLOT_REGISTERS.len(), IR_X64_SLOT_REGISTERS.len(), fresh, partners, phis, aliases, IR_X64_QUIET_REGISTERS)
     }

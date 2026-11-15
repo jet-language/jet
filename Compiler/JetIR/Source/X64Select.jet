@@ -680,10 +680,11 @@ ir_x64_tail_jump: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
     // Sources are callee-saved registers, r8 and r9 (a silent tail call's,
     // X64Alloc.jet ir_x64_tail_silent: its General arguments go to rdi,
     // rsi, rdx and rcx only), rsi and rdi (a leaf's open slots,
-    // X64Alloc.jet ir_x64_leaf_open), frame homes and immediates. A source
-    // in the argument register of an argument before it moves to r10 or
-    // r11 first, which no slot holds, so the registers fill in order; one
-    // source passed twice moves once.
+    // X64Alloc.jet ir_x64_leaf_open), rax (a leaf's scratch slots,
+    // ir_x64_leaf_scratch: a tail call writes rdx, rcx, r10 and r11), frame
+    // homes and immediates. A source in the argument register of an argument
+    // before it moves to r10 or r11 first, which no slot holds, so the
+    // registers fill in order; one source passed twice moves once.
     staged := [Int]{}
     sources := [Int]{}
     filled := 0
@@ -2654,8 +2655,10 @@ ir_x64_sqrt: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
 // register or home. The comparison the condition comes from
 // (ir_x64_select_test) moves to the End, after both arms, so its flags feed
 // the cmov: nothing it writes shares the slot's place (a bit test,
-// ir_x64_bit_test, writes nothing) and nothing it reads shares the place
-// of an arm's write. Returns that slot, -1 when the If branches.
+// ir_x64_bit_test, writes nothing), nothing it reads shares the place of an
+// arm's write, and nothing it reads is in a scratch register the arms or
+// the pick may write (X64Alloc.jet IR_X64_PICK_SCRATCH: a leaf's slot may
+// be, ir_x64_leaf_scratch). Returns that slot, -1 when the If branches.
 IR_X64_SELECT_ARM: 4
 
 ir_x64_selectable: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> Int Never! {
@@ -2674,6 +2677,7 @@ ir_x64_selectable: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) 
         ir_x64_reads_into(f, k, reads)
         loop read in reads {
             if read < 0 || al.consts[read] || (k > test && read == f.dst[test]) -> next
+            if al.regs[read] >= 0 && (1 << al.regs[read]).bit_and(IR_X64_PICK_SCRATCH) != 0 -> return -1
             loop j in (at + 1)..<end {
                 written: ir_x64_write(f, j)
                 if written >= 0 && !al.consts[written] && ir_x64_same_place(al, written, read) -> return -1
@@ -4436,7 +4440,7 @@ ir_x64_wrap: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
     }
     // Per register: the slot holding it, -1 for none, -2 for one it keeps
     // to the end (a parameter's, which its import still reads, or one a
-    // body slot lives in, which may be r8 or r9, or rsi or rdi in a leaf,
+    // body slot lives in, which may be r8 or r9, or in a leaf any scratch one,
     // so the prefix's values reach their places in any order).
     owner := [Int]{}
     loop _ in 0..<16 -> owner.push(-1)
@@ -5805,6 +5809,48 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     assert(al.regs[a] != al.regs[b])
     compiled: ir_x64_compile_function(m, ir_x64_tables(m), 1)
     assert(compiled.errors.is_empty())
+}
+
+// sum(x) keeps x and four values of it live at once by wrapping
+// arithmetic: past r8, r9, rsi and rdi the fifth, d, takes rbx in the scan
+// and then rdx, which no Add writes, so the leaf saves no register. With a
+// Mul over d's range, whose template may write rdx, d keeps rbx.
+#Test("A leaf's values move onto scratch registers no template over them writes") {
+    loop op in ([IROp]{IROp.Add, IROp.Mul}) {
+        m := ir_module_new()
+        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        f := ir_function_new("sum", "test:sum.jet::sum", "", "sum.jet", 1)
+        x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+        f.result = word
+        a: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        b: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        c: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        d: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        first: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        second: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        third: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        total: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Add, a, x, x, IR_OVERFLOW_WRAP, 2)
+        _ := ir_emit(f, IROp.Add, b, a, x, IR_OVERFLOW_WRAP, 2)
+        _ := ir_emit(f, IROp.Add, c, b, x, IR_OVERFLOW_WRAP, 2)
+        _ := ir_emit(f, IROp.Add, d, c, x, IR_OVERFLOW_WRAP, 2)
+        _ := ir_emit(f, IROp.Add, first, a, b, IR_OVERFLOW_WRAP, 3)
+        _ := ir_emit(f, op, second, first, c, IR_OVERFLOW_WRAP, 3)
+        _ := ir_emit(f, IROp.Add, third, second, d, IR_OVERFLOW_WRAP, 3)
+        _ := ir_emit(f, IROp.Add, total, third, x, IR_OVERFLOW_WRAP, 3)
+        _ := ir_emit(f, IROp.Return, -1, total, -1, -1, 3)
+        m.functions.push(f)
+        al: ir_x64_allocate(m, m.functions[0])
+        if op == .Add {
+            assert_eq(al.saved.len(), 0)
+            assert_eq(al.regs[d], X64_RDX)
+        } else {
+            assert_eq(al.saved.len(), 1)
+            assert_eq(al.regs[d], X64_RBX)
+        }
+        compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+        assert(compiled.errors.is_empty())
+    }
 }
 
 // spread(n) sums n + 1 .. n + 7, all seven live at once, by exact Int Adds
