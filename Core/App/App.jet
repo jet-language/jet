@@ -330,18 +330,24 @@ LiveRecord: struct {
 }
 
 // What `state` reads before it runs a binding: the stored result when it is
-// current, and the binding's generation then.
+// current, held, or capped (live_current), and the binding's generation then.
 LiveCurrent: struct {
     value: String?
     generation: Int
 }
 
+// `capped` counts the re-runs the per-second cap turned into holds;
+// `window_ns` starts the current second of re-runs and `window_runs` counts
+// the re-runs in it.
 LiveRegistry: struct {
     next_id: Int
     invalidations: Int
     changes: Int
     evictions: Int
     ws_pushes: Int
+    capped: Int
+    window_ns: Int
+    window_runs: Int
     records: [LiveRecord]
 }
 
@@ -359,7 +365,10 @@ LiveRegistry: struct {
 // what it read may predate that write. Under writes that keep overtaking it, a
 // binding settles: from its second overtaken run in a row, its stale result
 // is served for a hold (live_store) instead of running the source on every
-// read, and its watchers (`watch`) are told when to read it again. While the
+// read, and its watchers (`watch`) are told when to read it again. A server
+// re-runs at most LIVE_MAX_RERUNS_PER_SECOND bindings a second; past that, a
+// binding's stored result is held until the next second (live_current). Writes
+// between two reads cost one re-run, however many there were. While the
 // source runs, the tables it reads join the binding's read set (`live_reads`).
 state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! {
     now: rt.clock_mono_ns()
@@ -405,10 +414,11 @@ watch: fn<T: [Encode, Decode], E: [Encode, Decode]>(socket: WsConn, binding: Liv
 
 // `changes` counts stored results that differed from the one before;
 // `ws_pushes` counts the publishes to the WebSocket live hub: one per
-// `invalidate` that marked a binding, and one per hold's start and end.
+// `invalidate` that marked a binding, and one per hold's start and end;
+// `capped` counts the re-runs the per-second cap held over.
 live_stats: fn() -> String Never! {
     registry: live_decode(live_cell_load()) ?? return "LiveStats(error=live registry unavailable)"
-    "LiveStats(queries={live_query_count(registry)}, limit={LIVE_MAX_QUERIES}, evictions={registry.evictions}, invalidations={registry.invalidations}, changes={registry.changes}, ws_pushes={registry.ws_pushes})"
+    "LiveStats(queries={live_query_count(registry)}, limit={LIVE_MAX_QUERIES}, evictions={registry.evictions}, invalidations={registry.invalidations}, changes={registry.changes}, ws_pushes={registry.ws_pushes}, reruns_per_second={LIVE_MAX_RERUNS_PER_SECOND}, capped={registry.capped})"
 }
 
 // The live bindings of `registry`; sync's session records are not queries.
@@ -530,6 +540,12 @@ LIVE_HOLD_AFTER: 2
 // running.
 LIVE_HOLD_MIN_NS: 100000000
 
+// The re-runs a server makes in one second, over all its bindings; a binding
+// due past them serves its stored result until the next second.
+LIVE_MAX_RERUNS_PER_SECOND: 1000
+
+LIVE_RERUN_WINDOW_NS: 1000000000
+
 // The registry source of sync's session records: a session keeps its
 // generation and document as the record's value.
 LIVE_SYNC_SOURCE: "app.sync"
@@ -603,15 +619,46 @@ live_register: fn(source: String, key: String, every_ns: Int) -> Int {
 }
 
 // The stored result of binding `id` when it is current at `now`, or stale
-// but held (None when the binding must re-run), and its generation.
+// but held, and its generation; None when the binding must re-run. A re-run
+// takes one of this second's LIVE_MAX_RERUNS_PER_SECOND; once they are spent,
+// the stored result is held until the next second, its start published as a
+// hold's is (live_store), so watchers read again when it ends and every write
+// before then costs the one re-run that follows it. A first run is not capped:
+// it has no result to hold.
 live_current: fn(id: Int, now: Int) -> LiveCurrent {
-    registry: live_decode(live_cell_load()) ?? return LiveCurrent{value: None, generation: 0}
-    index: live_index(registry, id) ?? return LiveCurrent{value: None, generation: 0}
-    record: registry.records[index]
-    if record.value == "" -> return LiveCurrent{value: None, generation: record.generation}
-    if record.dirty && now >= record.held_ns -> return LiveCurrent{value: None, generation: record.generation}
-    if !record.dirty && record.every_ns > 0 && now - record.ran_ns >= record.every_ns -> return LiveCurrent{value: None, generation: record.generation}
-    LiveCurrent{value: Val(record.value.copy()), generation: record.generation}  // copy: the registry snapshot is dropped here
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return LiveCurrent{value: None, generation: 0}
+        index: live_index(registry, id) ?? return LiveCurrent{value: None, generation: 0}
+        generation: registry.records[index].generation
+        if registry.records[index].value == "" -> return LiveCurrent{value: None, generation: generation}
+        dirty: registry.records[index].dirty
+        held: now < registry.records[index].held_ns
+        every_ns: registry.records[index].every_ns
+        polled: every_ns > 0 && now - registry.records[index].ran_ns >= every_ns
+        if held || (!dirty && !polled) {
+            return LiveCurrent{value: Val(registry.records[index].value.copy()), generation: generation}  // copy: the registry snapshot is dropped here
+        }
+        if now - registry.window_ns >= LIVE_RERUN_WINDOW_NS {
+            registry.window_ns = now
+            registry.window_runs = 0
+        }
+        event := ""
+        if registry.window_runs < LIVE_MAX_RERUNS_PER_SECOND {
+            registry.window_runs += 1
+        } else {
+            ends: registry.window_ns + LIVE_RERUN_WINDOW_NS
+            registry.records[index].held_ns = ends
+            registry.capped += 1
+            registry.ws_pushes += 1
+            event = live_event(id, Val(live_hold_ms(ends - now)))
+        }
+        if live_cell_replace(seen, live_encode(registry)) {
+            if event == "" -> return LiveCurrent{value: None, generation: generation}
+            rt_web.live_publish("live:{id}", event)
+            return LiveCurrent{value: Val(registry.records[index].value.copy()), generation: generation}  // copy: the registry snapshot is dropped here
+        }
+    }
 }
 
 live_value_state: fn<T: [Encode, Decode], E: [Encode, Decode]>(text: String) -> Loadable<T, E>? {
@@ -737,8 +784,9 @@ live_index: fn(registry: LiveRegistry, id: Int) -> Int? {
 }
 
 // The cell holds the registry as length-prefixed fields: next id,
-// invalidations, changes, evictions, WebSocket pushes, then eleven fields per
-// binding, the last its read set joined by newlines.
+// invalidations, changes, evictions, WebSocket pushes, capped re-runs, the
+// re-run window's start and count, then eleven fields per binding, the last
+// its read set joined by newlines.
 live_encode: fn(registry: LiveRegistry) -> [U8] {
     out := [U8]{}
     live_put(out, "{registry.next_id}")
@@ -746,6 +794,9 @@ live_encode: fn(registry: LiveRegistry) -> [U8] {
     live_put(out, "{registry.changes}")
     live_put(out, "{registry.evictions}")
     live_put(out, "{registry.ws_pushes}")
+    live_put(out, "{registry.capped}")
+    live_put(out, "{registry.window_ns}")
+    live_put(out, "{registry.window_runs}")
     loop record in registry.records {
         live_put(out, "{record.id}")
         live_put(out, record.source)
@@ -770,17 +821,20 @@ live_put: fn(out: &[U8], text: String) {
 // An empty cell is the empty registry; None when the bytes are malformed.
 live_decode: fn(raw: [U8]) -> LiveRegistry? {
     if raw.len() == 0 {
-        return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, ws_pushes: 0, records: [LiveRecord]{}})
+        return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, ws_pushes: 0, capped: 0, window_ns: 0, window_runs: 0, records: [LiveRecord]{}})
     }
     fields: live_fields(raw) ?? return None
-    if fields.len() < 5 || (fields.len() - 5) % 11 != 0 -> return None
+    if fields.len() < 8 || (fields.len() - 8) % 11 != 0 -> return None
     next_id: Int.parse(fields[0]) ?? return None
     invalidations: Int.parse(fields[1]) ?? return None
     changes: Int.parse(fields[2]) ?? return None
     evictions: Int.parse(fields[3]) ?? return None
     ws_pushes: Int.parse(fields[4]) ?? return None
+    capped: Int.parse(fields[5]) ?? return None
+    window_ns: Int.parse(fields[6]) ?? return None
+    window_runs: Int.parse(fields[7]) ?? return None
     records := [LiveRecord]{}
-    at := 5
+    at := 8
     loop at < fields.len() {
         id: Int.parse(fields[at]) ?? return None
         generation: Int.parse(fields[at + 5]) ?? return None
@@ -792,7 +846,7 @@ live_decode: fn(raw: [U8]) -> LiveRegistry? {
         records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", generation: generation, overtaken: overtaken, held_ns: held_ns, every_ns: every_ns, ran_ns: ran_ns, reads: reads})
         at += 11
     }
-    Val(LiveRegistry{next_id: next_id, invalidations: invalidations, changes: changes, evictions: evictions, ws_pushes: ws_pushes, records: records})
+    Val(LiveRegistry{next_id: next_id, invalidations: invalidations, changes: changes, evictions: evictions, ws_pushes: ws_pushes, capped: capped, window_ns: window_ns, window_runs: window_runs, records: records})
 }
 
 // The length-prefixed fields (`<decimal byte length>:<bytes>`) of `raw`.

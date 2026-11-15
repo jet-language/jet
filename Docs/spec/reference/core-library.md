@@ -5468,7 +5468,7 @@ tasks never read or change the process registry. The module source is
 | `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list without running the source. |
 | `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. For a source whose data the database doesn't track, such as a fetch; a database write already reaches the bindings that read its table. |
 | `watch(socket: WsConn, binding: Live<T, E>) -[Net]>` | — | Send `{"live":"invalidate","binding":<id>}` to the server-side WebSocket `socket` each time `binding` is invalidated, starting with the latest such event when there was one. While the binding is held, the event carries `"after_ms":<n>`: read it again after `n` milliseconds. |
-| `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations and value changes. |
+| `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations, value changes, WebSocket pushes, the per-second re-run cap and the re-runs it held over. |
 | `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
 | `remote_at<S>(address: String) -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. |
 | `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
@@ -5492,7 +5492,12 @@ the hold's start publishes the binding's live event with `"after_ms":<n>`,
 the rest of the hold, as does every invalidation during it, so a watching
 client that read the held result reads again once the hold ends, and the
 binding's first current result after a hold publishes its event again, so
-every watcher reads it.
+every watcher reads it. A server re-runs at most 1000 bindings a second,
+over all of them; a binding due once those are spent serves its stored
+result, held the same way, until the next second. A binding's first run is
+not capped. Writes between two reads cost one re-run however many there
+were, so a burst of writes, or of writes during a hold, re-runs a binding
+once.
 `Live<T, E>` is an identity, not a snapshot: reads, invalidation and
 statistics always use the one registry. A full registry evicts its oldest
 binding. A signature names the type after `use app.[Live]`. The registry
