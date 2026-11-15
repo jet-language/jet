@@ -543,6 +543,36 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
     trap_exit(trap_coded_exit(word))
 }
 
+// A stack overflow a host caught where the runtime can't (a web page's
+// engine throws when the call stack runs out; JetWeb Host.jet): the E3012
+// stop the native fault report gives (Fault.jet), naming the innermost Jet
+// function `function` at its `file` and declaration `line`, with that
+// line's `source` when the host could read it. The host has unwound the
+// overflowing calls and reset the stack pointer before it calls this; the
+// strings are bytes in linear memory. Exit 70, as natively.
+#Export(c) jet_rt_stack_overflow_stop: fn(function: I64, function_len: I64, file: I64, file_len: I64, line: I64, source: I64, source_len: I64) {
+    name: jet_rt_string_from_static(function, function_len)
+    message: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(message, rt_static_text("Stack overflow in `"))
+    jet_rt_string_builder_push(message, name)
+    jet_rt_string_builder_push(message, rt_static_text("`"))
+    jet_rt_string_drop(name)
+    data: rt_text_data(message)
+    length: rt_text_len(message)
+    trap_stop(I64{1}, data, length, I64{0}, I64{0})
+    trap_root_prepare()
+    jet_rt_stdout_flush()
+    code: rt_static_text("E3012")
+    trap_msg_coded_head()
+    trap_write(rt_text_data(code), rt_text_len(code))
+    trap_msg_coded_mid()
+    trap_write(data, length)
+    trap_msg_newline()
+    trap_context(file, file_len, trap_line(line), function, function_len, source, source_len, I64{1}, I64{1})
+    trap_footer_e3012()
+    trap_exit(EXIT_RUNTIME_PANIC)
+}
+
 // ShiftOutOfRange: "Shifting {left|right} by {count} bits is out of range (this
 // type is {bits} bits wide)". The count prints in the shifted type's signedness
 // (1 = unsigned), as the seed's i128 operand does.
