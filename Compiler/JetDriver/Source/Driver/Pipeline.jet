@@ -2289,19 +2289,24 @@ jet_driver_comptime_settled: fn(local_value: Bool, reported: Bool, complete: Boo
     local_value || (!reported && (complete || waiting.len() > 0))
 }
 
-// Adds to `found` the key of each body site of `sites` other than item `own`
-// that a function checked since `mark` owns with no value yet (its check
-// captured the site, SemaComptimeFunctionResult.comptime_body_sources).
-// That check ran before the site's value landed, so the body it holds has
-// no binding for the site's local, and the finalization would take that
-// body as the function's (sema_comptime_find_checked_function): the
-// closure that made it is withdrawn and checked again once the site has
-// landed, as one item at a time in declaration order would have checked it.
-// A check captures few sites, so each is looked up in `sites` by a scan.
-jet_driver_comptime_unlanded_sites: fn(checked_functions: [SemaComptimeFunctionResult], mark: Int, sites: [SemaComptimeItemSource], own: String, found: &[String]) Never! {
+// Adds to `found` the key of each body site other than item `own` that a
+// function checked since `mark` owns with no value yet (its check captured
+// the site, SemaComptimeFunctionResult.comptime_body_sources), when the
+// site is one of `sites` or waits in `batch` from an earlier pass. That
+// check ran before the site's value landed, so the body it holds has no
+// binding for the site's local, and the finalization would take that body
+// as the function's (sema_comptime_find_checked_function): the closure that
+// made it is withdrawn and checked again once the site has landed, as one
+// item at a time in declaration order would have checked it. A check
+// captures few sites, so each is looked up in `sites` by a scan.
+jet_driver_comptime_unlanded_sites: fn(checked_functions: [SemaComptimeFunctionResult], mark: Int, sites: [SemaComptimeItemSource], batch: JetDriverComptimeBatch, own: String, found: &[String]) Never! {
     loop at in mark..<checked_functions.len() {
         loop captured in checked_functions[at].comptime_body_sources {
             if captured.key == own -> next
+            if batch.keys.get(captured.key) != None {
+                jet_driver_comptime_wait_add(found, captured.key)
+                next
+            }
             loop site in sites {
                 if site.kind == SemaComptimeItemKind.BodyExpression && site.key == captured.key {
                     jet_driver_comptime_wait_add(found, captured.key)
@@ -2316,6 +2321,14 @@ jet_driver_comptime_unlanded_sites: fn(checked_functions: [SemaComptimeFunctionR
 jet_driver_comptime_batch_holds: fn(batch: JetDriverComptimeBatch, keys: [String]) -> Bool Never! {
     loop key in keys {
         if batch.keys.get(key) != None -> return true
+    }
+    false
+}
+
+// Whether an item of `wait_rows` waits on an item `batch` holds.
+jet_driver_comptime_batch_awaited: fn(batch: JetDriverComptimeBatch, wait_rows: [JetDriverComptimeWaitRow]) -> Bool Never! {
+    loop row in wait_rows {
+        if jet_driver_comptime_batch_holds(batch, row.dependencies) -> return true
     }
     false
 }
@@ -2952,8 +2965,11 @@ jet_driver_comptime_run: fn(
     // admits them, wait in `batch` to be evaluated together on one IR
     // build. One that waits on a batch key waits like any item that names
     // an unvalued constant: the pass's last flush lands the batch, and the
-    // next pass checks it again. So one IR build and one load serve every
-    // item of a dependency level, not one stretch of the declaration order.
+    // next pass checks it again. A batch that no waiting item names, in a
+    // pass that landed other values, is not flushed at the pass's end: it
+    // waits into the next pass (jet_driver_comptime_batch_awaited). So one
+    // IR build and one load serve every item of a dependency level, and the
+    // levels a fold unblocks, not one stretch of the declaration order.
     // An item whose check is unsettled lands the batch first and is checked
     // again; one whose closure is unsettled, or checked the owner body of a
     // site the batch holds, withdraws the closure's reports and function
@@ -3201,7 +3217,7 @@ jet_driver_comptime_run: fn(
                 // The sites the pass has still to land whose owner bodies the
                 // closure checked (jet_driver_comptime_unlanded_sites).
                 unlanded := [String]{}
-                jet_driver_comptime_unlanded_sites(checked_functions, checked_mark, pending, source.key, unlanded)
+                jet_driver_comptime_unlanded_sites(checked_functions, checked_mark, pending, batch, source.key, unlanded)
                 // A settled closure that waits on a batch key waits below. One
                 // that checked the owner body of a site the batch holds starts
                 // over once the batch has landed.
@@ -3363,7 +3379,11 @@ jet_driver_comptime_run: fn(
                 }
             }
         }
-        if batch.entries.len() > 0 {
+        // A batch that no waiting item names waits into the next pass when
+        // this pass landed other values: the items that waited on those are
+        // evaluated in the same program as the batch, so a run whose items
+        // wait on folded constants builds one program, not one per pass.
+        if batch.entries.len() > 0 && (!made_progress || next_pending.len() == 0 || jet_driver_comptime_batch_awaited(batch, wait_rows)) {
             flushed := jet_driver_comptime_staged_flush(request, batch, values, checked_functions, trace, programs, staging, counters, diagnostics)
             batch = jet_driver_comptime_batch_new()
             if flushed.progressed -> made_progress = true
