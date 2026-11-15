@@ -5231,11 +5231,15 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // would serialize on the shared counters' permit.
     registration_graph.counting = false
     registration_graph.core_seal_pending = false
+    // The Core seal whose stand-ins the finalization checked (None when it
+    // ran over the Core bodies themselves): JET_RECHECK_VERIFY's
+    // finalization stands in the same Core functions.
+    stand_ins := registration_graph.core_stand_ins.move()
     registration_graph.core_stand_ins = None
     if request.recheck_verify && comptime_run.values.len() > staged_values {
         start := verify_start.move() ?? return jet_driver_compile_internal_result(load, trace, "JET_RECHECK_VERIFY lost the demand the finalization started from")
         verify_problem := String?{None}
-        registration_graph = jet_driver_verify_landed_values(registration_graph, comptime_stage, checked_graph, comptime_run.values, comptime_run.functions, start, request, verify_problem)
+        registration_graph = jet_driver_verify_landed_values(registration_graph, comptime_stage, checked_graph, comptime_run.values, comptime_run.functions, start, stand_ins, request, verify_problem)
         if verify_problem == .Val(problem) {
             return jet_driver_compile_internal_result(load, trace, problem)
         }

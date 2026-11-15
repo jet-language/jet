@@ -16,6 +16,7 @@ use {
         SemaComptimeItemKind,
         SemaComptimeItemSource,
         SemaComptimeItemValue,
+        SemaCoreSeal,
         SemaFinalizeBodies,
         SemaGraphModuleResult,
         SemaGraphResult,
@@ -690,8 +691,10 @@ jet_driver_local_sources_only: fn(sources: [SemaComptimeItemSource]) -> Bool Nev
 // (jet_driver_recheck_differences) in `problem`. The finalization starts
 // from `start`, the codec and derive demand the first one started from (the
 // item runs leave theirs pending, and the undo of the first one's generated
-// bodies takes it off the graph). The registration graph moves in without
-// staged edits and comes back the same.
+// bodies takes it off the graph), and stands in the Core functions of
+// `stand_ins`, the seal the first one's stand-ins were read from (None: it
+// checked the Core bodies themselves), as the first one did. The
+// registration graph moves in without staged edits and comes back the same.
 jet_driver_verify_landed_values: fn(
     graph: &&SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
@@ -699,11 +702,13 @@ jet_driver_verify_landed_values: fn(
     values: [SemaComptimeItemValue],
     functions: [SemaComptimeFunctionResult],
     start: &&SemaLocalSpliceDemand,
+    stand_ins: &&SemaCoreSeal?,
     request: JetDriverCompileRequest,
     problem: &String?,
 ) -> SemaRegistrationGraph {
     registration := graph.move()
     held := sema_local_splice_demand_swap(registration, start)
+    registration.core_stand_ins = stand_ins.move()
     trail := sema_graph_trail_init()
     sema_comptime_graph_apply_values(registration, values, trail)
     full := sema_finalize_graph(registration, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, false, None)
@@ -711,8 +716,10 @@ jet_driver_verify_landed_values: fn(
     full.registration_graph = None
     registration = restored.move() ?? panic("the verifying finalization lost its registration graph")
     sema_graph_trail_undo(registration, trail)
+    registration.core_stand_ins = None
     _ := sema_local_splice_demand_swap(registration, held)
-    differences: jet_driver_recheck_differences(landed, full, registration.module_table)
+    differences := jet_driver_recheck_differences(landed, full, registration.module_table)
+    if full.core_stand_in_rerun != "" -> differences.push("the full recheck's Core stand-ins would not do ({full.core_stand_in_rerun}) where the landed finalization's did")
     if differences.len() > 0 -> problem = Val("JET_RECHECK_VERIFY: the local values landed before the whole-program passes differ from the full recheck:\n{differences.join("\n")}")
     registration
 }
