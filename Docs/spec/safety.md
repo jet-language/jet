@@ -4843,7 +4843,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Auth/Auth.jet",
-      "line": 114,
+      "line": 214,
       "column": 5,
       "reason": "auth PASETO v4.public verification uses the fixed Ed25519 primitive"
     },
@@ -11236,7 +11236,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 179:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 368:5 | "the case explicitly authorizes signalling its own spawned child" |
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 30:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
-| Core | Core/Auth/Auth.jet | 114:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
+| Core | Core/Auth/Auth.jet | 214:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
 | Core | Core/Crypto/Crypto.jet | 266:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
 | Core | Core/Crypto/Crypto.jet | 272:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
 | Core | Core/Crypto/Crypto.jet | 277:5 | "vault key import: construct the typed recipient unlock request" |
