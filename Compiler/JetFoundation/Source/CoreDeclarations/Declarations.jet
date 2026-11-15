@@ -823,10 +823,19 @@ core_decl_mem_tier_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarat
     }
     if text == "" -> return Ok("{CORE_DECLARATIONS_CORE_PATH}: core.mem has no source module among the Core sources")
     marked := [String]{}
+    // Attributes may stand on their own lines above the declaration, and an
+    // attribute list spells the marker `Unsafe("…")` inside `#[ … ]`.
+    attributes := ""
     loop line in text.split("\n") {
         if line.starts_with(" ") || line.starts_with("\t") -> next
         name: core_decl_fn_name(line)
-        if name != "" && core_decl_slice(line, 0, core_decl_attributes_end(line)).find("#Unsafe(\"") >= 0 -> marked.push(name)
+        if name == "" {
+            attributes = if line.starts_with("#") -> "{attributes}{line}" else -> ""
+            next
+        }
+        written: "{attributes}{core_decl_slice(line, 0, core_decl_attributes_end(line))}"
+        attributes = ""
+        if written.find("#Unsafe(\"") >= 0 || (written.find("#[") >= 0 && written.find("Unsafe(\"") >= 0) -> marked.push(name)
     }
     marked.sort()
     if tiered.join("\n") == marked.join("\n") -> return Ok("")
