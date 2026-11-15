@@ -1027,6 +1027,10 @@ fl_enum_group_commas: fn(tokens: [FmtTok]) -> [Bool] {
     ignored
 }
 
+// The `,` between the entries of a struct or enum body: struct fields and enum
+// cases share one separator rule, a `,` or a line break, and `jet fmt` prints
+// one entry per line, so the separator is optional layout. A payload's own
+// commas sit inside parentheses and stay.
 fl_declaration_field_commas: fn(tokens: [FmtTok]) -> [Bool] {
     ignored := [Bool]{}
     loop _ in 0..<tokens.len() -> ignored.push(false)
@@ -1037,7 +1041,7 @@ fl_declaration_field_commas: fn(tokens: [FmtTok]) -> [Bool] {
     bracket_depth := 0
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
-        if kind == TOKEN_KW_STRUCT {
+        if kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM {
             awaiting_struct_body = true
         } else if kind == TOKEN_LBRACE {
             brace_depth += 1
@@ -1696,6 +1700,7 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"static generic call", "run: fn() {{ Pool<Node>.new() }}\n", "run: fn() {{ Pool.new<Node>() }}\n"},
         {"external method", "Point.len: fn(self) -> Int {{ 1 }}\n", "impl Point {{ len: fn(self) -> Int {{ 1 }} }}\n"},
         {"enum group separators", "E: enum {{ G {{ A, B }} }}\n", "E: enum {{ G {{ A B }} }}\n"},
+        {"enum case separators", "E: enum {{ A(x: Int, y: Int), B }}\n", "E: enum {{ A(x: Int, y: Int) B }}\n"},
         {"struct declaration separators", "S: struct {{ x: Int, y: Int }}\n", "S: struct {{ x: Int y: Int }}\n"},
         {"trailing comma", "run: fn() {{ xs: [1,] }}\n", "run: fn() {{ xs: [1] }}\n"},
         {"default file alias", "use \"./foo\" as foo\nrun: fn() {{}}\n", "use \"./foo\"\nrun: fn() {{}}\n"},
@@ -1750,6 +1755,8 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"task-block rewrite preserves body", "run: fn() {{ task.group g {{ x: task {{ work() }} }} }}\n", "run: fn() {{ task.group g {{ x: task {{ other() }} }} }}\n"},
         {"enum-group comma rule preserves variant order", "E: enum {{ G {{ A, B }} }}\n", "E: enum {{ G {{ B A }} }}\n"},
         {"struct-declaration comma rule preserves field order", "S: struct {{ x: Int, y: Int }}\n", "S: struct {{ y: Int x: Int }}\n"},
+        {"enum-case comma rule preserves case order", "E: enum {{ A, B }}\n", "E: enum {{ B A }}\n"},
+        {"enum-case comma rule keeps payload separators", "E: enum {{ A(x: Int, y: Int) }}\n", "E: enum {{ A(x: Int y: Int) }}\n"},
         {"trailing-comma rule does not remove argument separators", "run: fn() {{ call(a, b) }}\n", "run: fn() {{ call(a b) }}\n"},
         {"file-alias rule requires the default alias", "use \"./foo\" as bar\nrun: fn() {{}}\n", "use \"./foo\"\nrun: fn() {{}}\n"},
         {"arm-block rule does not remove explicit braces", "run: fn() {{ if x == {{ .A -> {{ print(1) }} }} }}\n", "run: fn() {{ if x == {{ .A -> print(1) }} }}\n"},
@@ -1817,6 +1824,7 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
 fl_ui_parse_invalid: fn() -> [String] {
     [String]{
         "tests/ui/E0436_method_named_copy.jet",
+        "tests/ui/E0931_signed_codec_direction.jet",
         "tests/ui/arithmetic_policy_invalid.jet",
         "tests/ui/assign_in_condition.jet",
         "tests/ui/auto_derive_invalid_sign.jet",
