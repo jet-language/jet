@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106091,
+    "rev": 106092,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101613,6 +101613,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c12 route decision (Main): with the runtime-identity scope removed, a sema probe finds 109 E3114 hits in the kernel files (Alloc 64, RawWords 25, Sync 9, Fault 5, Secret 3, Thread 3; 87 functions). The ratified address rule exempts package-private (priv) and #Unsafe functions, so the kernel helpers whose every Jet caller is inside the runtime package become priv. That uses the ratified rule, with no scope. A runtime function that another package calls by Jet name stays public and gets a typed owner or view signature. C ABI exports keep their symbols. The scope is deleted, and a guard keeps any later public raw-address runtime function under E3114. What is not done: c12's text also describes moving about 13,400 runtime-internal call sites of rt_text_word and sync_load to typed owners and views. Those sites raise no E3114 once the helpers are package-private, and the ratified rule does not require that migration, so it is not part of meeting c12. A typed internal API would be a separate design choice. Owner: CardCloser-3, in slices per file group."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c14 boundary decision (Main): two direct kernel-call sites stay as the boundary of 'no direct mmap', each with a stated reason at the site: the loader's emitted OS_SYS_MUNMAP executor rows, which run before the runtime and its sentry exist, and Assets/FaultReport/report.S, a relocation-free dying-path blob that cannot call Jet. The allocator's large-block mremap goes through the kernel primitive family (an untracked heap remap beside os_map and os_unmap), not a raw syscall. SUB CardCloser-3-kernel-maps-untracked-form is queued; the remap follow-up is stacked on it."
         },
         {
@@ -101852,7 +101857,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T10:21:58.619Z",
+      "updated": "2026-11-15T10:24:14.593Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -217798,6 +217803,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T10:24:14.593Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T10:21:58.619Z",
       "by": "Main",
