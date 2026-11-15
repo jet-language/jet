@@ -11631,13 +11631,16 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // The `#Inline(Always)` promise (E0917-E0919) needs every body's
     // function-value references first. These read-only checks, the effect
     // inputs with each module's effect-graph rows, and the liveness verdicts
-    // run side by side.
+    // run side by side, with the typestate flow and the Core usage walk,
+    // which read nothing the effect pass solves.
     if trace_sink == .Val(sink) -> sink.begin("sema.side", "", -1, -1)
     effect_inputs := [SemaEffectModuleInput]{}
     effect_prepared := sema_effect_prepared_empty()
     liveness := sema_finalize_side_liveness_empty()
     taint_prepared := [SemaTaintPrepared]{}
-    final_graph = sema_finalize_side_checks(final_graph, modules, threads, diagnostics, complete, effect_inputs, effect_prepared, liveness, taint_prepared)
+    typestate_found := [Diagnostic]{}
+    core_modules := [SemaCoreModuleUsageResult]{}
+    final_graph = sema_finalize_side_checks(final_graph, modules, threads, diagnostics, complete, effect_inputs, effect_prepared, liveness, taint_prepared, typestate_found, core_modules)
     if trace_sink == .Val(sink) -> sink.end("sema.side", liveness.facts.len())
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
     root_policy: sema_comptime_policy_for_package(stage.package_policies, final_graph.package_identity)
@@ -11694,8 +11697,8 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
     if stood_in > 0 && rerun == "" && effects.walks -> rerun = "walks"
-    // `sema.late`: the partition, target, typestate and compute checks that
-    // read the solved effects, and the publish of those effects.
+    // `sema.late`: the partition, target and compute checks that read the
+    // solved effects, and the publish of those effects.
     if trace_sink == .Val(sink) -> sink.begin("sema.late", "", -1, -1)
     // The web partition reads the solved effect rows and call edges.
     sema_web_partition_check(modules, final_graph, diagnostics)
@@ -11703,9 +11706,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     sema_target_denial_check(modules, final_graph, diagnostics)
     // `#Target(OS.…)` impls: the axis conflict and ungated signature uses.
     sema_os_target_check(final_graph, diagnostics)
-    // Typestate flow reads each body's checked receiver types, one module
-    // per thread.
-    final_graph = sema_typestate_check(final_graph, modules, threads, diagnostics)
+    // The typestate flow's findings (each body's checked receiver types,
+    // walked beside the side checks) report here.
+    diagnostics.extend(typestate_found.move())
     outputs := sema_output_publish_solved_effects(final_graph, modules)
     compute_work := SemaComputeValidationWork{}
     compute_diagnostics := sema_compute_validate_autodiff_purity(modules, compute_work)
@@ -11765,12 +11768,11 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // Tag dataflow over every checked body (the Rust reference's
     // `check_fact_tags_and_states`): a tagged value reaching a denied
     // destination is reported, whatever else the bundle reported. The Core
-    // usage walk runs beside it (sema_finalize_walks).
+    // usage walk ran beside the side checks.
     if trace_sink == .Val(sink) -> sink.begin("sema.walks", "", -1, -1)
     taint_diagnostics := [Diagnostic]{}
     taint_catalog := taint_prepared.pop() ?? panic("the side checks left no taint catalog")
-    core_modules := [SemaCoreModuleUsageResult]{}
-    final_graph = sema_finalize_walks(final_graph, taint_catalog, diagnostics, modules, threads, taint_diagnostics, core_modules)
+    final_graph = sema_finalize_walks(final_graph, taint_catalog, diagnostics, modules, threads, taint_diagnostics)
     core_usage := sema_core_combine_module_usage(core_modules)
     if trace_sink == .Val(sink) -> sink.end("sema.walks", core_modules.len())
     loop diagnostic in taint_diagnostics {
@@ -11955,67 +11957,38 @@ sema_core_source_lint: fn(diagnostic: Diagnostic) -> Bool Never! {
 }
 
 // A compiler thread is admitted for at least this many bytes of item source
-// walked, so a small program walks on the calling thread. The taint and Core
-// walks (sema_finalize_walks) each read every item: twice the 65536 bytes
-// either walk was once admitted a thread for on its own.
-SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD: 131072
+// walked, so a small program walks on the calling thread: the taint walk
+// (sema_finalize_walks), and the Core usage walk beside the side checks
+// (sema_finalize_side_checks).
+SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD: 65536
 
 // Core usage jobs per admitted thread, claimed dynamically.
 SEMA_CORE_JOBS_PER_THREAD: 8
 
-// The finalization's two read-only walks of the graph after the effect
-// publish, run together on up to `threads` compiler threads that claim from
-// one queue: the taint modules first, heaviest source first, then the Core
-// ranges in order.
-//
-// The tag dataflow (the Rust reference's `check_fact_tags_and_states` taint
-// walk) over `prepared` (sema_taint_prepare of `graph`): its reports first,
-// then every function, method, test and conversion body walked once, one job
-// per module. Appends the new reports to `reports`; the E0307 reports among
-// `existing_diagnostics` (the bundle's reports so far) settle switch coverage
+// The tag dataflow after the effect publish (the Rust reference's
+// `check_fact_tags_and_states` taint walk) over `prepared` (sema_taint_prepare
+// of `graph`), on up to `threads` compiler threads that claim its modules,
+// heaviest source first: its reports first, then every function, method,
+// test and conversion body walked once, one job per module. Appends the new
+// reports to `reports`; the E0307 reports among `existing_diagnostics` (the
+// bundle's reports so far) settle switch coverage
 // (sema_taint_coverage_reports), and no report of `existing_diagnostics` is
 // repeated. A module's walk reads only the graph, the catalog and the
 // coverage reports, and each module's reports are kept apart and joined in
-// module order (sema_taint_join_reports).
-//
-// The Core usage of every registered module, appended to `cores` in module
-// order. The walk of a module's items is the only part that grows with the
-// program, so the jobs are consecutive item ranges (one module each, about
-// equal source bytes, every module's ranges consecutive); each thread builds
-// the walk context of a job's module (sema_core_module_context, from the
-// module's checked call facts) and walks its claimed ranges into their own
-// rows. A job that covers its whole module also assembles that module's
-// usage on its thread (sema_core_module_usage_assemble: the prefix and
-// script-body usages and the reachable closure); a module's first job
-// otherwise hands back its context, and the caller joins the module's rows in
-// job order (sema_core_collected_append) and assembles it.
-//
-// So the reports, the usage sets, the first span of each usage and the
-// callback keys read exactly as one thread's taint walk and then Core walk of
-// every module in order. Every thread reads the graph, the modules and the
-// walk's inputs in place; the graph is returned. A program whose work admits
-// one thread walks on the calling thread.
-sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], modules: &[SemaGraphModuleResult], threads: CompilerThreads, reports: &[Diagnostic], cores: &[SemaCoreModuleUsageResult]) -> SemaRegistrationGraph {
+// module order (sema_taint_join_reports), so the reports read exactly as one
+// thread's walk of every module in order. Every thread reads the graph and
+// the walk's inputs in place; the graph is returned. A program whose work
+// admits one thread walks on the calling thread.
+sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], modules: &[SemaGraphModuleResult], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaRegistrationGraph {
     owned: graph.move()
-    taken := prepared.move()
-    catalog := taken.catalog.move()
+    taken: prepared.move()
+    catalog: taken.catalog.move()
     reports.extend(taken.reports.move())
     taint_weights: taken.weights.move()
-    coverage := sema_taint_coverage_reports(existing_diagnostics)
-    weights := [Int]{}
-    owners := [Int]{}
+    coverage: sema_taint_coverage_reports(existing_diagnostics)
     work := 0
     loop weight in taint_weights -> work += weight
-    loop module_index in 0..<owned.modules.len() {
-        loop item_index in 0..<owned.modules[module_index].program.items.len() {
-            span: sema_compiler_index_item_span(owned.modules[module_index].program.items[item_index])
-            weight: span.end - span.start
-            weights.push(weight)
-            owners.push(module_index)
-            work += weight
-        }
-    }
-    workers: compiler_threads_admit(threads, taint_weights.len() + weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
+    workers: compiler_threads_admit(threads, taint_weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
     if workers <= 1 {
         state := SemaTaintFlowState{catalog: catalog.move(), module_identity: module_none(), bindings: [SemaTaintBindingFact]{}, diagnostics: [Diagnostic]{}, coverage_reports: coverage.move(), fixed_tags: [String]{}}
         loop module_index in 0..<owned.modules.len() {
@@ -12024,17 +11997,9 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
             sema_taint_join_reports(reports, existing_diagnostics, found)
             sema_mark_masked_branches(modules[module_index].functions, state.masked, state.fixed_tags)
         }
-        loop module_index in 0..<owned.modules.len() {
-            context: sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts)
-            collected := sema_core_collected_empty()
-            sema_core_collect_item_range(owned.modules[module_index].program.items, 0, owned.modules[module_index].program.items.len(), context, collected)
-            cores.push(sema_core_module_usage_assemble(owned.modules[module_index], context, modules[module_index].exact_int_reachable, collected))
-        }
         return owned
     }
-    count := workers * SEMA_CORE_JOBS_PER_THREAD
-    if count > weights.len() -> count = weights.len()
-    inputs: SemaFinalizeWalkInputs{catalog: catalog.move(), coverage: coverage.move(), taint_order: compiler_threads_heaviest_first(taint_weights), jobs: sema_finalize_core_jobs(compiler_threads_partition(weights, count), owners)}
+    inputs: SemaFinalizeWalkInputs{catalog: catalog.move(), coverage: coverage.move(), taint_order: compiler_threads_heaviest_first(taint_weights)}
     queue: SemaFinalizeCoreQueue{next: 0}
     walked := [[Diagnostic]]{}
     masked := [[Span]]{}
@@ -12044,47 +12009,10 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
         masked.push([Span]{})
         fixed.push([String]{})
     }
-    results := [SemaCoreCollected]{}
-    assembled := [SemaCoreModuleUsageResult?]{}
-    contexts := [SemaCoreModuleContext?]{}
-    loop _ in 0..<inputs.jobs.len() {
-        results.push(sema_core_collected_empty())
-        assembled.push(None)
-        contexts.push(None)
-    }
-    sema_finalize_walkers(owned, modules, inputs, queue, 0, workers, walked, masked, fixed, results, assembled, contexts)
+    sema_finalize_walkers(owned, inputs, queue, 0, workers, walked, masked, fixed)
     loop found in walked -> sema_taint_join_reports(reports, existing_diagnostics, found)
     loop module_index in 0..<masked.len() {
         sema_mark_masked_branches(modules[module_index].functions, masked[module_index], fixed[module_index])
-    }
-    // Each module in order: a module walked whole by one job was assembled
-    // on its thread; any other module's item ranges are joined in job order
-    // (jobs are in module and item order, so a module's jobs are
-    // consecutive) and assembled here, with the context its first job built
-    // (or, for a module without items, built here).
-    results.reverse()
-    assembled.reverse()
-    contexts.reverse()
-    job := 0
-    loop module_index in 0..<owned.modules.len() {
-        collected := sema_core_collected_empty()
-        whole := SemaCoreModuleUsageResult?{None}
-        context := SemaCoreModuleContext?{None}
-        loop job < inputs.jobs.len() && inputs.jobs[job].module_index == module_index {
-            part := results.pop() ?? panic("a Core usage job left its rows")
-            done := assembled.pop() ?? panic("a Core usage job left its rows")
-            built := contexts.pop() ?? panic("a Core usage job left its rows")
-            if built != None -> context = built.move()
-            if done == None -> sema_core_collected_append(collected, part) else {
-                whole = done.move()
-            }
-            job += 1
-        }
-        if whole == None {
-            module_context := context.move() ?? sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts)
-            whole = Val(sema_core_module_usage_assemble(owned.modules[module_index], module_context, modules[module_index].exact_int_reachable, collected))
-        }
-        cores.push(whole.move() ?? panic("a Core usage module left no usage"))
     }
     owned
 }
@@ -12166,14 +12094,13 @@ sema_finalize_core_jobs: fn(bounds: [Int], owners: [Int]) -> [SemaFinalizeCoreJo
     jobs
 }
 
-// What every walking thread reads besides the graph and the checked modules
-// (sema_finalize_walks): for the taint walk the catalog, the coverage
-// reports and the modules in claim order; for the Core walk the jobs.
+// What every taint-walking thread reads besides the graph
+// (sema_finalize_walks): the catalog, the coverage reports and the modules
+// in claim order.
 SemaFinalizeWalkInputs: struct {
     catalog: SemaTaintCatalog
     coverage: [Diagnostic]
     taint_order: [Int]
-    jobs: [SemaFinalizeCoreJob]
 }
 
 // The next unclaimed job, taken with one atomic add; every thread reads the
@@ -12192,81 +12119,46 @@ SemaFinalizeCoreCollected: struct {
     context: SemaCoreModuleContext?
 }
 
-// What one walking thread returns: its taint modules' reports and its Core
-// jobs' rows.
-SemaFinalizeWalked: struct {
-    taint: [SemaTaintWalked]
-    core: [SemaFinalizeCoreCollected]
-}
-
-// Runs walking threads `from..<workers`, one task each, and moves each taint
+// Runs taint-walking threads `from..<workers`, one task each, and moves each
 // module's reports, masked branches and fixed tags a thread returned into
-// its module's slot of `walked`, `masked` and `fixed` and every Core job
-// row into its slot of `results`, `assembled` and `contexts`. None of the
-// graph, the modules, the inputs or the queue is written or moved before
-// the group joins.
-sema_finalize_walkers: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], inputs: SemaFinalizeWalkInputs, queue: SemaFinalizeCoreQueue, from: Int, workers: Int, walked: &[[Diagnostic]], masked: &[[Span]], fixed: &[[String]], results: &[SemaCoreCollected], assembled: &[SemaCoreModuleUsageResult?], contexts: &[SemaCoreModuleContext?]) {
+// its module's slot of `walked`, `masked` and `fixed`. Neither the graph,
+// the inputs nor the queue is written or moved before the group joins.
+sema_finalize_walkers: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalkInputs, queue: SemaFinalizeCoreQueue, from: Int, workers: Int, walked: &[[Diagnostic]], masked: &[[Span]], fixed: &[[String]]) {
     if from >= workers {
         return
     }
     task.group sema_finalize_walk_threads {
-        head: task sema_finalize_walk_claimed(graph, modules, inputs, queue)
-        sema_finalize_walkers(graph, modules, inputs, queue, from + 1, workers, walked, masked, fixed, results, assembled, contexts)
+        head: task sema_finalize_walk_claimed(graph, inputs, queue)
+        sema_finalize_walkers(graph, inputs, queue, from + 1, workers, walked, masked, fixed)
         claimed := head.join() ?? panic(compiler_threads_failure_text(err))
-        loop claimed.taint.len() > 0 {
-            done := claimed.taint.pop() ?? break
+        loop claimed.len() > 0 {
+            done: claimed.pop() ?? break
             walked[done.module_index] = done.found.move()
             masked[done.module_index] = done.masked.move()
             fixed[done.module_index] = done.fixed_tags.move()
         }
-        loop claimed.core.len() > 0 {
-            done := claimed.core.pop() ?? break
-            results[done.job] = done.collected.move()
-            assembled[done.job] = done.assembled.move()
-            contexts[done.job] = done.context.move()
-        }
     }
 }
 
-// One thread: walks the ranks it claims, in order: ranks below the taint
-// module count are taint modules, the rest Core jobs. A taint module is
-// walked with the thread's own flow state, over its own copy of the catalog
-// and the coverage reports made at its first taint module. A Core job builds
-// its module's walk context and walks its range into its own rows; a job
-// that walks its module's every item assembles the module's usage too, and
-// a module's first job otherwise hands its context back.
-sema_finalize_walk_claimed: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], inputs: SemaFinalizeWalkInputs, queue: SemaFinalizeCoreQueue) -> SemaFinalizeWalked {
+// One thread: walks the taint modules it claims, in claim order, with the
+// thread's own flow state, over its own copy of the catalog and the coverage
+// reports made at its first module.
+sema_finalize_walk_claimed: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalkInputs, queue: SemaFinalizeCoreQueue) -> [SemaTaintWalked] {
     state := SemaTaintFlowState{catalog: sema_taint_catalog_init(), module_identity: module_none(), bindings: [SemaTaintBindingFact]{}, diagnostics: [Diagnostic]{}, coverage_reports: [Diagnostic]{}, fixed_tags: [String]{}}
     stated := false
-    claimed := SemaFinalizeWalked{taint: [SemaTaintWalked]{}, core: [SemaFinalizeCoreCollected]{}}
-    taint_count: inputs.taint_order.len()
+    claimed := [SemaTaintWalked]{}
     loop {
         rank: sema_finalize_core_claim(queue)
-        if rank < taint_count {
-            if !stated {
-                state.catalog = inputs.catalog.copy()
-                state.coverage_reports = inputs.coverage.copy()
-                stated = true
-            }
-            module_index: inputs.taint_order[rank]
-            found := [Diagnostic]{}
-            sema_taint_check_module(graph, state, module_index, found)
-            claimed.taint.push(SemaTaintWalked{module_index: module_index, found: found.move(), masked: state.masked.copy(), fixed_tags: state.fixed_tags.copy()})
-            next
+        if rank >= inputs.taint_order.len() -> break
+        if !stated {
+            state.catalog = inputs.catalog.copy()
+            state.coverage_reports = inputs.coverage.copy()
+            stated = true
         }
-        job: rank - taint_count
-        if job >= inputs.jobs.len() -> break
-        module_index: inputs.jobs[job].module_index
-        context := sema_core_module_context(graph, graph.modules[module_index], modules[module_index].call_facts)
-        collected := sema_core_collected_empty()
-        sema_core_collect_item_range(graph.modules[module_index].program.items, inputs.jobs[job].first, inputs.jobs[job].last, context, collected)
-        if inputs.jobs[job].first == 0 && inputs.jobs[job].last == graph.modules[module_index].program.items.len() {
-            claimed.core.push(SemaFinalizeCoreCollected{job: job, collected: sema_core_collected_empty(), assembled: Val(sema_core_module_usage_assemble(graph.modules[module_index], context, modules[module_index].exact_int_reachable, collected)), context: None})
-            next
-        }
-        handed := SemaCoreModuleContext?{None}
-        if inputs.jobs[job].first == 0 -> handed = Val(context.move())
-        claimed.core.push(SemaFinalizeCoreCollected{job: job, collected: collected.move(), assembled: None, context: handed.move()})
+        module_index: inputs.taint_order[rank]
+        found := [Diagnostic]{}
+        sema_taint_check_module(graph, state, module_index, found)
+        claimed.push(SemaTaintWalked{module_index: module_index, found: found.move(), masked: state.masked.copy(), fixed_tags: state.fixed_tags.copy()})
     }
     claimed
 }
@@ -12326,26 +12218,137 @@ sema_finalize_side_liveness_empty: fn() -> SemaLivenessResult {
     SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
 }
 
+// What every side-check thread reads besides the graph and the checked
+// modules: the program's state table, the checked modules in typestate claim
+// order (most functions first), and the Core usage jobs.
+SemaFinalizeSideInputs: struct {
+    table: SemaStateTable
+    typestate_order: [Int]
+    jobs: [SemaFinalizeCoreJob]
+}
+
+// One checked module's typestate findings (sema_typestate_check_module).
+SemaFinalizeTypestate: struct {
+    module_index: Int
+    found: [Diagnostic]
+}
+
+// What one side-check thread returns: its side checks, its modules'
+// typestate findings and its Core jobs' rows.
+SemaFinalizeSideClaimed: struct {
+    sides: [SemaFinalizeSide]
+    typestate: [SemaFinalizeTypestate]
+    core: [SemaFinalizeCoreCollected]
+}
+
 // Runs every side check, on threads when the program is large enough, and
 // joins them in order: the declaration checks' diagnostics onto
 // `diagnostics` (any found leaves the graph incomplete), the effect inputs
 // onto `effect_inputs` with their graph rows in `effect_prepared`, the
 // liveness verdicts into `liveness`, and the taint catalog onto `taint`.
-sema_finalize_side_checks: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGraphModuleResult], threads: CompilerThreads, diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], effect_prepared: &SemaEffectPrepared, liveness: &SemaLivenessResult, taint: &[SemaTaintPrepared]) -> SemaRegistrationGraph {
+//
+// The typestate flow and the Core usage walk read neither the solved effects
+// nor anything the effect pass or the checks after it write, so they claim
+// from the same queue after the side checks instead of waiting for the
+// effect pass: each checked module's typestate walk
+// (sema_typestate_check_module, most functions first), its findings onto
+// `typestate_found` in module order for the caller to publish where the
+// typestate check reports; then the Core usage of every registered module,
+// appended to `cores` in module order. The walk of a module's items is the
+// only part of the Core walk that grows with the program, so its jobs are
+// consecutive item ranges (one module each, about equal source bytes, every
+// module's ranges consecutive); each thread builds the walk context of a
+// job's module (sema_core_module_context, from the module's checked call
+// facts) and walks its claimed ranges into their own rows. A job that covers
+// its whole module also assembles that module's usage on its thread
+// (sema_core_module_usage_assemble: the prefix and script-body usages and
+// the reachable closure); a module's first job otherwise hands back its
+// context, and the join appends the module's rows in job order
+// (sema_core_collected_append) and assembles it. So the findings, the usage
+// sets, the first span of each usage and the callback keys read exactly as
+// one thread's walk of every module in order.
+sema_finalize_side_checks: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGraphModuleResult], threads: CompilerThreads, diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], effect_prepared: &SemaEffectPrepared, liveness: &SemaLivenessResult, taint: &[SemaTaintPrepared], typestate_found: &[Diagnostic], cores: &[SemaCoreModuleUsageResult]) -> SemaRegistrationGraph {
     owned: graph.move()
-    sides := [SemaFinalizeSide]{}
-    workers: compiler_threads_admit(threads, SEMA_FINALIZE_SIDE_JOBS, modules.len(), SEMA_FINALIZE_SIDE_MIN_MODULES_PER_THREAD, 0, 0)
-    if workers <= 1 {
-        loop job in 0..<SEMA_FINALIZE_SIDE_JOBS {
-            sides.push(sema_finalize_side_run(job, owned, modules))
+    table: sema_state_table_of(owned)
+    // Each item's source bytes and its module, over every registered module.
+    weights := [Int]{}
+    owners := [Int]{}
+    work := 0
+    loop module_index in 0..<owned.modules.len() {
+        loop item_index in 0..<owned.modules[module_index].program.items.len() {
+            span: sema_compiler_index_item_span(owned.modules[module_index].program.items[item_index])
+            weight: span.end - span.start
+            weights.push(weight)
+            owners.push(module_index)
+            work += weight
         }
+    }
+    module_workers: compiler_threads_admit(threads, SEMA_FINALIZE_SIDE_JOBS + modules.len(), modules.len(), SEMA_FINALIZE_SIDE_MIN_MODULES_PER_THREAD, 0, 0)
+    core_workers: compiler_threads_admit(threads, weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
+    workers: if core_workers > module_workers -> core_workers else -> module_workers
+    if workers <= 1 {
+        sides: loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> sema_finalize_side_run(job, owned, modules)
         sema_finalize_side_join(sides, diagnostics, complete, effect_inputs, effect_prepared, liveness, taint)
+        loop module_row in modules -> typestate_found.extend(sema_typestate_check_module(owned, table, module_row))
+        loop module_index in 0..<owned.modules.len() {
+            context: sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts)
+            collected := sema_core_collected_empty()
+            sema_core_collect_item_range(owned.modules[module_index].program.items, 0, owned.modules[module_index].program.items.len(), context, collected)
+            cores.push(sema_core_module_usage_assemble(owned.modules[module_index], context, modules[module_index].exact_int_reachable, collected))
+        }
         return owned
     }
-    loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> sides.push(sema_finalize_side_new(job))
+    count := workers * SEMA_CORE_JOBS_PER_THREAD
+    if count > weights.len() -> count = weights.len()
+    function_counts: loop module_row in modules -> module_row.functions.len()
+    inputs: SemaFinalizeSideInputs{table: table.move(), typestate_order: compiler_threads_heaviest_first(function_counts), jobs: sema_finalize_core_jobs(compiler_threads_partition(weights, count), owners)}
+    sides := loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> sema_finalize_side_new(job)
+    found := loop _ in modules -> [Diagnostic]{}
+    results := [SemaCoreCollected]{}
+    assembled := [SemaCoreModuleUsageResult?]{}
+    contexts := [SemaCoreModuleContext?]{}
+    loop _ in 0..<inputs.jobs.len() {
+        results.push(sema_core_collected_empty())
+        assembled.push(None)
+        contexts.push(None)
+    }
     queue: SemaFinalizeCoreQueue{next: 0}
-    sema_finalize_side_claimers(owned, modules, queue, 0, workers, sides)
+    sema_finalize_side_claimers(owned, modules, inputs, queue, 0, workers, sides, found, results, assembled, contexts)
     sema_finalize_side_join(sides, diagnostics, complete, effect_inputs, effect_prepared, liveness, taint)
+    found.reverse()
+    loop found.len() > 0 {
+        module_found: found.pop() ?? break
+        typestate_found.extend(module_found.move())
+    }
+    // Each module in order: a module walked whole by one job was assembled
+    // on its thread; any other module's item ranges are joined in job order
+    // (jobs are in module and item order, so a module's jobs are
+    // consecutive) and assembled here, with the context its first job built
+    // (or, for a module without items, built here).
+    results.reverse()
+    assembled.reverse()
+    contexts.reverse()
+    job := 0
+    loop module_index in 0..<owned.modules.len() {
+        collected := sema_core_collected_empty()
+        whole := SemaCoreModuleUsageResult?{None}
+        context := SemaCoreModuleContext?{None}
+        loop job < inputs.jobs.len() && inputs.jobs[job].module_index == module_index {
+            part: results.pop() ?? panic("a Core usage job left its rows")
+            done := assembled.pop() ?? panic("a Core usage job left its rows")
+            built := contexts.pop() ?? panic("a Core usage job left its rows")
+            if built != None -> context = built.move()
+            if done == None -> sema_core_collected_append(collected, part) else {
+                whole = done.move()
+            }
+            job += 1
+        }
+        if whole == None {
+            module_context: context.move() ?? sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts)
+            whole = Val(sema_core_module_usage_assemble(owned.modules[module_index], module_context, modules[module_index].exact_int_reachable, collected))
+        }
+        cores.push(whole.move() ?? panic("a Core usage module left no usage"))
+    }
     owned
 }
 
@@ -12387,6 +12390,22 @@ sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [Sem
     side
 }
 
+// One Core usage job of `jobs`: its range's rows, or its module's assembled
+// usage when it walks the module's every item; a module's first job that
+// does not hands back its module's walk context.
+sema_finalize_core_job: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], jobs: [SemaFinalizeCoreJob], job: Int) -> SemaFinalizeCoreCollected {
+    module_index: jobs[job].module_index
+    context: sema_core_module_context(graph, graph.modules[module_index], modules[module_index].call_facts)
+    collected := sema_core_collected_empty()
+    sema_core_collect_item_range(graph.modules[module_index].program.items, jobs[job].first, jobs[job].last, context, collected)
+    if jobs[job].first == 0 && jobs[job].last == graph.modules[module_index].program.items.len() {
+        return SemaFinalizeCoreCollected{job: job, collected: sema_core_collected_empty(), assembled: Val(sema_core_module_usage_assemble(graph.modules[module_index], context, modules[module_index].exact_int_reachable, collected)), context: None}
+    }
+    handed := SemaCoreModuleContext?{None}
+    if jobs[job].first == 0 -> handed = Val(context.move())
+    SemaFinalizeCoreCollected{job: job, collected: collected.move(), assembled: None, context: handed.move()}
+}
+
 // Joins the side checks in job order.
 sema_finalize_side_join: fn(sides: &&[SemaFinalizeSide], diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], effect_prepared: &SemaEffectPrepared, liveness: &SemaLivenessResult, taint: &[SemaTaintPrepared]) {
     owned := sides.move()
@@ -12403,32 +12422,58 @@ sema_finalize_side_join: fn(sides: &&[SemaFinalizeSide], diagnostics: &[Diagnost
 }
 
 // Runs side-check threads `from..<workers`, one task each, and moves every
-// result a thread returned into its job's slot of `sides`. Every thread reads
-// the graph, the checked modules and the queue in place: none is written or
-// moved before the group joins.
-sema_finalize_side_claimers: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], queue: SemaFinalizeCoreQueue, from: Int, workers: Int, sides: &[SemaFinalizeSide]) {
+// result a thread returned into its slot: each side check into its job's
+// slot of `sides`, each module's typestate findings into its slot of
+// `found`, and every Core job row into its slot of `results`, `assembled`
+// and `contexts`. Every thread reads the graph, the checked modules, the
+// inputs and the queue in place: none is written or moved before the group
+// joins.
+sema_finalize_side_claimers: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], inputs: SemaFinalizeSideInputs, queue: SemaFinalizeCoreQueue, from: Int, workers: Int, sides: &[SemaFinalizeSide], found: &[[Diagnostic]], results: &[SemaCoreCollected], assembled: &[SemaCoreModuleUsageResult?], contexts: &[SemaCoreModuleContext?]) {
     if from >= workers {
         return
     }
     task.group sema_finalize_side_threads {
-        head: task sema_finalize_side_claimed(graph, modules, queue)
-        sema_finalize_side_claimers(graph, modules, queue, from + 1, workers, sides)
+        head: task sema_finalize_side_claimed(graph, modules, inputs, queue)
+        sema_finalize_side_claimers(graph, modules, inputs, queue, from + 1, workers, sides, found, results, assembled, contexts)
         claimed := head.join() ?? panic(compiler_threads_failure_text(err))
-        loop claimed.len() > 0 {
-            done := claimed.pop() ?? break
+        loop claimed.sides.len() > 0 {
+            done: claimed.sides.pop() ?? break
             job: done.job
             sides[job] = done.move()
+        }
+        loop claimed.typestate.len() > 0 {
+            done: claimed.typestate.pop() ?? break
+            found[done.module_index] = done.found.move()
+        }
+        loop claimed.core.len() > 0 {
+            done: claimed.core.pop() ?? break
+            results[done.job] = done.collected.move()
+            assembled[done.job] = done.assembled.move()
+            contexts[done.job] = done.context.move()
         }
     }
 }
 
-// One thread: runs the side checks it claims, heaviest (last job) first.
-sema_finalize_side_claimed: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], queue: SemaFinalizeCoreQueue) -> [SemaFinalizeSide] {
-    claimed := [SemaFinalizeSide]{}
+// One thread: runs the side checks it claims, heaviest (last job) first,
+// then the typestate modules, then the Core jobs.
+sema_finalize_side_claimed: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], inputs: SemaFinalizeSideInputs, queue: SemaFinalizeCoreQueue) -> SemaFinalizeSideClaimed {
+    claimed := SemaFinalizeSideClaimed{sides: [SemaFinalizeSide]{}, typestate: [SemaFinalizeTypestate]{}, core: [SemaFinalizeCoreCollected]{}}
+    typestate_count: inputs.typestate_order.len()
     loop {
         rank: sema_finalize_core_claim(queue)
-        if rank >= SEMA_FINALIZE_SIDE_JOBS -> break
-        claimed.push(sema_finalize_side_run(SEMA_FINALIZE_SIDE_JOBS - 1 - rank, graph, modules))
+        if rank < SEMA_FINALIZE_SIDE_JOBS {
+            claimed.sides.push(sema_finalize_side_run(SEMA_FINALIZE_SIDE_JOBS - 1 - rank, graph, modules))
+            next
+        }
+        position: rank - SEMA_FINALIZE_SIDE_JOBS
+        if position < typestate_count {
+            module_index: inputs.typestate_order[position]
+            claimed.typestate.push(SemaFinalizeTypestate{module_index: module_index, found: sema_typestate_check_module(graph, inputs.table, modules[module_index])})
+            next
+        }
+        job: position - typestate_count
+        if job >= inputs.jobs.len() -> break
+        claimed.core.push(sema_finalize_core_job(graph, modules, inputs.jobs, job))
     }
     claimed
 }

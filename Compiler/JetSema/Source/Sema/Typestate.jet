@@ -15,7 +15,7 @@
 //
 // The receiver's type comes from the function's checked body: the type of the
 // receiver's node in its expression-type column.
-use jet_foundation.[BodyTree, CompilerThreads, Diagnostic, Expr, Func, Item, Name, NameTable, OrFallback, Pattern, Span, Stmt, SwitchArm, Type, body_tree_new, checked_expr_type_id, compiler_take_rows, compiler_threads_admit, compiler_threads_heaviest_first, compiler_transfer_rows, expr_binary_operands, expr_span, name_count, name_find, name_index, name_intern, name_table_sized, name_text]
+use jet_foundation.[BodyTree, Diagnostic, Expr, Func, Item, Name, NameTable, OrFallback, Pattern, Span, Stmt, SwitchArm, Type, body_tree_new, checked_expr_type_id, expr_binary_operands, expr_span, name_count, name_find, name_index, name_intern, name_table_sized, name_text]
 
 SEMA_STATE_TASK: "Task"
 SEMA_STATE_TASK_RUNNING: "Running"
@@ -182,39 +182,16 @@ SemaStateSplit: struct {
     other: String
 }
 
-// Each module's walk reads the program's state table, the graph and its own
-// checked module and writes only its own findings, so the walks run as a
-// graph scan (sema_graph_scan), claimed heaviest first, and join in module
-// order: the diagnostics are the same for any thread count.
-sema_typestate_check: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGraphModuleResult], threads: CompilerThreads, diagnostics: &[Diagnostic]) -> SemaRegistrationGraph {
-    owned := graph.move()
+// The program's state table: every registered module's state-typed
+// declarations. Each module's walk (sema_typestate_check_module) reads it,
+// the graph and its own checked module and writes only its own findings, so
+// the walks run on compiler threads beside the side checks
+// (CheckProgram.jet sema_finalize_side_checks) and join in module order.
+sema_state_table_of: fn(graph: SemaRegistrationGraph) -> SemaStateTable Never! {
     table := sema_state_table_new()
-    loop registered in owned.modules -> sema_state_table_add_items(table, registered.program.items)
-    workers: compiler_threads_admit(threads, modules.len(), modules.len(), SEMA_TYPESTATE_MIN_MODULES_PER_THREAD, 0, 0)
-    if workers <= 1 {
-        loop module_index in 0..<modules.len() -> diagnostics.extend(sema_typestate_check_module(owned, table, modules[module_index]))
-        return owned
-    }
-    weights := [Int]{}
-    loop module_row in modules -> weights.push(module_row.functions.len())
-    rows: loop module_index in 0..<modules.len() -> module_index
-    scan := sema_graph_scan_new(owned, compiler_take_rows<SemaGraphModuleResult>(modules), rows, compiler_threads_heaviest_first(weights))
-    scan.table = Val(table.move())
-    done := sema_graph_scan(scan, workers)
-    compiler_transfer_rows<SemaGraphModuleResult>(modules, done.modules)
-    found := done.found.move()
-    found.reverse()
-    loop found.len() > 0 {
-        slot := found.pop() ?? break
-        module_found := slot.move() ?? panic("a module's typestate walk left its slot")
-        diagnostics.extend(module_found.diagnostics.move())
-    }
-    done.graph.move()
+    loop registered in graph.modules -> sema_state_table_add_items(table, registered.program.items)
+    table
 }
-
-// A program of fewer modules per admitted thread walks them on the calling
-// thread.
-SEMA_TYPESTATE_MIN_MODULES_PER_THREAD: 16
 
 // One checked module's walk: every function, method and test body of its
 // registered program, with the source locations attached to its findings.
