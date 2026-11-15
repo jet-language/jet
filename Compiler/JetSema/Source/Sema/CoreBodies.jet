@@ -48,6 +48,7 @@
 use jet_foundation.[
     BodyCodecIn,
     BodyCodecOut,
+    CompilerThreads,
     DeclID,
     Diagnostic,
     ModuleID,
@@ -58,6 +59,10 @@ use jet_foundation.[
     body_codec_put_count,
     body_codec_put_string,
     compiler_take_rows,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_limit,
+    compiler_threads_partition,
     decl_table_find,
     decl_table_key,
     module_find,
@@ -438,16 +443,33 @@ sema_core_body_load: fn(program: SemaProgramTables, access: SemaHostHookAccess, 
             key: symbol_table_key(graph.symbols, owner_id)
             if sema_core_body_stands_in(graph, key) -> return None
             permit: hooks.guard_edit()
+            taken: sema_core_body_ahead_take(permit.value, owner_id)
+            if taken != None -> return taken
             position: sema_core_bodies_position(permit.value.core_bodies, key) ?? return None
             packet: sema_core_body_read(permit.value.core_bodies, permit.value.core_bodies_records, graph, position, permit.value.core_bodies_read, permit.value.core_bodies_reader) ?? return None
-            loop permit.value.core_bodies_loaded.len() <= position {
-                permit.value.core_bodies_loaded.push(false)
-            }
-            permit.value.core_bodies_loaded[position] = true
+            sema_core_body_mark_loaded(permit.value.core_bodies_loaded, position)
             return Val(packet)
         }
     }
     None
+}
+
+// Marks record `position` loaded in `loaded`
+// (SemaRegistrationHostHooks.core_bodies_loaded).
+sema_core_body_mark_loaded: fn(loaded: &[Bool], position: Int) Never! {
+    loop loaded.len() <= position -> loaded.push(false)
+    loaded[position] = true
+}
+
+// The packet of function `owner` that sema_core_bodies_ahead read ahead,
+// taken out of `hooks` (SemaRegistrationHostHooks.core_bodies_ahead) and
+// counted as sema_core_body_load counts a record it reads; None when none
+// was read ahead.
+sema_core_body_ahead_take: fn(hooks: &SemaRegistrationHostHooks, owner: SymbolID) -> SemaParallelBody? Never! {
+    row := hooks.core_bodies_ahead.remove(owner.id) ?? return None
+    hooks.core_bodies_read += row.size
+    sema_core_body_mark_loaded(hooks.core_bodies_loaded, row.position)
+    Val(row.packet.move())
 }
 
 // Whether the current Core demand wave checks the function keyed `key` as a
@@ -516,4 +538,199 @@ sema_core_body_decode: fn(bytes: [U8], at: Int, graph: SemaRegistrationGraph, po
         panic("internal compiler error: the packet of record {position} of the Core bodies file does not read")
     }
     Val(packet)
+}
+
+// The fewest record bytes worth a compiler thread of their own in
+// sema_core_bodies_ahead: a record of about 12 KB decodes in about 100 µs,
+// so each thread decodes for some milliseconds.
+SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD: 262144
+
+// The most record bytes sema_core_bodies_ahead holds read and not yet
+// decoded: it reads and decodes a wave's records in rounds of about this
+// many bytes, so a wave's records never sit in memory together.
+SEMA_CORE_BODIES_AHEAD_ROUND_BYTES: 8388608
+
+// A record sema_core_bodies_ahead read for a compiler thread to decode: its
+// function, its position in the bodies file, and its bytes, which the
+// thread drops once it decoded them, keeping their count.
+SemaCoreBodyRecord: struct {
+    owner: SymbolID
+    position: Int
+    bytes: [U8]
+    size: Int{0}
+}
+
+// A packet sema_core_bodies_ahead decoded, waiting for the module pass to
+// take it (sema_core_body_ahead_take): its record's position in the bodies
+// file and how many of the file's bytes the record holds.
+SemaCoreBodyAhead: struct {
+    packet: SemaParallelBody
+    position: Int
+    size: Int
+}
+
+// One compiler thread's records (sema_core_bodies_ahead_decode_part) and,
+// once it decoded them, their packets in the same order: None where a key
+// does not resolve in this compile.
+SemaCoreBodiesAheadPart: struct {
+    records: [SemaCoreBodyRecord]
+    packets: [SemaParallelBody?]
+}
+
+// Reads ahead the packets a Core demand wave (graph.core_wave_rows) loads.
+// A compile that loads Core packets loads them on the module pass's thread,
+// where the host hooks are (sema_core_bodies_held), and decoding a record is
+// most of a load, so a wave of thousands of loads would leave the other
+// threads idle. Before the wave's module pass this thread reads the records
+// of the wave's functions that sema_core_body_load would load, and compiler
+// threads decode them, each with a reader of its own, into
+// SemaRegistrationHostHooks.core_bodies_ahead; sema_core_body_load takes
+// each at its function's turn and counts it as a load of its own. A packet
+// read ahead is the one the turn's load would read: its keys resolve to the
+// same ids once they resolve, and a record whose keys don't resolve yet is
+// left to the turn's load. Each thread's reader has its own pool of
+// spellings (BodyCodecIn.spellings), so a spelling is one String per thread
+// that read it. The wave's end drops what its pass did not take
+// (sema_core_bodies_ahead_drop).
+sema_core_bodies_ahead: fn(program: SemaProgramTables, host_hooks: SemaHostHookAccess?, threads: CompilerThreads) {
+    access: host_hooks ?? return
+    if program.registration_graph == .Val(graph) {
+        if graph.core_seal || !graph.core_bodies_held || compiler_threads_limit(threads) < 2 {
+            return
+        }
+        keys := [String]{}
+        loop key in graph.core_wave_rows.keys() -> keys.push(key)
+        // In key order, the bodies file's record order.
+        keys.sort()
+        next_key := 0
+        loop next_key < keys.len() {
+            records := sema_core_bodies_ahead_read(access, graph, keys, next_key)
+            sema_core_bodies_ahead_keep(access, sema_core_bodies_ahead_decode(graph, records, threads))
+        }
+    }
+}
+
+// Drops the packets read ahead for a wave its module pass did not take
+// (sema_core_bodies_ahead).
+sema_core_bodies_ahead_drop: fn(host_hooks: SemaHostHookAccess?) {
+    access: host_hooks ?? return
+    if access == .Callbacks(hooks) {
+        permit: hooks.guard_edit()
+        permit.value.core_bodies_ahead = [U32:SemaCoreBodyAhead]{}
+    }
+}
+
+// The next round of records sema_core_bodies_ahead reads, from key
+// `start` of `keys` on, which it advances past them: the records of the
+// functions sema_core_body_load would load, as it reads them, up to about
+// SEMA_CORE_BODIES_AHEAD_ROUND_BYTES. None when the host hooks are
+// withheld or the bodies file's context is not this compile's.
+sema_core_bodies_ahead_read: fn(access: SemaHostHookAccess, graph: SemaRegistrationGraph, keys: [String], start: &Int) -> [SemaCoreBodyRecord] {
+    records := [SemaCoreBodyRecord]{}
+    if access == .Callbacks(hooks) {
+        permit: hooks.guard_edit()
+        if permit.value.core_bodies == .Val(file) {
+            if file.head.context == sema_core_bodies_context(graph) {
+                bytes := 0
+                loop start < keys.len() && bytes < SEMA_CORE_BODIES_AHEAD_ROUND_BYTES {
+                    key: keys[start]
+                    start += 1
+                    module_index: graph.core_demand_rows.get(key) ?? next
+                    if !sema_core_body_module(graph.modules[module_index]) || sema_core_body_stands_in(graph, key) {
+                        next
+                    }
+                    owner: symbol_find(graph.symbols, key) ?? next
+                    position: sema_core_bodies_position(permit.value.core_bodies, key) ?? next
+                    at: sema_core_bodies_offset(file.bytes, file.head, position)
+                    end: if position + 1 < file.head.count -> sema_core_bodies_offset(file.bytes, file.head, position + 1) else -> file.bytes.len()
+                    bytes += end - at
+                    record: if permit.value.core_bodies_records == .Val(source) -> source.read(at, end - at) ?? panic("internal compiler error: record {position} of the Core bodies file does not read from the host's file") else -> file.bytes.slice(at, end)
+                    records.push(SemaCoreBodyRecord{owner: owner, position: position, bytes: record})
+                }
+                return records
+            }
+        }
+    }
+    start = keys.len()
+    records
+}
+
+// Puts each packet of `done` that reads into
+// SemaRegistrationHostHooks.core_bodies_ahead.
+sema_core_bodies_ahead_keep: fn(access: SemaHostHookAccess, done: &&[SemaCoreBodiesAheadPart]) {
+    parts := done.move()
+    if access == .Callbacks(hooks) {
+        permit: hooks.guard_edit()
+        loop at in 0..<parts.len() {
+            loop parts[at].records.len() > 0 {
+                record: parts[at].records.pop() ?? panic("a Core bodies round lost a record")
+                popped := parts[at].packets.pop() ?? panic("a Core bodies round lost a packet")
+                packet := popped.move() ?? next
+                permit.value.core_bodies_ahead[record.owner.id] = SemaCoreBodyAhead{packet: packet.move(), position: record.position, size: record.size}
+            }
+        }
+    }
+}
+
+// Decodes `records` on compiler threads, in consecutive parts weighed by
+// their bytes (sema_core_bodies_ahead_parts).
+sema_core_bodies_ahead_decode: fn(graph: SemaRegistrationGraph, records: &&[SemaCoreBodyRecord], threads: CompilerThreads) -> [SemaCoreBodiesAheadPart] {
+    rows := records.move()
+    weights := [Int]{}
+    work := 0
+    loop record in rows {
+        weights.push(record.bytes.len())
+        work += record.bytes.len()
+    }
+    workers: compiler_threads_admit(threads, rows.len(), work, SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD, 0, 0)
+    bounds: compiler_threads_partition(weights, workers)
+    parts := [SemaCoreBodiesAheadPart]{}
+    loop part_index in 0..<workers {
+        parts.push(SemaCoreBodiesAheadPart{records: [SemaCoreBodyRecord]{}, packets: [SemaParallelBody?]{}})
+    }
+    // Each part's records, moved out of `rows` from its end, so a part
+    // holds them last first.
+    part_index := workers - 1
+    loop rows.len() > 0 {
+        loop rows.len() <= bounds[part_index] -> part_index -= 1
+        parts[part_index].records.push(rows.pop() ?? panic("a Core bodies round lost a record"))
+    }
+    sema_core_bodies_ahead_parts(graph, parts)
+}
+
+// Decodes `parts` (sema_core_bodies_ahead_decode_part), in part order: the
+// last part on its own thread, the ones before it the same way, and the
+// first on this one.
+sema_core_bodies_ahead_parts: fn(graph: SemaRegistrationGraph, parts: &&[SemaCoreBodiesAheadPart]) -> [SemaCoreBodiesAheadPart] {
+    rest := parts.move()
+    last := rest.pop() ?? return rest
+    if rest.len() == 0 {
+        rest.push(sema_core_bodies_ahead_decode_part(graph, last.move()))
+        return rest
+    }
+    done := [SemaCoreBodiesAheadPart]{}
+    task.group sema_core_bodies_ahead_threads {
+        head: task sema_core_bodies_ahead_decode_part(graph, last.move())
+        done = sema_core_bodies_ahead_parts(graph, rest.move())
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+    }
+    done
+}
+
+// One part's packets, decoded with a reader of its own, its records taken
+// from the last (the first in the file) on; each record's bytes are dropped
+// once decoded, their count kept.
+sema_core_bodies_ahead_decode_part: fn(graph: SemaRegistrationGraph, part: &&SemaCoreBodiesAheadPart) -> SemaCoreBodiesAheadPart {
+    pending := part.move()
+    decoded := SemaCoreBodiesAheadPart{records: [SemaCoreBodyRecord]{}, packets: [SemaParallelBody?]{}}
+    reader := BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
+    loop {
+        record := pending.records.pop() ?? break
+        bytes := record.bytes.move()
+        record.bytes = [U8]{}
+        record.size = bytes.len()
+        decoded.packets.push(sema_core_body_decode(bytes, 0, graph, record.position, reader))
+        decoded.records.push(record.move())
+    }
+    decoded
 }

@@ -584,7 +584,12 @@ that function's record by halving the table and loads its packet
 only the records it looks up, and counts their bytes as
 `core.bodies_read_bytes`. The packet then drains as a prepared one does.
 This holds in the module pass and in each Core demand wave, so a kept
-generic, function-value, lowered or comptime body loads too. Any miss
+generic, function-value, lowered or comptime body loads too. Before a
+Core demand wave's module pass, the pass's thread reads the records of
+the wave's loads in rounds of about 8 MiB, and compiler threads decode
+them, each thread with its own reader (`sema_core_bodies_ahead`). The
+wave's loads take those packets in place of reading their records, and
+count them the same way. Any miss
 checks the function from text, as does a stand-in of a run bound to the
 Core image, which is checked by its signature alone. A shipped file whose
 header does not read refuses the compile as an internal compiler error, and

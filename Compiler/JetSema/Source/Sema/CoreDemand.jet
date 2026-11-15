@@ -428,7 +428,18 @@ sema_core_demand_pass: fn(owned: &&SemaRegistrationGraph, first_affected: &&[Int
         tally.checked += size
         tally.waves += 1
         if trace_sink == .Val(sink) -> sink.begin("sema.core_demand", "", -1, -1)
+        // A per-function trace times each Core body's load at its turn
+        // (sema_core_bound_charge), so it reads none ahead.
+        timed := false
+        if trace_sink == .Val(sink) -> timed = sink.functions()
+        if !timed {
+            ahead_program := sema_check_shared_take_program(shared_state)
+            ahead_plan := sema_check_shared_take_memory_plan(shared_state)
+            sema_core_bodies_ahead(ahead_program, host_hooks, threads)
+            sema_check_shared_put_tables(shared_state, ahead_program, ahead_plan)
+        }
         checked_functions: sema_finalize_pass_modules(shared_state, values, comptime_functions, comptime_rows, affected, SemaWaveKind.Core, true, host_hooks, threads, "sema.core_demand", trace_sink, modules)
+        sema_core_bodies_ahead_drop(host_hooks)
         if trace_sink == .Val(sink) -> sink.end("sema.core_demand", checked_functions)
         // The next wave, named on the pass's own graph.
         wave := [String:Bool]{}

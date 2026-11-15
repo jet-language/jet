@@ -774,12 +774,16 @@ SemaRegistrationHostHooks: struct {
     // its records it so loaded, by position, how many of the file's bytes
     // those records hold, and the reader every load reads its packet with,
     // whose pool of strings (BodyCodecIn.spellings) holds one String per
-    // spelling across every load.
+    // spelling across every load. A Core demand wave's packets read ahead
+    // on compiler threads wait in `core_bodies_ahead`, by function symbol
+    // id, for the wave's loads to take them (CoreBodies.jet
+    // sema_core_bodies_ahead).
     core_bodies: SemaCoreBodies?{None}
     core_bodies_records: SemaCoreBodiesRecords?{None}
     core_bodies_loaded: [Bool]{[Bool]{}}
     core_bodies_read: Int{0}
     core_bodies_reader: BodyCodecIn{BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}}
+    core_bodies_ahead: [U32:SemaCoreBodyAhead]{[U32:SemaCoreBodyAhead]{}}
 }
 
 // The folded build snapshot the driver
