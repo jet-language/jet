@@ -2257,9 +2257,10 @@ sema_comptime_reflection_trait_info: fn(name: String, associated: [TComptimeValu
 // The traits module row `index` declares, as ProgramInfo.traits() lists
 // them: each one's name, its identity, the module's name as its scope, and a
 // MethodInfo for each method it declares, the header an implementation
-// writes. A declaration binds no associated type, so its
-// `associated_types` is empty; a type's TraitInfo lists the ones its
-// implementation binds. None when the module has no marker registry.
+// writes, with its location and documentation as a type's methods have them.
+// A declaration binds no associated type, so its `associated_types` is
+// empty; a type's TraitInfo lists the ones its implementation binds. None
+// when the module has no marker registry.
 sema_comptime_reflection_declared_traits: fn(graph: SemaRegistrationGraph, index: Int, catalog: TAppliedRuleCatalog) -> [TComptimeValue]? {
     registered_module: graph.modules[index]
     traits := [TComptimeValue]{}
@@ -2275,7 +2276,10 @@ sema_comptime_reflection_declared_traits: fn(graph: SemaRegistrationGraph, index
             traits.push(sema_comptime_reflection_trait_info(definition.name, [TComptimeValue]{}, method_values, identity, sema_comptime_reflection_module_of(registered_module)))
         }
     }
-    Val(traits)
+    if traits.len() == 0 -> return Val(traits)
+    module_path: sema_comptime_reflection_module_of(registered_module)
+    source: sema_comptime_reflection_doc_source(registered_module.source, registered_module.source_file)
+    Val(loop info in traits -> sema_comptime_reflection_located(info, registered_module.source_segments, module_path, source))
 }
 
 sema_comptime_reflection_trait_contracts_from_items: fn(

@@ -3,15 +3,15 @@
 step: jet inspect expand --facts reflect {root}/Examples/Metaprogramming/Reflection/ReflectValue.jet
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "reflect — types and stored fields each reflect.of call retains"
-stdout: ~ "reflect.of   retains ReflectValue.Point {x: Int(0..10), y: Int, level: Int(0..10)}"
-stdout: ~ "reflect.of   retains ReflectValue.Box {value: Int}"
-stdout: ~ "reflect.of   retains Int"
+stdout: ~ "reflect — types and stored fields each reflect.of call retains" # the lens heading; the rest of the report is the rows below
+stdout: ~ "reflect.of   retains ReflectValue.Point {x: Int(0..10), y: Int, level: Int(0..10)}" # one call's row; the example's other calls add their own
+stdout: ~ "reflect.of   retains ReflectValue.Box {value: Int}" # one call's row; the example's other calls add their own
+stdout: ~ "reflect.of   retains Int" # one call's row; the example's other calls add their own
 step: jet inspect expand --facts reflect --json {root}/Examples/Metaprogramming/Reflection/ReflectValue.jet
 env: NO_COLOR=1
 exit: 0
-json: stdout doc $ valid
-stdout: ~ "\"selection\":\"reflect\""
-stdout: ~ "\"call\":\"reflect.of\""
-stdout: ~ "\"path\":\"ReflectValue.Point\""
-stdout: ~ "\"name\":\"level\""
+json: stdout doc $ valid # the report is one JSON document
+stdout: ~ "\"selection\":\"reflect\"" # the selected lens; the document holds every row besides
+stdout: ~ "\"call\":\"reflect.of\"" # a row's call; each row carries one
+stdout: ~ "\"path\":\"ReflectValue.Point\"" # one retained type's identity among the example's calls
+stdout: ~ "\"name\":\"level\"" # one stored field of that type's tree

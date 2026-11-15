@@ -2,7 +2,7 @@
 // reflection floor. Legal wherever `"{x}"` interpolation is (the `Renderable`
 // gate a trait-bounded variadic's `...Renderable` bound also uses):
 // `.type_name()` and `.path()` and `.display()` always work — `.display()` shows exactly
-// what `"{x}"` would, and `.path()` is the identity `T.reflect()` reads;
+// what `"{x}"` would, and `.path()` is the identity text of the TypeId `T.reflect()` reads;
 // `.fields()` is populated for a struct receiver and empty for anything
 // else (primitives, enums, …). `.int()`, `.float()`, `.bool()`, `.char()`
 // and `.string()` read the captured value itself, typed: `Some` when it is
@@ -15,7 +15,7 @@ ATTRIBUTION: #run report.reflect().attribution
 
 UNIT_SCALE: #run Meter.reflect().unit_scale_provenance
 
-POINT_IDENTITY: #run Point.reflect().identity
+POINT_IDENTITY: #run Point.reflect().identity.identity
 
 Summarize: struct {
     impl Marker {
@@ -92,7 +92,7 @@ run: fn() {
     count: n.int() ?? -1
     text: n.string() ?? "none"
     print("int={count} string={text}")
-    float: reflect.of(2.5).float() ?? 0.0
+    float: reflect.of(Float{2.5}).float() ?? Float{0.0}
     flag: reflect.of(true).bool() ?? false
     letter: reflect.of('z').char() ?? '?'
     word: reflect.of("jet").string() ?? ""
