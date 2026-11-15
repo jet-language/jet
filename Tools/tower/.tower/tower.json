@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6857,
-    "rev": 102925,
+    "nextNum": 6861,
+    "rev": 102950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -67432,7 +67432,7 @@
     {
       "id": "c0w1wcfc",
       "num": 6151,
-      "title": "Core declares its own host leaves; delete the compiler's twin of Core's API",
+      "title": "Core members are declared in Core source; the compiler's twin tables and route tables are deleted",
       "body": "Finding F01 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). The compiler keeps a twin of Core's API. Core members are typed and dispatched by compiler tables (Compiler/Prelude/Core.jet:1-4, CoreCallExtensions.jet; generated Registry/CoreCallRows.jet:10 with 1,998 rows; hand-written Registry/CoreSignatures.jet:88, CorePlatformSignatures.jet:229, CoreHostSignatures.jet:22, CoreValueSignatures.jet). A native row wins over the Core declaration (Sema/Calls/Core.jet:264-270). A package can reach the host only through C FFI.\n\nPillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9).",
       "kind": "feature",
       "track": "epoch",
@@ -67449,6 +67449,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: split into three streams. This card keeps Core declarations, the twin signature tables, the route tables, CoreReach, core.build and the D-CORE-LOWER1/D-EMBED-TOOLCHAIN1 table work. Core-only privileges (c5, c6, c8, c9, c20, c21, c23, c35, c36) moved to #6851; declaration facts and layout (c18, c29, c30, c32, c33) moved to #6852. c46 restated: D-FLOAT-INT1=A covers scalar conversions, the SIMD bridges stay under D-SIMD1/D-SIMD2."
+        },
         {
           "at": "2026-11-12",
           "by": "Main",
@@ -67916,7 +67921,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-15T02:25:52.228Z",
+      "updated": "2026-11-15T02:26:22.780Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 53
     },
@@ -68338,6 +68343,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: the research is done (Docs/research/2026-10-29-extensibility-every-layer.md, D-EXTEND-ARCH1=A, guard 912fae1170). Open items went to: #6853 (open vocabularies: c33, c34, c17, c19, c20, c21, c28), #6854 (taint, effect roots, devices, schedulers: c22, c30-c32), #6855 (editor, formatter, debugger, laws: c13-c16), #6856 on G7 (build tools, Jetpack, JetOS: c23-c25), #6519 c1 (binders: c26), #6516 (c11, c12, c27) and #6846 (c29). c2, c9 and c18 were already met on dev."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
@@ -68541,56 +68551,62 @@
         {
           "n": 11,
           "text": "(from #6225 Package diagnostics: build the consumer for declared `diagno) A package marker refuses code with its own diagnostic, and `jet explain package.Name` works.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:39:35.961Z"
+          "evidence": "Moved to #6516 c8: package diagnostics belong on the package diagnostics card",
+          "at": "2026-11-15T02:26:15.293Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
           "text": "(from #6226 Package lints as `#On(compiler.checked)` hooks reporting dec) A package lint runs only for programs that import it; a program with no hooks emits no dispatch code (D-HOOK-ONE1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:39:47.022Z"
+          "evidence": "Merged into #6516 c7: lint opt-in and zero dispatch cost are one outcome on the package lint card",
+          "at": "2026-11-15T02:26:16.190Z",
+          "closure": "obsolete"
         },
         {
           "n": 13,
           "text": "(from #6227 Editor stages for completion, semantic tokens and inlay hint) A package marker gets completion and highlighting with no LSP change.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:39:58.379Z"
+          "evidence": "Moved to #6855 c1: tool hooks stream",
+          "at": "2026-11-15T02:26:08.127Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
           "text": "(from #6228 Formatter hook for block-marker bodies, `fmt.block` (owner b) `jet fmt` formats a `#SQL { … }` body through a package hook and leaves Jet code untouched.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:40:06.806Z"
+          "evidence": "Moved to #6855 c2: tool hooks stream",
+          "at": "2026-11-15T02:26:09.027Z",
+          "closure": "obsolete"
         },
         {
           "n": 15,
           "text": "(from #6229 Debugger: one scalar-name source and a Core `DebugView` trai) One scalar list; a package ring buffer shows its items in the debugger.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:40:19.422Z"
+          "evidence": "Moved to #6855 c3: tool hooks stream",
+          "at": "2026-11-15T02:26:09.923Z",
+          "closure": "obsolete"
         },
         {
           "n": 16,
           "text": "(from #6230 Laws as conformance kits for every open vocabulary) `jet test` on a package whose impl breaks a law fails and names the law.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:40:29.565Z"
+          "evidence": "Moved to #6855 c4: tool hooks stream",
+          "at": "2026-11-15T02:26:10.820Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
@@ -68654,47 +68670,52 @@
         {
           "n": 23,
           "text": "(from #6237 Foreign build tools as `b.toolchain` providers in packages) A Meson provider package works with no build-session change.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:41:57.736Z"
+          "evidence": "Moved to #6856 c1: build providers belong with packages (G7)",
+          "at": "2026-11-15T02:26:11.697Z",
+          "closure": "obsolete"
         },
         {
           "n": 24,
           "text": "(from #6238 Jetpack: one provider trait; service presets as package rows) A new registry or preset is one package, not a Jetpack edit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:42:13.063Z"
+          "evidence": "Moved to #6856 c2: Jetpack providers (G7)",
+          "at": "2026-11-15T02:26:12.577Z",
+          "closure": "obsolete"
         },
         {
           "n": 25,
           "text": "(from #6239 JetOS module options as package declarations with a merge la) Two packages set one option and the merge result is stated by the law.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:42:28.080Z"
+          "evidence": "Moved to #6856 c3: JetOS option providers (G7)",
+          "at": "2026-11-15T02:26:13.455Z",
+          "closure": "obsolete"
         },
         {
           "n": 26,
           "text": "(from #6240 Binder package trait (after the foreign-code ballot)) A new binder is one package.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:42:41.248Z"
+          "evidence": "Merged into #6519 c1: D-FFI-LANG1=A makes each foreign language a package implementing trait Language; #6519 c1 already requires a test package to add one with no compiler change",
+          "at": "2026-11-15T02:26:14.352Z",
+          "closure": "obsolete"
         },
         {
           "n": 27,
           "text": "(from #6241 `#Deprecated` with a replacement body that `jet fix` inlines) A library author retires an API and users migrate with one `jet fix`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:42:58.247Z"
+          "evidence": "Moved to #6516 c9: rewrite-based migration belongs on the package diagnostics and rewrite card",
+          "at": "2026-11-15T02:26:17.086Z",
+          "closure": "obsolete"
         },
         {
           "n": 28,
@@ -68709,11 +68730,12 @@
         {
           "n": 29,
           "text": "(from #6243 Generate the Compiler-value method list from Core declaratio) A new field on `CompilerChecked` appears with no evaluator edit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:43:29.438Z"
+          "evidence": "Moved to #6846 c11: the Compiler value surface lives on the generated-code card",
+          "at": "2026-11-15T02:26:17.957Z",
+          "closure": "obsolete"
         },
         {
           "n": 30,
@@ -68728,20 +68750,22 @@
         {
           "n": 31,
           "text": "(from #6245 Device names come from accelerator providers and hardware ki) An NPU package adds a device with no compiler edit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:43:56.058Z"
+          "evidence": "Moved to #6854 c3: declared rows and providers stream",
+          "at": "2026-11-15T02:26:06.311Z",
+          "closure": "obsolete"
         },
         {
           "n": 32,
           "text": "(from #6246 Scheduler provider chosen per target) A target profile selects a package scheduler, with no per-call cost.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:44:11.956Z"
+          "evidence": "Moved to #6854 c4: declared rows and providers stream",
+          "at": "2026-11-15T02:26:07.213Z",
+          "closure": "obsolete"
         },
         {
           "n": 33,
@@ -68772,7 +68796,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T18:57:04.836Z",
-      "updated": "2026-11-15T02:26:05.204Z",
+      "updated": "2026-11-15T02:26:23.721Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 35
     },
@@ -80313,7 +80337,7 @@
     {
       "id": "c0fymc7l",
       "num": 6516,
-      "title": "Package diagnostics, lints and rewrite rules as values; retire hand-written marker name switches",
+      "title": "Packages declare diagnostics, lints and rewrite fixes as values (NEW-D-LINT-DECL1)",
       "body": "The registry has 874 diagnostic rows; 80 carry a structured fix and 71 a lint name (DiagnosticRows.jet). Marker names are matched by hand in the parser (Compiler/JetParser/Source/Parser/Items.jet:1593) and in sema (Compiler/JetSema/Source/Sema/MarkerRules.jet:918), and re-declared as strings (Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:160). Packages cannot register codes.\n\nDone when: `impl T.Diagnostic` and `impl T.Lint` register package codes; `syntax.rewrite(pattern, template)` declares a structured fix that `jet fix` applies; the marker switches read the declared markers (D-MARKER-REFLECT1).\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.11.",
       "kind": "task",
       "track": "epoch",
@@ -80328,6 +80352,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: c3 (NEW-D-LINT-DECL1) split into #6516 c4-#6516 c7; #6202's package diagnostic, lint and deprecation items joined as #6516 c8, #6516 c7 and #6516 c9."
+        },
         {
           "at": "2026-11-13",
           "by": "Main",
@@ -80347,11 +80376,12 @@
         {
           "n": 3,
           "text": "NEW-D-LINT-DECL1=A is built (owner ratified 2026-11-11): Diagnostic stays the only finding carrier and gains `tier` and `structured_fix`, while `fix` stays literal help text. A package lint is a checked compile-event subscriber over resolved calls (the NoPrintInLib example fires only on the resolved print symbol inside the opted-in library). syntax.rewrite takes resolved callable identities, keeps argument subtrees and refuses incompatible argument or return types. Importing a package never turns its lints on; a root enables the package's lint group once. Goldens and UI snapshots prove the NoPrintInLib lint, a structured fix applied by `jet fix`, the refused incompatible rewrite, and that a dependent's import stays silent.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T11:07:29.396Z"
+          "evidence": "Moved to #6516 c4: split NEW-D-LINT-DECL1 into four one-sitting outcomes (#6516 L1-L4)",
+          "at": "2026-11-15T02:26:18.830Z",
+          "closure": "obsolete"
         },
         {
           "n": 4,
@@ -80419,7 +80449,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:41.377Z",
-      "updated": "2026-11-15T02:25:19.560Z",
+      "updated": "2026-11-15T02:26:24.606Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 9
     },
@@ -99054,6 +99084,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:18:20.433Z"
+        },
+        {
+          "n": 11,
+          "text": "Types made by build-time functions (D-GENERIC-TYPEFN1=A, ratified 2026-10-02): type parameters, type-recipe functions, parameterized traits and trait static methods returning Self compile and run, each with an example and golden output on o0, o1 and o2. Waits on an owner check: the ratified text says it replaces `<>`, while D-META-SPELL1=A (later) spells const generics `<N: Int>` and every example uses `<T>`. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Generics/TypeFunctions`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:44.610Z"
         }
       ],
       "refs": [],
@@ -99068,9 +99107,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:42.975Z",
-      "updated": "2026-11-15T02:18:20.434Z",
+      "updated": "2026-11-15T02:29:44.610Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 10
+      "criteriaLastN": 11
     },
     {
       "id": "c0n7zpy3",
@@ -99867,6 +99906,314 @@
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:12.098Z",
       "updated": "2026-11-15T02:25:12.098Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c01gyy9b",
+      "num": 6857,
+      "title": "Language-review cutovers: arrow-first signatures, brace records, brace layout and one program entry form",
+      "body": "Destination: the owner's 2026-11-09/11 language-review rulings are the only spellings in the repository. Signatures put the arrow first (D-SIG-ARROW1), records use braces and paren tuples retire (D-RECORD-BRACE1), commas separate data members but not bodied methods (D-BRACE-LAYOUT1), and a program is either script style or one `run: fn` entry, never mixed (owner order 2026-11-11).\n\nWhy it matters: two spellings for one thing cost every reader and every tool; AGENTS.md Greenfield cutover requires one cutover per change with every in-repository caller migrated and no teaching of the retired form.\n\nEach cutover lands with its rewrite registered in `jet fix` (D-LANG-MIGRATE1, #6068) and its syntax row, syntax-decisions.md entry and regenerated grammars in the same change.\n\nSources: #6281 c127, c150, c180 and #6251 c12, c15 (split here 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet fix` rewrites an error-first signature such as `fn(path: Path) IOError! -[FS.Write]>` to arrow-first `fn(path: Path) -[FS.Write]> IOError!` (unit result omitted after the arrow), registered as a D-LANG-MIGRATE1 rewrite in Compiler/Migrations (D-SIG-ARROW1=A). Proof: `jet test Compiler --profile cases --filter fix_sig_arrow_first`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.039Z"
+        },
+        {
+          "n": 2,
+          "text": "Every signature in Core, Compiler, Jetpack, Tools, Examples and tests is arrow-first (617 error-first signatures in Core on dev 72a8142651), and the parser no longer accepts the error-first order: it gets the generic parse error, with no teaching (D-SIG-ARROW1=A). Proof: `git grep -c -E '\\) [A-Z][A-Za-z]*! -\\[' -- '*.jet'` prints nothing and `jet test Compiler --profile ui --filter sig_error_first_not_jet`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.039Z"
+        },
+        {
+          "n": 3,
+          "text": "Every record uses braces: `{x: 1}` is an unnamed struct, and a paren tuple is not Jet syntax (generic parse error, no teaching) (D-RECORD-BRACE1=A). Proof: `jet test Compiler --profile golden --filter Types/Records` passes on o0, o1 and o2, and `jet test Compiler --profile ui --filter paren_tuple_not_jet`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.039Z"
+        },
+        {
+          "n": 4,
+          "text": "Every in-repository paren tuple is migrated to a brace record in the same cutover, through a registered `jet fix` rewrite. Proof: `jet test Compiler --profile cases --filter fix_paren_tuple_to_record`, and the self-build plus `jet test Compiler --profile golden` pass with the parser refusing paren tuples.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.039Z"
+        },
+        {
+          "n": 5,
+          "text": "Commas separate data members, and bodied method declarations (in struct, trait and impl bodies) take none: the parser and `jet fmt` follow it (D-BRACE-LAYOUT1=A). Proof: `jet test Compiler --profile cases --filter fmt_brace_layout` and `jet test Compiler --profile ui --filter brace_layout_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.039Z"
+        },
+        {
+          "n": 6,
+          "text": "Every in-repository file follows D-BRACE-LAYOUT1. Proof: `jet fmt --check Core Compiler Jetpack Tools Examples tests` reports no brace-layout difference.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.039Z"
+        },
+        {
+          "n": 7,
+          "text": "Each ruling built here, and D-MODULE-VAR1, D-CLI-EVAL1, D-COMPREHEND1 and D-LANG-MIGRATE1 on their cards, has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change. Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.039Z"
+        },
+        {
+          "n": 8,
+          "text": "A program is either script style or one `run: fn` entry, never mixed, at any scope: a `run: fn` anywhere in the load graph, package or project (module, nested module, re-export, import rename such as `use { run: other.main }`, or generated code) refuses top-level executable statements anywhere in that scope, and the reverse. One registered diagnostic names both sites, replacing the partial E0620/E0621 checks, and every in-repository hit is migrated in the same batch. Proof: `jet test Compiler --profile ui --filter program_entry_mixed_` covers the same file, an imported module, another module of the package, a renamed import, a re-export and generated code.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.039Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "syntax",
+        "cutover"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:29:41.039Z",
+      "updated": "2026-11-15T02:29:41.039Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0gbe4aj",
+      "num": 6858,
+      "title": "Jet has no warnings: jet fmt rewrites style, tidy errors never stop run or dev (D-NO-WARNINGS1)",
+      "body": "Destination: Jet prints no warnings. A style point `jet fmt` can rewrite is rewritten and never reported; everything else that matters is an error. Tidiness errors (an unused binding, an unused import, unreachable code) never stop `jet run` or `jet dev` and are not printed there; `jet check` and `jet build` list every one and exit non-zero, so the list works as a todo list.\n\nWhy it matters: the final-return and positional-Bool lints print thousands of lines when Jet's own runtime compiles, which hides real errors.\n\nDecision: D-NO-WARNINGS1=A (ratified 2026-11-10). Related: #4624 (member liveness findings follow the same rule) and #6326 c4 (state-machine lints L0529, L0302, gated on that design).\n\nSource: #6281 c129 (split here 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The final-return and positional-Bool style points are `jet fmt` rewrites, not reports: compiling Jet's own runtime prints neither. Proof: `jet test Compiler --profile cases --filter fmt_rewrites_former_style_lints`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.936Z"
+        },
+        {
+          "n": 2,
+          "text": "A tidiness error (unused binding, unused import, unreachable code) never stops `jet run` or `jet dev` and is not printed there; `jet check` and `jet build` list every one and exit non-zero. Proof: `jet test Compiler --profile cases --filter tidy_errors_run_vs_check`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.936Z"
+        },
+        {
+          "n": 3,
+          "text": "No L code remains active: each is a `jet fmt` rewrite or a registered tidy error with what/why/fix text and a UI snapshot. Proof: no active row in Compiler/Prelude/Diagnostics.jet has an `L` code, and `jet test tests/guards --filter diagnostics_coverage` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.936Z"
+        },
+        {
+          "n": 4,
+          "text": "The whole repository is clean under `jet check`. Proof: `jet check` over Core, Compiler, Jetpack, Tools and Examples exits 0.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:41.936Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "lints"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:29:41.937Z",
+      "updated": "2026-11-15T02:29:41.937Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0uxxmpm",
+      "num": 6859,
+      "title": "Module variables belong to the main task; a task that touches one is refused (D-MODULE-VAR1)",
+      "body": "Destination: a plain module variable is owned by the main task. Each function type carries its touch set (the module variables it reads or writes) as a deny-only fact; a task spawn requires an empty touch set; functions may write module variables (the E0111 function-write ban goes); borrow exclusivity holds across calls that touch the same variable.\n\nWhy it matters: module state is easy for beginners and stays race-free without locks or annotations.\n\nDecision: D-MODULE-VAR1=A (ratified 2026-11-10). Each refusal is a registered error with what/why/fix and a UI snapshot; the example runs the same at O0, O1 and O2.\n\nSource: #6281 c158 (split here 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A function type carries its touch set (the module variables it reads or writes, transitively) as a deny-only fact, and `jet inspect` shows it. Proof: `jet test Compiler --profile cases --filter module_var_touch_set`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:42.821Z"
+        },
+        {
+          "n": 2,
+          "text": "A task spawn whose function touches a module variable is refused with a registered error naming the variable and the touching call. Proof: `jet test Compiler --profile ui --filter module_var_task_touch`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:42.821Z"
+        },
+        {
+          "n": 3,
+          "text": "A function may write a module variable: the E0111 function-write ban is removed. Proof: `jet test Compiler --profile golden --filter Basics/ModuleVariables` passes on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:42.821Z"
+        },
+        {
+          "n": 4,
+          "text": "Borrow exclusivity holds across calls: a call that writes a module variable while a borrow of it is live is refused. Proof: `jet test Compiler --profile ui --filter module_var_borrow_across_call`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:42.821Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "memory",
+        "tasks",
+        "soundness"
+      ],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:29:42.821Z",
+      "updated": "2026-11-15T02:29:42.821Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c09qojqz",
+      "num": 6860,
+      "title": "Library promise changes show in jet check, and publish computes the minimum version (D-API-SURFACE1)",
+      "body": "Destination: a package records its public promises (signatures and effects) in package.api. `jet check` reports a changed promise and tells the author to accept it; `jet registry publish` computes the minimum semantic version from the promise diff, and the author may raise it but never lower it.\n\nWhy it matters: users can trust a minor release, and a new required effect on a released function is never shipped as a patch.\n\nDecision: D-API-SURFACE1=A (ratified 2026-11-11). Related: #5459 (capability diff on dependency update).\n\nSource: #6281 c179 (split here 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet check` compares a package's public promises with its recorded package.api and reports a changed promise with a registered diagnostic (what, why, fix) that tells the author to accept it. Proof: `jet test Compiler --profile ui --filter api_promise_changed`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:43.716Z"
+        },
+        {
+          "n": 2,
+          "text": "`jet check --accept-api` rewrites package.api to the current promises. Proof: `jet test Compiler --profile cases --filter accept_api_rewrites_sheet`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:43.716Z"
+        },
+        {
+          "n": 3,
+          "text": "`jet registry publish` computes the minimum version from the promise diff: an unchanged API is a patch, an added function a minor, and a released function newly needing Time a major; an author raise is kept and a lower version is refused. Proof: `jet test Compiler --profile cases --filter publish_minimum_semver` covers the four cases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:29:43.716Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "packages",
+        "registry"
+      ],
+      "goals": [
+        "G7"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:29:43.716Z",
+      "updated": "2026-11-15T02:29:43.716Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -205286,6 +205633,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:29:44.610Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c07ywjvi",
+      "note": "#11 Types made by build-time functions (D-GENERIC-TYPEFN1=A, rat"
+    },
+    {
+      "at": "2026-11-15T02:29:43.716Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c09qojqz",
+      "note": "Library promise changes show in jet check, and publish computes the minimum version (D-API-SURFACE1)"
+    },
+    {
+      "at": "2026-11-15T02:29:42.821Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0uxxmpm",
+      "note": "Module variables belong to the main task; a task that touches one is refused (D-MODULE-VAR1)"
+    },
+    {
+      "at": "2026-11-15T02:29:41.937Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0gbe4aj",
+      "note": "Jet has no warnings: jet fmt rewrites style, tidy errors never stop run or dev (D-NO-WARNINGS1)"
+    },
+    {
+      "at": "2026-11-15T02:29:41.039Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c01gyy9b",
+      "note": "Language-review cutovers: arrow-first signatures, brace records, brace layout and one program entry form"
+    },
+    {
+      "at": "2026-11-15T02:26:24.606Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0fymc7l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:26:23.722Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0y4zfcp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:26:22.780Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0w1wcfc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:26:21.838Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0fymc7l",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T02:26:20.357Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0w1wcfc",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T02:26:18.830Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0fymc7l",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T02:26:17.958Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-15T02:26:17.086Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-15T02:26:16.190Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T02:26:15.293Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T02:26:14.352Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-15T02:26:13.455Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-15T02:26:12.577Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-15T02:26:11.697Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-15T02:26:10.820Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T02:26:09.923Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-15T02:26:09.027Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T02:26:08.127Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T02:26:07.213Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#32"
+    },
+    {
+      "at": "2026-11-15T02:26:06.311Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zfcp",
+      "note": "#31"
+    },
     {
       "at": "2026-11-15T02:26:05.204Z",
       "by": "TowerKeeper-1",
