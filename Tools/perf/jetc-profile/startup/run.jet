@@ -164,7 +164,7 @@ startup_timing: fn(events: [Dyn], time_text: String, entry: String) -> Timing Me
     seconds: Float.from_int((clock.group_int(1) ?? 0) * 3600 + (clock.group_int(2) ?? 0) * 60) + (clock.group_float(3) ?? math.NAN)
     if !math.is_finite(seconds) || !(seconds > ZERO) -> return Err(measure_error("invalid process wall time"))
     Ok(Timing{
-        wall_ns: Int.from_float(js_round(seconds * BILLION)) ?? 0
+        wall_ns: checked(Int{js_round(seconds * BILLION)}) ?? 0
         compile_ns: (ts[1] - ts[0]) * 1000
         pre_parse_ns: (ts[2] - ts[0]) * 1000
     })

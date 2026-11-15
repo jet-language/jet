@@ -505,8 +505,8 @@ sample: fn(bench: Bench, cell: Matrix, input: String, expected: String, index: I
     argv: command_argv(bench.command, values)
     expected_bytes: cell.wire_payload.bytes().len()
     spec: process.cmd(argv).cwd(bench.root).env("JET_ENUM_CODEC_BENCH_PROTOCOL", "{PROTOCOL_VERSION}").env("JET_ENUM_CODEC_BENCH_PROFILE", bench.profile)
-        .timeout(time.duration_ns(Int.from_float(bench.timeout_seconds * 1000000000.0) ?? 0))
-        .cpu_time_limit(time.duration_seconds(max(1, Int.from_float(math.ceil(bench.timeout_seconds)) ?? 1)))
+        .timeout(time.duration_ns(checked(Int{math.trunc(bench.timeout_seconds * 1000000000.0)}) ?? 0))
+        .cpu_time_limit(time.duration_seconds(max(1, checked(Int{math.ceil(bench.timeout_seconds)}) ?? 1)))
         .memory_limit(bench.memory_limit_mib * 1048576).output_limit(bench.max_output_bytes)
     watch: time.start()
     tree := Dyn{[String: Dyn]{"codec_ns": Dyn.Null, "allocation_count": Dyn.Null, "encoded_bytes": expected_bytes, "stderr": ""}}
@@ -681,7 +681,7 @@ repr_escape: fn(character: String) -> String Never! {
 // A positive number as Python's `:g` writes it: six significant digits,
 // trailing zeros dropped, in exponent form below 1e-4 or from 1e6.
 general: fn(value: Float) -> String Never! {
-    exponent: Int.from_float(math.floor(math.log10(value))) ?? 0
+    exponent: checked(Int{math.floor(math.log10(value))}) ?? 0
     if exponent < -4 || exponent >= 6 {
         mantissa: trimmed(fmt.decimal(value / math.pow_n(10.0, exponent), 5))
         sign: if exponent < 0 -> "-" else -> "+"

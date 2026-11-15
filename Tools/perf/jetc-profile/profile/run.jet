@@ -422,7 +422,7 @@ draw: fn(nodes: [Node], at: Int, x: Float, level: Int, height: Int, svg: &[Strin
     hash := 0
     loop scalar in text.scalars(node.name) -> hash = (hash * 31 + lead_unit(scalar)) % 4294967296
     if w >= 0.1 {
-        label: utf16_prefix(node.name, (Int.from_float(math.floor(w / 7.0)) ?? 0) - 1)
+        label: utf16_prefix(node.name, (checked(Int{math.floor(w / 7.0)}) ?? 0) - 1)
         caption: if w > 14.0 -> "<text x=\"{fmt.decimal(x + 3.0, 3)}\" y=\"{y + 14}\">{xml(label)}</text>" else -> ""
         svg.push("<g><title>{xml(node.name)} — {node.count} samples ({pct(node.count, total)})</title><rect x=\"{fmt.decimal(x, 3)}\" y=\"{y}\" width=\"{fmt.decimal(w, 3)}\" height=\"19\" fill=\"hsl({hash % 55},85%,{60 + hash % 18}%)\"/>{caption}</g>")
     }

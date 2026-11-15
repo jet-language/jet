@@ -52,7 +52,7 @@ getconf_number: fn(name: String, fallback: Int) -[Exec, Time.Wait]> Int Never! {
     receipt: process.cmd([String]{"getconf", name}).stdout(.Capture).stderr(.Capture).run() ?? return fallback
     value: number_from_text(receipt.output)
     if math.is_nan(value) || !(math.abs(value) > KIT_ZERO) -> return fallback
-    Int.from_float(value) ?? fallback
+    checked(Int{math.trunc(value)}) ?? fallback
 }
 
 measure_host: fn() -[Exec, Time.Wait]> Host Never! {
@@ -203,7 +203,7 @@ read_rusage: fn(time_file: String) -[FS]> Rusage? Never! {
 
 // `Math.round(Number(seconds) * 1e9)`.
 rusage_ns: fn(seconds: String) -> Int Never! {
-    Int.from_float(js_round(number_from_text(seconds) * Float{1000000000.0})) ?? 0
+    checked(Int{js_round(number_from_text(seconds) * Float{1000000000.0})}) ?? 0
 }
 
 // Run argv under GNU time and the sampler: exact totals and the sample
@@ -303,7 +303,7 @@ safe_integer: fn(value: Dyn?) -> Int? Never! { safe_number(as_number(value) ?? r
 // Number.isSafeInteger(number): the integer it holds.
 safe_number: fn(number: Float) -> Int? Never! {
     if !math.is_finite(number) || math.abs(number - math.floor(number)) > KIT_ZERO || math.abs(number) > Float.from_int(MAX_SAFE_INTEGER) -> return None
-    Val(Int.from_float(number) ?? return None)
+    Val(checked(Int{number}) ?? return None)
 }
 
 // The recorded run as a caller holds it in JSON: a pid or time that is not a
@@ -389,7 +389,7 @@ check_completed: fn(events: [Dyn], run: Completed) MeasureError! {
         // independently recorded process window have millisecond precision.
         if ph == "M" && field(value, "ts") == None -> next
         ts: safe_integer(field(value, "ts")) ?? return Err(measure_error("completed trace event is outside the recorded process window"))
-        if ts < 0 || (Int.from_float(math.floor(Float.from_int(anchor) + Float.from_int(ts) / Float{1000.0})) ?? 0) > run.finished_unix_ms {
+        if ts < 0 || (checked(Int{math.floor(Float.from_int(anchor) + Float.from_int(ts) / Float{1000.0})}) ?? 0) > run.finished_unix_ms {
             return Err(measure_error("completed trace event is outside the recorded process window"))
         }
         pid_text: js_string(field(value, "pid"))

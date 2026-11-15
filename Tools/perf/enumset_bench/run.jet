@@ -207,7 +207,7 @@ measure: fn(bench: Bench, binary: String, fields: [(key: String, value: Dyn)]) -
     phase_ns := [Int]{}
     medians := [(key: String, value: Dyn)]{}
     loop i in 0..<PHASES.len() {
-        phase_ns.push(Int.from_float(stats.median(timings.slice(1, timings.len()).map(fn(row) { Float.from_int(row[i]) })) ?? 0.0) ?? 0)
+        phase_ns.push(checked(Int{math.trunc(stats.median(timings.slice(1, timings.len()).map(fn(row) { Float.from_int(row[i]) })) ?? 0.0)}) ?? 0)
         medians.push((key: PHASES[i], value: Dyn.Int(phase_ns[i])))
     }
     rss: sh(process.cmd([String]{binary}), 900s)
@@ -216,7 +216,7 @@ measure: fn(bench: Bench, binary: String, fields: [(key: String, value: Dyn)]) -
             (key: "status", value: Dyn.Text("measured")),
             (key: "stdout", value: Dyn.Text(kept[0].out.copy())),  // copy: the stability check reads it too
             (key: "stable_stdout", value: Dyn.Bool(kept.filter(fn(ran) { ran.out != first }).len() == 0)),
-            (key: "wall_median_ns", value: Dyn.Int(Int.from_float(stats.median(kept.map(fn(ran) { Float.from_int(ran.wall_ns) })) ?? 0.0) ?? 0)),
+            (key: "wall_median_ns", value: Dyn.Int(checked(Int{math.trunc(stats.median(kept.map(fn(ran) { Float.from_int(ran.wall_ns) })) ?? 0.0)}) ?? 0)),
             (key: "phase_median_ns", value: Dyn.Object(medians)),
             (key: "peak_rss_kib", value: if rss.code == 0 && rss.peak_kib > 0 -> Dyn.Int(rss.peak_kib) else -> Dyn.Text("unavailable")),
             (key: "binary_bytes", value: Dyn.Int(files.getsize(binary))),

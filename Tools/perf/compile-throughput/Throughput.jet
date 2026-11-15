@@ -645,7 +645,9 @@ perf_count: fn(text: String, event: String) -> Int {
 check_budget: fn(options: Options, base: String, lines: Int, outside_ns: Int) -> String {
     budget_file: files.join(options.tree, BUDGET_FILE)
     clock: if options.budget.ends_with("-wall") -> "wall" else -> "proc_cpu"
-    argv: [String]{options.tool, files.join(options.tree, "Tools/perf/budget/check"), files.join(base, "trace.jsonl"), "--budget", budget_file, "--column", options.budget, "--clock", clock, "--lines", "{lines}"}
+    // `jet run FILE --` hands every flag after `--` to the checker; before it,
+    // jet reads them as its own flags and refuses them.
+    argv: [String]{options.tool, "run", files.join(options.tree, "Tools/perf/budget/check/run.jet"), "--", files.join(base, "trace.jsonl"), "--budget", budget_file, "--column", options.budget, "--clock", clock, "--lines", "{lines}"}
     receipt: process.cmd(argv).cwd(options.tree).output_limit(GIB).run() ?? return "error {err}"
     report := "{receipt.output}{receipt.errors}"
     files.write(files.join(base, "budget.txt"), report) ?? ()
