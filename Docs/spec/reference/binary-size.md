@@ -43,6 +43,24 @@ The gate compares the file size with the cap and requires a positive result.
 A toolchain, runtime, reachable-Core, linker, or profile change can alter the
 measurement; record the exact source and profile when investigating a breach.
 
+## Hello size and start gate
+
+`jet Tools/perf/budget/check/run.jet --hello` is the local perf gate for the
+size floor. It builds `Examples/Basics/Hello.jet` with `jet build --small`,
+records the executable's size, and runs it 50 times to get the median start
+time, measured from spawn to exit. Run it on the reference Linux x86-64
+machine. It fails when either measure is over its limit in this table. The
+gate reads its limits from this table, and nothing else holds a copy:
+
+| Measure | Limit |
+|---|---:|
+| Hello binary size | 200 KB |
+| Hello start time | 5 ms |
+
+A KB is 1,024 bytes. Each run prints a `card row:` line with the size and the
+median start time, for the binary-size card's log. `--jet PATH` picks the jet
+that builds hello. `--runs N` changes how many runs the median covers.
+
 ## Size levers and boundaries
 
 - Use `--small` rather than hand-editing generated compiler arguments.

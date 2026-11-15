@@ -67,3 +67,14 @@ What the native `jet` writes for the checker (Compiler/JetCli/Source/Cli/Request
 The default clock is the process CPU time when the trace carries it, else wall
 time. The per-line denominator is the trace's `parse.user_lines`, else
 `default_lines` (448,165, the self-compile unit).
+
+## Hello size and start gate
+
+`jet Tools/perf/budget/check/run.jet --hello` builds
+`Examples/Basics/Hello.jet` with `jet build --small`. It runs the executable
+50 times (`--runs N`) and fails when the file size or the median start time
+is over its limit. The limits are the `| Measure | Limit |` table of
+Docs/spec/reference/binary-size.md. The checker keeps no copy of them, so
+change a limit there. The jet that builds hello is `--jet PATH`, else `$JET`,
+else `jet` on PATH. Each run prints a `card row:` line with the size and the
+median start time.

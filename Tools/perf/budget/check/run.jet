@@ -7,9 +7,11 @@
 // and the subtotal of the always-on check rows. Exits 1 when any phase is
 // over its budget, when such a phase names no owner card, or when a
 // full-unit trace (it has a `lower` span) lacks an always-on check span.
+// With --hello it is the hello size and start gate instead (see below).
 //
 //   jet Tools/perf/budget/check <trace> [--column 225K|500K|1M]
 //        [--clock auto|proc_cpu|cpu|wall] [--lines N] [--budget FILE] [--strict]
+//   jet Tools/perf/budget/check --hello [--jet PATH] [--runs N] [--doc FILE]
 //
 // --column   the milestone being claimed (default 225K).
 // --clock    proc_cpu: the process CPU time of each span (`proc_cpu_ns`, every
@@ -44,7 +46,10 @@ use {
     json: core.encoding.json
     math: core.math
     process: core.process
+    stats: core.math.stats
+    sys: core.sys
     term: core.term
+    time: core.time
 }
 
 DEFAULT_BUDGET: "Tools/perf/budget/budget.json"
@@ -711,8 +716,193 @@ check: fn(args: [String]) -> Outcome CheckError! {
     Ok(report(options, budget, trace_text))
 }
 
+// ---- Hello size and start gate ------------------------------------------------
+//
+// Builds Examples/Basics/Hello.jet with `jet build --small`, the smallest-size
+// profile, runs the executable --runs times (default 50) and fails when its
+// size or its median start time (spawn to exit) is over its limit. The limits
+// are read from the `| Measure | Limit |` table of the binary-size doc
+// (--doc, default Docs/spec/reference/binary-size.md), their only copy.
+//
+// --jet   the jet that builds hello (default $JET, else `jet` on PATH).
+// --runs  how many runs the median is over (default 50).
+// --doc   the doc holding the limit table.
+
+DEFAULT_SIZE_DOC: "Docs/spec/reference/binary-size.md"
+HELLO_SOURCE: "Examples/Basics/Hello.jet"
+HELLO_EXECUTABLE: "Hello"
+HELLO_RUNS: 50
+GATE_HEADER: "| Measure | Limit |"
+HELLO_USAGE: "usage: jet Tools/perf/budget/check --hello [--jet PATH] [--runs N] [--doc FILE]"
+OUTPUT_LIMIT: 16777216
+
+HelloOptions: struct {
+    jet: String
+    runs: Int
+    doc: String
+}
+
+// One row of the limit table: `value` is bytes for a size, ns for a time.
+GateLimit: struct {
+    measure: String
+    text: String
+    value: Float
+    time: Bool
+}
+
+GateLimits: struct {
+    size: GateLimit
+    start: GateLimit
+}
+
+// Hello's file size and its start times in ns, sorted.
+HelloMeasure: struct {
+    bytes: Int
+    starts: [Int]
+}
+
+gate_error: fn(message: String) -> CheckError Never! { CheckError{lines: [String]{"check: {message}"}, code: 1} }
+
+hello_usage: fn(message: String) -> CheckError Never! { CheckError{lines: [String]{"check: {message}", HELLO_USAGE}, code: 64} }
+
+parse_hello_args: fn(args: [String]) -> HelloOptions CheckError! {
+    options := HelloOptions{jet: sys.get("JET") ?? "jet", runs: HELLO_RUNS, doc: DEFAULT_SIZE_DOC}
+    index := 1
+    loop index < args.len() {
+        arg: args[index]
+        if arg != "--jet" && arg != "--runs" && arg != "--doc" -> return Err(hello_usage("unknown argument {arg}"))
+        index += 1
+        if index >= args.len() -> return Err(hello_usage("{arg} needs a value"))
+        value: args[index]
+        if {
+            arg == "--jet" -> options.jet = value
+            arg == "--doc" -> options.doc = value
+            else -> {
+                runs: Int.parse(value) ?? 0
+                if runs < 1 -> return Err(hello_usage("--runs must be a positive whole number"))
+                options.runs = runs
+            }
+        }
+        index += 1
+    }
+    Ok(options)
+}
+
+// A limit's text, `<number> <unit>`, in bytes (B, KB, MB; a KB is 1,024
+// bytes) or ns (ns, us, ms, s); None when it is not one.
+parse_limit: fn(measure: String, text: String) -> GateLimit? Never! {
+    space: text.find(" ")
+    if space <= 0 -> return None
+    number: number_from_text(text.slice(0, space).replace(",", ""))
+    if !finite(number) || !(number > ZERO) -> return None
+    unit: text.slice(space + 1, text.len()).trim()
+    scale := ZERO
+    if {
+        unit == "B" || unit == "bytes" -> scale = ONE
+        unit == "KB" -> scale = Float{1024.0}
+        unit == "MB" -> scale = Float{1048576.0}
+        unit == "ns" -> scale = ONE
+        unit == "us" -> scale = THOUSAND
+        unit == "ms" -> scale = MILLION
+        unit == "s" -> scale = BILLION
+        else -> return None
+    }
+    is_time: unit == "ns" || unit == "us" || unit == "ms" || unit == "s"
+    Val(GateLimit{measure: measure, text: text, value: number * scale, time: is_time})
+}
+
+// The size limit and the start limit of the doc's `| Measure | Limit |`
+// table: exactly one row in bytes and one in time.
+gate_limits: fn(doc: String, path: String) -> GateLimits CheckError! {
+    sizes := [GateLimit]{}
+    starts := [GateLimit]{}
+    inside := false
+    loop raw in doc.split("\n") {
+        line: raw.trim()
+        if !inside {
+            inside = line == GATE_HEADER
+            next
+        }
+        if !line.starts_with("|") -> break
+        cells := [String]{}
+        loop cell in line.split("|") -> cells.push(cell.trim())
+        if cells.len() != 4 -> return Err(gate_error("{path}: the limit table row `{line}` is not `| measure | limit |`"))
+        if cells[2].replace("-", "").replace(":", "") == "" -> next
+        limit: parse_limit(cells[1], cells[2]) ?? return Err(gate_error("{path}: `{cells[2]}` is not a size (B, KB, MB) or a time (ns, us, ms, s)"))
+        if limit.time -> starts.push(limit) else -> sizes.push(limit)
+    }
+    if !inside -> return Err(gate_error("{path} has no `{GATE_HEADER}` limit table"))
+    if sizes.len() != 1 || starts.len() != 1 -> return Err(gate_error("{path}: the limit table needs one size row and one time row"))
+    Ok(GateLimits{size: sizes[0], start: starts[0]})
+}
+
+measure_hello: fn(options: HelloOptions) -> HelloMeasure CheckError! {
+    folder: files.mkdtemp("budget-hello") ?? return Err(gate_error("cannot make a build folder: {err}"))
+    measured: measure_hello_in(options, folder)
+    files.remove_all(folder).drop("a leftover temporary build folder is harmless")
+    measured
+}
+
+measure_hello_in: fn(options: HelloOptions, folder: String) -> HelloMeasure CheckError! {
+    build: process.cmd([String]{options.jet, "build", "--small", "--output-dir={folder}", HELLO_SOURCE}).output_limit(OUTPUT_LIMIT).run() ?? return Err(gate_error("cannot run {options.jet}: {err}"))
+    if !build.success -> return Err(gate_error("`{options.jet} build --small {HELLO_SOURCE}` exited {build.code}: {build.errors.trim().last_lines(6).join(" | ")}"))
+    executable: files.join(folder, HELLO_EXECUTABLE)
+    stat: files.stat(executable) ?? return Err(gate_error("the build wrote no {executable}: {err}"))
+    starts := [Int]{}
+    loop starts.len() < options.runs {
+        started: time.instant()
+        receipt: process.cmd([String]{executable}).output_limit(OUTPUT_LIMIT).run() ?? return Err(gate_error("cannot run {executable}: {err}"))
+        ns: started.elapsed().ns
+        if !receipt.success -> return Err(gate_error("{executable} exited {receipt.code}: {receipt.errors.trim().last_lines(6).join(" | ")}"))
+        starts.push(ns)
+    }
+    starts.sort()
+    Ok(HelloMeasure{bytes: stat.size, starts: starts})
+}
+
+ms: fn(ns: Float) -> String Never! { "{fixed(ns / MILLION, 3)} ms" }
+
+// The gate's receipt: each measure against its limit, the row the card logs,
+// and PASS, or FAIL (exit 1) when either is over.
+hello_verdict: fn(limits: GateLimits, measured: HelloMeasure, doc: String) -> Outcome Never! {
+    bytes: Float{measured.bytes}
+    median: stats.median(measured.starts.map(fn(ns) { Float.from_int(ns) })) ?? ZERO
+    runs: measured.starts.len()
+    size_over: bytes > limits.size.value
+    start_over: median > limits.start.value
+    rows: [[String]]{
+        [String]{limits.size.measure, "{grouped(bytes)} B", "{limits.size.text} ({grouped(limits.size.value)} B)", if size_over -> "OVER" else -> "ok"},
+        [String]{limits.start.measure, "{ms(median)} (median of {runs} runs)", limits.start.text, if start_over -> "OVER" else -> "ok"},
+    }
+    out := [String]{
+        "hello:   {HELLO_SOURCE}, jet build --small",
+        "limits:  {doc}",
+        "",
+        table([String]{"measure", "value", "limit", "verdict"}, rows),
+        "",
+        "start range: {ms(Float{measured.starts[0]})} to {ms(Float{measured.starts[runs - 1]})}",
+        "card row: hello size {grouped(bytes)} B, start {ms(median)} (median of {runs} runs)",
+    }
+    if size_over || start_over {
+        out.push("FAIL: hello is over its limit")
+        return Outcome{out: out, err: [String]{}, code: 1}
+    }
+    out.push("PASS: hello is within its size and start limits")
+    Outcome{out: out, err: [String]{}, code: 0}
+}
+
+hello: fn(args: [String]) -> Outcome CheckError! {
+    options: parse_hello_args(args) ?? return Err(err)
+    doc: read_text(options.doc) ?? return Err(err)
+    limits: gate_limits(doc, options.doc) ?? return Err(err)
+    measured: measure_hello(options) ?? return Err(err)
+    Ok(hello_verdict(limits, measured, options.doc))
+}
+
 run: fn() {
-    outcome: check(process.args()) ?? process.fail(err.code, err.lines.join("\n"))
+    args: process.args()
+    hello_gate: args.len() > 0 && args[0] == "--hello"
+    outcome: if hello_gate -> hello(args) ?? process.fail(err.code, err.lines.join("\n")) else -> check(args) ?? process.fail(err.code, err.lines.join("\n"))
     loop line in outcome.out -> print(line)
     loop line in outcome.err -> term.eprint(line)
     if outcome.code != 0 -> process.exit(outcome.code)
@@ -881,4 +1071,47 @@ test_always_on_trace: fn(kinds: [String]) -> String Never! {
     assert(math.is_nan(number_from_text("12abc")))
     assert_eq(js_number(number_from_text("")), "0")
     assert_eq(js_number(number_from_text(".5e1")), "5")
+}
+
+TEST_LIMITS: "| Measure | Limit |\n|---|---:|\n| Hello binary size | 150 KB |\n| Hello start time | 4 ms |\n"
+
+#Test("the hello gate reads its limits from the binary-size doc's table") {
+    doc: files.read(DEFAULT_SIZE_DOC) ?? panic("cannot read {DEFAULT_SIZE_DOC}")
+    limits: gate_limits(doc, DEFAULT_SIZE_DOC) ?? panic(err.lines.join(" "))
+    assert(!limits.size.time && limits.size.value > ZERO)
+    assert(limits.start.time && limits.start.value > ZERO)
+    parsed: gate_limits("intro\n\n{TEST_LIMITS}\nafter\n", "t.md") ?? panic(err.lines.join(" "))
+    assert_eq(js_number(parsed.size.value), "153600")
+    assert_eq(js_number(parsed.start.value), "4000000")
+    assert_eq(parsed.start.measure, "Hello start time")
+    if gate_limits("no table\n", "t.md") == .Ok(_) -> panic("a doc without the table must fail")
+    if gate_limits("| Measure | Limit |\n|---|---|\n| Hello binary size | 150 parsecs |\n| Hello start time | 4 ms |\n", "t.md") == .Ok(_) -> panic("an unknown unit must fail")
+    if gate_limits("| Measure | Limit |\n| a | 1 KB |\n| b | 2 KB |\n| c | 4 ms |\n", "t.md") == .Ok(_) -> panic("two size rows must fail")
+}
+
+#Test("the hello gate passes within both limits, fails over either, and prints the card row") {
+    limits: gate_limits(TEST_LIMITS, "t.md") ?? panic(err.lines.join(" "))
+    within: hello_verdict(limits, HelloMeasure{bytes: 100000, starts: [Int]{1000000, 2000000, 3000000}}, "t.md")
+    assert_eq(within.code, 0)
+    text: within.out.join("\n")
+    assert(text.contains("card row: hello size 100,000 B, start 2.000 ms (median of 3 runs)"))
+    assert(text.contains("start range: 1.000 ms to 3.000 ms"))
+    assert(text.ends_with("PASS: hello is within its size and start limits"))
+    big: hello_verdict(limits, HelloMeasure{bytes: 160000, starts: [Int]{1000000, 3000000}}, "t.md")
+    assert_eq(big.code, 1)
+    assert_eq(tail(test_row(big.out, "Hello binary size"), 1, 4), "160,000 B|150 KB (153,600 B)|OVER")
+    assert_eq(test_row(big.out, "Hello start time")[3], "ok")
+    assert(big.out.join("\n").ends_with("FAIL: hello is over its limit"))
+    slow: hello_verdict(limits, HelloMeasure{bytes: 100000, starts: [Int]{4500000}}, "t.md")
+    assert_eq(slow.code, 1)
+    assert_eq(test_row(slow.out, "Hello start time")[3], "OVER")
+}
+
+#Test("hello gate arguments") {
+    options: parse_hello_args([String]{"--hello", "--runs", "7", "--jet", "/x/jet"}) ?? panic(err.lines.join(" "))
+    assert_eq(options.runs, 7)
+    assert_eq(options.jet, "/x/jet")
+    assert_eq(options.doc, DEFAULT_SIZE_DOC)
+    if parse_hello_args([String]{"--hello", "--runs", "0"}) == .Ok(_) -> panic("--runs 0 must be a usage error")
+    if parse_hello_args([String]{"--hello", "--column", "1M"}) == .Ok(_) -> panic("a trace option must be a usage error")
 }
