@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6923,
-    "rev": 104400,
+    "rev": 104425,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -44574,12 +44574,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "[#4336] For E0342, E0343, E0345, E1404, E1410 and L0527, either a tests/ui fixture shows the code as primary on the Jet compiler or the row is removed. Where the specific code stays, the generic code (E0355, E0930, E0769, E0999/E0105, E0003) no longer reports the same mistake.",
+          "text": "For E0342, E0343, E0345, E1404, E1410 and L0527, either a tests/ui fixture shows the code as primary on the Jet compiler, or the row is removed. Where the specific code stays, the generic code (E0355, E0930, E0769, E0999 or E0105, E0003) no longer reports the same mistake. Proof: `jet test Compiler --profile ui --filter E0342` (and the same for each other code).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:45:11.106Z"
+          "at": "2026-11-15T04:18:59.152Z"
         },
         {
           "n": 2,
@@ -44610,12 +44610,12 @@
         },
         {
           "n": 5,
-          "text": "[#4283] Ratified diagnostics and review contracts: • D-1912-NAME1: registry name distances. • D-ARCH-ADVICE1: fact-backed review advice. • D-BIG-DIAGDIFF1: jet review --diagnostics. • D-REPORT-HOME1: the registry is the single home for code, severity, moment, What/Why/Fix and edits.",
+          "text": "D-REPORT-HOME1=A: the diagnostic registry is typed rows (code, severity, moment, What, Why and Fix templates with named holes, optional structured fix) in the compile-time program. Emit sites fill a row's holes, and the spec chapter, error pages and `jet explain` are generated from the rows. Proof: `jet test tests/guards --filter diagnostics_generated_from_registry`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:45:14.634Z"
+          "at": "2026-11-15T04:19:00.153Z"
         },
         {
           "n": 6,
@@ -44700,12 +44700,12 @@
         },
         {
           "n": 29,
-          "text": "(was #6187) registered_unimplemented_codes_are_expected passes, with each of the 236 codes either emitted or removed (was #6206 c31)",
+          "text": "registered_unimplemented_codes_are_expected passes: each of the 236 registered codes is emitted or removed. The exception is E1278-E1291 (jetos refusals), which stay registered for frozen owner card #6604 (Main's log 2026-11-12). Proof: `jet test tests/guards --filter registered_unimplemented_codes_are_expected`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T18:28:48.350Z"
+          "at": "2026-11-15T04:19:01.080Z"
         },
         {
           "n": 30,
@@ -44754,7 +44754,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-02T16:50:50.627Z",
-      "updated": "2026-11-15T04:18:29.409Z",
+      "updated": "2026-11-15T04:19:01.080Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -52026,66 +52026,66 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`jet --help | wc -l` prints at most 50: the common commands, one line each (419 lines on 2026-10-28).",
+          "text": "`jet --help | wc -l` prints at most 50: the common commands, one line each (419 lines on 2026-10-28). Proof: `jet test Compiler --profile cases --filter cli_parts_surface/top_help_is_short`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:04:02.747Z"
+          "at": "2026-11-15T04:18:51.156Z"
         },
         {
           "n": 2,
-          "text": "`jet help <command>` prints that command's flags only, and `jet help --all` prints the full table; all three come from one option table.",
+          "text": "`jet help <command>` prints only that command's flags, and `jet help --all` prints the full table, all from the one option table. Proof: `jet test Compiler --profile cases --filter cli_parts_surface/help_command_and_all`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:04:03.730Z"
+          "at": "2026-11-15T04:18:52.176Z"
         },
         {
           "n": 3,
-          "text": "No help summary line wraps mid-word at 80 columns.",
+          "text": "No help summary line wraps mid-word at 80 columns. Proof: `jet test tests/guards --filter help_lines_fit_80_columns`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:04:04.874Z"
+          "at": "2026-11-15T04:18:53.339Z"
         },
         {
           "n": 4,
-          "text": "(was #4573) Move Jet user data per D-JET-HOME1: Implement ratified D-JET-HOME1=A as one verified cutover preserving keys, trust and retention records",
+          "text": "D-JET-HOME1=A is carried out as one verified cutover that keeps keys, trust and retention records. After any jet command on a clean home directory, only ~/.config/jet/ and ~/.cache/jet/ exist (honouring XDG_CONFIG_HOME and XDG_CACHE_HOME), and ~/.jet and ~/.local/share/jet are never created. The same work sits on frozen #4573. Proof: `jet test Compiler --profile cases --filter cli_home/clean_home_creates_only_config_and_cache`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:00:57.201Z"
+          "at": "2026-11-15T04:18:54.729Z"
         },
         {
           "n": 5,
-          "text": "(was #3993 c1) No two registry flags name the same meaning; each removed spelling is an unknown-flag error with the normal suggestion [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "No two registry flags share a meaning, and a removed spelling gets the ordinary unknown-flag error with its normal suggestion. Proof: `jet test tests/guards --filter cli_flag_meanings_unique`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:49:58.341Z"
+          "at": "2026-11-15T04:18:55.866Z"
         },
         {
           "n": 6,
-          "text": "(was #3993 c2) Help, completion, and CLI snapshots are regenerated, and in-repo callers use the kept spelling [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Help, completion and CLI snapshots are regenerated, and in-repo callers use the kept spellings. Proof: `jet test Compiler --profile cases --filter cli_parts_surface/` passes, and git grep finds no removed spelling outside tests that pin its rejection.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:49:59.532Z"
+          "at": "2026-11-15T04:18:56.963Z"
         },
         {
           "n": 7,
-          "text": "Single-source census F29 (Docs/audits/2026-11-05-single-source-census.md): Build profile names. One hand-written home: One stock-profile table beside JET_BUILD_OPTIONS. Fix: derive. Drift check: Guard. Drifted on 2026-11-05: Not drifted. Inspect.jet also knows `hardened` and `ci`, and Front.jet does not Effort S. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "text": "Build profile names have one home, the stock-profile table beside JET_BUILD_OPTIONS (census F29). Inspect.jet and Front.jet derive from it (Inspect.jet also knew `hardened` and `ci`; Front.jet did not), and a gate guard fails on any copy that differs. Proof: `jet test tests/guards --filter single_source_build_profiles`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T15:30:33.310Z"
+          "at": "2026-11-15T04:18:58.149Z"
         },
         {
           "n": 8,
@@ -52108,7 +52108,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T15:49:16.817Z",
-      "updated": "2026-11-15T04:18:27.567Z",
+      "updated": "2026-11-15T04:18:58.149Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -52187,66 +52187,66 @@
       "criteria": [
         {
           "n": 2,
-          "text": "(was #4986) Collect-all gap: a runtime stop inside sema (E3010/E3012) ends the whole factory run",
+          "text": "A runtime stop inside sema (E3010, E3012) is captured as that item's failure, and the rest of the check run continues. Proof: `jet test Compiler --profile cases --filter keep_going_sema_runtime_stop_is_captured`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:18:28.729Z"
+          "at": "2026-11-15T04:18:36.010Z"
         },
         {
           "n": 3,
-          "text": "(was #5571) Collect-all gap: one lexer error (E0001) in a package hides all of that package's sema errors in jet check",
+          "text": "One lexer error (E0001) in a package does not hide the package's sema errors in `jet check`. Proof: `jet test Compiler --profile cases --filter project_check/lexer_error_keeps_sema_errors`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:31:00.179Z"
+          "at": "2026-11-15T04:18:37.073Z"
         },
         {
           "n": 4,
-          "text": "(was #5662) Keep-going sema stubs (#Todo bodies) can reach the binary with zero census rows, so a broken s1 reports BUILT",
+          "text": "A #Todo stub from keep-going sema never reaches a binary unrecorded: each stub is a census row, and a build with any stub does not report BUILT. Proof: `jet test Compiler --profile cases --filter cli_commands/keep_going_census_records_every_trap` and `--filter keep_going_stub_never_reports_built`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:38:05.721Z"
+          "at": "2026-11-15T04:18:38.126Z"
         },
         {
           "n": 5,
-          "text": "(was #6270) A keep-going check of a package with errors reports zero diagnostics in clean dependencies (a case pins it)",
+          "text": "A keep-going check of a package with errors reports no diagnostics in its clean dependencies. Proof: `jet test Compiler --profile cases --filter project_check/keep_going_registration_error_keeps_dependency_facts_known`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:28:06.871Z"
+          "at": "2026-11-15T04:18:39.251Z"
         },
         {
           "n": 6,
-          "text": "(was #6270) A file with one parse error still has its other items checked under keep-going (a case pins it)",
+          "text": "A file with one parse error still has its other items checked under keep-going. Proof: `jet test Compiler --profile cases --filter project_check/parse_error_keeps_other_items_checked`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:28:07.586Z"
+          "at": "2026-11-15T04:18:40.270Z"
         },
         {
           "n": 7,
-          "text": "(was #6270) A keep-going build reaches lowering and reports a lowering census for the clean items",
+          "text": "A keep-going build reaches lowering and reports a lowering census for the clean items. Proof: `jet test Compiler --profile cases --filter cli_commands/keep_going_build_reaches_lowering`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:28:08.185Z"
+          "at": "2026-11-15T04:18:41.192Z"
         },
         {
           "n": 9,
-          "text": "(was #2213 c1) Identical diagnostics within one jetpack invocation render once with a repeat count line; a multi-failure repro shows one card per root cause [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "Identical diagnostics in one invocation render once with a repeat-count line, and a multi-failure repro shows one block per root cause. Proof: `jet test Compiler --profile ui --filter repeated_diagnostic_renders_once`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:50:48.626Z"
+          "at": "2026-11-15T04:18:42.128Z"
         },
         {
           "n": 10,
@@ -52286,7 +52286,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T18:05:19.437Z",
-      "updated": "2026-11-15T04:18:26.637Z",
+      "updated": "2026-11-15T04:18:42.128Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -67022,75 +67022,75 @@
         },
         {
           "n": 2,
-          "text": "Each runs on an example package with golden output, and the results appear as rows in the jet test report.",
+          "text": "Mutation testing and fuzzing each run on an example package with golden output, and their results are rows in the `jet test` report. Proof: `jet test Compiler --profile golden --filter testing/mutation_and_fuzz_report`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T18:25:50.855Z"
+          "at": "2026-11-15T04:18:43.292Z"
         },
         {
           "n": 3,
-          "text": "D-TEST-MUTFUZZ1 A, mutation: mutate is a row of the one test settings table (changed stock, all, off). Only functions whose IR changed are mutated by default, all mutants share one build (mutant schemata), each runs only the tests that reach it (last killer first), and the kill matrix is cached in the #6035 store. A cases row proves an unchanged rerun mutates nothing.",
+          "text": "D-TEST-MUTFUZZ1=A mutation: `mutate` is a row of the one test settings table (`changed` by default, plus `all` and `off`). By default only functions whose IR changed are mutated. All mutants share one build (mutant schemata), each runs only the tests that reach it (last killer first), and the kill matrix is cached in the #6035 store. Proof: `jet test Compiler --profile cases --filter mutate_unchanged_rerun_mutates_nothing`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T12:27:36.264Z"
+          "at": "2026-11-15T04:18:44.469Z"
         },
         {
           "n": 4,
-          "text": "D-TEST-MUTFUZZ1 A, equivalent mutants: mutants equal to the original after canonical-IR folding are dropped unrun; an effect-free survivor is proved equivalent by the solver lens or reported with an input that tells it apart, with fuzzing as fallback; effectful survivors are reported as unchecked. A cases row shows each outcome.",
+          "text": "D-TEST-MUTFUZZ1=A equivalent mutants: a mutant equal to the original after canonical-IR folding is dropped unrun. An effect-free survivor is proved equivalent by the solver, or reported with an input that tells it apart (fuzzing is the fallback), and an effectful survivor is reported as unchecked. Proof: `jet test Compiler --profile cases --filter mutate_survivor_outcomes`, one row per outcome.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T12:27:38.312Z"
+          "at": "2026-11-15T04:18:45.525Z"
         },
         {
           "n": 5,
-          "text": "D-TEST-MUTFUZZ1 A, fuzzing: grade: generated steers generation by branch coverage, keeps new-branch inputs and shrunk failures under the corpus directory (stock testdata/fuzz/<test>/), and later runs replay them as ordinary rows; a cases row proves the replay.",
+          "text": "D-TEST-MUTFUZZ1=A fuzzing: `grade: generated` steers generation by branch coverage and keeps new-branch inputs and shrunk failures under the corpus directory (testdata/fuzz/<test>/ by default), and later runs replay them as ordinary rows. Proof: `jet test Compiler --profile cases --filter fuzz_corpus_replays_as_rows`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T12:27:39.594Z"
+          "at": "2026-11-15T04:18:46.433Z"
         },
         {
           "n": 7,
-          "text": "(was #2343 c1) A reviewed must-kill catalog names one exact mutation and the expected rejecting layer for every critical silent-data seam class.",
+          "text": "A reviewed must-kill catalog names one exact mutation and the layer expected to reject it for every critical silent-data seam class. Proof: the catalog is committed under Docs/testing, and `jet test tests/guards --filter must_kill_catalog` runs every entry.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:57:40.654Z"
+          "at": "2026-11-15T04:18:47.342Z"
         },
         {
           "n": 10,
-          "text": "(was #2343 c6) The mutation score and survivor list are derived from the catalog and immutable result bundles; manual exemptions, hidden skips, and stale target commits are red [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "The mutation score and survivor list come from the catalog and immutable result bundles, and a manual exemption, hidden skip or stale target commit fails the run. Proof: `jet test tests/guards --filter mutation_score_from_catalog`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:49:06.633Z"
+          "at": "2026-11-15T04:18:48.232Z"
         },
         {
           "n": 11,
-          "text": "A coverage-guided fuzz run of a parameterized `#Test` finds a planted crash in a parser fixture within its time budget and saves the crashing input as a regression case that later plain `jet test` runs replay. (was #6015 c2)",
+          "text": "A coverage-guided fuzz run of a parameterized #Test finds a planted crash in a parser fixture within its time budget and saves the crashing input as a regression case that later plain `jet test` runs replay. Proof: `jet test Compiler --profile cases --filter fuzz_finds_planted_parser_crash`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:27:36.476Z"
+          "at": "2026-11-15T04:18:49.230Z"
         },
         {
           "n": 12,
-          "text": "(was #3000) [#3002] Optional independent-condition evidence uses witness pairs. Branch reports keep their meaning, short-circuiting is unchanged, and bitmask coverage never claims independent bits. Source versus object scope and build/target identity are recorded. Release gates do not change. (was #3239 c48)",
+          "text": "Optional independent-condition coverage evidence uses witness pairs. Branch reports keep their meaning, short-circuiting is unchanged, and bitmask coverage never claims independent bits. Source versus object scope and the build and target identity are recorded, and release gates do not change. Proof: `jet test Compiler --profile cases --filter coverage_condition_witness_pairs`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:46:53.660Z"
+          "at": "2026-11-15T04:18:50.204Z"
         },
         {
           "n": 13,
@@ -67113,7 +67113,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:25:50.855Z",
-      "updated": "2026-11-15T03:25:34.008Z",
+      "updated": "2026-11-15T04:18:50.204Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -213942,6 +213942,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:19:01.080Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xnvmrf",
+      "note": "#29: strip debris; carry Main's exception; was: (was #6187) registered_unimplemented_codes_are_expected passes, with each of the 236 codes either emitted or removed (was #6206 c31)"
+    },
+    {
+      "at": "2026-11-15T04:19:00.153Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xnvmrf",
+      "note": "#5: split: one decision per criterion; D-1912-NAME1 moved to #6632; was: [#4283] Ratified diagnostics and review contracts: • D-1912-NAME1: registry name distances. • D-ARCH-ADVICE1: fact-backed review advice. • D-BIG-DIAGDIFF1: jet review --diagnostics. • D-REPORT-HOME1: "
+    },
+    {
+      "at": "2026-11-15T04:18:59.152Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xnvmrf",
+      "note": "#1: strip debris; proof; was: [#4336] For E0342, E0343, E0345, E1404, E1410 and L0527, either a tests/ui fixture shows the code as primary on the Jet compiler or the row is removed. Where the specific code stays, the generic code "
+    },
+    {
+      "at": "2026-11-15T04:18:58.149Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#7: proof; was: Single-source census F29 (Docs/audits/2026-11-05-single-source-census.md): Build profile names. One hand-written home: One stock-profile table beside JET_BUILD_OPTIONS. Fix: derive. Drift check: Guard"
+    },
+    {
+      "at": "2026-11-15T04:18:56.963Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#6: strip debris; proof; was: (was #3993 c2) Help, completion, and CLI snapshots are regenerated, and in-repo callers use the kept spelling [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-15T04:18:55.866Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#5: strip debris; proof; was: (was #3993 c1) No two registry flags name the same meaning; each removed spelling is an unknown-flag error with the normal suggestion [precut audit: no dev test, golden, case or snapshot proves this t"
+    },
+    {
+      "at": "2026-11-15T04:18:54.729Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#4: strip debris; outcome from frozen #4573 c2; proof; was: (was #4573) Move Jet user data per D-JET-HOME1: Implement ratified D-JET-HOME1=A as one verified cutover preserving keys, trust and retention records"
+    },
+    {
+      "at": "2026-11-15T04:18:53.339Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#3: proof; was: No help summary line wraps mid-word at 80 columns."
+    },
+    {
+      "at": "2026-11-15T04:18:52.176Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#2: proof; was: `jet help <command>` prints that command's flags only, and `jet help --all` prints the full table; all three come from one option table."
+    },
+    {
+      "at": "2026-11-15T04:18:51.156Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#1: proof; was: `jet --help | wc -l` prints at most 50: the common commands, one line each (419 lines on 2026-10-28)."
+    },
+    {
+      "at": "2026-11-15T04:18:50.204Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fvnyiq",
+      "note": "#12: strip debris; proof; was: (was #3000) [#3002] Optional independent-condition evidence uses witness pairs. Branch reports keep their meaning, short-circuiting is unchanged, and bitmask coverage never claims independent bits. So"
+    },
+    {
+      "at": "2026-11-15T04:18:49.230Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fvnyiq",
+      "note": "#11: strip debris; proof; was: A coverage-guided fuzz run of a parameterized `#Test` finds a planted crash in a parser fixture within its time budget and saves the crashing input as a regression case that later plain `jet test` run"
+    },
+    {
+      "at": "2026-11-15T04:18:48.232Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fvnyiq",
+      "note": "#10: strip debris; proof; was: (was #2343 c6) The mutation score and survivor list are derived from the catalog and immutable result bundles; manual exemptions, hidden skips, and stale target commits are red [precut audit: no dev t"
+    },
+    {
+      "at": "2026-11-15T04:18:47.342Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fvnyiq",
+      "note": "#7: strip debris; proof; was: (was #2343 c1) A reviewed must-kill catalog names one exact mutation and the expected rejecting layer for every critical silent-data seam class."
+    },
+    {
+      "at": "2026-11-15T04:18:46.433Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fvnyiq",
+      "note": "#5: proof; was: D-TEST-MUTFUZZ1 A, fuzzing: grade: generated steers generation by branch coverage, keeps new-branch inputs and shrunk failures under the corpus directory (stock testdata/fuzz/<test>/), and later runs "
+    },
+    {
+      "at": "2026-11-15T04:18:45.525Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fvnyiq",
+      "note": "#4: proof; was: D-TEST-MUTFUZZ1 A, equivalent mutants: mutants equal to the original after canonical-IR folding are dropped unrun; an effect-free survivor is proved equivalent by the solver lens or reported with an i"
+    },
+    {
+      "at": "2026-11-15T04:18:44.470Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fvnyiq",
+      "note": "#3: proof; was: D-TEST-MUTFUZZ1 A, mutation: mutate is a row of the one test settings table (changed stock, all, off). Only functions whose IR changed are mutated by default, all mutants share one build (mutant schem"
+    },
+    {
+      "at": "2026-11-15T04:18:43.292Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fvnyiq",
+      "note": "#2: proof; was: Each runs on an example package with golden output, and the results appear as rows in the jet test report."
+    },
+    {
+      "at": "2026-11-15T04:18:42.128Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08i9ox6",
+      "note": "#9: strip debris; proof; was: (was #2213 c1) Identical diagnostics within one jetpack invocation render once with a repeat count line; a multi-failure repro shows one card per root cause [precut audit: no dev test, golden, case or"
+    },
+    {
+      "at": "2026-11-15T04:18:41.192Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08i9ox6",
+      "note": "#7: strip debris; proof; was: (was #6270) A keep-going build reaches lowering and reports a lowering census for the clean items"
+    },
+    {
+      "at": "2026-11-15T04:18:40.270Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08i9ox6",
+      "note": "#6: strip debris; proof; was: (was #6270) A file with one parse error still has its other items checked under keep-going (a case pins it)"
+    },
+    {
+      "at": "2026-11-15T04:18:39.251Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08i9ox6",
+      "note": "#5: strip debris; proof; was: (was #6270) A keep-going check of a package with errors reports zero diagnostics in clean dependencies (a case pins it)"
+    },
+    {
+      "at": "2026-11-15T04:18:38.126Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08i9ox6",
+      "note": "#4: strip debris; proof; was: (was #5662) Keep-going sema stubs (#Todo bodies) can reach the binary with zero census rows, so a broken s1 reports BUILT"
+    },
+    {
+      "at": "2026-11-15T04:18:37.073Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08i9ox6",
+      "note": "#3: strip debris; proof; was: (was #5571) Collect-all gap: one lexer error (E0001) in a package hides all of that package's sema errors in jet check"
+    },
+    {
+      "at": "2026-11-15T04:18:36.010Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08i9ox6",
+      "note": "#2: strip debris; proof; was: (was #4986) Collect-all gap: a runtime stop inside sema (E3010/E3012) ends the whole factory run"
+    },
     {
       "at": "2026-11-15T04:18:34.602Z",
       "by": "TowerKeeper-1",
