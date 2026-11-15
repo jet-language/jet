@@ -478,9 +478,7 @@ SemaRegistrationForeignFunction: struct {
     foreign_library: String
     foreign_library_span: Span
     identity: TypeIdentity
-    identity_key: String
     generic_params: [SemaRegistrationGenericParam]
-    generic_identity_key: String
     parameters: [SemaRegistrationParameter]
     abi: SemaRegistrationCallableABI
 }
@@ -490,9 +488,7 @@ SemaRegistrationFunction: struct {
     declaration: Func
     signature: Type
     identity: TypeIdentity
-    identity_key: String
     generic_params: [SemaRegistrationGenericParam]
-    generic_identity_key: String
     parameters: [SemaRegistrationParameter]
     abi: SemaRegistrationCallableABI
     // The declared return stays raw for a protocol ABI trait-impl method.
@@ -506,7 +502,6 @@ SemaRegistrationField: struct {
     symbol: Symbol
     ty: Type
     identity: TypeIdentity
-    identity_key: String
     default: Expr?
     computed: Bool
 }
@@ -515,7 +510,6 @@ SemaRegistrationVariant: struct {
     symbol: Symbol
     payload: VariantPayload
     payload_type: Type?
-    identity_key: String
 }
 
 SemaRegistrationTraitMethod: struct {
@@ -523,7 +517,6 @@ SemaRegistrationTraitMethod: struct {
     declaration: TraitMethodSig
     signature: Type
     identity: TypeIdentity
-    identity_key: String
     parameters: [SemaRegistrationParameter]
 }
 
@@ -532,7 +525,6 @@ SemaRegistrationAssociatedType: struct {
     declaration: NamedType
     ty: Type
     identity: TypeIdentity
-    identity_key: String
 }
 
 SemaRegistrationImpl: struct {
@@ -549,7 +541,6 @@ SemaRegistrationImpl: struct {
     trait_symbol: Symbol?
     trait_identity: TypeIdentity?
     trait_span: Span?
-    identity_key: String
     methods: [SemaRegistrationFunction]
     associated_type_impls: [NamedType]
     associated_types: [SemaRegistrationAssociatedType]
@@ -572,7 +563,6 @@ SemaRegistrationNominal: struct {
     identity: TypeIdentity
     identity_key: String
     generic_params: [SemaRegistrationGenericParam]
-    generic_identity_key: String
     fields: [SemaRegistrationField]
     variants: [SemaRegistrationVariant]
     methods: [SemaRegistrationFunction]
@@ -593,7 +583,6 @@ SemaRegistrationConstant: struct {
     declaration: ConstDef
     ty: Type?
     typed: Bool
-    identity_key: String
 }
 
 SemaRegistrationExport: struct {
@@ -1232,19 +1221,6 @@ sema_registration_identity_key: fn(module_identity: String, ty: Type) -> String 
     "{module_identity}:{type_identity_key(ty)}"
 }
 
-sema_registration_function_identity_key: fn(module_identity: String, owner_key: String, signature: Type) -> String Never! {
-    if owner_key == "" -> sema_registration_identity_key(module_identity, signature) else -> "{module_identity}:{owner_key}:{type_identity_key(signature)}"
-}
-
-sema_registration_generic_identity: fn(owner_key: String, params: [SemaRegistrationGenericParam]) -> String Never! {
-    if params.len() == 0 -> return owner_key.copy()
-    parts: loop parameter in params -> {
-        bound: parameter.bounds.join("+")
-        "{parameter.index}:{parameter.name}[{bound}]"
-    }
-    "{owner_key}<{parts.join(",")}>"
-}
-
 // `module_identity` is the declaring module: the bounds' trait names resolve
 // there, whichever module calls the declaration.
 sema_registration_generic_params: fn(type_params: [TypeParam], owner_key: String, module_identity: ModuleID, diagnostics: &[Diagnostic]) -> [SemaRegistrationGenericParam] {
@@ -1479,7 +1455,6 @@ sema_registration_function: fn(func: Func, raw_protocol_return: Bool, module_id:
         visibility: visibility,
     }
     generic_params: sema_registration_generic_params(func.type_params, key, module_id, diagnostics)
-    generic_identity_key: sema_registration_generic_identity(key, generic_params)
     abi: sema_registration_callable_abi_for_func(func)
     parameters: sema_registration_function_parameters(func, module_id, module_identity, key, symbols, signature)
     metadata: sema_registration_signature_metadata(signature)
@@ -1496,9 +1471,7 @@ sema_registration_function: fn(func: Func, raw_protocol_return: Bool, module_id:
         declaration: func.copy(),
         signature: signature,
         identity: type_identity(signature),
-        identity_key: sema_registration_function_identity_key(module_identity, owner_key, signature),
         generic_params: generic_params,
-        generic_identity_key: generic_identity_key,
         parameters: parameters,
         abi: abi,
         raw_protocol_return: raw_protocol_return,
@@ -1531,9 +1504,7 @@ sema_registration_foreign_function: fn(function: ExternFn, module_id: ModuleID, 
         foreign_library: foreign_library,
         foreign_library_span: foreign_library_span,
         identity: type_identity(signature),
-        identity_key: sema_registration_function_identity_key(module_identity, "", signature),
         generic_params: [SemaRegistrationGenericParam]{},
-        generic_identity_key: key,
         parameters: parameters,
         abi: sema_registration_callable_abi_for_extern(function, owner),
     }
@@ -1940,7 +1911,6 @@ sema_registration_struct_fields: fn(definition: StructDef, module_identity: Stri
             symbol: field_symbol,
             ty: definition.fields[field_index].ty,
             identity: type_identity(definition.fields[field_index].ty),
-            identity_key: "{owner_key}:{definition.fields[field_index].name}:{type_identity_key(definition.fields[field_index].ty)}",
             default: definition.fields[field_index].default,
             computed: definition.fields[field_index].computed != None,
         })
@@ -1969,12 +1939,10 @@ sema_registration_enum_variants: fn(definition: EnumDef, module_identity: String
             ty: payload_ty,
             visibility: owner.visibility,
         }
-        payload_key: payload_ty.map(fn(value) { type_identity_key(value) }) ?? "Unit"
         variants.push(SemaRegistrationVariant{
             symbol: variant_symbol,
             payload: definition.variants[variant_index].payload,
             payload_type: payload_ty,
-            identity_key: "{owner_key}:{definition.variants[variant_index].name}:{payload_key}",
         })
     }
     variants
@@ -2043,7 +2011,7 @@ sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: Stri
         })
     }
     symbol: Symbol{id: id, kind: SymbolKind.Function, name: method.name, module_identity: owner.module_identity, owner: Val(owner_key), span: method.name_span, ty: Val(signature), visibility: owner.visibility}
-    SemaRegistrationTraitMethod{symbol: symbol, declaration: method, signature: signature, identity: type_identity(signature), identity_key: sema_registration_function_identity_key(module_identity, owner_key, signature), parameters: parameters}
+    SemaRegistrationTraitMethod{symbol: symbol, declaration: method, signature: signature, identity: type_identity(signature), parameters: parameters}
 }
 
 // Hook callable identity is the operand pair, not the ordinary owner/name
@@ -2087,7 +2055,6 @@ sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: 
             symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
             key: symbol_table_key(symbols, symbol.id)
             generic_params: sema_registration_generic_params(definition.type_params, key, module_id, diagnostics)
-            generic_identity_key: sema_registration_generic_identity(key, generic_params)
             methods := [SemaRegistrationFunction]{}
             loop method in definition.methods -> methods.push(sema_registration_function(method, false, module_id, module_identity, Val(symbol.id), symbols, fallback_source_file, fallback_source_origin, source_segments, diagnostics))
             trait_methods: [SemaRegistrationTraitMethod]{}
@@ -2097,14 +2064,13 @@ sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: 
                     methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_id, module_identity, Val(hook_owner), symbols, fallback_source_file, fallback_source_origin, source_segments, diagnostics))
                 }
             }
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Struct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: sema_registration_struct_fields(definition, module_identity, symbol, symbols, diagnostics), variants: [SemaRegistrationVariant]{}, methods: methods, trait_methods: trait_methods, compiler_owned: definition.compiler_builtin_error, generated_provenance: if definition.compiler_builtin_error -> Val(sema_registration_compiler_owned_default_err_provenance()) else -> None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Struct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, fields: sema_registration_struct_fields(definition, module_identity, symbol, symbols, diagnostics), variants: [SemaRegistrationVariant]{}, methods: methods, trait_methods: trait_methods, compiler_owned: definition.compiler_builtin_error, generated_provenance: if definition.compiler_builtin_error -> Val(sema_registration_compiler_owned_default_err_provenance()) else -> None})
         }
         .Enum(definition) -> {
             ty: sema_registration_nominal_type(definition.name, definition.type_params)
             symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
             key: symbol_table_key(symbols, symbol.id)
             generic_params: sema_registration_generic_params(definition.type_params, key, module_id, diagnostics)
-            generic_identity_key: sema_registration_generic_identity(key, generic_params)
             methods := [SemaRegistrationFunction]{}
             loop method in definition.methods -> methods.push(sema_registration_function(method, false, module_id, module_identity, Val(symbol.id), symbols, fallback_source_file, fallback_source_origin, source_segments, diagnostics))
             trait_methods: [SemaRegistrationTraitMethod]{}
@@ -2114,36 +2080,36 @@ sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: 
                     methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_id, module_identity, Val(hook_owner), symbols, fallback_source_file, fallback_source_origin, source_segments, diagnostics))
                 }
             }
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Enum, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: [SemaRegistrationField]{}, variants: sema_registration_enum_variants(definition, module_identity, symbol, symbols, diagnostics), methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Enum, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, fields: [SemaRegistrationField]{}, variants: sema_registration_enum_variants(definition, module_identity, symbol, symbols, diagnostics), methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
         }
         .Distinct(definition) -> {
             ty: Type.Named{name: definition.name}
             symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
             generic_params: [SemaRegistrationGenericParam]{}
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Distinct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: symbol_table_key(symbols, symbol.id), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Distinct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
         }
         .TypeAlias(definition) -> {
             ty: sema_registration_nominal_type(definition.name, definition.type_params)
             symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
             key: symbol_table_key(symbols, symbol.id)
             generic_params: sema_registration_generic_params(definition.type_params, key, module_id, diagnostics)
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.TypeAlias, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: sema_registration_generic_identity(key, generic_params), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.TypeAlias, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
         }
         .Trait(definition) -> {
             ty: Type.Named{name: definition.name}
             symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Trait, None, definition.is_pub, definition.is_package_pub)
             trait_methods: loop method in definition.methods -> sema_registration_trait_method(method, module_identity, symbol, symbols, fallback_source_file, fallback_source_origin, source_segments)
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Trait, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol_table_key(symbols, symbol.id), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Trait, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
         }
         .Tag(definition) -> {
             ty: Type.Named{name: definition.name}
             symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Tag, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol_table_key(symbols, symbol.id), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Tag, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
         }
         .UnitFamily(definition) -> {
             ty: Type.Named{name: definition.family}
             symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.family, definition.family_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.UnitFamily, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol_table_key(symbols, symbol.id), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.UnitFamily, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
         }
         .Func(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
@@ -2249,7 +2215,6 @@ sema_registration_compiler_owned_codec_trait: fn(module_id: ModuleID, module_ide
         identity: type_identity(ty),
         identity_key: sema_registration_identity_key(module_identity, ty),
         generic_params: [SemaRegistrationGenericParam]{},
-        generic_identity_key: symbol_table_key(symbols, symbol.id),
         fields: [SemaRegistrationField]{},
         variants: [SemaRegistrationVariant]{},
         methods: [SemaRegistrationFunction]{},
@@ -2323,7 +2288,6 @@ sema_registration_compiler_owned_enum: fn(module_id: ModuleID, module_identity: 
         identity: type_identity(ty),
         identity_key: sema_registration_identity_key(module_identity, ty),
         generic_params: [SemaRegistrationGenericParam]{},
-        generic_identity_key: symbol_table_key(symbols, symbol.id),
         fields: [SemaRegistrationField]{},
         variants: sema_registration_enum_variants(definition, module_identity, symbol, symbols, diagnostics),
         methods: [SemaRegistrationFunction]{},
@@ -2340,7 +2304,7 @@ sema_registration_foreign_handle_nominal: fn(facts: SemaRegistrationForeignHandl
     }
     ty: Type.Named{name: facts.jet_name}
     symbol: sema_registration_named_symbol(module_id, module_identity, symbols, facts.jet_name, facts.source_span, SymbolKind.Type, Val(ty), true, false)
-    Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.ForeignHandle, source: SemaRegistrationNominalSource.ForeignHandle{value: facts}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol_table_key(symbols, symbol.id), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
+    Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.ForeignHandle, source: SemaRegistrationNominalSource.ForeignHandle{value: facts}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
 }
 
 sema_registration_nominal_source_item: fn(source: SemaRegistrationNominalSource) -> Item? {
@@ -2554,7 +2518,7 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, module_text:
         .Const(value) -> {
             if sema_ownership_is_static_root(value) -> module_row.static_roots.push(symbol_table_key(symbols, symbol.id))
             if value.is_persist -> module_row.persist_roots.push(symbol_table_key(symbols, symbol.id))
-            module_row.constants.push(SemaRegistrationConstant{symbol: symbol, declaration: value, ty: value.ty, typed: value.ty != None, identity_key: "{module_text}:{value.name}"})
+            module_row.constants.push(SemaRegistrationConstant{symbol: symbol, declaration: value, ty: value.ty, typed: value.ty != None})
         }
         // Each member type a unit family declared in this module mints
         // registers as its own distinct declaration, so `Usd.from_float(...)`
@@ -2711,7 +2675,7 @@ sema_registration_impl: fn(module_row: SemaRegistrationModule, module_text: Stri
     impl_key: symbol_key_text(SymbolKind.Impl, module_text, "", identity_key)
     associated_types: loop declaration in definition.assoc_type_impls -> {
         associated_symbol: Symbol{id: symbol_mint(symbols, SymbolKind.Type, module_text, impl_key, declaration.name), kind: SymbolKind.Type, name: declaration.name, module_identity: module_row.module_identity, owner: Val(impl_key), span: declaration.span, ty: Val(declaration.ty), visibility: 0}
-        SemaRegistrationAssociatedType{symbol: associated_symbol, declaration: declaration, ty: declaration.ty, identity: type_identity(declaration.ty), identity_key: "{impl_key}:{declaration.name}:{type_identity_key(declaration.ty)}"}
+        SemaRegistrationAssociatedType{symbol: associated_symbol, declaration: declaration, ty: declaration.ty, identity: type_identity(declaration.ty)}
     }
     hook_owner: sema_registration_operator_owner(owner_id, symbols, module_text, target_type, definition.trait_name, definition.operator_rhs)
     methods := loop method_index in 0..<definition.methods.len() -> sema_registration_function(definition.methods[method_index], sema_raw_protocol_function_return(definition.trait_name, false, definition.methods[method_index]), module_row.module_identity, module_text, Val(hook_owner), symbols, module_row.source_file, module_row.source_origin, module_row.source_segments, diagnostics)
@@ -2740,7 +2704,6 @@ sema_registration_impl: fn(module_row: SemaRegistrationModule, module_text: Stri
         trait_symbol: trait_symbol,
         trait_identity: trait_identity,
         trait_span: definition.trait_span,
-        identity_key: identity_key,
         methods: methods,
         associated_type_impls: definition.assoc_type_impls,
         associated_types: associated_types,
