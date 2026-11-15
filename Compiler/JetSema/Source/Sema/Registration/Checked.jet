@@ -1420,7 +1420,11 @@ sema_checked_foreign_close: fn(graph: SemaRegistrationGraph, module_row: SemaReg
         }
     }
     if function_candidate == .Val(candidate_value) {
-        valid: candidate_value.parameters.len() == 1 && !candidate_value.parameters[0].variadic && candidate_value.parameters[0].convention == AccessConvention.Move && candidate_value.parameters[0].ty == return_type && candidate_value.declaration.return_type == None
+        // Registration writes a Jet function's parameter types in canonical
+        // form (QualifiedTypes.jet), and a foreign declaration's as written,
+        // so the handle types compare as the module resolves them.
+        handle: sema_checked_qualify_type(graph, return_type, module_row.module_identity)
+        valid: candidate_value.parameters.len() == 1 && !candidate_value.parameters[0].variadic && candidate_value.parameters[0].convention == AccessConvention.Move && type_identity_equal(sema_checked_qualify_type(graph, candidate_value.parameters[0].ty, module_row.module_identity), handle) && candidate_value.declaration.return_type == None
         if valid -> return true
         diagnostics.push(sema_error("E0702", candidate_value.declaration.name_span, "foreign close function `{close.name}` has the wrong signature", "`#Close` runs the named function exactly once by consuming the returned handle", "declare one `&&` parameter with the returned handle type and no return value"))
         return false
