@@ -79,7 +79,7 @@ Pin: struct<T> {}
 // `size` bytes of fresh heap storage aligned to `align`, as a byte pointer
 // (`cast<U>` gives the typed view), or None when `size` is not above zero,
 // `align` is not a power of two, or the heap refuses. The bytes are not
-// cleared. Two words before them hold the size and alignment for `free_raw`.
+// cleared. The word 24 bytes before them keeps the size for `free_raw`.
 #Unsafe("the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once") alloc_raw: fn(size: Int, align: Int) -> mem.Ptr<U8>? Never! {
     core.mem.alloc_raw(size, align)
 }
