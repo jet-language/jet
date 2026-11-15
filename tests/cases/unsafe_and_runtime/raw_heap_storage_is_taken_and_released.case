@@ -3,8 +3,9 @@
 # that is not a power of two, and `cast<U>` gives the typed view;
 # `mem.free_raw(p)` takes the pointer and releases the block, on every tier.
 # The released bytes are quarantined: a read through a kept copy of the
-# pointer is a located R0802 fault, and a second release of the taken
-# binding is refused before the program runs.
+# pointer is a located R0802 fault, a second release of the taken binding is
+# refused before the program runs, and a second release through a copy of
+# the pointer, which the ownership check cannot see, is a located R0802 fault.
 fixture: raw_heap_storage_is_taken_and_released.fixture
 env: NO_COLOR=1
 step check: jet check main.jet
@@ -30,4 +31,15 @@ stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obl
 stderr: ~ "kept.jet:10:19, in #Unsafe gate" # the fault is located at the read after release
 step twice: jet check twice.jet
 exit: 1
-stderr: ~ "E0209" # the take report names both releases of the binding
+stderr: ~ "E0121" # the first release took the binding
+stderr: ~ "twice.jet:7:26" # the report is located at the second release
+step aliasednone: jet run -O0 aliased.jet
+exit: 70
+stdout: = "released\n"
+stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "aliased.jet:9:17, in #Unsafe gate" # the fault is located at the second release
+step aliasedfull: jet run -O2 aliased.jet
+exit: 70
+stdout: = "released\n"
+stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "aliased.jet:9:17, in #Unsafe gate" # the fault is located at the second release
