@@ -6139,7 +6139,10 @@ ir_pend: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: String, subject:
 }
 
 // An enum value: a payload-free enum's variant index, else a new box with the
-// discriminant and payload.
+// discriminant and payload. A payload-free variant of a boxed enum holds
+// nothing a value could change, so every one of them borrows one static box
+// per variant and type (ir_static_read) instead of allocating its own, as a
+// constant does; the Dyn enum the runtime walks keeps a box of its own.
 ir_enum_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: String, variant: String, payload: BodyEnumPayload, span: Span) -> Int Never! {
     slot_type: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     row: ir_type_def(p, owner) ?? ir_enum_def(m, p, slot_type) ?? return ir_fail_slot(b, span, "enum {owner} without a declaration")
@@ -6152,6 +6155,10 @@ ir_enum_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: St
     }
     slot_args: ir_row_args(m, slot_type)
     members: ir_variant_members(m, p, row, slot_args, index) ?? return ir_fail_slot(b, span, "payload of {variant}")
+    if payload == .Unit && members.len() == 0 && !ir_dyn_declaration(p.types[row]) {
+        shared: ir_static_read(m, p, b, ty, "variant:{index}", TComptimeValue.Enum{type_name: owner, variant: variant, args: [TComptimeEnumArg]{}})
+        if shared >= 0 -> return shared
+    }
     size: ir_enum_variant_box_size(m, p, row, slot_args, index) ?? return ir_fail_slot(b, span, "layout of {owner}")
     values := [Int]{}
     targets := [IRMember]{}
