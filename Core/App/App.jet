@@ -524,12 +524,12 @@ LiveCell: struct {
 LIVE_CELL: Shared{LiveCell{bytes: [U8]{}}}
 
 live_cell_load: fn() -> [U8] {
-    if world_rt.world_store_load("core.web.live") == .Val(bytes) -> return bytes
+    if world_rt.world_store_load("app.live") == .Val(bytes) -> return bytes
     LIVE_CELL.bytes
 }
 
 live_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
-    if world_rt.world_store_replace("core.web.live", expected, replacement) == .Val(replaced) {
+    if world_rt.world_store_replace("app.live", expected, replacement) == .Val(replaced) {
         return replaced
     }
     cell := LIVE_CELL.guard_edit()

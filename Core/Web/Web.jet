@@ -2564,8 +2564,6 @@ __openapi_route_json: fn(route: __OpenAPIRoute) -> String Never! {
     "{out}}}"
 }
 
-storage: fn() -> String Never! { "local" }
-
 auth: fn(kind: String) -> Auth Never! { Auth{kind: kind, client_id: ""} }
 
 auth_oauth: fn(auth: Auth, client_id: String) -> Auth Never! {
@@ -2580,8 +2578,6 @@ auth_routes: fn(auth: Auth) -> [String] Never! {
 }
 
 auth_show: fn(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
-
-sync: fn(key: String, data: String) -> String Never! { "{key}:{data}" }
 
 #Test("an OpenAPI route contract that does not parse or match comes back as an OpenAPIError") {
     not_json: if __openapi_route_input("{{", "GET", "/a") == {

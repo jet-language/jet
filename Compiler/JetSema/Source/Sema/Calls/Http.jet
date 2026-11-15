@@ -816,7 +816,7 @@ sema_call_http_web_openapi_mux: fn(target: SemaCallDirectTarget, qualified_name:
 
 sema_call_try_http_core_call: fn(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if record.module_name == "core.http.client" && (record.member == "get" || record.member == "post" || record.member == "request") -> return sema_call_http_transport(record, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if (record.module_name == "app" || record.module_name == "core.web") && record.member == "sync" -> return sema_call_http_sync(record, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if record.module_name == "app" && record.member == "sync" -> return sema_call_http_sync(record, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     SemaDirectSpecialCheck{handled: false, value: None}
 }
 
