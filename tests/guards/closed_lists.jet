@@ -33,8 +33,8 @@ CLOSED_LIST_BLOCK_END: "// END GENERATED"
 // when its list moves to a declared home, then lower the ceiling to match. A
 // duplicate baseline row also records how many members its pair shares, and
 // that count only shrinks.
-CLOSED_LIST_BASELINE: 975
-CLOSED_LIST_DUPLICATE_BASELINE: 309
+CLOSED_LIST_BASELINE: 982
+CLOSED_LIST_DUPLICATE_BASELINE: 327
 
 // The reasons a list may stay closed. Each kernel ledger row names one.
 CLOSED_LIST_REASONS: [String]{"grammar", "soundness", "ir", "kernel", "protocol", "fixed-standard"}
@@ -61,23 +61,6 @@ closed_list_ident_prefix: fn(text: String) -> String {
         end += 1
     }
     policy_slice_bytes(text, 0, end)
-}
-
-// The enum variants a member line declares: `A B C`, `Custom(String)` or
-// `Report{ code: Int }`. A field, method or `impl` line declares none.
-closed_list_enum_line_members: fn(line: String, out: &[String]) {
-    loop word in line.trim().split(" ").to_list() {
-        if word == "" -> next
-        ident: closed_list_ident_prefix(word)
-        if ident == "" || !closed_list_upper_byte(ident.bytes()[0]) -> return
-        if ident != word {
-            next_byte: Int{word.bytes()[ident.bytes().len()]}
-            // `(` payload, `{` record payload, `,` separator.
-            if next_byte != 40 && next_byte != 123 && next_byte != 44 -> return
-        }
-        out.push(ident.to_lower())
-        if ident != word && (Int{word.bytes()[ident.bytes().len()]}) != 44 -> return
-    }
 }
 
 // The string literals on `line`, lower-cased.
@@ -171,71 +154,375 @@ closed_list_after: fn(text: String, needle: String) -> Int {
     bytes.len()
 }
 
-// The kind a top-level line opens: "enum", "list" or "".
-closed_list_opener: fn(rest: String) -> String {
-    if rest.starts_with("enum {{") || rest.starts_with("enum{{") -> return "enum"
-    if rest.starts_with("[String]{{") || rest.starts_with("#run {{ [String]{{") || rest.starts_with("#run {{[String]{{") -> return "list"
-    ""
+// The scan reads a source as tokens, never as lines, so a list is the same
+// finding however its source is laid out: on one line or many, at any
+// indentation, with any wrapping. Its token kinds:
+CLOSED_LIST_TOKEN_END: 0
+CLOSED_LIST_TOKEN_WORD: 1
+CLOSED_LIST_TOKEN_STRING: 2
+CLOSED_LIST_TOKEN_PUNCT: 3
+CLOSED_LIST_TOKEN_COMMENT: 4
+CLOSED_LIST_TOKEN_CHAR: 5
+
+// One token: its kind and its bytes `start..<end`. A string spans its quotes
+// or fences; a comment is one `//` comment, up to its line end.
+ClosedListToken: struct {
+    kind: Int
+    start: Int
+    end: Int
+}
+
+closed_list_at: fn(bytes: [U8], index: Int) -> Int {
+    if index < 0 || index >= bytes.len() -> return 0
+    Int{bytes[index]}
+}
+
+closed_list_word_byte: fn(value: Int) -> Bool { value >= 128 || closed_list_ident_byte(U8{value}) }
+
+// The index after the raw string whose backtick fence starts at `start`.
+closed_list_raw_end: fn(bytes: [U8], start: Int) -> Int {
+    fence := 0
+    loop closed_list_at(bytes, start + fence) == 96 -> fence += 1
+    cursor := start + fence
+    loop cursor < bytes.len() {
+        if closed_list_at(bytes, cursor) != 96 {
+            cursor += 1
+            next
+        }
+        run: cursor
+        loop closed_list_at(bytes, cursor) == 96 -> cursor += 1
+        if cursor - run == fence -> return cursor
+    }
+    bytes.len()
+}
+
+// The index after the `{…}` interpolation that opens at `open` inside a
+// plain string; its nested strings, fences and braces are skipped. One left
+// open at its line end ends there.
+closed_list_interpolation_end: fn(bytes: [U8], open: Int) -> Int {
+    cursor := open + 1
+    depth := 1
+    loop cursor < bytes.len() {
+        value: closed_list_at(bytes, cursor)
+        if value == 34 {
+            cursor = closed_list_string_end(bytes, cursor)
+            next
+        }
+        if value == 96 {
+            cursor = closed_list_raw_end(bytes, cursor)
+            next
+        }
+        if value == 10 -> return cursor
+        if value == 123 -> depth += 1
+        if value == 125 {
+            depth -= 1
+            if depth == 0 -> return cursor + 1
+        }
+        cursor += 1
+    }
+    bytes.len()
+}
+
+// The index after the string whose quote is at `start`. A `"""` string runs
+// to its closing `"""`; a plain one skips `\` escapes, `{{` and `{…}`
+// interpolations, and ends at its closing quote or its line end.
+closed_list_string_end: fn(bytes: [U8], start: Int) -> Int {
+    triple: closed_list_at(bytes, start + 1) == 34 && closed_list_at(bytes, start + 2) == 34
+    cursor := if triple -> start + 3 else -> start + 1
+    loop cursor < bytes.len() {
+        value: closed_list_at(bytes, cursor)
+        if value == 92 {
+            cursor += 2
+            next
+        }
+        if triple {
+            if value == 34 && closed_list_at(bytes, cursor + 1) == 34 && closed_list_at(bytes, cursor + 2) == 34 -> return cursor + 3
+            cursor += 1
+            next
+        }
+        if value == 123 && closed_list_at(bytes, cursor + 1) == 123 {
+            cursor += 2
+            next
+        }
+        if value == 123 {
+            cursor = closed_list_interpolation_end(bytes, cursor)
+            next
+        }
+        if value == 34 -> return cursor + 1
+        if value == 10 -> return cursor
+        cursor += 1
+    }
+    bytes.len()
+}
+
+// The index after the character literal whose quote is at `start`, or just
+// past the quote when no literal closes on its line within a scalar's width.
+closed_list_char_end: fn(bytes: [U8], start: Int) -> Int {
+    cursor := start + 1
+    loop cursor < bytes.len() && cursor <= start + 12 {
+        value: closed_list_at(bytes, cursor)
+        if value == 10 -> break
+        if value == 92 {
+            cursor += 2
+            next
+        }
+        if value == 39 -> return cursor + 1
+        cursor += 1
+    }
+    start + 1
+}
+
+// The next token at or after `from`; blank space and `/* … */` comments are
+// skipped.
+closed_list_token: fn(bytes: [U8], from: Int) -> ClosedListToken {
+    cursor := from
+    loop cursor < bytes.len() {
+        value: closed_list_at(bytes, cursor)
+        if value == 32 || value == 9 || value == 10 || value == 13 {
+            cursor += 1
+            next
+        }
+        if value == 47 && closed_list_at(bytes, cursor + 1) == 47 {
+            end := cursor
+            loop end < bytes.len() && closed_list_at(bytes, end) != 10 -> end += 1
+            return ClosedListToken{kind: CLOSED_LIST_TOKEN_COMMENT, start: cursor, end: end}
+        }
+        if value == 47 && closed_list_at(bytes, cursor + 1) == 42 {
+            cursor += 2
+            depth := 1
+            loop cursor < bytes.len() && depth > 0 {
+                if closed_list_at(bytes, cursor) == 47 && closed_list_at(bytes, cursor + 1) == 42 {
+                    depth += 1
+                    cursor += 2
+                } else if closed_list_at(bytes, cursor) == 42 && closed_list_at(bytes, cursor + 1) == 47 {
+                    depth -= 1
+                    cursor += 2
+                } else {
+                    cursor += 1
+                }
+            }
+            next
+        }
+        if value == 34 -> return ClosedListToken{kind: CLOSED_LIST_TOKEN_STRING, start: cursor, end: closed_list_string_end(bytes, cursor)}
+        if value == 96 -> return ClosedListToken{kind: CLOSED_LIST_TOKEN_STRING, start: cursor, end: closed_list_raw_end(bytes, cursor)}
+        if value == 39 -> return ClosedListToken{kind: CLOSED_LIST_TOKEN_CHAR, start: cursor, end: closed_list_char_end(bytes, cursor)}
+        if closed_list_word_byte(value) {
+            end := cursor + 1
+            loop end < bytes.len() && closed_list_word_byte(closed_list_at(bytes, end)) -> end += 1
+            return ClosedListToken{kind: CLOSED_LIST_TOKEN_WORD, start: cursor, end: end}
+        }
+        return ClosedListToken{kind: CLOSED_LIST_TOKEN_PUNCT, start: cursor, end: cursor + 1}
+    }
+    ClosedListToken{kind: CLOSED_LIST_TOKEN_END, start: bytes.len(), end: bytes.len()}
+}
+
+// The next token after `from` that is not a comment.
+closed_list_code_token: fn(bytes: [U8], from: Int) -> ClosedListToken {
+    token := closed_list_token(bytes, from)
+    loop token.kind == CLOSED_LIST_TOKEN_COMMENT -> token = closed_list_token(bytes, token.end)
+    token
+}
+
+closed_list_is_punct: fn(bytes: [U8], token: ClosedListToken, value: Int) -> Bool {
+    token.kind == CLOSED_LIST_TOKEN_PUNCT && closed_list_at(bytes, token.start) == value
+}
+
+closed_list_is_word: fn(text: String, token: ClosedListToken, word: String) -> Bool {
+    token.kind == CLOSED_LIST_TOKEN_WORD && token.end - token.start == word.bytes().len() && policy_slice_bytes(text, token.start, token.end) == word
+}
+
+// The index just past the `// END GENERATED` line that closes the generated
+// block whose opening comment ends at `from`, or the end of `text`.
+closed_list_block_end: fn(text: String, bytes: [U8], from: Int) -> Int {
+    start := from
+    loop start < bytes.len() {
+        if closed_list_at(bytes, start) == 10 {
+            start += 1
+            next
+        }
+        end := start
+        loop end < bytes.len() && closed_list_at(bytes, end) != 10 -> end += 1
+        if policy_slice_bytes(text, start, end) == CLOSED_LIST_BLOCK_END -> return end
+        start = end
+    }
+    bytes.len()
+}
+
+// Where a member may follow in an enum body: at its start or after a `,`;
+// after a variant, its payload, a marker or a discriminant; or nowhere,
+// after a method, an `impl` or any other item.
+CLOSED_LIST_AT_START: 0
+CLOSED_LIST_AFTER_VARIANT: 1
+CLOSED_LIST_AFTER_HASH: 2
+CLOSED_LIST_AFTER_MARKER: 3
+CLOSED_LIST_AFTER_ITEM: 4
+CLOSED_LIST_IN_DISCRIMINANT: 5
+
+// The variants of the enum body that starts just past its `{` at `from`,
+// pushed to `out` lower-cased: `A B C`, `Custom(String)`, `Report{ code:
+// Int }`, `#Marker A` and `A = 1` each name one; a group `G { A B }` names
+// `G`. Returns the index just past the body's closing `}`.
+closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: &[String]) -> Int {
+    cursor := from
+    depth := 1
+    state := CLOSED_LIST_AT_START
+    // Whether a member may follow the bracket open at the body's depth: it
+    // holds a variant's payload, a group or a marker's arguments.
+    resume := false
+    loop {
+        token: closed_list_token(bytes, cursor)
+        if token.kind == CLOSED_LIST_TOKEN_END -> return cursor
+        cursor = token.end
+        if token.kind == CLOSED_LIST_TOKEN_COMMENT -> next
+        value: if token.kind == CLOSED_LIST_TOKEN_PUNCT -> closed_list_at(bytes, token.start) else -> 0
+        if value == 123 || value == 40 || value == 91 {
+            if depth == 1 -> resume = state != CLOSED_LIST_AFTER_ITEM && state != CLOSED_LIST_IN_DISCRIMINANT
+            depth += 1
+            next
+        }
+        if value == 125 || value == 41 || value == 93 {
+            depth -= 1
+            if depth == 0 -> return cursor
+            if depth == 1 -> state = if resume -> CLOSED_LIST_AFTER_VARIANT else -> CLOSED_LIST_AFTER_ITEM
+            next
+        }
+        if depth > 1 -> next
+        if token.kind == CLOSED_LIST_TOKEN_WORD {
+            if state == CLOSED_LIST_AFTER_HASH {
+                state = CLOSED_LIST_AFTER_MARKER
+                next
+            }
+            upper: closed_list_upper_byte(bytes[token.start])
+            if state != CLOSED_LIST_AFTER_ITEM && upper && !closed_list_is_punct(bytes, closed_list_code_token(bytes, token.end), 58) {
+                out.push(policy_slice_bytes(text, token.start, token.end).to_lower())
+                state = CLOSED_LIST_AFTER_VARIANT
+                next
+            }
+            if state == CLOSED_LIST_IN_DISCRIMINANT && !upper && !closed_list_is_punct(bytes, closed_list_code_token(bytes, token.end), 58) -> next
+            state = CLOSED_LIST_AFTER_ITEM
+            next
+        }
+        if value == 44 {
+            state = CLOSED_LIST_AT_START
+            next
+        }
+        if value == 35 {
+            state = CLOSED_LIST_AFTER_HASH
+            next
+        }
+        if value == 61 && state == CLOSED_LIST_AFTER_VARIANT {
+            state = CLOSED_LIST_IN_DISCRIMINANT
+            next
+        }
+        if state != CLOSED_LIST_IN_DISCRIMINANT -> state = CLOSED_LIST_AFTER_ITEM
+    }
+}
+
+// The string literals of the `[String]` body that starts just past its `{`
+// at `from`, pushed to `out` lower-cased. Returns the index just past the
+// body's closing `}`.
+closed_list_string_body: fn(text: String, bytes: [U8], from: Int, out: &[String]) -> Int {
+    cursor := from
+    depth := 1
+    loop {
+        token: closed_list_token(bytes, cursor)
+        if token.kind == CLOSED_LIST_TOKEN_END -> return cursor
+        cursor = token.end
+        if token.kind == CLOSED_LIST_TOKEN_STRING && closed_list_at(bytes, token.start) == 34 && token.end - token.start >= 2 {
+            out.push(policy_slice_bytes(text, token.start + 1, token.end - 1).to_lower())
+            next
+        }
+        if token.kind != CLOSED_LIST_TOKEN_PUNCT -> next
+        value: closed_list_at(bytes, token.start)
+        if value == 123 || value == 40 || value == 91 -> depth += 1
+        if value == 125 || value == 41 || value == 93 {
+            depth -= 1
+            if depth == 0 -> return cursor
+        }
+    }
+}
+
+closed_list_record: fn(path: String, name: String, members: [String], out: &[ClosedListFinding]) {
+    unique: closed_list_unique(members)
+    if unique.len() >= 3 -> out.push(ClosedListFinding{path: path, name: name, members: unique})
+}
+
+// The declaration the top-level word `name` opens: `Name: enum {…}`,
+// `NAME: [String]{…}` or `NAME: #run { [String]{…} }`, recorded in `out`
+// when it holds three or more members. A list a method call follows
+// (`[String]{…}.join("")`) is a String, not a list. Returns the index just
+// past the body, or -1 when `name` opens none of them.
+closed_list_declaration: fn(path: String, text: String, bytes: [U8], name: ClosedListToken, out: &[ClosedListFinding]) -> Int {
+    colon: closed_list_code_token(bytes, name.end)
+    if !closed_list_is_punct(bytes, colon, 58) -> return -1
+    head: closed_list_code_token(bytes, colon.end)
+    members := [String]{}
+    if closed_list_is_word(text, head, "enum") {
+        open: closed_list_code_token(bytes, head.end)
+        if !closed_list_is_punct(bytes, open, 123) -> return -1
+        end: closed_list_enum_members(text, bytes, open.end, members)
+        closed_list_record(path, policy_slice_bytes(text, name.start, name.end), members, out)
+        return end
+    }
+    bracket := head
+    if closed_list_is_punct(bytes, head, 35) {
+        run: closed_list_code_token(bytes, head.end)
+        if !closed_list_is_word(text, run, "run") -> return -1
+        brace: closed_list_code_token(bytes, run.end)
+        if !closed_list_is_punct(bytes, brace, 123) -> return -1
+        bracket = closed_list_code_token(bytes, brace.end)
+    }
+    if !closed_list_is_punct(bytes, bracket, 91) -> return -1
+    element: closed_list_code_token(bytes, bracket.end)
+    if !closed_list_is_word(text, element, "String") -> return -1
+    close: closed_list_code_token(bytes, element.end)
+    if !closed_list_is_punct(bytes, close, 93) -> return -1
+    open: closed_list_code_token(bytes, close.end)
+    if !closed_list_is_punct(bytes, open, 123) -> return -1
+    end: closed_list_string_body(text, bytes, open.end, members)
+    if !closed_list_is_punct(bytes, closed_list_code_token(bytes, end), 46) -> closed_list_record(path, policy_slice_bytes(text, name.start, name.end), members, out)
+    end
 }
 
 // Every closed list `text` declares at top level, outside the generated
-// blocks registered generators own, for the file `path`.
+// blocks registered generators own, for the file `path`. A declaration
+// after `priv` or `pub` is not one.
 closed_list_findings_in: fn(path: String, text: String, out: &[ClosedListFinding]) {
-    if !text.contains(": enum") && !text.contains("[String]{{") -> return
-    kind := ""
-    name := ""
-    members := [String]{}
-    owned := false
-    loop line in text.lines() {
-        if owned {
-            if line == CLOSED_LIST_BLOCK_END -> owned = false
+    if !text.contains("enum") && !text.contains("[String]") -> return
+    bytes: text.bytes()
+    depth := 0
+    // Whether the depth-0 token before keeps the next word from naming a
+    // declaration: `priv`, `pub` or a `.`.
+    held := false
+    cursor := 0
+    loop {
+        token: closed_list_token(bytes, cursor)
+        if token.kind == CLOSED_LIST_TOKEN_END -> break
+        cursor = token.end
+        if token.kind == CLOSED_LIST_TOKEN_COMMENT {
+            if depth == 0 && (token.start == 0 || closed_list_at(bytes, token.start - 1) == 10) && closed_list_registered_block(policy_slice_bytes(text, token.start, token.end)) -> cursor = closed_list_block_end(text, bytes, token.end)
             next
         }
-        if kind == "" && closed_list_registered_block(line) {
-            owned = true
+        if token.kind == CLOSED_LIST_TOKEN_PUNCT {
+            value: closed_list_at(bytes, token.start)
+            if value == 123 || value == 40 || value == 91 -> depth += 1
+            if (value == 125 || value == 41 || value == 93) && depth > 0 -> depth -= 1
+            held = value == 46
             next
         }
-        if kind != "" {
-            if line.starts_with("}}") {
-                unique: closed_list_unique(members)
-                if unique.len() >= 3 -> out.push(ClosedListFinding{path: path, name: name, members: unique})
-                kind = ""
+        if depth > 0 -> next
+        if token.kind != CLOSED_LIST_TOKEN_WORD {
+            held = false
+            next
+        }
+        if !held {
+            end: closed_list_declaration(path, text, bytes, token, out)
+            if end >= 0 {
+                cursor = end
                 next
             }
-            if line.trim_start().starts_with("//") -> next
-            if kind == "enum" {
-                if line.starts_with("    ") && !line.starts_with("     ") -> closed_list_enum_line_members(line, members)
-            } else {
-                closed_list_string_members(line, members)
-            }
-            next
         }
-        if line == "" || line.starts_with(" ") || line.starts_with("\t") || line.starts_with("/") -> next
-        if !line.contains(": enum") && !line.contains("[String]{{") -> next
-        ident: closed_list_ident_prefix(line)
-        if ident == "" -> next
-        bytes: line.bytes()
-        width: ident.bytes().len()
-        if width + 1 >= bytes.len() || (Int{bytes[width]}) != 58 -> next
-        rest: policy_slice_bytes(line, width + 1, bytes.len()).trim()
-        opened: closed_list_opener(rest)
-        if opened == "" -> next
-        name = ident
-        members = [String]{}
-        opener_end: closed_list_after(rest, if opened == "enum" -> "{{" else -> "]{{")
-        body: policy_slice_bytes(rest, opener_end, rest.bytes().len())
-        if rest.ends_with("}}") {
-            if opened == "enum" {
-                closed_list_enum_line_members(body, members)
-            } else {
-                closed_list_string_members(body, members)
-            }
-            unique: closed_list_unique(members)
-            if unique.len() >= 3 -> out.push(ClosedListFinding{path: path, name: name, members: unique})
-            next
-        }
-        if opened == "list" -> closed_list_string_members(body, members)
-        kind = opened
+        held = closed_list_is_word(text, token, "priv") || closed_list_is_word(text, token, "pub")
     }
 }
 

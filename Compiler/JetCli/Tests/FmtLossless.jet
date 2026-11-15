@@ -6,8 +6,7 @@
 // redundant default file aliases; typed-literal constructor dot removal;
 // formatter-added arm blocks, leading-dot variant patterns,
 // struct shorthand labels and separators; and a required default alias on a
-// dotted module import. Later ratified spellings add: the redundant default
-// alias in the `name: path` and `name: "file"` use forms; a one-member import
+// dotted module import. Later ratified spellings add: a one-member import
 // list; import grouping; a leading parameter sigil riding the type; `Unit` as
 // `()`; `Result<T, E>` as `T E!`; empty marker parentheses; dropped positional
 // names in a function type; the `,` ending a wrapped loop header; the choice
@@ -176,14 +175,6 @@ fl_canonical_tokens: fn(src: String, path: String) -> [FmtTok] {
         }
         // `use "./foo" as foo` and `use "./foo"` parse identically.
         if fl_redundant_default_file_alias(canonical, kept, index) {
-            index += 2
-            next
-        }
-        // The same redundant default alias in the `name: path` use
-        // spelling: `json: core.encoding.json` binds what
-        // `core.encoding.json` binds, and `text: "./text"` what `"./text"`
-        // binds.
-        if fl_redundant_default_module_alias(kept, index) || fl_redundant_file_binding_alias(kept, index) {
             index += 2
             next
         }
@@ -459,32 +450,6 @@ fl_in_use: fn(tokens: [FmtTok], index: Int) -> Bool {
     cursor := index - 1
     loop cursor >= 0 && (fl_kind(tokens, cursor) == TOKEN_IDENT || fl_kind(tokens, cursor) == TOKEN_DOT || fl_kind(tokens, cursor) == TOKEN_COLON) -> cursor -= 1
     fl_kind(tokens, cursor) == TOKEN_KW_USE
-}
-
-// `name: a.b.name` or `name: name` inside a use declaration, where the alias
-// repeats the path's last segment.
-fl_redundant_default_module_alias: fn(tokens: [FmtTok], index: Int) -> Bool {
-    if fl_kind(tokens, index) != TOKEN_IDENT || fl_kind(tokens, index + 1) != TOKEN_COLON || fl_kind(tokens, index + 2) != TOKEN_IDENT -> return false
-    open: fl_enclosing_brace(tokens, index)
-    in_use: fl_kind(tokens, index - 1) == TOKEN_KW_USE || (open >= 0 && fl_kind(tokens, open - 1) == TOKEN_KW_USE)
-    if !in_use -> return false
-    last := index + 2
-    loop fl_kind(tokens, last + 1) == TOKEN_DOT && fl_kind(tokens, last + 2) == TOKEN_IDENT -> last += 2
-    after: fl_kind(tokens, last + 1)
-    if after == TOKEN_DOT || after == TOKEN_LBRACKET -> return false
-    tokens[last].text == tokens[index].text
-}
-
-// `name: "dir/name"` inside a use declaration: the alias repeats the file
-// path's last segment.
-fl_redundant_file_binding_alias: fn(tokens: [FmtTok], index: Int) -> Bool {
-    if fl_kind(tokens, index) != TOKEN_IDENT || fl_kind(tokens, index + 1) != TOKEN_COLON || fl_kind(tokens, index + 2) != TOKEN_STRING -> return false
-    open: fl_enclosing_brace(tokens, index)
-    in_use: fl_kind(tokens, index - 1) == TOKEN_KW_USE || (open >= 0 && fl_kind(tokens, open - 1) == TOKEN_KW_USE)
-    if !in_use -> return false
-    path: fl_plain_string_value(tokens[index + 2].parts) ?? return false
-    segments: path.split("/").to_list()
-    segments[segments.len() - 1] == tokens[index].text
 }
 
 // `.[name]` after a dotless module name in a use declaration.
@@ -1691,6 +1656,22 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
     assert_eq(alone.text, "package: {{\n    name: \"p\"\n}}\n")
 }
 
+// fmt keeps a written import alias even when it repeats the path's last
+// segment: `use net: jet.runtime.net` keeps its `net:`, since the row without
+// it is a retired spelling, and so do the grouped module and file forms.
+#Test("fmt_keeps_a_written_import_alias") {
+    cases: [String]{
+        "use net: jet.runtime.net\n\nrun: fn() {{}}\n",
+        "use {{\n    json: core.encoding.json\n    store: \"./data/store\"\n}}\n\nrun: fn() {{}}\n",
+    }
+    loop source in cases {
+        result: jet_cli_fmt_ordinary(source, false, false)
+        assert(result.ok, "the source formats: {source}")
+        assert_eq(result.text, source)
+        assert_eq(fl_check_preserves("inline.jet", source, result.text), "")
+    }
+}
+
 // fmt keeps what a declaration means: the written `priv` of each kind of
 // top-level declaration, and the type arguments of an `Owner<Args>.Variant{ … }`
 // head on the owner, where `Tree.Node<Int>{ … }` would read as a typed literal.
@@ -1746,11 +1727,9 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"default module alias", "use core.encoding.json\nrun: fn() {{}}\n", "use core.encoding.json as json\nrun: fn() {{}}\n"},
         {"struct literal separator", "run: fn() {{ p: Point{{x: 1 y: 2}} }}\n", "run: fn() {{ p: Point{{x: 1, y: 2}} }}\n"},
         {"anonymous union member order", "S: struct {{ value: String | Char }}\n", "S: struct {{ value: Char | String }}\n"},
-        {"redundant default alias in the name: path spelling", "use {{\n    json: core.encoding.json\n}}\nrun: fn() {{}}\n", "use {{\n    core.encoding.json\n}}\nrun: fn() {{}}\n"},
         {"loop arrow body", "run: fn() {{\n    loop i in 0..<3 {{\n        print(i)\n    }}\n}}\n", "run: fn() {{\n    loop i in 0..<3 -> print(i)\n}}\n"},
         {"if arrow body expanded", "run: fn() {{\n    if ok -> return 1\n    print(0)\n}}\n", "run: fn() {{\n    if ok {{\n        return 1\n    }}\n    print(0)\n}}\n"},
         {"else arrow bodies", "run: fn() {{\n    if ok {{\n        a()\n    }} else {{\n        b()\n    }}\n}}\n", "run: fn() {{\n    if ok -> a() else -> b()\n}}\n"},
-        {"redundant file binding alias", "use {{\n    store: \"./data/store\"\n}}\nrun: fn() {{}}\n", "use {{\n    \"./data/store\"\n}}\nrun: fn() {{}}\n"},
         {"single-member import list", "use core.[files]\nrun: fn() {{}}\n", "use core.files\nrun: fn() {{}}\n"},
         {"leading parameter sigil", "f: fn(&&s: String) {{}}\n", "f: fn(s: &&String) {{}}\n"},
         {"unit type name", "f: fn() -> Unit {{}}\n", "f: fn() -> () {{}}\n"},
@@ -1804,12 +1783,11 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"union order rule rejects dotted member replacement", "S: struct {{ value: A | B.C }}\n", "S: struct {{ value: B | A.C }}\n"},
         {"union order rule rejects generic member replacement", "S: struct {{ value: A | B<C> }}\n", "S: struct {{ value: B | A<C> }}\n"},
         {"union order rule preserves every member", "S: struct {{ value: A | B }}\n", "S: struct {{ value: A | C }}\n"},
-        {"use-alias rule requires the default alias", "use {{\n    fs: core.files\n}}\nrun: fn() {{}}\n", "use {{\n    core.files\n}}\nrun: fn() {{}}\n"},
-        {"use-alias rule requires a use declaration", "run: fn() {{\n    json: core.encoding.json\n}}\n", "run: fn() {{\n    core.encoding.json\n}}\n"},
+        {"an import keeps a written alias that repeats its module path", "use {{\n    json: core.encoding.json\n}}\nrun: fn() {{}}\n", "use {{\n    core.encoding.json\n}}\nrun: fn() {{}}\n"},
+        {"an import keeps a written alias that repeats its file path", "use {{\n    store: \"./data/store\"\n}}\nrun: fn() {{}}\n", "use {{\n    \"./data/store\"\n}}\nrun: fn() {{}}\n"},
         {"control-arrow rule keeps the body", "run: fn() {{\n    loop i in 0..<3 {{\n        print(i)\n    }}\n}}\n", "run: fn() {{\n    loop i in 0..<3 -> print(0)\n}}\n"},
         {"control-arrow rule keeps the statement boundary", "run: fn() {{\n    loop i in 0..<3 {{\n        print(i)\n    }}\n    done()\n}}\n", "run: fn() {{\n    loop i in 0..<3 -> print(i) done()\n}}\n"},
         {"control-arrow rule leaves value-position arrows", "run: fn() {{\n    xs: loop i in 0..<3 -> i\n}}\n", "run: fn() {{\n    xs: loop i in 0..<3 {{ i }}\n}}\n"},
-        {"file-binding alias rule requires the default alias", "use {{\n    other: \"./data/store\"\n}}\nrun: fn() {{}}\n", "use {{\n    \"./data/store\"\n}}\nrun: fn() {{}}\n"},
         {"single-member import rule keeps the member", "use core.[files]\nrun: fn() {{}}\n", "use core.term\nrun: fn() {{}}\n"},
         {"sigil rule keeps the sigil", "f: fn(&&s: String) {{}}\n", "f: fn(s: String) {{}}\n"},
         {"unit rule leaves a Unit value path", "run: fn() {{ x: Unit.default() }}\n", "run: fn() {{ x: ().default() }}\n"},

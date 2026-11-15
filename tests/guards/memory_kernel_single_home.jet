@@ -75,6 +75,24 @@ mksh_kernel_entries: fn(manifest: String) -> [String] Never! {
     entries
 }
 
+// The markers a declaration at `lines[index]` carries, as one text with the
+// line breaks and indentation gone: the declaration line itself, where a
+// marker may lead, and the marker lines right above it: `#…` lines, a
+// wrapped group's inner lines and its closing `]` or `)`. A gate reads the
+// same however its markers are laid out.
+mksh_gate: fn(lines: [String], index: Int) -> String Never! {
+    gate := lines[index].trim()
+    above := index - 1
+    loop above >= 0 {
+        line: lines[above]
+        marker: line.starts_with("#") || line.starts_with(" ") || line.starts_with("\t") || line.starts_with("]") || line.starts_with(")")
+        if !marker -> break
+        gate = "{line.trim()}{gate}"
+        above -= 1
+    }
+    gate
+}
+
 // The kernel declarations of `source`, one finding per primitive that is not
 // declared exactly once or whose declaration states no precondition.
 mksh_home_findings: fn(source: String) -> [String] Never! {
@@ -86,8 +104,7 @@ mksh_home_findings: fn(source: String) -> [String] Never! {
         loop index in 0..<lines.len() {
             if !mksh_declares(lines[index], primitive.name) -> next
             count += 1
-            gate: if index > 0 && lines[index - 1].starts_with("#[") -> lines[index - 1] else -> lines[index]
-            if gate.contains("Unsafe(\"") -> gated = true
+            if mksh_gate(lines, index).contains("Unsafe(\"") -> gated = true
         }
         if count != 1 -> findings.push("{MKSH_KERNEL}: `{primitive.name}` ({primitive.action}) is declared {count} times; the kernel declares each primitive once")
         if count == 1 && !gated -> findings.push("{MKSH_KERNEL}: `{primitive.name}` ({primitive.action}) states no precondition; declare it behind `#Unsafe(\"…\")`")
@@ -154,4 +171,26 @@ mksh_home_findings: fn(source: String) -> [String] Never! {
     assert(!mksh_declares("// alloc_raw: fn is the kernel's", "alloc_raw"))
     assert_eq(mksh_kernel_entries("policy: {{\n    memory: .Kernel([\"Source/A.jet\", \"Source/B.jet\"]),\n}}"), [String]{"Source/A.jet", "Source/B.jet"})
     assert_eq(mksh_kernel_entries("name: \"x\""), [String]{})
+    // A gate reads the same on the declaration's line, on its own line above
+    // it, and wrapped as a marker group; a comment or another item above ends
+    // the markers.
+    gated: [String]{
+        "#Unsafe(\"why\") free_raw: fn(p: Int) Never! {{",
+        "#Unsafe(\"why\")\nfree_raw: fn(p: Int) Never! {{",
+        "#[Inline(Always), Unsafe(\"why\")]\nfree_raw: fn(p: Int) Never! {{",
+        "#[\n    Inline(Always),\n    Unsafe(\"why\"),\n]\nfree_raw: fn(p: Int) Never! {{",
+        "#Unsafe(\n    \"why\"\n)\nfree_raw: fn(p: Int) Never! {{",
+    }
+    loop source in gated {
+        lines: source.split("\n").to_list()
+        assert(mksh_gate(lines, lines.len() - 1).contains("Unsafe(\""), "the gate of: {source}")
+    }
+    ungated: [String]{
+        "#Unsafe(\"why\")\nother: fn() {{}}\n\nfree_raw: fn(p: Int) Never! {{",
+        "#Unsafe(\"why\")\n// note\nfree_raw: fn(p: Int) Never! {{",
+    }
+    loop source in ungated {
+        lines: source.split("\n").to_list()
+        assert(!mksh_gate(lines, lines.len() - 1).contains("Unsafe(\""), "no gate in: {source}")
+    }
 }

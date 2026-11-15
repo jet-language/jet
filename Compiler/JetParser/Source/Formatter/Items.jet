@@ -2776,21 +2776,23 @@ jfmt_fmt_import_head: fn(f: &JetFmt, imp: ImportDecl) {
     jfmt_write(f, "use ")
 }
 
-// One import row; an alias prints as `alias: path` (#6542).
+// One import row; an alias prints as `alias: path` (#6542). A written alias
+// always prints: dropping one that repeats the path's last segment would
+// keep the binding but change the spelling the row was written in.
 jfmt_fmt_import_row: fn(f: &JetFmt, imp: ImportDecl) {
     if imp.kind == {
-        .File(path, _) -> {
-            if imp.alias != jfmt_last_segment(path, "/") -> jfmt_write(f, "{imp.alias}: ")
+        .File(path, span) -> {
+            if imp.alias != jfmt_last_segment(path, "/") || jfmt_import_alias_written(imp, span) -> jfmt_write(f, "{imp.alias}: ")
             jfmt_write(f, "\"")
             jfmt_write(f, path)
             jfmt_write(f, "\"")
         }
-        .Module(name, _) -> {
+        .Module(name, span) -> {
             // A two-segment `a.b` with no alias reads as the member `b` of
             // `a`, so that module keeps its alias even when it repeats the
-            // last segment; `foo` and `a.b.c` can omit a matching one.
+            // last segment.
             two_segments: name.split(".").to_list().len() == 2
-            if imp.alias != jfmt_last_segment(name, ".") || two_segments -> jfmt_write(f, "{imp.alias}: ")
+            if imp.alias != jfmt_last_segment(name, ".") || two_segments || jfmt_import_alias_written(imp, span) -> jfmt_write(f, "{imp.alias}: ")
             jfmt_write(f, name)
             // U11 `use pkg#version;` inline dep.
             if imp.inline_version == .Val(version) {
@@ -2829,6 +2831,13 @@ jfmt_fmt_import_row: fn(f: &JetFmt, imp: ImportDecl) {
             jfmt_write(f, "]")
         }
     }
+}
+
+// Whether the row's alias was written (`alias: path`) rather than taken from
+// the path: a written alias ends before the path starts, while a taken one
+// shares the path's span.
+jfmt_import_alias_written: fn(imp: ImportDecl, path_span: Span) -> Bool Never! {
+    imp.alias_span.start < path_span.start && imp.alias_span.end <= path_span.start
 }
 
 jfmt_fmt_field: fn(f: &JetFmt, field: Field, derives_decode: Bool) {
