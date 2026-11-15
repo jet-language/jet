@@ -1428,7 +1428,9 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         if found.witness == "" && export == "" -> return Err(problem("plain transport {found.name} names no C host and no codec export"))
         fixture: "{native}/Source/Fixture.jet"
         files.write(fixture, "{unit}{entry}{ended}") ?? return Err(problem("`{fixture}` cannot be written: {err}"))
-        package: files.read("{repo}/Compiler/JetRuntime/package.jet") ?? return Err(problem("`Compiler/JetRuntime/package.jet` cannot be read: {err}"))
+        // The unit's own package.jet names its memory kernel by checkout
+        // path, the way the composed Fixture.jet names its sources.
+        package: files.read("{raw}/package.jet") ?? return Err(problem("`{raw}/package.jet` cannot be read: {err}"))
         files.write("{native}/package.jet", package) ?? return Err(problem("`{native}/package.jet` cannot be written: {err}"))
         // The fragments witness the allocator a program built without
         // `--checked-alloc` runs, so the checked heap's init hook stays out;
