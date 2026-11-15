@@ -1261,7 +1261,9 @@ sema_scope_environment_enter_module: fn(environment: &SemaScopeEnvironment, prog
 }
 
 // A comptime probe borrows the program graph and replaces only scope facts.
-// Its else-arm/debug-site reset differs from real declaration/body entry.
+// Its else-arm reset differs from real declaration/body entry; it keeps the
+// module's debug sites, so a compile-time `debug(…)` writes its expression
+// text and carries its E3405 unwrap edit as a run-time one does.
 // False when the graph has no such module.
 sema_scope_environment_enter_probe_module: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, comptime_body_values: &&SemaComptimeBodyValues) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
@@ -1278,7 +1280,7 @@ sema_scope_environment_enter_probe_module: fn(environment: &SemaScopeEnvironment
         environment.generic_params = [TGenericParam]{}
         environment.comptime_body_values = comptime_body_values.move()
         environment.else_arms = [ElseArmSpan]{}
-        environment.debug_sites = [DebugTraceSite]{}
+        environment.debug_sites = graph.modules[module_index].program.debug_sites
         environment.function_name = ""
         return true
     }

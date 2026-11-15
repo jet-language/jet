@@ -460,6 +460,11 @@ THostCall: enum {
     // text is `key`; `default` reads the constant itself, and `equatable`
     // says the value's type has equality (ContextKeys.jet).
     ContextGet(key: String, default: TExpr, equatable: Bool)
+    // `debug(value)`'s trace line, `write` the `core.term.eprint` call of it
+    // (Calls/Direct.jet sema_call_check_special_debug). Running code makes
+    // the call; compile-time code hands its one argument, the line, to the
+    // compiler, which prints it while compiling.
+    DebugTrace(write: TExpr)
 }
 
 TCoreClosureKind: enum {
@@ -1146,6 +1151,7 @@ tree_each_host_call_child: fn(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem
         .TupleIndex(base, _) -> visit(base)
         .YieldSend(value) -> visit(value)
         .ComptimeInput(_, path, _) -> visit(path)
+        .DebugTrace(write) -> visit(write)
         .ContextGet(_, default, _) -> visit(default)
         .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
     }

@@ -375,8 +375,9 @@ JetDriverCompileRequest: struct {
     // Explicit callable shared by named jobs, generation and evaluation.
     selected_entry: String?{None}
     profile: String{JET_BUILD_DEFAULT_PROFILE}
-    // A shipped artifact (`jet build`): sema rejects every remaining `debug`
-    // trace (E3405), as a release-profile compile does.
+    // A shipped artifact (`jet build`), or the `jet fix` pass that removes
+    // what one refuses: sema rejects every remaining `debug` trace (E3405),
+    // as a release-profile compile does.
     artifact_build: Bool{false}
     // `dead_code: remove` on the executable route (`jet build`, `jet run`, a
     // script, `jet dev`): the entry package's top-level bodies lower only when
@@ -762,6 +763,8 @@ JetDriverLoadedModule: struct {
 JetDriverCompileTrace: struct {
     stdout: [String]
     stderr: [String]
+    // Each comptime item's JetEvalIRResult.debug_trace.
+    debug_trace: [String]{[String]{}}
     soft_stop: Bool
     exit_code: Int?
 }
@@ -838,6 +841,10 @@ JetDriverCompileResult: struct {
     package_effects: [PackageEffects]{[PackageEffects]{}}
     comptime_stdout: String
     comptime_stderr: String
+    // The `debug` trace lines compile-time code printed while compiling, in
+    // evaluation order; the CLI writes them to stderr (Request.jet
+    // jet_cli_comptime_debug_trace).
+    comptime_debug_trace: String{""}
     soft_stop: Bool
     exit_code: Int?
     failed_stage: JetDriverStage?

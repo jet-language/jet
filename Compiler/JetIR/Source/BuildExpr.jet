@@ -2001,6 +2001,20 @@ ir_splits: fn(p: IRProgram, b: IRBuilder, expression: Int) -> Bool Never! {
     ir_body_node(p, b, expression).kind == .CoreCall(_, _, _, _, _, _)
 }
 
+// The line `debug`'s trace `write` (THostCall.DebugTrace) hands its
+// `core.term.eprint` call: the call's one argument, a registered Core row's
+// or the source-owned declaration's.
+ir_debug_trace_line: fn(p: IRProgram, b: IRBuilder, write: Int) -> Int? Never! {
+    node: ir_body_node(p, b, write)
+    if node.kind == .CoreCall(_, args, _, _, _, _) {
+        if args.len() == 1 -> return Val(args[0])
+    }
+    if node.kind == .Call(_, _, args) {
+        if args.len() == 1 -> return Val(args[0].value)
+    }
+    None
+}
+
 ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Never! {
     expression_ty: ir_ty(p, b, expression)
     if ir_failed(b) -> return -1
@@ -2361,6 +2375,19 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
             }
             if call == .ContextGet(key, default, _) {
                 return ir_context_get(m, p, b, expression_ty, key, default, span)
+            }
+            if call == .DebugTrace(write) {
+                // Running code writes `debug`'s trace line through its
+                // `core.term.eprint` call. Compile-time code hands the line to
+                // the compiler (ir_host_route kind 7), which prints it while
+                // compiling: the comptime child's own stderr is a Tier-2 effect.
+                if !p.comptime_values -> return ir_expr(m, p, b, write)
+                line: ir_debug_trace_line(p, b, write) ?? return ir_fail_slot(b, span, "debug trace without its line")
+                line_text: ir_expr(m, p, b, line)
+                if ir_failed(b) -> return -1
+                word_row: ir_word_row(m)
+                _: ir_host_route(m, b, 7, word_row, [Int]{line_text})
+                return -1
             }
             if call == .ComptimeInput(builtin, path, pin) {
                 // Sema refuses every input a runtime entry can reach (E0956),

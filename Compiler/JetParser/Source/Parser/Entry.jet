@@ -46,20 +46,29 @@ use {
         TOKEN_AT,
         TOKEN_BANG,
         TOKEN_BLOCK_COMMENT,
+        TOKEN_CHAR,
         TOKEN_COLON,
+        TOKEN_COLON_COLON,
         TOKEN_COMMA,
         TOKEN_COLON_EQ,
         TOKEN_DOT,
         TOKEN_EOF,
+        TOKEN_EQ,
+        TOKEN_FALSE,
         TOKEN_FENCE_CLOSE,
         TOKEN_FENCE_OPEN,
+        TOKEN_FLOAT,
         TOKEN_HASH,
         TOKEN_IDENT,
+        TOKEN_INT,
         TOKEN_KW_EFFECT,
         TOKEN_KW_ENUM,
         TOKEN_KW_EXTERN,
         TOKEN_KW_FN,
+        TOKEN_KW_IF,
         TOKEN_KW_IMPL,
+        TOKEN_KW_IN,
+        TOKEN_KW_LOOP,
         TOKEN_KW_MODULE,
         TOKEN_KW_PRIV,
         TOKEN_KW_PUB,
@@ -71,10 +80,23 @@ use {
         TOKEN_LINE_COMMENT,
         TOKEN_LBRACKET,
         TOKEN_LPAREN,
+        TOKEN_NULL,
+        TOKEN_PLUS_EQ,
+        TOKEN_QUESTION,
+        TOKEN_QUESTION_DOT,
+        TOKEN_RAW_STRING,
         TOKEN_RBRACE,
         TOKEN_RBRACKET,
+        TOKEN_RETURN,
         TOKEN_RPAREN,
+        TOKEN_SELF,
         TOKEN_SEMI,
+        TOKEN_SHR_EQ,
+        TOKEN_STRING,
+        TOKEN_TILDE_PIPE_EQ,
+        TOKEN_TRUE,
+        TOKEN_UNIFIED_ARROW,
+        TOKEN_UNIT_NUMBER,
         Token,
         TokenTables,
         lex,
@@ -842,8 +864,80 @@ parser_collect_debug_trace_sites: fn(tokens: [Token], tables: TokenTables, debug
         close_end: tokens[close].span.end
         if start < 0 || end <= start || close_end > source.len() -> next
         text: String.from_bytes(source.slice(start, end)) ?? next
-        sites.push(DebugTraceSite{name_start: token.span.start, text: text, close_end: close_end})
+        grouped: parser_debug_argument_compound(tokens, open + 1, last) && parser_debug_call_tight(tokens, source, index, close)
+        sites.push(DebugTraceSite{name_start: token.span.start, text: text, close_end: close_end, grouped: grouped})
     }
+}
+
+// Whether the argument tokens `first` through `last` are more than one
+// operand: outside any bracket they hold a token no single operand has (an
+// operator or keyword), or two operands side by side (`x as Int`). An
+// operand is a name or literal with its member steps, calls, indexes and
+// bodies.
+parser_debug_argument_compound: fn(tokens: [Token], first: Int, last: Int) -> Bool Never! {
+    depth := 0
+    operand := false
+    loop index in first..<last + 1 {
+        kind: tokens[index].kind
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE {
+            depth += 1
+            next
+        }
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE {
+            depth -= 1
+            if depth == 0 -> operand = true
+            next
+        }
+        if depth > 0 || kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> next
+        if kind == TOKEN_DOT || kind == TOKEN_QUESTION_DOT || kind == TOKEN_COLON_COLON {
+            operand = false
+            next
+        }
+        if kind == TOKEN_QUESTION || kind == TOKEN_BANG {
+            if !operand -> return true
+            next
+        }
+        if !parser_debug_operand_token(kind) || operand -> return true
+        operand = true
+    }
+    false
+}
+
+parser_debug_operand_token: fn(kind: Int) -> Bool Never! {
+    kind == TOKEN_IDENT || kind == TOKEN_RAW_STRING || kind == TOKEN_STRING || kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER || kind == TOKEN_CHAR || kind == TOKEN_TRUE || kind == TOKEN_FALSE || kind == TOKEN_SELF || kind == TOKEN_NULL
+}
+
+// Whether the `debug(…)` call from token `name` to its `)` at `close` stands
+// where an operator expression would bind differently without its own
+// parentheses: anywhere but a whole value (after `:`, `=`, `->`, `return`,
+// an opening bracket or `,`, or at a statement start) that ends there.
+parser_debug_call_tight: fn(tokens: [Token], source: [U8], name: Int, close: Int) -> Bool Never! {
+    if name > 0 {
+        before: tokens[name - 1]
+        starts: parser_debug_line_between(source, before.span.end, tokens[name].span.start) && (parser_debug_operand_token(before.kind) || before.kind == TOKEN_RPAREN || before.kind == TOKEN_RBRACKET || before.kind == TOKEN_RBRACE)
+        if !starts && !parser_debug_value_opener(before.kind) -> return true
+    }
+    if close + 1 >= tokens.len() -> return false
+    after: tokens[close + 1]
+    if parser_debug_line_between(source, tokens[close].span.end, after.span.start) -> return after.kind == TOKEN_DOT || after.kind == TOKEN_QUESTION_DOT
+    !parser_debug_value_closer(after.kind)
+}
+
+parser_debug_value_opener: fn(kind: Int) -> Bool Never! {
+    kind == TOKEN_COLON || kind == TOKEN_COLON_EQ || kind == TOKEN_EQ || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_RETURN || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE || kind == TOKEN_COMMA || kind == TOKEN_SEMI || kind == TOKEN_KW_IF || kind == TOKEN_KW_IN || kind == TOKEN_KW_LOOP || kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT || (kind >= TOKEN_PLUS_EQ && kind <= TOKEN_SHR_EQ) || kind == TOKEN_TILDE_PIPE_EQ
+}
+
+parser_debug_value_closer: fn(kind: Int) -> Bool Never! {
+    kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE || kind == TOKEN_COMMA || kind == TOKEN_SEMI || kind == TOKEN_EOF || kind == TOKEN_LBRACE || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT
+}
+
+// Whether the source bytes `start..<end` hold a line break.
+parser_debug_line_between: fn(source: [U8], start: Int, end: Int) -> Bool Never! {
+    if start < 0 || end > source.len() -> return false
+    loop index in start..<end {
+        if source[index] == 10 -> return true
+    }
+    false
 }
 
 parser_parse_program: fn(state: &JetParserState) -> Program {

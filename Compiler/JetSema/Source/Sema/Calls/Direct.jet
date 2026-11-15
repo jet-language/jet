@@ -224,9 +224,11 @@ sema_call_debug_expression_text: fn(text: String) -> String Never! {
 
 // `debug(value)` evaluates the value once, writes
 // `[debug] file.jet:LINE expr = <Debug form>` to stderr through the shared
-// `core.term.eprint` row, and yields the value unchanged. The trace adds no
+// `core.term.eprint` row, and yields the value unchanged; compile-time code
+// prints the line while compiling (THostCall.DebugTrace). The trace adds no
 // effect. A shipped artifact or a release-profile build rejects it (E3405)
-// with an edit that keeps the traced expression exactly as written.
+// with an edit that keeps the traced expression exactly as written, in
+// parentheses where the call's place needs them (DebugTraceSite.grouped).
 sema_call_check_special_debug: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.args.len() != 1 || call.args[0].label != None || call.args[0].spread {
@@ -244,7 +246,8 @@ sema_call_check_special_debug: fn(call: Call, expected: Type?, environment: Sema
     loop recorded in environment.debug_sites {
         if recorded.name_start == call.name_span.start {
             authored = Val(recorded.text)
-            unwrap = Val(TextEdit{span: Span{start: call.name_span.start, end: recorded.close_end}, new_text: recorded.text})
+            kept: if recorded.grouped -> "({recorded.text})" else -> recorded.text
+            unwrap = Val(TextEdit{span: Span{start: call.name_span.start, end: recorded.close_end}, new_text: kept})
             break
         }
     }
@@ -287,9 +290,10 @@ sema_call_check_special_debug: fn(call: Call, expected: Type?, environment: Sema
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     write: sema_tree_node(unit, kind, call.name_span)
+    trace: sema_tree_node(unit, TExprKind.HostCall{call: THostCall.DebugTrace{write: write}}, call.name_span)
     body: [TStmt]{
         TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: traced, gc_promotion: None, gc_transferred: false, span: call.name_span},
-        TStmt.ExprStmt{value: write, span: call.name_span},
+        TStmt.ExprStmt{value: trace, span: call.name_span},
         TStmt.ExprStmt{value: read, span: call.name_span},
     }
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(checked.ty, TExprKind.InlineBlock{body: body}, call.name_span))}

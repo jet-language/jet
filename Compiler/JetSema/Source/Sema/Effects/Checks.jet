@@ -1286,7 +1286,7 @@ sema_effect_record_context: fn(nodes: &[SemaEffectNode], node_index: Int, tree: 
                 if field != "scratch" && !nodes[node_index].context_reads.contains(field) -> nodes[node_index].context_reads.push(field.copy())
             }
             .ContextGet(key, default, equatable) -> sema_effect_add_context_key(nodes[node_index].context_keys, TEffectContextKey{key: key.copy(), ty: body_type(tree, default), equatable: equatable})
-            .Method(_, _, _) | .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) -> {}
+            .Method(_, _, _) | .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .DebugTrace(_) -> {}
         }
         return
     }
@@ -6799,6 +6799,7 @@ sema_effect_walk_host_call_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffec
         .TupleIndex(base, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, base)
         .YieldSend(value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, value)
         .ComptimeInput(_, path, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, path)
+        .DebugTrace(write) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, write)
         .ContextGet(_, default, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, default)
         .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
     }

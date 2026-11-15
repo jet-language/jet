@@ -9,6 +9,7 @@ use {
     cli_files: core.files
     cli_sys: core.sys
     cli_tasks: core.tasks
+    cli_term: core.term
     jet_foundation.[
         AppAuthorizedDirectory,
         BuildOptions,
@@ -110,8 +111,13 @@ use {
 // an artifact. `trace_sink` traces the keep-going report write
 // (`keepgoing.report`).
 jet_cli_compile_request: fn(request: &&JetDriverCompileRequest, trace_sink: JetCLITraceSink?{None}) -> JetDriverCompileResult {
-    if !jet_cli_keep_going_enabled() -> return jet_driver_compile(request)
+    if !jet_cli_keep_going_enabled() {
+        compiled: jet_driver_compile(request)
+        jet_cli_comptime_debug_trace(compiled)
+        return compiled
+    }
     result := jet_driver_compile_keep_going(request, JetDriverKeepGoing{skip: jet_cli_control_items("keep_going_skip")})
+    jet_cli_comptime_debug_trace(result)
     if result.keep_going_rows.len() > 0 -> result.complete = false
     if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
     problem: jet_cli_keep_going_report(result.keep_going_rows)
@@ -124,14 +130,28 @@ jet_cli_compile_request: fn(request: &&JetDriverCompileRequest, trace_sink: JetC
 // stopped before lowering, with the checked inputs the route builds from
 // (Pipeline `jet_driver_lowering_inputs`), under the same keep-going collector.
 jet_cli_lowering_inputs: fn(request: &&JetDriverCompileRequest, trace_sink: JetCLITraceSink?) -> JetDriverLoweringInputsResult {
-    if !jet_cli_keep_going_enabled() -> return jet_driver_lowering_inputs(request, None)
+    if !jet_cli_keep_going_enabled() {
+        lowered: jet_driver_lowering_inputs(request, None)
+        jet_cli_comptime_debug_trace(lowered.compile)
+        return lowered
+    }
     front := jet_driver_lowering_inputs(request, Val(JetDriverKeepGoing{skip: jet_cli_control_items("keep_going_skip")}))
+    jet_cli_comptime_debug_trace(front.compile)
     if front.compile.keep_going_rows.len() > 0 -> front.compile.complete = false
     if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
     problem: jet_cli_keep_going_report(front.compile.keep_going_rows)
     if trace_sink == .Val(sink) -> sink.end("keepgoing.report", front.compile.keep_going_rows.len())
     if problem != "" -> return JetDriverLoweringInputsResult{compile: jet_driver_compile_escaped_failure(problem), inputs: None}
     front
+}
+
+// The `debug` trace lines the compile's compile-time code printed
+// (JetDriverCompileResult.comptime_debug_trace), written to stderr as the
+// compile ends, ahead of anything the verb reports.
+jet_cli_comptime_debug_trace: fn(result: JetDriverCompileResult) {
+    if result.comptime_debug_trace == "" -> return
+    stderr_handle := cli_term.stderr()
+    stderr_handle.write(result.comptime_debug_trace).drop("jet stderr")
 }
 
 // `--keep-going` selects the all-phases collector.

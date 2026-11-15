@@ -1,8 +1,10 @@
 // `debug(value)` returns its value unchanged and writes one stderr
 // line with the file, line, expression text, and Debug form. It adds no
 // effect, so pure (`-[]>`) and memoized functions can use it; a memoized
-// function traces only when its body runs, never on a cache hit. `jet build`
-// and release-profile builds reject a leftover trace (E3405).
+// function traces only when its body runs, never on a cache hit.
+// Compile-time code traces too: a `#run` value's trace prints while the
+// program compiles. `jet build` and release-profile builds reject a
+// leftover trace (E3405), and `jet fix` removes the wrapper.
 #Memo score: fn(word: String) -[]> Int {
     total: debug(word.len() * 3)
     total + 1
@@ -10,10 +12,13 @@
 
 label: fn(name: String) -[]> String { debug("<{name}>") }
 
+TABLE_SIZE: #run debug(4 * 8)
+
 run: fn() {
     print(score("jet"))
     print(score("jet"))
     print(label("ok"))
     words: debug([String]{"a", "b"})
     print(words.len())
+    print(TABLE_SIZE)
 }

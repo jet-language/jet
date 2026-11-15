@@ -423,6 +423,7 @@ jet_driver_compile_result: fn(
         entry_module_identity: module_text(load.module_table, load.entry_module_identity),
         comptime_stdout: trace.stdout.join(""),
         comptime_stderr: trace.stderr.join(""),
+        comptime_debug_trace: trace.debug_trace.join(""),
         soft_stop: trace.soft_stop,
         exit_code: trace.exit_code,
         failed_stage: failed_stage,
@@ -782,6 +783,7 @@ jet_driver_empty_compile_trace: fn() -> JetDriverCompileTrace Never! {
 jet_driver_record_eval_result: fn(trace: &JetDriverCompileTrace, result: JetEvalIRResult) Never! {
     if result.stdout.len() > 0 -> trace.stdout.push(result.stdout)
     if result.stderr.len() > 0 -> trace.stderr.push(result.stderr)
+    if result.debug_trace.len() > 0 -> trace.debug_trace.push(result.debug_trace)
     if result.exit_code != None -> trace.exit_code = result.exit_code
 }
 
@@ -2204,7 +2206,7 @@ jet_driver_comptime_local_value_runs: fn(values: &[SemaComptimeItemValue], sourc
 // produced a value: it printed, ended the program, stopped, ran out of
 // steps, failed, or could not run.
 jet_driver_comptime_local_value_eval_reason: fn(result: JetEvalIRResult) -> String? {
-    if result.stdout.len() > 0 || result.stderr.len() > 0 -> return Val("it prints text")
+    if result.stdout.len() > 0 || result.stderr.len() > 0 || result.debug_trace.len() > 0 -> return Val("it prints text")
     if result.exit_code != None -> return Val("it ends the program")
     if result.internal_problem == .Val(problem) {
         return Val("the compile-time evaluator can't run it ({problem.message})")
@@ -5206,6 +5208,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     staged_functions: comptime_run.functions.len()
     printed_stdout: trace.stdout.len()
     printed_stderr: trace.stderr.len()
+    printed_debug_trace: trace.debug_trace.len()
     printed_soft_stop: trace.soft_stop
     printed_exit_code: trace.exit_code
     checked_graph := jet_driver_finalize_program(finalize_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, trace, request)
@@ -5222,6 +5225,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         loop comptime_run.functions.len() > staged_functions -> _ := comptime_run.functions.pop()
         loop trace.stdout.len() > printed_stdout -> _ := trace.stdout.pop()
         loop trace.stderr.len() > printed_stderr -> _ := trace.stderr.pop()
+        loop trace.debug_trace.len() > printed_debug_trace -> _ := trace.debug_trace.pop()
         trace.soft_stop = printed_soft_stop
         trace.exit_code = printed_exit_code
         checked_graph = jet_driver_finalize_program(rerun_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, trace, request)

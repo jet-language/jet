@@ -753,10 +753,10 @@ ir_host_literal: fn(m: &IRModule, b: &IRBuilder, row: Int, value: TComptimeValue
 
 // A host route of compile-time code: the comptime child hands its compiler
 // (JetRuntime ComptimeServe.jet) route `kind` (1 method, 2 field, 3 comptime
-// input, 5 compiler value constant, 6 compiler value literal) and a stack
-// area of words, the answer's row key and then `operands`; the compiler reads
-// them and answers a value of row `row`, in place when it is an aggregate (or
-// a float, which a word cell carries).
+// input, 5 compiler value constant, 6 compiler value literal, 7 `debug` trace
+// line) and a stack area of words, the answer's row key and then `operands`;
+// the compiler reads them and answers a value of row `row`, in place when it
+// is an aggregate (or a float, which a word cell carries).
 ir_host_route: fn(m: &IRModule, b: &IRBuilder, kind: Int, row: Int, operands: [Int]) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     area: ir_temp(m, b, pointer_row)

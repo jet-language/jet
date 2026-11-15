@@ -37,7 +37,8 @@ jet_cli_fix_round: fn(fixes: [JetCLIFix], repairs: [JetCLIFix], all: Bool) -> Je
 // with the fixes so far, that a `jet fix` query reads: the entry's
 // diagnostics and definition facts alone, so Core bodies wait for demand
 // (JetDriverCompileRequest.doc_core_on_demand). A file the fixes leave
-// unchanged is read from disk.
+// unchanged is read from disk. It is checked as a shipped artifact is, so
+// each `debug` trace a build would refuse (E3405) brings its unwrap edit.
 jet_cli_fix_compile: fn(file: String, source: String, files: [JetCLIFixFile], texts: [String?]) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{JetCLIOverlay{path: file, source: source}}
     loop (row, other) in files {
@@ -52,6 +53,7 @@ jet_cli_fix_compile: fn(file: String, source: String, files: [JetCLIFixFile], te
         .Prepared(request, snapshot) -> {
             demanded := request.move()
             demanded.doc_core_on_demand = true
+            demanded.artifact_build = true
             jet_cli_compile_prepared(JetCLIPrepared.Prepared{request: demanded.move(), snapshot: snapshot.move()}, None, None)
         }
     }

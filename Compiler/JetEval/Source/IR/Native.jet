@@ -42,6 +42,7 @@ use {
         X64_COMPTIME_HOST_LITERAL,
         X64_COMPTIME_HOST_METHOD,
         X64_COMPTIME_HOST_MISSING,
+        X64_COMPTIME_HOST_TRACE,
         X64_COMPTIME_INT,
         X64_COMPTIME_READ,
         X64_COMPTIME_REFUSED,
@@ -180,6 +181,8 @@ JetEvalIRState: struct {
     budget: Int
     stdout: String
     stderr: String
+    // JetEvalIRResult.debug_trace.
+    debug_trace: String{""}
     max_depth: Int
     runtime_execution: Bool
     // config.eval_entry: ambient effects other than the runtime child's
@@ -975,7 +978,7 @@ jet_eval_ir_effect_refused: fn(s: &JetEvalIRState, what: String, nondeterministi
 
 jet_eval_ir_result: fn(s: JetEvalIRState, value: TComptimeValue?) -> JetEvalIRResult Never! {
     complete: value != None && !jet_eval_ir_failed(s)
-    JetEvalIRResult{value: if complete -> value else -> None, complete: complete, error: s.failure, internal_problem: s.internal_problem, stdout: s.stdout, stderr: s.stderr, exit_code: s.exit_code, steps: 0}
+    JetEvalIRResult{value: if complete -> value else -> None, complete: complete, error: s.failure, internal_problem: s.internal_problem, stdout: s.stdout, stderr: s.stderr, debug_trace: s.debug_trace, exit_code: s.exit_code, steps: 0}
 }
 
 // ---------------------------------------------------------------------------
@@ -1005,6 +1008,7 @@ jet_eval_native_host: fn(s: &JetEvalIRState, kind: Int, operands: Int, count: In
         X64_COMPTIME_HOST_INPUT -> jet_eval_ir_comptime_input_route(s, args, row)
         X64_COMPTIME_HOST_CONSTANT -> jet_eval_ir_host_constant_route(s, args, row, result)
         X64_COMPTIME_HOST_LITERAL -> jet_eval_ir_host_literal_route(s, args, row, result)
+        X64_COMPTIME_HOST_TRACE -> jet_eval_ir_debug_trace_route(s, args)
         else -> jet_eval_ir_primitive_shape(s, "jet_comptime_host")
     } ?? return None
     reads: types_cell.guard_read()
@@ -1035,6 +1039,17 @@ jet_eval_native_answer_row: fn(s: &JetEvalIRState, types_cell: Shared<IRModule>,
 jet_eval_ir_primitive_shape: fn(s: &JetEvalIRState, name: String) -> Int? Never! {
     jet_eval_ir_problem(s, "host primitive {name} called with the wrong operands")
     None
+}
+
+// `debug(value)` in compile-time code (JetIR THostCall.DebugTrace): its one
+// operand is the trace line's String, which the compiler prints while
+// compiling (JetEvalIRResult.debug_trace), so it is no output of the
+// evaluated code's own.
+jet_eval_ir_debug_trace_route: fn(s: &JetEvalIRState, args: [Int]) -> Int? {
+    if args.len() != 1 -> return jet_eval_ir_primitive_shape(s, "jet_comptime_debug_trace")
+    line: jet_eval_ir_text(s, args[0]) ?? return None
+    s.debug_trace = "{s.debug_trace}{line}\n"
+    Val(0)
 }
 
 // jet_comptime_input(builtin, path): the value the compiler's comptime input

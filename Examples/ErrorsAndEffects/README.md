@@ -12,6 +12,10 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [PreBreach](Contracts/PreBreach.jet) — A broken `#Pre` stops at the call, the same on every tier.
 - [PrePost](Contracts/PrePost.jet) — `#Pre`/`#Post` function contracts.
 
+## Debugging
+
+- [Dbg](Debugging/Dbg.jet) — `debug(value)` returns its value unchanged and writes one stderr line with the file, line, expression text, and Debug form.
+
 ## Effects
 
 - [AuditedGateLadder](Effects/AuditedGateLadder.jet) — All audited escapes use the same policy ladder.
