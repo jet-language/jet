@@ -65,6 +65,8 @@ use {
         name_index,
         name_intern,
         name_table,
+        name_pool_adopt,
+        name_pool_fold,
         ImportedItem,
         TextEdit,
         diagnostic_with_migration_edit,
@@ -2683,7 +2685,8 @@ jet_driver_build_entry_members: fn(request: JetDriverCompileRequest, source_unit
     waiting_names := [[String]]{}
     waiting_words := [[String]]{}
     // The wave's results come back last-first: each pop is the next member.
-    parsed := jet_driver_parse_wave(request, source_units, members, 0, -1, -1) ?? return None
+    wave: jet_driver_parse_wave(request, source_units, members, 0, -1, -1, name_table()) ?? return None
+    parsed := wave.units.move()
     loop index in members {
         member: parsed.pop() ?? return None
         found: member.words.move() ?? {
@@ -4086,7 +4089,7 @@ jet_driver_parse_user_unit: fn(text: String, retain_demand: Bool) -> JetDriverPa
 // source chunks (lex_threads, which also yields the newline table) and its
 // parse splits at item boundaries (parse_lexed_with_source_threads).
 // Fallible like every thread-spawning step of the parse wave.
-jet_driver_parse_user_unit_threads: fn(text: String, retain_demand: Bool, threads: CompilerThreads) -> JetDriverParsedUnit {
+jet_driver_parse_user_unit_threads: fn(text: String, retain_demand: Bool, threads: CompilerThreads, shared: NameTable, own: &NameTable) -> JetDriverParsedUnit {
     // The one copy of the file's bytes: the carrier scan reads it, the mask
     // blanks it in place, the lexer and parser read it.
     source := text.bytes()
@@ -4100,6 +4103,7 @@ jet_driver_parse_user_unit_threads: fn(text: String, retain_demand: Bool, thread
     lines: lexed.line_starts.len() - 1
     // A lexer error ends the frontend before the parse.
     if jet_driver_has_errors(lexed.lexed.diagnostics) -> return JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: lexed.lexed.diagnostics}, demand: jet_driver_empty_core_identifier_demand(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move()}
+    name_pool_adopt(lexed.lexed.tables.names, shared, own)
     spellings := jet_driver_unit_spellings(source, lexed.lexed.tokens, lexed.lexed.tables)
     scanned := jet_driver_collect_core_identifier_demand_threads(lexed.lexed.move(), lexed.runs, retain_demand, true, threads)
     demand := scanned.demand.move()
@@ -4210,11 +4214,19 @@ jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
 // (parse_lexed_with_source_threads); a wave that already runs its
 // units on several threads parses each unit on one.
 jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> JetDriverParsedUnit {
+    own := name_table()
+    jet_driver_parse_unit(job, threads, name_table(), own)
+}
+
+// jet_driver_parse_one for one unit of a wave: its spellings' Strings come
+// from the load's spelling pool (name_pool_adopt): `shared`, and `own`,
+// which gains the ones it met first.
+jet_driver_parse_unit: fn(job: JetDriverParseJob, threads: CompilerThreads, shared: NameTable, own: &NameTable) -> JetDriverParsedUnit {
     if job == {
-        .Source(text) -> jet_driver_parse_user_unit_threads(text, true, threads)
-        .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
-        .Prelude(text) -> jet_driver_parse_prelude_source(text, threads)
-        .Core(text, module_name, owned_members, runtime, tested) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, tested, threads)
+        .Source(text) -> jet_driver_parse_user_unit_threads(text, true, threads, shared, own)
+        .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, threads, shared, own)
+        .Prelude(text) -> jet_driver_parse_prelude_source(text, threads, shared, own)
+        .Core(text, module_name, owned_members, runtime, tested) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, tested, threads, shared, own)
         .Missing -> JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
     }
 }
@@ -4227,11 +4239,12 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
 // source): it keeps its `#Test` controls and is reached whole. Any other
 // unit holds back the declarations the load parses only once it reaches
 // them (jet_driver_reach_hold).
-jet_driver_parse_core_source: fn(text: String, module_name: String, owned_members: [String], runtime: Bool, entry: Bool, threads: CompilerThreads) -> JetDriverParsedUnit {
+jet_driver_parse_core_source: fn(text: String, module_name: String, owned_members: [String], runtime: Bool, entry: Bool, threads: CompilerThreads, shared: NameTable, own: &NameTable) -> JetDriverParsedUnit {
     source := text.bytes()
     carrier: jet_driver_inline_package_threads(text, source, threads)
     if carrier.found -> jet_driver_blank_bytes(source, carrier.start, carrier.end)
     lexed := lex_generated_threads(source, threads)
+    name_pool_adopt(lexed.lexed.tables.names, shared, own)
     tokens: lexed.lexed.tokens.len()
     lines: lexed.line_starts.len() - 1
     spellings := jet_driver_unit_spellings(source, lexed.lexed.tokens, lexed.lexed.tables)
@@ -4311,8 +4324,8 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
 // - an `impl X -> Err` conversion is a Core error family row: the compiler
 //   injects the routine for a family member (FailureLaw.jet
 //   sema_prelude_error_conversion), so X must be one and the target `Err`.
-jet_driver_parse_prelude_source: fn(text: String, threads: CompilerThreads) -> JetDriverParsedUnit {
-    unit := jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
+jet_driver_parse_prelude_source: fn(text: String, threads: CompilerThreads, shared: NameTable, own: &NameTable) -> JetDriverParsedUnit {
+    unit := jet_driver_parse_core_source(text, "", [String]{}, true, true, threads, shared, own)
     unit.parsed.program.items = jet_driver_prelude_checked_items(unit.parsed.program.items, "", text, unit.parsed.diagnostics)
     unit
 }
@@ -4599,23 +4612,28 @@ jet_driver_core_private_unit: fn(module_name: String, span: Span) -> Diagnostic?
 // One parse thread's jobs, held last-first; parsed and returned first-first.
 // `threads` is the budget each unit's parse may split across: a wave's
 // single part gets the compiler threads; a claimed unit (a wave of several
-// threads) parses on its own thread, so no spawned thread spawns.
-jet_driver_parse_part: fn(jobs: [JetDriverParseJob], threads: CompilerThreads) -> [JetDriverParsedUnit] {
+// threads) parses on its own thread, so no spawned thread spawns. The units
+// take their spellings' Strings from the pool `shared` and `own`
+// (name_pool_adopt).
+jet_driver_parse_part: fn(jobs: [JetDriverParseJob], threads: CompilerThreads, shared: NameTable, own: &NameTable) -> [JetDriverParsedUnit] {
     results := [JetDriverParsedUnit]{}
     index := jobs.len()
     loop index > 0 {
         index -= 1
-        results.push(jet_driver_parse_one(jobs[index], threads))
+        results.push(jet_driver_parse_unit(jobs[index], threads, shared, own))
     }
     results
 }
 
-// What every parse thread reads: the wave's jobs in `pending` order and the
+// What every parse thread reads: the wave's jobs in `pending` order, the
 // claim order, heaviest first, so the largest files start first and the
-// small ones fill the threads' tails.
+// small ones fill the threads' tails, and the load's spellings from the
+// waves before (the pool's `shared`, name_pool_adopt), one table held as a
+// row so the wave takes it back after the join.
 JetDriverParseInputs: struct {
     jobs: [JetDriverParseJob]
     order: [Int]
+    spellings: [NameTable]
 }
 
 // The next unclaimed rank, taken with one atomic add under a read guard each
@@ -4630,35 +4648,45 @@ JetDriverParseClaimed: struct {
     unit: JetDriverParsedUnit
 }
 
-// Runs claiming threads `from..<workers`, one task each, and moves every
-// unit a thread parsed into its position's slot of `placed`.
-jet_driver_parse_claimers: fn(inputs: Shared<JetDriverParseInputs>, queue: Shared<JetDriverParseQueue>, from: Int, workers: Int, placed: &[JetDriverParsedUnit?]) {
+// What one parse thread returns: its claimed parses and the spellings it
+// met first (its pool's `own`, name_pool_adopt).
+JetDriverParseThread: struct {
+    claimed: [JetDriverParseClaimed]
+    spellings: NameTable
+}
+
+// Runs claiming threads `from..<workers`, one task each, moves every unit a
+// thread parsed into its position's slot of `placed` and adds the spellings
+// each thread met first to `spellings`.
+jet_driver_parse_claimers: fn(inputs: Shared<JetDriverParseInputs>, queue: Shared<JetDriverParseQueue>, from: Int, workers: Int, placed: &[JetDriverParsedUnit?], spellings: &[NameTable]) {
     if from >= workers -> return
     task.group parse_threads {
         head: task jet_driver_parse_claimed(inputs, queue)
-        jet_driver_parse_claimers(inputs, queue, from + 1, workers, placed)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
-        loop claimed.len() > 0 {
-            done := claimed.pop() ?? break
+        jet_driver_parse_claimers(inputs, queue, from + 1, workers, placed, spellings)
+        thread := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop thread.claimed.len() > 0 {
+            done := thread.claimed.pop() ?? break
             position: done.position
             placed[position] = Val(done.unit.move())
         }
+        spellings.push(thread.spellings.move())
     }
 }
 
 // One thread: parses the jobs it claims until none is left.
-jet_driver_parse_claimed: fn(inputs: Shared<JetDriverParseInputs>, queue: Shared<JetDriverParseQueue>) -> [JetDriverParseClaimed] {
+jet_driver_parse_claimed: fn(inputs: Shared<JetDriverParseInputs>, queue: Shared<JetDriverParseQueue>) -> JetDriverParseThread {
     rows: inputs.guard_read()
     ranks: queue.guard_read()
     claimed := [JetDriverParseClaimed]{}
+    own := name_table()
     loop {
         rank: ranks.value.next.add(1)
         if rank >= rows.value.order.len() -> break
         position: rows.value.order[rank]
         // Passed straight through: a local binding of a guarded row would copy it.
-        claimed.push(JetDriverParseClaimed{position: position, unit: jet_driver_parse_one(rows.value.jobs[position], compiler_threads_single())})
+        claimed.push(JetDriverParseClaimed{position: position, unit: jet_driver_parse_unit(rows.value.jobs[position], compiler_threads_single(), rows.value.spellings[0], own)})
     }
-    claimed
+    JetDriverParseThread{claimed: claimed.move(), spellings: own.move()}
 }
 
 // A parse thread is admitted for at least this much source, so a small
@@ -4668,6 +4696,13 @@ JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD: 262144
 // parse (tokens, line starts, and parser state beside the retained program).
 JET_DRIVER_PARSE_SCRATCH_PER_BYTE: 64
 
+// A parse wave's units, in `pending` order, last-first, and the load's
+// spellings (name_pool_adopt) with the ones the wave met first added.
+JetDriverParseWave: struct {
+    units: [JetDriverParsedUnit]
+    spellings: NameTable
+}
+
 // Parses `pending[first..]`, the units queued since the last wave, on the
 // admitted threads; the results come back in `pending` order, last-first, so
 // the load loop pops them in queue order. Parsing reads nothing but each
@@ -4675,7 +4710,9 @@ JET_DRIVER_PARSE_SCRATCH_PER_BYTE: 64
 // parsing each unit when the loop reaches it.
 // `runtime_entry` is the source-unit index of an exact runtime entry, or -1;
 // `prelude_entry` is the index of a `jet check --prelude` entry, or -1.
-jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], pending: [Int], first: Int, runtime_entry: Int, prelude_entry: Int) -> [JetDriverParsedUnit] {
+// `spellings` holds the load's spellings so far: the wave's units take
+// their Strings from it.
+jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], pending: [Int], first: Int, runtime_entry: Int, prelude_entry: Int, spellings: &&NameTable) -> JetDriverParseWave {
     jobs := [JetDriverParseJob]{}
     weights := [Int]{}
     total := 0
@@ -4726,26 +4763,34 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
     }
     workers: compiler_threads_admit(request.compiler_threads, jobs.len(), total, JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD, largest * JET_DRIVER_PARSE_SCRATCH_PER_BYTE, 0)
     results := [JetDriverParsedUnit]{}
+    pooled := spellings.move()
     if workers <= 1 {
         // One part: it parses on this thread, and each unit may split its own
         // parse across the compiler threads.
         jobs.reverse()
-        results = jet_driver_parse_part(jobs, request.compiler_threads)
+        own := name_table()
+        results = jet_driver_parse_part(jobs, request.compiler_threads, pooled, own)
         results.reverse()
+        name_pool_fold(pooled, own)
     } else {
         // Claimed heaviest first: a static byte partition left most threads
         // idle while the ones holding the largest files finished.
         count: jobs.len()
-        inputs: Shared{JetDriverParseInputs{jobs: jobs.move(), order: compiler_threads_heaviest_first(weights)}}
+        inputs: Shared{JetDriverParseInputs{jobs: jobs.move(), order: compiler_threads_heaviest_first(weights), spellings: [NameTable]{pooled.move()}}}
         queue: Shared{JetDriverParseQueue{next: 0}}
         placed := [JetDriverParsedUnit?]{}
         loop _ in 0..<count -> placed.push(None)
-        jet_driver_parse_claimers(inputs, queue, 0, workers, placed)
+        met := [NameTable]{}
+        jet_driver_parse_claimers(inputs, queue, 0, workers, placed, met)
         loop placed.len() > 0 {
             slot := placed.pop() ?? break
             unit := slot.move() ?? panic("a parse job's unit left its thread")
             results.push(unit)
         }
+        // The load's spellings, back from the shared inputs after the join.
+        permit: inputs.guard_edit()
+        pooled = permit.value.spellings.pop() ?? panic("the parse wave left the load's spellings in its shared inputs")
+        loop own in met -> name_pool_fold(pooled, own)
     }
     // One input-volume delta per completed wave, summed by the trace reader.
     // The byte counters are loaded payloads; `lines` (newlines) and `tokens`
@@ -4778,7 +4823,7 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
         sink.progress("counters.parse.core_tokens", core_tokens, 0)
         sink.progress("counters.parse.tokens", user_tokens + core_tokens, 0)
     }
-    results
+    JetDriverParseWave{units: results.move(), spellings: pooled.move()}
 }
 jet_driver_add_core_unit: fn(source_units: &[JetDriverSourceUnit], queued: &[Bool], generated: &[SourceFile], module_name: String, relative_path: String, file_index: Int, source: String) -> Int {
     path: "{JET_DRIVER_CORE_SOURCE_ROOT}/{relative_path}"
@@ -5210,6 +5255,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     // The current parse wave's results, last-first: every unit queued when
     // the wave starts is parsed at once, on the admitted compiler threads.
     parsed := [JetDriverParsedUnit]{}
+    // The spellings of the units parsed so far (name_pool_adopt), whose Strings
+    // the later waves' units share.
+    spellings := name_table()
     loop {
         if pending_index == pending.len() {
             // Every queued unit is loaded: when a module carries a Module
@@ -5278,7 +5326,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         if parsed.len() == 0 {
             wave_size: pending.len() - pending_index
             if request.trace_sink == .Val(sink) -> sink.begin("parse", if wave_size == 1 -> source_units[pending[pending_index]].relative_path else -> "{wave_size} files", pending_index, pending.len())
-            parsed = jet_driver_parse_wave(request, source_units, pending, pending_index, if entry_module != "" -> entry_index ?? 0 else -> -1, if request.prelude_entry -> entry_index ?? 0 else -> -1)
+            wave: jet_driver_parse_wave(request, source_units, pending, pending_index, if entry_module != "" -> entry_index ?? 0 else -> -1, if request.prelude_entry -> entry_index ?? 0 else -> -1, spellings.move())
+            parsed = wave.units.move()
+            spellings = wave.spellings.move()
             if request.trace_sink == .Val(sink) {
                 items := 0
                 loop wave_result in parsed -> items += wave_result.parsed.program.items.len()

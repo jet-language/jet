@@ -85,24 +85,37 @@ name_bytes_equal: fn(table: NameTable, id: Int, hash: Int, bytes: [U8], start: I
     true
 }
 
-// The id of `bytes[start..<end]`, interning it when it is new. A spelling
-// that is not UTF-8 resolves to "" but keeps its own id.
-name_intern_bytes: fn(table: &NameTable, bytes: [U8], start: Int, end: Int) -> Name Never! {
-    hash: name_hash(bytes, start, end)
+// The slot of `bytes[start..<end]` (whose `name_hash` is `hash`) in
+// `table`: the one holding its id, or the empty one a new id takes.
+name_slot: fn(table: NameTable, hash: Int, bytes: [U8], start: Int, end: Int) -> Int Never! {
     slot := hash.bit_and(table.mask)
     loop table.slots[slot] != 0 {
-        id: table.slots[slot] - 1
-        if name_bytes_equal(table, id, hash, bytes, start, end) -> return Name{id: U32{id}}
+        if name_bytes_equal(table, table.slots[slot] - 1, hash, bytes, start, end) -> return slot
         slot = (slot + 1).bit_and(table.mask)
     }
+    slot
+}
+
+// Gives `bytes[start..<end]` (hash `hash`), whose String is `text`, the
+// next id at the empty slot `slot`.
+name_insert: fn(table: &NameTable, slot: Int, hash: Int, bytes: [U8], start: Int, end: Int, text: &&String) -> Name Never! {
     id: table.texts.len()
     table.bytes.extend(bytes[start..<end])
     table.ends.push(table.bytes.len())
     table.hashes.push(hash)
-    table.texts.push(String.from_bytes(bytes.slice(start, end)) ?? "")
+    table.texts.push(text)
     table.slots[slot] = id + 1
     if (id + 1) * 2 > table.mask -> name_table_grow(table)
     Name{id: U32{id}}
+}
+
+// The id of `bytes[start..<end]`, interning it when it is new. A spelling
+// that is not UTF-8 resolves to "" but keeps its own id.
+name_intern_bytes: fn(table: &NameTable, bytes: [U8], start: Int, end: Int) -> Name Never! {
+    hash: name_hash(bytes, start, end)
+    slot: name_slot(table, hash, bytes, start, end)
+    if table.slots[slot] != 0 -> return Name{id: U32{table.slots[slot] - 1}}
+    name_insert(table, slot, hash, bytes, start, end, String.from_bytes(bytes.slice(start, end)) ?? "")
 }
 
 // The id of `text` when the table holds it; never interns.
@@ -114,14 +127,9 @@ name_find: fn(table: NameTable, text: String) -> Name? Never! {
 // The id of `bytes[start..<end]` when the table holds that spelling; never
 // interns.
 name_find_bytes: fn(table: NameTable, bytes: [U8], start: Int, end: Int) -> Name? Never! {
-    hash: name_hash(bytes, start, end)
-    slot := hash.bit_and(table.mask)
-    loop table.slots[slot] != 0 {
-        id: table.slots[slot] - 1
-        if name_bytes_equal(table, id, hash, bytes, start, end) -> return Val(Name{id: U32{id}})
-        slot = (slot + 1).bit_and(table.mask)
-    }
-    None
+    slot: name_slot(table, name_hash(bytes, start, end), bytes, start, end)
+    if table.slots[slot] == 0 -> return None
+    Val(Name{id: U32{table.slots[slot] - 1}})
 }
 
 name_intern: fn(table: &NameTable, text: String) -> Name Never! {
@@ -141,6 +149,43 @@ name_table_grow: fn(table: &NameTable) Never! {
     }
     table.slots = slots.move()
     table.mask = mask
+}
+
+// A load's spelling pool. Each lexed source keeps a table of its own, so its
+// ids stay its own, but equal spellings across a load's sources need only
+// one String: a source's table takes it from the pool (name_pool_adopt)
+// before anything reads the table's Strings. The pool is two tables:
+// `shared`, the spellings of the load's earlier parse waves, which every
+// parse thread of a wave reads and none writes, and a thread's `own`, the
+// spellings it met first, which name_pool_fold adds to `shared` after the
+// wave.
+
+// Points each spelling of `table` at the pool's String for it; a spelling
+// the pool lacks joins `own` with the table's String. Ids and bytes stay.
+name_pool_adopt: fn(table: &NameTable, shared: NameTable, own: &NameTable) Never! {
+    loop id in 0..<table.texts.len() {
+        start: name_start(table, id)
+        end: table.ends[id]
+        hash: table.hashes[id]
+        found: name_slot(shared, hash, table.bytes, start, end)
+        if shared.slots[found] != 0 {
+            table.texts[id] = name_text(shared, Name{id: U32{shared.slots[found] - 1}})
+            next
+        }
+        slot: name_slot(own, hash, table.bytes, start, end)
+        if own.slots[slot] == 0 -> _ := name_insert(own, slot, hash, table.bytes, start, end, name_text(table, Name{id: U32{id}})) else -> table.texts[id] = name_text(own, Name{id: U32{own.slots[slot] - 1}})
+    }
+}
+
+// Adds each spelling of `own` that `shared` lacks, with its String, to
+// `shared`.
+name_pool_fold: fn(shared: &NameTable, own: NameTable) Never! {
+    loop id in 0..<own.texts.len() {
+        start: name_start(own, id)
+        end: own.ends[id]
+        slot: name_slot(shared, own.hashes[id], own.bytes, start, end)
+        if shared.slots[slot] == 0 -> _ := name_insert(shared, slot, own.hashes[id], own.bytes, start, end, name_text(own, Name{id: U32{id}}))
+    }
 }
 
 // Loaded modules by identity (#6793, Docs/spec/compiler-data.md). The loader
