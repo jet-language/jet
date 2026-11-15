@@ -6,6 +6,7 @@
 // as a value), and a `task` spawned where a caller is certain, since a
 // spawned task acts for no account.
 use jet_foundation.[
+    CompilerThreads,
     Diagnostic,
     FnBody,
     NodeKind,
@@ -14,6 +15,9 @@ use jet_foundation.[
     body_each_expr_child,
     body_each_stmt_child,
     body_node,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_partition,
     diagnostic_registry_row,
     module_is_core,
     symbol_find,
@@ -67,8 +71,12 @@ SemaAppCallerReport: struct {
 }
 
 // The E2815 reports of the program. A program outside Core that never
-// calls `app.caller` walks nothing: one scan of its bodies finds that.
-sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
+// calls `app.caller` walks nothing: one scan of its bodies finds that. The
+// scan reads each function on its own, so it runs on as many of `threads`
+// as its bodies admit (sema_app_caller_scans), its parts joined in function
+// order: the program, the gate and the reports are the same for any thread
+// count.
+sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], threads: CompilerThreads) -> [Diagnostic] {
     // `app.caller` and `app.as_caller` as a call resolves them: the app
     // module's own declarations.
     app_index: loop index in 0..<graph.modules.len() {
@@ -78,23 +86,41 @@ sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     } ?? return [Diagnostic]{}
     caller: sema_registration_direct_symbol(graph.modules[app_index], "caller") ?? return [Diagnostic]{}
     as_caller: sema_registration_direct_symbol(graph.modules[app_index], "as_caller") ?? return [Diagnostic]{}
-    program := SemaAppCallerProgram{functions: [SemaAppCallerFunction]{}, rows: [U32:Int]{}, signed_in: [U32:Bool]{}, caller: caller.symbol.id.id, as_caller: as_caller.symbol.id.id}
+    places := [SemaAppCallerPlace]{}
+    weights := [Int]{}
+    work := 0
     loop module_index in 0..<modules.len() {
         if module_is_core(modules[module_index].module_identity) -> next
         loop function_index in 0..<modules[module_index].functions.len() {
-            symbol: symbol_find(graph.symbols, modules[module_index].functions[function_index].key) ?? next
-            program.rows[symbol.id] = program.functions.len()
-            program.functions.push(SemaAppCallerFunction{symbol: symbol.id, module_index: module_index, function_index: function_index})
+            places.push(SemaAppCallerPlace{module_index: module_index, function_index: function_index})
+            weight: 1 + modules[module_index].functions[function_index].tree.nodes.len()
+            weights.push(weight)
+            work += weight
         }
     }
-    // What each function calls: the functions outside Core it reaches, and
-    // `app.caller` where one calls it, read from the bodies as the walk
-    // reads them.
-    called := [U32:Bool]{}
-    loop entry in program.functions {
-        sema_app_caller_collect_calls(graph, program, modules[entry.module_index].functions[entry.function_index], called)
+    workers: compiler_threads_admit(threads, places.len(), work, SEMA_APP_CALLER_NODES_PER_THREAD, 0, 0)
+    bounds: if workers <= 1 -> [Int]{0, places.len()} else -> compiler_threads_partition(weights, workers)
+    scans: sema_app_caller_scans(graph, modules, places, bounds, 0)
+    program := SemaAppCallerProgram{functions: [SemaAppCallerFunction]{}, rows: [U32:Int]{}, signed_in: [U32:Bool]{}, caller: caller.symbol.id.id, as_caller: as_caller.symbol.id.id}
+    reached := false
+    loop scan in scans {
+        if scan.callees.get(program.caller) != None -> reached = true
     }
-    if called.get(program.caller) == None -> return [Diagnostic]{}
+    if !reached -> return [Diagnostic]{}
+    loop scan in scans {
+        loop function in scan.functions {
+            program.rows[function.symbol] = program.functions.len()
+            program.functions.push(function)
+        }
+    }
+    // What the functions call: the functions outside Core they reach, and
+    // `app.caller`, read from the bodies as the walk reads them.
+    called := [U32:Bool]{}
+    loop scan in scans {
+        loop (symbol, _) in scan.callees {
+            if symbol == program.caller || program.rows.get(symbol) != None -> called[symbol] = true
+        }
+    }
     // The marked methods: a public one, a webhook and a signing key each
     // start a path, before the others, so a report names the marked method
     // its path starts at; a signed-in one has its caller, so only a task it
@@ -184,20 +210,69 @@ sema_app_caller_name: fn(function: FnBody) -> String Never! {
     "{function.name}"
 }
 
-// Adds each function outside Core that `function` calls or names, and
-// `app.caller` when it calls that, to `called`.
-sema_app_caller_collect_calls: fn(graph: SemaRegistrationGraph, program: SemaAppCallerProgram, function: FnBody, called: &[U32:Bool]) Never! {
+// The functions outside Core the app.caller scan reads: where each one's
+// body is.
+SemaAppCallerPlace: struct {
+    module_index: Int
+    function_index: Int
+}
+
+// One part of the scan: its functions that have a run-wide symbol, in
+// order, and every symbol their bodies call or name.
+SemaAppCallerScan: struct {
+    functions: [SemaAppCallerFunction]
+    callees: [U32:Bool]
+}
+
+// The app.caller scan's threads (compiler_threads_admit): a thread is
+// admitted for at least this many body nodes, a few milliseconds of
+// lookups.
+SEMA_APP_CALLER_NODES_PER_THREAD: 20000
+
+// The scans of the parts from bounds `at` on, each but the last on a task of
+// its own, in part order.
+sema_app_caller_scans: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], places: [SemaAppCallerPlace], bounds: [Int], at: Int) -> [SemaAppCallerScan] Never! {
+    done := [SemaAppCallerScan]{}
+    if at + 1 >= bounds.len() -> return done
+    from: bounds[at]
+    to: bounds[at + 1]
+    if at + 2 == bounds.len() {
+        done.push(sema_app_caller_scan(graph, modules, places, from, to))
+        return done
+    }
+    task.group sema_app_caller_scan_threads {
+        head: task sema_app_caller_scan(graph, modules, places, from, to)
+        rest: sema_app_caller_scans(graph, modules, places, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+// The scan of functions `from..<to` of `places`.
+sema_app_caller_scan: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], places: [SemaAppCallerPlace], from: Int, to: Int) -> SemaAppCallerScan Never! {
+    scan := SemaAppCallerScan{functions: [SemaAppCallerFunction]{}, callees: [U32:Bool]{}}
+    loop index in from..<to {
+        place: places[index]
+        function: modules[place.module_index].functions[place.function_index]
+        symbol: symbol_find(graph.symbols, function.key) ?? next
+        scan.functions.push(SemaAppCallerFunction{symbol: symbol.id, module_index: place.module_index, function_index: place.function_index})
+        sema_app_caller_scan_calls(graph, function, scan.callees)
+    }
+    scan
+}
+
+// Adds each symbol `function` calls or names to `callees`.
+sema_app_caller_scan_calls: fn(graph: SemaRegistrationGraph, function: FnBody, callees: &[U32:Bool]) Never! {
     loop statement in function.body {
-        body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_app_caller_collect_expr(graph, program, function, expression, called) })
+        body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_app_caller_scan_expr(graph, function, expression, callees) })
     }
 }
 
-sema_app_caller_collect_expr: fn(graph: SemaRegistrationGraph, program: SemaAppCallerProgram, function: FnBody, expression: Int, called: &[U32:Bool]) Never! {
+sema_app_caller_scan_expr: fn(graph: SemaRegistrationGraph, function: FnBody, expression: Int, callees: &[U32:Bool]) Never! {
     node: body_node(function.tree, expression)
-    if sema_app_caller_callee(graph, function, node.kind) == .Val(symbol) && (symbol == program.caller || program.rows.get(symbol) != None) {
-        called[symbol] = true
-    }
-    body_each_expr_child(function.tree, node, fn(child: Int) { sema_app_caller_collect_expr(graph, program, function, child, called) })
+    if sema_app_caller_callee(graph, function, node.kind) == .Val(symbol) -> callees[symbol] = true
+    body_each_expr_child(function.tree, node, fn(child: Int) { sema_app_caller_scan_expr(graph, function, child, callees) })
 }
 
 // Walks a root: one where a caller is certain (a signed-in method) only for

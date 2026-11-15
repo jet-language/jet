@@ -12457,7 +12457,10 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     loop diagnostic in sema_http_unmounted_warnings(final_graph, modules) {
         diagnostics.push(diagnostic)
     }
-    loop diagnostic in sema_app_caller_diagnostics(final_graph, modules) {
+    if trace_sink == .Val(sink) -> sink.begin("sema.app_caller", "", -1, -1)
+    app_caller: sema_app_caller_diagnostics(final_graph, modules, threads)
+    if trace_sink == .Val(sink) -> sink.end("sema.app_caller", app_caller.len())
+    loop diagnostic in app_caller {
         complete = false
         diagnostics.push(diagnostic)
     }
