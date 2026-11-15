@@ -656,11 +656,12 @@ editor_event_from_event: fn(event: JetDevtoolsEvent) -> EditorStreamEvent Editor
     EditorStreamEvent.new(event.sequence(), event.timestamp_ms, event.source().copy(), event.kind().copy(), event.entity().copy(), fields, payload)
 }
 editor_source_url: fn(workbench_url: String, source_id: String, line: U32, column: U32) -> String Never! {
-    end := workbench_url.bytes().len()
-    loop end > 0 && workbench_url.bytes()[end - 1] == (U8{47}) -> end -= 1
-    base := workbench_url.slice(0, end) // #4303
+    // The trailing slashes are trimmed by byte, so the base is copied by byte.
+    bytes: workbench_url.bytes()
+    end := bytes.len()
+    loop end > 0 && bytes[end - 1] == (U8{47}) -> end -= 1
     out := [U8]{}
-    editor_append(out, base)
+    loop index in 0..<end -> out.push(bytes[index])
     editor_append(out, "?source_id=")
     editor_percent_encode(source_id, out)
     editor_append(out, "&line={line}&column={column}")

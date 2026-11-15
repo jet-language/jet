@@ -11,7 +11,7 @@ use {
     ]
     jet_driver.[jet_driver_apply_edits, jet_driver_has_errors]
     jet_env_model.[envmodel_evaluate_env, envmodel_workspace_evaluate]
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, TextEdit, diagnostic_render_all, sha256_hex]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, TextEdit, diagnostic_render_all, foundation_byte_text, sha256_hex]
     jet_lsp.[LSPChecker, LSPOverlay]
     jet_parser.[jet_format_source]
     jet_pkg_model.[DepSpec, PackageFacts, pkg_add_dependency, pkg_dep_display_redacted, pkg_remove_dependency]
@@ -181,7 +181,7 @@ game_selection_audit_json: fn(targets: [GameSelectionTarget], patch: GameSelecti
 // argument of a `.component<…>(…)` call.
 game_field_edit: fn(source: String, source_span: Span, field: String, value: String) -> TextEdit Err! {
     if source_span.end > source.count_bytes() -> return Err(project_edit_error("bad_request", "game selection `source_span` is outside the source file"))
-    selected: source.slice(source_span.start, source_span.end)
+    selected: foundation_byte_text(source.bytes(), source_span.start, source_span.end)
     name: field.trim()
     if name == "path" {
         if game_call_argument_span(selected, source_span.start, [String]{"image", "sound"}) == .Val(span) -> return Ok(edit(span, game_string_literal(value)))
@@ -204,12 +204,14 @@ game_field_edit: fn(source: String, source_span: Span, field: String, value: Str
     Err(project_edit_error("bad_request", "Canvas game field patches support only `path`, `component`, `type`, or `name`"))
 }
 
-// Whether the text just before `span` ends with one of `needles`.
+// Whether the text just before `span` ends with one of `needles`. Spans count
+// bytes, so the text is cut and searched by byte.
 game_source_context_contains: fn(source: String, span: Span, needles: [String]) -> Bool Never! {
-    prefix: source.slice(0, span.start)
+    prefix: foundation_byte_text(source.bytes(), 0, span.start)
     loop needle in needles {
-        position: prefix.last_index_of(needle) ?? next
-        if prefix.slice(position + needle.count_bytes(), prefix.count_bytes()).trim() == "" -> return true
+        position: prefix.rfind(needle)
+        if position < 0 -> next
+        if foundation_byte_text(prefix.bytes(), position + needle.count_bytes(), prefix.count_bytes()).trim() == "" -> return true
     }
     false
 }
@@ -220,7 +222,8 @@ game_call_argument_span: fn(selected: String, offset: Int, methods: [String]) ->
     method_at := -1
     method_len := 0
     loop method in methods {
-        position: selected.index_of(".{method}(") ?? next
+        position: selected.find(".{method}(")
+        if position < 0 -> next
         if method_at < 0 || position < method_at {
             method_at = position
             method_len = method.count_bytes()
@@ -263,15 +266,20 @@ game_call_argument_span: fn(selected: String, offset: Int, methods: [String]) ->
 
 // The span of the type argument of the `.component<…>` call in `selected`.
 game_component_type_span: fn(selected: String, offset: Int) -> Span? Never! {
-    method: selected.index_of(".component") ?? return None
-    tail: selected.slice(method, selected.count_bytes())
-    open_rel: tail.index_of("(") ?? return None
-    generic_rel: tail.slice(0, open_rel).index_of("<") ?? return None
+    method: selected.find(".component")
+    if method < 0 -> return None
+    bytes: selected.bytes()
+    tail: foundation_byte_text(bytes, method, bytes.len())
+    open_rel: tail.find("(")
+    if open_rel < 0 -> return None
+    generic_rel: foundation_byte_text(tail.bytes(), 0, open_rel).find("<")
+    if generic_rel < 0 -> return None
     generic_start: method + generic_rel
-    close_rel: selected.slice(generic_start + 1, method + open_rel).index_of(">") ?? return None
+    close_rel: foundation_byte_text(bytes, generic_start + 1, method + open_rel).find(">")
+    if close_rel < 0 -> return None
     generic_end: generic_start + 1 + close_rel
-    range: trim_byte_range(selected.bytes(), generic_start + 1, generic_end) ?? return None
-    value: selected.slice(range.start, range.end)
+    range: trim_byte_range(bytes, generic_start + 1, generic_end) ?? return None
+    value: foundation_byte_text(bytes, range.start, range.end)
     if value == "" || value.contains(",") -> return None
     Val(Span{start: offset + range.start, end: offset + range.end})
 }
@@ -325,8 +333,9 @@ json_key_present: fn(text: String, key: String) -> Bool Never! {
     needle: "\"{key}\""
     rest := text
     loop {
-        at: rest.index_of(needle) ?? break
-        rest = rest.slice(at + needle.count_bytes(), rest.count_bytes())
+        at: rest.find(needle)
+        if at < 0 -> break
+        rest = foundation_byte_text(rest.bytes(), at + needle.count_bytes(), rest.count_bytes())
         if rest.trim_start().starts_with(":") -> return true
     }
     false
@@ -335,10 +344,12 @@ json_key_present: fn(text: String, key: String) -> Bool Never! {
 // The bytes between the braces of the JSON object at `"key":`.
 json_object_body: fn(text: String, key: String) -> String? Never! {
     needle: "\"{key}\""
-    key_at: text.index_of(needle) ?? return None
-    after_key: text.slice(key_at + needle.count_bytes(), text.count_bytes())
-    colon: after_key.index_of(":") ?? return None
-    rest: after_key.slice(colon + 1, after_key.count_bytes()).trim_start()
+    key_at: text.find(needle)
+    if key_at < 0 -> return None
+    after_key: foundation_byte_text(text.bytes(), key_at + needle.count_bytes(), text.count_bytes())
+    colon: after_key.find(":")
+    if colon < 0 -> return None
+    rest: foundation_byte_text(after_key.bytes(), colon + 1, after_key.count_bytes()).trim_start()
     if !rest.starts_with("{{") -> return None
     bytes: rest.bytes()
     depth := 0
@@ -362,7 +373,7 @@ json_object_body: fn(text: String, key: String) -> String? Never! {
             depth += 1
         } else if byte == 125 {
             depth -= 1
-            if depth == 0 -> return Val(rest.slice(1, index))
+            if depth == 0 -> return Val(foundation_byte_text(bytes, 1, index))
         }
     }
     None
@@ -901,7 +912,8 @@ manifest_string: fn(value: String) -> String Never! {
 // absent.
 replace_top_level_field: fn(src: String, field: String, replacement: String) -> String Never! {
     if top_level_field_range(src, field) == .Val(range) {
-        return "{src.slice(0, range.start)}{field}: {replacement}{src.slice(range.end, src.count_bytes())}"
+        bytes: src.bytes()
+        return "{foundation_byte_text(bytes, 0, range.start)}{field}: {replacement}{foundation_byte_text(bytes, range.end, bytes.len())}"
     }
     separator: if src.ends_with("\n") -> "" else -> "\n"
     "{src}{separator}{field}: {replacement}\n"
@@ -942,20 +954,23 @@ top_level_field_range: fn(src: String, field: String) -> ByteRange? Never! {
 }
 
 field_entry_range: fn(src: String, start: Int, end: Int, field: String) -> ByteRange? Never! {
-    entry: src.slice(start, end)
+    entry: foundation_byte_text(src.bytes(), start, end)
     leading: entry.count_bytes() - entry.trim_start().count_bytes()
     trimmed: entry.trim()
-    colon: trimmed.index_of(":") ?? return None
-    if trimmed.slice(0, colon).trim() != field -> return None
+    colon: trimmed.find(":")
+    if colon < 0 -> return None
+    if foundation_byte_text(trimmed.bytes(), 0, colon).trim() != field -> return None
     Val(ByteRange{start: start + leading, end: start + leading + trimmed.count_bytes()})
 }
 
 // The byte range inside the braces of the block after `label`.
 block_body_range: fn(src: String, label: String) -> ByteRange? Never! {
-    label_at: src.index_of(label) ?? return None
-    open_rel: src.slice(label_at, src.count_bytes()).index_of("{{") ?? return None
-    open: label_at + open_rel
+    label_at: src.find(label)
+    if label_at < 0 -> return None
     bytes: src.bytes()
+    open := label_at
+    loop open < bytes.len() && bytes[open] != (U8{123}) -> open += 1
+    if open == bytes.len() -> return None
     depth := 0
     in_string := false
     escaped := false
@@ -987,24 +1002,33 @@ add_workspace_member_to_source: fn(src: String, member_path: String) -> String E
     bare: member_path.removeprefix("./")
     normalized: "./{bare}"
     if src.contains("\"{normalized}\"") || src.contains("\"{member_path}\"") || workspace_find_covers(src, member_path) -> return Ok(src)
-    members_at: src.index_of("members") ?? return Err(project_edit_error("unsupported", "Canvas can add workspace members only to a `members: [...]` list"))
-    list_rel: src.slice(members_at, src.count_bytes()).index_of("[") ?? return Err(project_edit_error("unsupported", "Canvas can add workspace members only to a `members: [...]` list"))
-    list_start: members_at + list_rel
-    end_rel: src.slice(list_start, src.count_bytes()).index_of("]") ?? return Err(project_edit_error("diagnostic", "workspace members list is missing `]`"))
-    list_end: list_start + end_rel
-    inner: src.slice(list_start + 1, list_end).trim()
+    // Offsets are bytes: `find` counts bytes, and the text is cut from the bytes.
+    bytes: src.bytes()
+    members_at: src.find("members")
+    if members_at < 0 -> return Err(project_edit_error("unsupported", "Canvas can add workspace members only to a `members: [...]` list"))
+    list_start := members_at
+    loop list_start < bytes.len() && bytes[list_start] != (U8{91}) -> list_start += 1
+    if list_start == bytes.len() -> return Err(project_edit_error("unsupported", "Canvas can add workspace members only to a `members: [...]` list"))
+    list_end := list_start
+    loop list_end < bytes.len() && bytes[list_end] != (U8{93}) -> list_end += 1
+    if list_end == bytes.len() -> return Err(project_edit_error("diagnostic", "workspace members list is missing `]`"))
+    inner: foundation_byte_text(bytes, list_start + 1, list_end).trim()
     addition: if inner == "" -> "\"{normalized}\"" else -> ", \"{normalized}\""
-    Ok("{src.slice(0, list_end)}{addition}{src.slice(list_end, src.count_bytes())}")
+    Ok("{foundation_byte_text(bytes, 0, list_end)}{addition}{foundation_byte_text(bytes, list_end, bytes.len())}")
 }
 
 // Whether the workspace's `find("dir")` already covers `member_path`.
 workspace_find_covers: fn(src: String, member_path: String) -> Bool Never! {
-    find_at: src.index_of("find(") ?? return false
-    rest: src.slice(find_at + 5, src.count_bytes())
-    open: rest.index_of("\"") ?? return false
-    tail: rest.slice(open + 1, rest.count_bytes())
-    close: tail.index_of("\"") ?? return false
-    dir := tail.slice(0, close).removeprefix("./")
+    bytes: src.bytes()
+    find_at: src.find("find(")
+    if find_at < 0 -> return false
+    open := find_at + 5
+    loop open < bytes.len() && bytes[open] != (U8{34}) -> open += 1
+    if open == bytes.len() -> return false
+    close := open + 1
+    loop close < bytes.len() && bytes[close] != (U8{34}) -> close += 1
+    if close == bytes.len() -> return false
+    dir := foundation_byte_text(bytes, open + 1, close).removeprefix("./")
     loop dir.ends_with("/") {
         dir = dir.removesuffix("/")
     }
@@ -1042,15 +1066,17 @@ shutdown_policy: fn(text: String) -> String? Never! {
 
 add_env_service_to_source: fn(src: String, name: String, service: String) -> String Err! {
     if src.contains("{name}:") -> return Ok(src)
+    bytes: src.bytes()
     if block_body_range(src, "services:") == .Val(body) {
-        inner: src.slice(body.start, body.end).trim()
+        inner: foundation_byte_text(bytes, body.start, body.end).trim()
         addition: if inner == "" -> service else -> ", {service}"
-        return Ok("{src.slice(0, body.end)}{addition}{src.slice(body.end, src.count_bytes())}")
+        return Ok("{foundation_byte_text(bytes, 0, body.end)}{addition}{foundation_byte_text(bytes, body.end, bytes.len())}")
     }
-    close: src.last_index_of("}}") ?? return Err(project_edit_error("diagnostic", "env.jet module is missing its closing brace"))
-    head: src.slice(0, close)
+    close: src.rfind("}}")
+    if close < 0 -> return Err(project_edit_error("diagnostic", "env.jet module is missing its closing brace"))
+    head: foundation_byte_text(bytes, 0, close)
     separator: if head.ends_with("\n") -> "" else -> "\n"
-    Ok("{head}{separator}    services: {{ {service} }}\n{src.slice(close, src.count_bytes())}")
+    Ok("{head}{separator}    services: {{ {service} }}\n{foundation_byte_text(bytes, close, bytes.len())}")
 }
 
 // ---- Checking and writing one transaction ----

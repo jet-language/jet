@@ -14,7 +14,7 @@ use {
     cli_term: core.term
     jet_debug.[NATIVE_DEBUG_PROMPT, NativeBreak, NativeDebugError, NativeDebugStep, NativeSession, NativeStopKind, native_debug_build_argv, native_debug_image, native_debug_lldb]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[DeepChecks, deep_checks_malformed, deep_checks_read, diagnostic_registry_row]
+    jet_foundation.[DeepChecks, deep_checks_malformed, deep_checks_read, diagnostic_registry_row, foundation_byte_text]
 }
 
 jet_cli_debug: fn(jet_argv: [String], args: [String], color: Bool) -[FS, Env, Exec, IO, Time.Wait]> JetCLIPlan Never! {
@@ -53,9 +53,11 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], color: Bool) -[FS, Env, Ex
 jet_cli_debug_break: fn(spec: String) -> NativeBreak? Never! {
     colon: spec.rfind(":")
     if colon <= 0 -> return None
-    line: Int.parse(spec.slice(colon + 1, spec.len())) ?? return None
+    // `rfind` counts bytes, so the file and line are cut from the bytes.
+    bytes: spec.bytes()
+    line: Int.parse(foundation_byte_text(bytes, colon + 1, bytes.len())) ?? return None
     if line < 1 -> return None
-    Val(NativeBreak{file: cli_files.basename(spec.slice(0, colon)), line: line})
+    Val(NativeBreak{file: cli_files.basename(foundation_byte_text(bytes, 0, colon)), line: line})
 }
 
 // Under `--dap` the build's report goes to stderr: stdout is the protocol's.

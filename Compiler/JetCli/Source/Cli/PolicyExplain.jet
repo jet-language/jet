@@ -2,7 +2,7 @@
 // query. No semantic check is used for these essays.
 use {
     jet_driver.[JetDriverSourceQueryResult, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[DiagnosticExplanation, PolicyDeclaration, PolicyKey, PolicyScope, PolicySourceText, diagnostic_source_text, policy_explain, policy_key_name, policy_resolve]
+    jet_foundation.[DiagnosticExplanation, PolicyDeclaration, PolicyKey, PolicyScope, PolicySourceText, diagnostic_source_text, foundation_byte_text, policy_explain, policy_key_name, policy_resolve]
 }
 
 JetCLIMarkerSite: struct {
@@ -16,10 +16,10 @@ jet_cli_explain_marker_site: fn(site: String) -> JetCLIMarkerSite JetCLIReadErro
  loop cut > 0 {
  cut -= 1
  if (bytes[cut] == U8{58}) {
- text: site.slice((cut + 1)..<bytes.len())
+ text: foundation_byte_text(bytes, cut + 1, bytes.len())
  line: jet_cli_remote_unsigned(text) ?? return Err(jet_cli_read_error("marker line must be a positive number"))
  if (line == U64{0}) -> return Err(jet_cli_read_error("marker line must be a positive number"))
- return Ok(JetCLIMarkerSite{file: site.slice(0..<cut), line: line})
+ return Ok(JetCLIMarkerSite{file: foundation_byte_text(bytes, 0, cut), line: line})
  }
  }
  Err(jet_cli_read_error("marker site must be `<file>:<line>`"))

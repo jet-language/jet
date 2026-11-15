@@ -427,7 +427,8 @@ jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, bu
     summary := false
     loop line in receipt.output.split("\n") {
         if line.contains(" passed, ") && line.contains(" failed") -> summary = true
-        at: line.rfind(": ")
+        // A test name may hold any character, so the cut counts characters.
+        at: line.last_index_of(": ") ?? next
         if at <= 0 -> next
         results[line.slice(0, at)] = line.slice(at + 2, line.len()).trim()
     }
@@ -531,11 +532,9 @@ json_texts: fn(value: Dyn) -> [String] {
 workspace_members: fn(setup: SuiteSetup) -> [String] Err! {
     path: files.join(setup.checkout, "Compiler/package.jet")
     text: files.read(path) ?? return Err("couldn't read `{path}`: {err}")
-    start: text.find("members: [")
-    if start < 0 -> return Err("`{path}` has no `members: [` list")
+    start: text.index_of("members: [") ?? return Err("`{path}` has no `members: [` list")
     rest: text.slice(start, text.len())
-    end: rest.find("]")
-    if end < 0 -> return Err("`{path}` doesn't close its `members` list")
+    end: rest.index_of("]") ?? return Err("`{path}` doesn't close its `members` list")
     members := [String]{}
     loop (index, part) in rest.slice(0, end).split("\"").to_list() {
         if index % 2 == 1 -> members.push("Compiler/{part}")
@@ -580,7 +579,7 @@ package_rows: fn(rows: TestRows, package: String, receipt: ProcessReceipt) -> [S
     failed := false
     loop line in receipt.output.split("\n") {
         if line.contains(" passed, ") && line.contains(" failed, ") -> summary = true
-        at: line.rfind(": ")
+        at: line.last_index_of(": ") ?? next
         if at <= 0 -> next
         name: line.slice(0, at)
         verdict: line.slice(at + 2, line.len()).trim()
@@ -727,8 +726,7 @@ test_names: fn(text: String) -> [String] {
         declaration: line.trim()
         if !declaration.starts_with("#Test(\"") -> next
         rest: declaration.slice(7, declaration.len())
-        end: rest.find("\"")
-        if end >= 0 -> names.push(rest.slice(0, end).copy())
+        if rest.index_of("\"") == .Val(end) -> names.push(rest.slice(0, end).copy())
     }
     names
 }

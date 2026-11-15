@@ -7,7 +7,7 @@ use {
     ]
     jet_foundation.[
         DIAGNOSTIC_LINT, Diagnostic, Span, TextEdit, diagnostic_render_all, diagnostic_source_column, diagnostic_source_line, diagnostic_source_position,
-        diagnostic_source_texts,
+        diagnostic_source_texts, foundation_byte_text,
     ]
     jet_lsp.[LSPChecker]
     jet_semindex.[SemIndex]
@@ -30,23 +30,25 @@ graph_id_name_span: fn(graph_id: String) -> Span? Never! {
     Val(Span{start: start, end: end})
 }
 
+// Source offsets are Span bytes, so these helpers scan and cut bytes.
 function_signature_span: fn(src: String, name_span: Span) -> Span Err! {
     start: line_start(src, name_span.start)
-    from: if name_span.end < src.len() -> name_span.end else -> src.len()
-    brace_rel: src.slice(from, src.len()).index_of("{{") ?? return Err(edit_error("not_found", "Canvas function signature no longer has a body"))
     bytes: src.bytes()
-    end := from + brace_rel
+    brace := if name_span.end < bytes.len() -> name_span.end else -> bytes.len()
+    loop brace < bytes.len() && bytes[brace] != (U8{123}) -> brace += 1
+    if brace == bytes.len() -> return Err(edit_error("not_found", "Canvas function signature no longer has a body"))
+    end := brace
     loop end > start && is_space_byte(Int{bytes[end - 1]}) -> end -= 1
     Ok(Span{start: start, end: end})
 }
 
 indentation_at: fn(src: String, offset: Int) -> String Never! {
     start: line_start(src, offset)
-    limit: if offset < src.len() -> offset else -> src.len()
     bytes: src.bytes()
+    limit: if offset < bytes.len() -> offset else -> bytes.len()
     end := start
     loop end < limit && (bytes[end] == 32 || bytes[end] == 9) -> end += 1
-    src.slice(start, end)
+    foundation_byte_text(bytes, start, end)
 }
 
 edit: fn(span: Span, text: String) -> TextEdit Never! {
@@ -62,11 +64,13 @@ text_matches: fn(src: String, needle: String) -> [Span] Never! {
     if needle.is_empty() -> return out
     hay: src.to_ascii_lower()
     lower_needle: needle.to_ascii_lower()
+    hay_bytes: hay.bytes()
     offset := 0
-    loop offset <= hay.len() {
-        pos: hay.slice(offset, hay.len()).index_of(lower_needle) ?? break
+    loop offset <= hay_bytes.len() {
+        pos: foundation_byte_text(hay_bytes, offset, hay_bytes.len()).find(lower_needle)
+        if pos < 0 -> break
         start: offset + pos
-        end: start + lower_needle.len()
+        end: start + lower_needle.count_bytes()
         out.push(Span{start: start, end: end})
         offset = end
     }
@@ -163,8 +167,8 @@ dedupe_results: fn(results: &[String]) {
 }
 
 line_number_for: fn(src: String, offset: Int) -> Int Never! {
-    limit: if offset < src.len() -> offset else -> src.len()
     bytes: src.bytes()
+    limit: if offset < bytes.len() -> offset else -> bytes.len()
     count := 1
     loop i in 0..<limit {
         if bytes[i] == 10 -> count += 1
@@ -174,9 +178,10 @@ line_number_for: fn(src: String, offset: Int) -> Int Never! {
 
 source_line_for: fn(src: String, offset: Int) -> String Never! {
     start: line_start(src, offset)
-    from: if offset < src.len() -> offset else -> src.len()
-    end: if src.slice(from, src.len()).index_of("\n") == .Val(i) -> from + i else -> src.len()
-    src.slice(start, end).trim()
+    bytes: src.bytes()
+    end := if offset < bytes.len() -> offset else -> bytes.len()
+    loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+    foundation_byte_text(bytes, start, end).trim()
 }
 
 simple_diff: fn(before: String, after: String) -> String Never! {

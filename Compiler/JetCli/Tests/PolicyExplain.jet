@@ -14,6 +14,9 @@ use {
  loop text in ([String]{"source.jet", "source.jet:", "source.jet:0", "source.jet:-1", "source.jet:1_0", "source.jet:18446744073709551616"}) {
  if jet_cli_explain_marker_site(text) == .Ok(_) -> panic("invalid marker-site grammar")
  }
+ // The last colon is found by byte, so a multi-byte path keeps its whole name.
+ wide: jet_cli_explain_marker_site("é/source.jet:7") ?? panic("a non-ASCII path")
+ if wide.file != "é/source.jet" || wide.line != (U64{7}) -> panic("cut a non-ASCII marker site at its byte offset")
  source: "é\nsecond\nthird"
  if jet_cli_explain_marker_offset(source, U64{1}) != 0 || jet_cli_explain_marker_offset(source, U64{2}) != 3 || jet_cli_explain_marker_offset(source, U64{3}) != 10 || jet_cli_explain_marker_offset(source, U64.MAX) != source.bytes().len() -> panic("offsets are UTF-8 bytes; beyond last line is EOF")
  declaration: PolicyDeclaration{key: PolicyKey.Copies, value: PolicyValue.Explicit, scope: PolicyScope.Module, span: Span{start: 7, end: 33}, target: None, source: "policy.jet"}

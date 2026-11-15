@@ -1,7 +1,7 @@
 // What the graph projection reads off the source and the semantic index:
 // ids, source offsets, titles, value types, and effect badges.
 use {
-    jet_foundation.[BinOp, Binding, Expr, Func, LValue, Span, type_name]
+    jet_foundation.[BinOp, Binding, Expr, Func, LValue, Span, foundation_byte_text, type_name]
     jet_parser.[jfmt_bin_op_spell, jfmt_stmt_span]
     jet_semindex.[SemCallable, SemIndex]
 }
@@ -16,8 +16,8 @@ graph_id: fn(module_display: String, f: Func) -> String Never! {
 // `span` widened over the closing parentheses its unbalanced opening ones
 // still need.
 span_through_closing_parens: fn(src: String, span: Span) -> Span Never! {
-    if span.start < 0 || span.end > src.len() || span.start > span.end -> return Span{start: span.start, end: span.end}
     bytes: src.bytes()
+    if span.start < 0 || span.end > bytes.len() || span.start > span.end -> return Span{start: span.start, end: span.end}
     opens := 0
     closes := 0
     loop i in span.start..<span.end {
@@ -40,22 +40,28 @@ insert_offset: fn(src: String, f: Func) -> Int Never! {
     if f.body.len() > 0 {
         first_start: jfmt_stmt_span(f.body[0]).start
         line: line_start(src, first_start)
-        if src.slice(line, first_start).contains("{{") -> return first_start
+        if foundation_byte_text(src.bytes(), line, first_start).contains("{{") -> return first_start
         return line
     }
     line_after(src, f.name_span.end)
 }
 
+// Source offsets are Span bytes, so lines are found by byte.
 line_start: fn(src: String, offset: Int) -> Int Never! {
-    limit: if offset < src.len() -> offset else -> src.len()
-    if src.slice(0, limit).last_index_of("\n") == .Val(i) -> return i + 1
-    0
+    bytes: src.bytes()
+    at := if offset < bytes.len() -> offset else -> bytes.len()
+    loop at > 0 && bytes[at - 1] != (U8{10}) -> at -= 1
+    at
 }
 
 line_after: fn(src: String, offset: Int) -> Int Never! {
-    from: if offset < src.len() -> offset else -> src.len()
-    if src.slice(from, src.len()).index_of("\n") == .Val(i) -> return from + i + 1
-    src.len()
+    bytes: src.bytes()
+    at := if offset < bytes.len() -> offset else -> bytes.len()
+    loop at < bytes.len() {
+        if bytes[at] == (U8{10}) -> return at + 1
+        at += 1
+    }
+    bytes.len()
 }
 
 assignment_title: fn(target: LValue, op: BinOp?) -> String Never! {
@@ -234,8 +240,9 @@ wire_ident_refs: fn(g: &GraphBuilder, expr: Expr, input_pin: String) {
 }
 
 snippet: fn(src: String, span: Span) -> String Never! {
-    if span.start < 0 || span.end > src.len() || span.start > span.end -> return ""
-    src.slice(span.start, span.end).trim()
+    bytes: src.bytes()
+    if span.start < 0 || span.end > bytes.len() || span.start > span.end -> return ""
+    foundation_byte_text(bytes, span.start, span.end).trim()
 }
 
 json_bool: fn(value: Bool) -> String Never! {

@@ -14,6 +14,7 @@ use {
         JET_DRIVER_EXIT_USER_ERROR,
         jet_driver_present_diagnostics,
     ]
+    jet_foundation.[foundation_byte_text]
     jet_pkg_model.[ProvenanceRequirement]
 }
 
@@ -97,7 +98,7 @@ jet_cli_lock_trim_quotes: fn(value: String) -> String Never! {
     end := bytes.len()
     loop start < end && bytes[start] == (U8{34}) -> start += 1
     loop end > start && bytes[end - 1] == (U8{34}) -> end -= 1
-    value.slice(start..<end)
+    foundation_byte_text(bytes, start, end)
 }
 
 jet_cli_lock_unescape: fn(raw: String) -> String Never! {
@@ -190,11 +191,11 @@ jet_cli_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
         } else if code == 34 {
             quoted = !quoted
         } else if code == 44 && !quoted {
-            parts.push(inline.slice(start..<index))
+            parts.push(foundation_byte_text(bytes, start, index))
             start = index + 1
         }
     }
-    parts.push(inline.slice(start..<bytes.len()))
+    parts.push(foundation_byte_text(bytes, start, bytes.len()))
     loop raw_part in parts {
         part: raw_part.trim()
         if !part.starts_with(key) -> next
@@ -215,7 +216,7 @@ jet_cli_lock_inline: fn(raw: String) -> String Never! {
     end := bytes.len()
     loop start < end && bytes[start] == (U8{123}) -> start += 1
     loop end > start && bytes[end - 1] == (U8{125}) -> end -= 1
-    text.slice(start..<end).trim()
+    foundation_byte_text(bytes, start, end).trim()
 }
 
 // `parse_source`, keeping only what the provenance report reads. A Nix source
@@ -351,8 +352,9 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
             }
         }
         if equals < 0 -> return JetCLILockLoad.Missing
-        key: line.slice(0..<equals).trim()
-        value: line.slice(equals + 1..<line.len()).trim()
+        line_bytes: line.bytes()
+        key: foundation_byte_text(line_bytes, 0, equals).trim()
+        value: foundation_byte_text(line_bytes, equals + 1, line_bytes.len()).trim()
         if key == "version" && section != "package" && section != "toolchain" && !in_root {
             version = Val(jet_cli_lock_u32(jet_cli_lock_trim_quotes(value)) ?? return JetCLILockLoad.Missing)
             next

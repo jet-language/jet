@@ -15,4 +15,6 @@ use jet_cli.[jet_cli_devtools_example]
  loop invalid in ([String]{"", "name", "/name", "topic/"}) {
  if jet_cli_devtools_example(invalid) == .Ok(_) -> panic("requires two nonempty components")
  }
+ wide: jet_cli_devtools_example("tópic/näme") ?? panic("a non-ASCII topic and name")
+ if wide.directory != "Examples/tópic" || wide.path != "Examples/tópic/näme.jet" -> panic("cut a non-ASCII spec at its slash's byte offset")
 }

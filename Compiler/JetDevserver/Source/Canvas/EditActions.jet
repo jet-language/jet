@@ -8,7 +8,7 @@ use {
         read_source_without_symlinks, snippet, source_revision, write_new_file_without_symlinks, write_source_if_unchanged,
     ]
     jet_driver.[jet_driver_apply_edits]
-    jet_foundation.[COMMENT_PREFIX, Item, NameLedger, Span, TextEdit, TraitMethodSig, core_module_for_alias, sha256_hex, type_name]
+    jet_foundation.[COMMENT_PREFIX, Item, NameLedger, Span, TextEdit, TraitMethodSig, core_module_for_alias, foundation_byte_text, sha256_hex, type_name]
     jet_lsp.[LSPChecker]
     jet_parser.[jet_format_source]
     jet_semindex.[SemIndex]
@@ -328,13 +328,14 @@ apply_create_trait_impl: fn(checker: LSPChecker, path: String, src: String, type
     local_name: if trait_name.cut_last(".") == .Val(parts) -> parts.after else -> trait_name
     requested_scope: if trait_name.cut_last(".") == .Val(parts) -> "{parts.before}." else -> ""
     request := TraitRequest{name: trait_name, local_name: local_name, scope: requested_scope, module_index: doc.name_module_index, module_alias: doc.alias}
-    location: find_trait_location(doc.items, "", src.len(), request, src, permit.value) ?? return Err(edit_error("not_found", "Canvas trait was not found in source"))
+    location: find_trait_location(doc.items, "", src.count_bytes(), request, src, permit.value) ?? return Err(edit_error("not_found", "Canvas trait was not found in source"))
     if location.has_assoc_types {
         return Err(edit_error("needs_associated_types", "Canvas will not guess associated type implementations; add each associated type in source first"))
     }
-    insert_at: if location.scope == "" -> src.len() else -> line_start(src, location.module_close)
+    bytes: src.bytes()
+    insert_at: if location.scope == "" -> bytes.len() else -> line_start(src, location.module_close)
     item_indent: if location.scope == "" -> "" else -> indentation_at(src, location.trait_start)
-    prefix: if insert_at == 0 || src.slice(0, insert_at).ends_with("\n") -> "" else -> "\n"
+    prefix: if insert_at == 0 || bytes[insert_at - 1] == (U8{10}) -> "" else -> "\n"
     method_lines: loop line in location.methods_source.lines() -> "{item_indent}{line}\n"
     impl_block: "{prefix}{item_indent}impl {type_name}.{local_name} {{\n{method_lines.join("")}{item_indent}}}\n"
     changed: jet_driver_apply_edits(src, [TextEdit]{edit(Span{start: insert_at, end: insert_at}, impl_block)}) ?? return Err(edit_error("overlap", "Canvas trait impl edit overlapped"))
@@ -514,9 +515,10 @@ widest_node: fn(nodes: [NodeQueryRef], graph_id: String, node_id: String, suffix
     best
 }
 
+// Offsets are Span bytes.
 clamp_to_source: fn(src: String, offset: Int) -> Int Never! {
     if offset < 0 -> return 0
-    if offset > src.len() -> return src.len()
+    if offset > src.count_bytes() -> return src.count_bytes()
     offset
 }
 
@@ -532,11 +534,14 @@ call_insert_target: fn(src: String, graph_id: String, projection: Projection, an
     line: line_start(src, node.span.start)
     node_start: clamp_to_source(src, node.span.start)
     node_end: clamp_to_source(src, node.span.end)
-    line_end: if src.slice(node_end, src.len()).index_of("\n") == .Val(offset) -> node_end + offset else -> src.len()
-    after_node: src.slice(node_end, line_end)
-    inline_body: line == line_start(src, anchor.insert_offset) && line <= node_start && src.slice(line, node_start).contains("{{") && after_node.contains("}}")
+    bytes: src.bytes()
+    line_end := node_end
+    loop line_end < bytes.len() && bytes[line_end] != (U8{10}) -> line_end += 1
+    after_node: foundation_byte_text(bytes, node_end, line_end)
+    inline_body: line == line_start(src, anchor.insert_offset) && line <= node_start && foundation_byte_text(bytes, line, node_start).contains("{{") && after_node.contains("}}")
     if inline_body {
-        close: if after_node.index_of("}}") == .Val(offset) -> node_end + offset else -> line_end
+        close_at: after_node.find("}}")
+        close: if close_at >= 0 -> node_end + close_at else -> line_end
         insert: if pin.direction == "input" -> anchor.insert_offset else -> close
         return Ok(InsertTarget{offset: insert, indent: "\n{statement_indent}"})
     }
@@ -670,7 +675,7 @@ ident_prefix: fn(text: String) -> String {
     bytes: text.bytes()
     end := 0
     loop end < bytes.len() && ident_byte(Int{bytes[end]}, false) -> end += 1
-    text.slice(0, end)
+    foundation_byte_text(bytes, 0, end)
 }
 
 default_core_alias: fn(module_ref: String) -> String {
@@ -834,7 +839,7 @@ apply_delete_hint_region: fn(checker: LSPChecker, path: String, src: String, reg
 apply_create_collapse_region: fn(checker: LSPChecker, path: String, src: String, graph_id: String, requested: Span, title: String) -> String Err! {
     projection: projection_for_edit(checker, path, src)
     if !graph_exists(projection.graph_anchors, graph_id) -> return Err(edit_error("not_found", "Canvas graph no longer exists"))
-    if requested.start >= requested.end || requested.end > src.len() -> return Err(edit_error("bad_request", "Canvas collapse needs one valid source span"))
+    if requested.start >= requested.end || requested.end > src.count_bytes() -> return Err(edit_error("bad_request", "Canvas collapse needs one valid source span"))
     selected: validated_collapse_selection(checker, path, src, graph_id, requested)
     loop hint in canvas_collapse_hints(src) {
         if hint.anchor.start == selected.start && hint.anchor.end == selected.end -> return Err(edit_error("conflict", "Canvas selection is already collapsed"))

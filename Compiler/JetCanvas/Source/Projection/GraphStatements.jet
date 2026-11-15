@@ -1,6 +1,6 @@
 // One graph node, region, or nested block per statement of a function body.
 use {
-    jet_foundation.[Expr, Pattern, Span, Stmt, SwitchArm, expr_span, policy_key_name]
+    jet_foundation.[Expr, Pattern, Span, Stmt, SwitchArm, expr_span, foundation_byte_text, policy_key_name]
     jet_parser.[jfmt_is_subjectless_guard, jfmt_uses_classic_if_spelling]
     jet_semindex.[SemIndex]
 }
@@ -354,10 +354,11 @@ dispatch_arm_pattern_label: fn(src: String, expr: Expr) -> String {
 dispatch_arm_pattern_span: fn(src: String, expr: Expr) -> Span {
     fragment: dispatch_arm_pattern_fragment(src, expr)
     start: expr_span(expr).start + fragment.offset
-    Span{start: start, end: start + fragment.text.len()}
+    Span{start: start, end: start + fragment.text.count_bytes()}
 }
 
-// The pattern text of one dispatch arm and its offset in the arm's source.
+// The pattern text of one dispatch arm and its byte offset in the arm's
+// source. Spans count bytes, so the text is cut and measured in bytes.
 PatternFragment: struct {
     text: String
     offset: Int
@@ -365,38 +366,42 @@ PatternFragment: struct {
 
 dispatch_arm_pattern_fragment: fn(src: String, expr: Expr) -> PatternFragment {
     span: expr_span(expr)
-    source: if span.start >= 0 && span.end <= src.len() && span.start <= span.end -> src.slice(span.start, span.end) else -> ""
+    bytes: src.bytes()
+    source: if span.start >= 0 && span.end <= bytes.len() && span.start <= span.end -> foundation_byte_text(bytes, span.start, span.end) else -> ""
     fragment := source.trim_start()
-    offset := source.len() - fragment.len()
+    offset := source.count_bytes() - fragment.count_bytes()
     opened := false
-    if fragment.index_of("==") == .Val(pos) {
-        after_cmp: fragment.slice(pos + 2, fragment.len())
+    pos: fragment.find("==")
+    if pos >= 0 {
+        after_cmp: foundation_byte_text(fragment.bytes(), pos + 2, fragment.count_bytes())
         after_space: after_cmp.trim_start()
         if after_space.starts_with("{{") {
-            skip: pos + 2 + after_cmp.len() - after_space.len()
+            skip: pos + 2 + after_cmp.count_bytes() - after_space.count_bytes()
             offset += skip
-            fragment = fragment.slice(skip, fragment.len())
+            fragment = after_space
             opened = true
         }
     }
     if !opened {
         after_space: fragment.trim_start()
-        offset += fragment.len() - after_space.len()
+        offset += fragment.count_bytes() - after_space.count_bytes()
         fragment = after_space
     }
     if fragment.starts_with("{{") {
-        after_open: fragment.slice(1, fragment.len())
+        after_open: fragment.remove_prefix("{{")
         offset += 1
         fragment = after_open.trim_start()
-        offset += after_open.len() - fragment.len()
+        offset += after_open.count_bytes() - fragment.count_bytes()
     }
-    if fragment.last_index_of("->") == .Val(arrow) {
-        after_arrow: fragment.slice(arrow + 2, fragment.len())
-        if after_arrow.last_index_of("}}") == .Val(close) {
-            after_body: after_arrow.slice(close + 1, after_arrow.len())
+    arrow: fragment.rfind("->")
+    if arrow >= 0 {
+        after_arrow: foundation_byte_text(fragment.bytes(), arrow + 2, fragment.count_bytes())
+        close: after_arrow.rfind("}}")
+        if close >= 0 {
+            after_body: foundation_byte_text(after_arrow.bytes(), close + 1, after_arrow.count_bytes())
             offset += arrow + 2 + close + 1
             fragment = after_body.trim_start()
-            offset += after_body.len() - fragment.len()
+            offset += after_body.count_bytes() - fragment.count_bytes()
         }
     }
     PatternFragment{text: fragment.trim_end(), offset: offset}

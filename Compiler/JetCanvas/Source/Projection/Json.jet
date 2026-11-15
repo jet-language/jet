@@ -1,7 +1,7 @@
 // The JSON spellings the graph document uses, and the `key=value` readers of
 // `// canvas:` hint lines.
 use {
-    jet_foundation.[Span, foundation_json_quote]
+    jet_foundation.[Span, foundation_byte_text, foundation_json_quote]
 }
 
 // A JSON string literal decoded from the front of a text, and the bytes it used.
@@ -57,7 +57,7 @@ attr_string: fn(text: String, key: String) -> String? Never! {
     bytes: rest.bytes()
     end := 0
     loop end < bytes.len() && !is_space_byte(Int{bytes[end]}) -> end += 1
-    Val(rest.slice(0, end))
+    Val(foundation_byte_text(bytes, 0, end))
 }
 
 attr_span: fn(text: String, key: String) -> Span? Never! {

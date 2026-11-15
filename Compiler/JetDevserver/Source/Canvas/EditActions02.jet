@@ -4,7 +4,7 @@
 use {
     jet_canvas.[is_space_byte, line_after, line_start, lvalue_span, pattern_arm_edit_span, snippet, stmt_execution_anchor, stmt_is_terminal, switch_was_classic_if]
     jet_driver.[JetDriverDocModule, jet_driver_apply_edits, jet_driver_has_errors]
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Expr, Func, Item, Span, Stmt, SwitchArm, TextEdit, ast_visit_body, expr_span, type_name]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Expr, Func, Item, Span, Stmt, SwitchArm, TextEdit, ast_visit_body, expr_span, foundation_byte_text, type_name]
     jet_lsp.[LSPChecker, LSPOverlay]
     jet_parser.[jet_format_source, jfmt_is_subjectless_guard, jfmt_stmt_span, jfmt_uses_classic_if_spelling]
     jet_semindex.[SemIndex]
@@ -109,13 +109,16 @@ apply_reorder_statements: fn(checker: LSPChecker, path: String, src: String, gra
     } else {
         return Err(edit_error("bad_request", "Canvas reorder position must be before or after"))
     }
-    if moved_full.end > src.len() -> return Err(edit_error("bad_request", "Canvas moved source span is stale"))
-    chunk: src.slice(moved_full.start, moved_full.end)
-    rest: "{src.slice(0, moved_full.start)}{src.slice(moved_full.end, src.len())}"
+    // Spans count bytes, so the source is cut and rejoined by byte.
+    src_bytes: src.bytes()
+    if moved_full.end > src_bytes.len() -> return Err(edit_error("bad_request", "Canvas moved source span is stale"))
+    chunk: foundation_byte_text(src_bytes, moved_full.start, moved_full.end)
+    rest: "{foundation_byte_text(src_bytes, 0, moved_full.start)}{foundation_byte_text(src_bytes, moved_full.end, src_bytes.len())}"
     if insert > moved_full.start -> insert -= moved_full.end - moved_full.start
     if insert < 0 -> insert = 0
-    if insert > rest.len() -> insert = rest.len()
-    write_checked_formatted(checker, path, src, "{rest.slice(0, insert)}{chunk}{rest.slice(insert, rest.len())}")
+    rest_bytes: rest.bytes()
+    if insert > rest_bytes.len() -> insert = rest_bytes.len()
+    write_checked_formatted(checker, path, src, "{foundation_byte_text(rest_bytes, 0, insert)}{chunk}{foundation_byte_text(rest_bytes, insert, rest_bytes.len())}")
 }
 
 loc_by_anchor: fn(locs: [StatementLoc], anchor: Span) -> Int? Never! {
@@ -146,8 +149,8 @@ apply_exec_convergence: fn(checker: LSPChecker, path: String, src: String, graph
     doc: checked.modules[checked.at]
     func: find_func_by_name_span(doc.items, name_span) ?? return Err(edit_error("not_found", "Canvas graph no longer exists"))
     target: find_expression_selection(func.body, target_span, src) ?? return Err(edit_error("not_found", "Canvas convergence target source selection no longer exists"))
-    if target.full.end > src.len() -> return Err(edit_error("bad_request", "Canvas convergence target span is stale"))
-    target_text: src.slice(target.span.start, target.span.end).trim()
+    if target.full.end > src.count_bytes() -> return Err(edit_error("bad_request", "Canvas convergence target span is stale"))
+    target_text: foundation_byte_text(src.bytes(), target.span.start, target.span.end).trim()
     if target_text == "" -> return Err(edit_error("ambiguous", "Canvas needs one or more complete ordinary source statements to converge"))
     scan := InsertionScan{node_span: from_span, pin_name: from_pin_name, found: None, problem: None}
     find_exec_insertion(src, func.body, scan)
@@ -178,7 +181,7 @@ apply_exec_convergence: fn(checker: LSPChecker, path: String, src: String, graph
         edits.push(edit(Span{start: 0, end: 0}, "{function}: fn({signature_parts.join(", ")}) {{\n{body_lines.join("")}}}\n\n"))
     }
     if strategy != "duplicate" {
-        suffix: src.slice(target.span.end, target.full.end)
+        suffix: foundation_byte_text(src.bytes(), target.span.end, target.full.end)
         edits.push(edit(target.full, "{indentation_at(src, target.full.start)}{call_name}({args}){suffix}"))
     }
     incoming: if strategy == "duplicate" -> target_text else -> "{call_name}({args})"
@@ -375,7 +378,7 @@ branch_source_span: fn(src: String, stmt: Stmt) -> Span Never! {
     close := matching_delimiter(src, open, 123, 125) ?? stmt_span.end
     loop {
         else_start: find_word(src, close + 1, "else") ?? break
-        if src.slice(close + 1, else_start).trim() != "" -> break
+        if foundation_byte_text(src.bytes(), close + 1, else_start).trim() != "" -> break
         next_open: find_unquoted_byte(src, else_start + 4, 123) ?? break
         close = matching_delimiter(src, next_open, 123, 125) ?? break
     }
@@ -429,8 +432,8 @@ expression_body_source: fn(src: String, body: [Stmt]) -> String? Never! {
             return None
         }
     }
-    if start > end || end > src.len() -> return None
-    Val(src.slice(start, end).trim())
+    if start > end || end > src.count_bytes() -> return None
+    Val(foundation_byte_text(src.bytes(), start, end).trim())
 }
 
 formatted_expression_matches: fn(left: String, right: String) -> Bool Never! {
@@ -472,11 +475,11 @@ normalized_source_shape: fn(source: String) -> String Never! {
         if keep {
             if run < 0 -> run = at
         } else if run >= 0 {
-            parts.push(source.slice(run, at))
+            parts.push(foundation_byte_text(bytes, run, at))
             run = -1
         }
     }
-    if run >= 0 -> parts.push(source.slice(run, bytes.len()))
+    if run >= 0 -> parts.push(foundation_byte_text(bytes, run, bytes.len()))
     parts.join("")
 }
 
@@ -578,7 +581,7 @@ classic_switch_source: fn(src: String, arm: SwitchArm, else_body: [Stmt]?, new_h
     subject_src := ""
     if arm.cond == .PatternTest(subject, _, _, _) -> subject_src = snippet(src, expr_span(subject))
     head_span: pattern_arm_edit_span(src, arm.cond)
-    head: if head_span.start >= 0 && head_span.end <= src.len() && head_span.start <= head_span.end -> src.slice(head_span.start, head_span.end) else -> snippet(src, expr_span(arm.cond))
+    head: if head_span.start >= 0 && head_span.end <= src.count_bytes() && head_span.start <= head_span.end -> foundation_byte_text(src.bytes(), head_span.start, head_span.end) else -> snippet(src, expr_span(arm.cond))
     then_body: block_body_source(src, arm.body, "        ")
     else_text := ""
     if else_body == .Val(body) -> else_text = "    else -> {{\n{block_body_source(src, body, "        ")}    }}\n"
@@ -589,15 +592,17 @@ block_body_source: fn(src: String, stmts: [Stmt], indent: String) -> String Neve
     parts := [String]{}
     loop stmt in stmts {
         span: stmt_text_span(src, stmt)
-        loop line in src.slice(span.start, span.end).trim().lines() -> parts.push("{indent}{line.trim()}\n")
+        loop line in foundation_byte_text(src.bytes(), span.start, span.end).trim().lines() -> parts.push("{indent}{line.trim()}\n")
     }
     parts.join("")
 }
 
 dispatch_body_insert_offset: fn(src: String, span: Span) -> Int Never! {
-    end: if span.end < src.len() -> span.end else -> src.len()
+    bytes: src.bytes()
+    end: if span.end < bytes.len() -> span.end else -> bytes.len()
     if span.start > end -> return span.end
-    if src.slice(span.start, end).index_of("{{") == .Val(open) -> return line_after(src, span.start + open)
+    open: foundation_byte_text(bytes, span.start, end).find("{{")
+    if open >= 0 -> return line_after(src, span.start + open)
     span.end
 }
 
@@ -699,14 +704,15 @@ apply_append_multi_input: fn(checker: LSPChecker, path: String, src: String, nod
     func: checked_func_containing_span(checker, path, src, node_span)
     list: find_list_literal(func.body, node_span)
     if !list.found -> return Err(edit_error("not_found", "Canvas multi-input node no longer exists"))
-    if node_span.start < 0 || node_span.end > src.len() || node_span.start > node_span.end {
+    if node_span.start < 0 || node_span.end > src.count_bytes() || node_span.start > node_span.end {
         return Err(edit_error("bad_request", "Canvas multi-input source span is stale"))
     }
     insert := 0
     if list.items.len() > 0 {
         insert = list.items[list.items.len() - 1].end
     } else {
-        close: src.slice(node_span.start, node_span.end).last_index_of("]") ?? return Err(edit_error("bad_request", "Canvas multi-input source span is stale"))
+        close: foundation_byte_text(src.bytes(), node_span.start, node_span.end).rfind("]")
+        if close < 0 -> return Err(edit_error("bad_request", "Canvas multi-input source span is stale"))
         insert = node_span.start + close
     }
     prefix: if list.items.len() == 0 -> "" else -> ", "
@@ -748,18 +754,22 @@ span_listed: fn(spans: [Span], wanted: Span) -> Bool Never! {
 
 // `element` with the comma after it, or else the comma before it.
 comma_separated_remove_span: fn(src: String, container: Span, element: Span) -> Span Err! {
-    if container.start < 0 || container.end > src.len() || container.start > container.end {
+    // Spans count bytes, so the container is cut and searched by byte.
+    bytes: src.bytes()
+    if container.start < 0 || container.end > bytes.len() || container.start > container.end {
         return Err(edit_error("bad_request", "Canvas multi-input span is stale"))
     }
-    text: src.slice(container.start, container.end)
+    text: foundation_byte_text(bytes, container.start, container.end).bytes()
     rel_start: clamp_offset(element.start - container.start, text.len())
     rel_end: clamp_offset(element.end - container.start, text.len())
-    if text.slice(rel_end, text.len()).index_of(",") == .Val(comma) {
-        return Ok(Span{start: element.start, end: consume_trailing_space(src, element.end + comma + 1, container.end)})
+    comma_after: foundation_byte_text(text, rel_end, text.len()).find(",")
+    if comma_after >= 0 {
+        return Ok(Span{start: element.start, end: consume_trailing_space(src, element.end + comma_after + 1, container.end)})
     }
-    before: text.slice(0, rel_start)
-    if before.last_index_of(",") == .Val(comma) {
-        return Ok(Span{start: container.start + consume_leading_space_back(before, comma), end: element.end})
+    before: foundation_byte_text(text, 0, rel_start)
+    comma_before: before.rfind(",")
+    if comma_before >= 0 {
+        return Ok(Span{start: container.start + consume_leading_space_back(before, comma_before), end: element.end})
     }
     Ok(Span{start: element.start, end: element.end})
 }
@@ -1086,9 +1096,10 @@ find_word: fn(src: String, start: Int, word: String) -> Int? Never! {
     bytes: src.bytes()
     cursor := if start < 0 -> 0 else -> start
     loop cursor < bytes.len() {
-        relative: src.slice(cursor, bytes.len()).index_of(word) ?? return None
+        relative: foundation_byte_text(bytes, cursor, bytes.len()).find(word)
+        if relative < 0 -> return None
         found: cursor + relative
-        after: found + word.len()
+        after: found + word.count_bytes()
         before_ok: found == 0 || !ident_byte(Int{bytes[found - 1]}, false)
         after_ok: after >= bytes.len() || !ident_byte(Int{bytes[after]}, false)
         if before_ok && after_ok -> return Val(found)

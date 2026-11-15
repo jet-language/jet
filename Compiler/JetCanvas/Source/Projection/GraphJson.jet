@@ -2,7 +2,7 @@
 // overlay wired over them, and their JSON.
 use {
     jet_foundation.[
-        DOC_COMMENT_PREFIX, Expr, Func, LValue, MetaAttr, NameLedger, Span, Stmt, access_sigil, expr_span, name_ledger_declaration, type_name,
+        DOC_COMMENT_PREFIX, Expr, Func, LValue, MetaAttr, NameLedger, Span, Stmt, access_sigil, expr_span, foundation_byte_text, name_ledger_declaration, type_name,
     ]
     jet_parser.[jfmt_stmt_span]
 }
@@ -134,18 +134,22 @@ spans_touch: fn(a: Span, b: Span) -> Bool Never! {
 }
 
 // The offset of the next `name: fn` declaration line at or after `offset`.
+// Offsets are bytes, so lines are cut from the bytes.
 next_function_start: fn(src: String, offset: Int) -> Int Never! {
-    cursor := if offset < src.len() -> offset else -> src.len()
-    loop cursor < src.len() {
-        line_end: if src.slice(cursor, src.len()).index_of("\n") == .Val(i) -> cursor + i + 1 else -> src.len()
-        line: src.slice(cursor, line_end)
+    bytes: src.bytes()
+    cursor := if offset < bytes.len() -> offset else -> bytes.len()
+    loop cursor < bytes.len() {
+        line_end := cursor
+        loop line_end < bytes.len() && bytes[line_end] != (U8{10}) -> line_end += 1
+        if line_end < bytes.len() -> line_end += 1
+        line: foundation_byte_text(bytes, cursor, line_end)
         trimmed: line.trim_start()
         if trimmed.split_once(": fn") == .Val(parts) && parts.before.len() > 0 && is_identifier_text(parts.before) {
-            return cursor + line.len() - trimmed.len()
+            return cursor + line.count_bytes() - trimmed.count_bytes()
         }
         cursor = line_end
     }
-    src.len()
+    bytes.len()
 }
 
 is_identifier_text: fn(text: String) -> Bool Never! {
@@ -513,11 +517,12 @@ function_signature_text: fn(src: String, f: Func) -> String Never! {
 
 doc_comment_before: fn(src: String, name_start: Int) -> String Never! {
     docs := [String]{}
+    bytes: src.bytes()
     cursor := line_start(src, name_start)
     loop cursor > 0 {
         prev_end: cursor - 1
         prev_start: line_start(src, prev_end)
-        line: src.slice(prev_start, prev_end).trim()
+        line: foundation_byte_text(bytes, prev_start, prev_end).trim()
         if line.starts_with(DOC_COMMENT_PREFIX) {
             docs.push(line.remove_prefix(DOC_COMMENT_PREFIX).trim())
             cursor = prev_start

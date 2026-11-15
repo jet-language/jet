@@ -144,6 +144,7 @@ use {
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_render_all,
+        foundation_byte_text,
         gate_ledger_push,
         policy_key_name,
         sha256_hex,
@@ -3295,16 +3296,18 @@ jet_cli_fmt_policy_marks: fn(source: String, origin: String, color: Bool, policy
             if blocking.len() > 0 -> return jet_cli_fmt_rejected(diagnostics)
         }
     }
+    // Mark sites are byte offsets, so the source is cut from its bytes.
+    bytes: source.bytes()
     prepended: jet_cli_compile_entry(origin, color, None, JetDriverCompileMode.Program, Val("{policy}{source}"), None)
-    marks := jet_cli_fmt_marks_of(prepended, code, texts, policy.len(), source.len()) ?? jet_cli_fmt_marks_of(jet_cli_compile_entry(origin, color, None, JetDriverCompileMode.Program, Val(source), None), code, texts, 0, source.len()) ?? [JetCLIFmtMark]{}
+    marks := jet_cli_fmt_marks_of(prepended, code, texts, policy.len(), bytes.len()) ?? jet_cli_fmt_marks_of(jet_cli_compile_entry(origin, color, None, JetDriverCompileMode.Program, Val(source), None), code, texts, 0, bytes.len()) ?? [JetCLIFmtMark]{}
     marks.sort_by(fn(left: JetCLIFmtMark, right: JetCLIFmtMark) { left.site <=> right.site })
     marked := ""
     cursor := 0
     loop mark in marks {
-        marked = "{marked}{source.slice(cursor..<mark.site)}{mark.text}"
+        marked = "{marked}{foundation_byte_text(bytes, cursor, mark.site)}{mark.text}"
         cursor = mark.site
     }
-    jet_cli_fmt_formatted("{marked}{source.slice(cursor..<source.len())}")
+    jet_cli_fmt_formatted("{marked}{foundation_byte_text(bytes, cursor, bytes.len())}")
 }
 
 // The marks the Safe edits of the checked `compiled` give, `shift` bytes of
@@ -3514,7 +3517,7 @@ jet_cli_external_formatter_program: fn(package: String) -> String? Never! {
         code: Int{bytes[index]}
         if code == 47 || code == 58 -> start = index + 1
     }
-    program: name.slice(start..<name.len()).trim()
+    program: foundation_byte_text(bytes, start, bytes.len()).trim()
     if program == "" || envmodel_has_whitespace(program) -> return None
     Val(program)
 }
@@ -3529,7 +3532,7 @@ jet_cli_external_fmt_matches: fn(path: String, language: String) -> Bool Never! 
         if (Int{bytes[index]}) == 46 -> dot = index
     }
     if dot <= 0 -> return false
-    name.slice((dot + 1)..<name.len()) == language
+    foundation_byte_text(bytes, dot + 1, bytes.len()) == language
 }
 
 // Rust `Path` ordering: component by component, so `a/b` sorts before

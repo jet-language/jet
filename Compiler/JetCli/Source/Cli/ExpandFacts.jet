@@ -1,7 +1,7 @@
 // memory/layout/origin/reflect lenses: render only compiler-owned facts.
 use {
     jet_driver.[JetDriverDocModule]
-    jet_foundation.[BodyTree, TComptimeValue, Span, Diagnostic, Type, ast_comptime_value_show, body_each_expr_child, body_each_stmt_child, body_node, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render, diagnostic_line_at, diagnostic_column_at, type_name]
+    jet_foundation.[BodyTree, TComptimeValue, Span, Diagnostic, Type, ast_comptime_value_show, body_each_expr_child, body_each_stmt_child, body_node, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render, diagnostic_line_at, diagnostic_column_at, foundation_byte_text, type_name]
     jet_sema.[SemaMemoryProjection, sema_user_template_ct_value]
     jet_semindex.[SemIndex]
 }
@@ -152,15 +152,16 @@ jet_cli_expand_layout: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] N
     facts
 }
 jet_cli_expand_origin_receiver: fn(source: String, span: Span) -> String Never! {
-    if span.start < 0 || span.end < span.start || span.end > source.len() -> return "value"
-    text: source.slice(span.start, span.end).trim()
+    bytes: source.bytes()
+    if span.start < 0 || span.end < span.start || span.end > bytes.len() -> return "value"
+    text: foundation_byte_text(bytes, span.start, span.end).trim()
     if text.ends_with(".reflect().origin") {
         receiver: text.slice(0, text.len() - ".reflect().origin".len()).trim()
         if receiver != "" -> return receiver
     }
     // The fact read `x.reflect().origin` is spanned at its member `origin`.
-    if text == "origin" && source.slice(0, span.start).ends_with(".reflect().") {
-        words: jet_cli_find_words(source.slice(0, span.start - ".reflect().".len()))
+    if text == "origin" && foundation_byte_text(bytes, 0, span.start).ends_with(".reflect().") {
+        words: jet_cli_find_words(foundation_byte_text(bytes, 0, span.start - ".reflect().".len()))
         if words.len() > 0 {
             receiver: words[words.len() - 1]
             if receiver != "" -> return receiver

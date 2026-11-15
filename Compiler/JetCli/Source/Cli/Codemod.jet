@@ -17,7 +17,7 @@ use {
         JET_DRIVER_EXIT_OK,
         JET_DRIVER_EXIT_USER_ERROR,
     ]
-    jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_render_all, foundation_json_quote, name_mangle]
+    jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_render_all, foundation_byte_text, foundation_json_quote, name_mangle]
     jet_lexer.[lex, lex_generated, TOKEN_IDENT]
     jet_parser.[parse_generated_source]
     jet_semindex.[
@@ -362,7 +362,7 @@ jet_cli_codemod_extension: fn(path: String) -> String? Never! {
     bytes: name.bytes()
     at := bytes.len() - 1
     loop at > 0 {
-        if bytes[at] == 46 -> return Val(name.slice(at + 1, name.len()))
+        if bytes[at] == 46 -> return Val(foundation_byte_text(bytes, at + 1, bytes.len()))
         at -= 1
     }
     None
@@ -541,10 +541,6 @@ jet_cli_codemod_pair: fn(bytes: [U8], at: Int, first: Int, second: Int) -> Bool 
     at + 1 < bytes.len() && Int{bytes[at]} == first && Int{bytes[at + 1]} == second
 }
 
-jet_cli_codemod_slice: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
-    String.from_bytes(bytes.slice(start, end)) ?? ""
-}
-
 // Rust lex_template_source: a capture-aware byte scanner, not Jet lexing.
 jet_cli_codemod_lex_template: fn(source: String) -> [JetCLICodemodTemplateToken] JetCLIReadError! {
     bytes: source.bytes()
@@ -608,14 +604,14 @@ jet_cli_codemod_lex_template: fn(source: String) -> [JetCLICodemodTemplateToken]
                 at += 1
             }
         } else {
-            two: if at + 1 < bytes.len() -> jet_cli_codemod_slice(bytes, at, at + 2) else -> ""
+            two: if at + 1 < bytes.len() -> foundation_byte_text(bytes, at, at + 2) else -> ""
             if two == "->" || two == "=>" || two == "==" || two == "!=" || two == "<=" || two == ">=" || two == "?." || two == "??" || two == ":=" || two == ".." {
                 at += 2
             } else {
                 at += 1
             }
         }
-        tokens.push(JetCLICodemodTemplateToken{text: jet_cli_codemod_slice(bytes, start, at)})
+        tokens.push(JetCLICodemodTemplateToken{text: foundation_byte_text(bytes, start, at)})
     }
     Ok(tokens)
 }
@@ -754,7 +750,7 @@ jet_cli_codemod_normalized: fn(source: String) -> [String] JetCLIReadError! {
     out := [String]{}
     loop token in lexed.tokens {
         if token.span.start >= token.span.end || token.span.end > bytes.len() -> next
-        out.push(jet_cli_codemod_slice(bytes, token.span.start, token.span.end))
+        out.push(foundation_byte_text(bytes, token.span.start, token.span.end))
     }
     Ok(out)
 }
@@ -837,7 +833,7 @@ jet_cli_codemod_forest: fn(nodes: [SemNode], source: String) -> JetCLICodemodFor
 // that capture.
 jet_cli_codemod_pattern_node: fn(forest: JetCLICodemodForest, index: Int, source: String, captures: [JetCLICodemodCaptured], variadic: [String], pattern: &[JetCLICodemodPatternNode]) -> Int Never! {
     tree: forest.trees[index]
-    text: jet_cli_codemod_slice(source.bytes(), tree.span.start, tree.span.end).trim()
+    text: foundation_byte_text(source.bytes(), tree.span.start, tree.span.end).trim()
     loop capture in captures {
         if capture.text == text {
             pattern.push(JetCLICodemodPatternNode{capture: Val(capture.name.copy()), variadic: variadic.contains(capture.name), class: tree.class.copy(), shape: "", signature: [String]{}, slots: [JetCLICodemodPatternSlot]{}})
@@ -935,7 +931,7 @@ jet_cli_codemod_match_tree: fn(pattern: JetCLICodemodPattern, at: Int, forest: J
     candidate: forest.trees[index]
     if node.capture == .Val(name) {
         if node.variadic || node.class != candidate.class -> return false
-        return jet_cli_codemod_bind(name, jet_cli_codemod_slice(source.bytes(), candidate.span.start, candidate.span.end), jet_cli_codemod_tree_key(forest, index), captures)
+        return jet_cli_codemod_bind(name, foundation_byte_text(source.bytes(), candidate.span.start, candidate.span.end), jet_cli_codemod_tree_key(forest, index), captures)
     }
     if node.class != candidate.class || node.shape != candidate.shape || node.signature != candidate.signature || node.slots.len() != candidate.slots.len() -> return false
     loop position in 0..<node.slots.len() {
@@ -959,7 +955,7 @@ jet_cli_codemod_match_children: fn(pattern: JetCLICodemodPattern, wanted: [Int],
             loop limit < candidates.len() && forest.trees[candidates[limit]].class == node.class -> limit += 1
             end := limit
             loop end >= ci {
-                text: if end == ci -> "" else -> jet_cli_codemod_slice(source.bytes(), forest.trees[candidates[ci]].span.start, forest.trees[candidates[end - 1]].span.end)
+                text: if end == ci -> "" else -> foundation_byte_text(source.bytes(), forest.trees[candidates[ci]].span.start, forest.trees[candidates[end - 1]].span.end)
                 keys := [String]{}
                 loop position in ci..<end -> keys.push(jet_cli_codemod_tree_key(forest, candidates[position]))
                 checkpoint: captures.len()

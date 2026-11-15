@@ -2,7 +2,7 @@
 // closure. Terminal bits are host facts, not color.
 use {
     jet_driver.[JET_DRIVER_RUN_RECEIPT_MAGIC, JetDriverRunReceiptClaim, JetDriverRunReceiptInput, jet_driver_run_receipt_frame, jet_driver_run_receipt_section_marker]
-    jet_foundation.[ENV_JET_RECEIPT_BYPASS, foundation_json_quote]
+    jet_foundation.[ENV_JET_RECEIPT_BYPASS, foundation_byte_text, foundation_json_quote]
     jet_pkg_model.[AuthorityResolver, WorkspaceDeclarationCache]
     cli_sys: core.sys
     cli_files: core.files
@@ -13,7 +13,7 @@ jet_cli_receipt_secret_component: fn(component: String) -> Bool Never! {
     bytes: component.bytes()
     end := bytes.len()
     loop end > 0 && bytes[end - 1] >= (U8{48}) && bytes[end - 1] <= (U8{57}) -> end -= 1
-    name: component.slice(0, end)
+    name: foundation_byte_text(bytes, 0, end)
     [String]{"secret", "token", "password", "passwd", "credential", "key"}.contains(name)
 }
 

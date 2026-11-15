@@ -3,7 +3,7 @@
 use {
     jet_canvas.[Projection, canvas_graph_projection, json_bool, json_optional_str, json_str, json_strs, snippet, span_json]
     jet_driver.[JetDriverDocModule]
-    jet_foundation.[DerivationRecord, Expr, Func, ImportDecl, Item, NameDeclaration, NameLedger, NamedType, Span, TraitDef, TraitMethodSig, ast_visit_body, derivation_record_json, expr_span, name_facts_leaf, name_ledger_display_path, name_ledger_display_path_at, name_ledger_visible, type_name]
+    jet_foundation.[DerivationRecord, Expr, Func, ImportDecl, Item, NameDeclaration, NameLedger, NamedType, Span, TraitDef, TraitMethodSig, ast_visit_body, derivation_record_json, expr_span, foundation_byte_text, name_facts_leaf, name_ledger_display_path, name_ledger_display_path_at, name_ledger_visible, type_name]
     jet_semindex.[SemAnchor, SemDef, SemIndex, SemOutput, SemRef, SemStateGraph]
 }
 
@@ -285,13 +285,15 @@ game_method_call_span: fn(src: String, receiver: Expr, method_span: Span) -> Spa
 // The byte just past the `)` that closes the first `(` at or after `from`;
 // string literals are skipped.
 call_close_after: fn(src: String, from: Int) -> Int? {
-    if from < 0 || from > src.len() -> return None
-    open: src.slice(from, src.len()).index_of("(") ?? return None
     bytes: src.bytes()
+    if from < 0 || from > bytes.len() -> return None
+    open := from
+    loop open < bytes.len() && bytes[open] != (U8{40}) -> open += 1
+    if open == bytes.len() -> return None
     depth := 0
     in_string := false
     escaped := false
-    loop index in from + open..<bytes.len() {
+    loop index in open..<bytes.len() {
         byte: Int{bytes[index]}
         if in_string {
             if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == 34 {
@@ -309,10 +311,12 @@ call_close_after: fn(src: String, from: Int) -> Int? {
 
 game_type_name_span: fn(src: String, enclosing: Span, method_span: Span, written: String) -> Span? {
     start: if method_span.end < enclosing.end -> method_span.end else -> enclosing.end
-    end: if enclosing.end < src.len() -> enclosing.end else -> src.len()
+    bytes: src.bytes()
+    end: if enclosing.end < bytes.len() -> enclosing.end else -> bytes.len()
     if start < 0 || start >= end -> return None
-    relative: src.slice(start, end).index_of(written) ?? return None
-    Val(Span{start: start + relative, end: start + relative + written.len()})
+    relative: foundation_byte_text(bytes, start, end).find(written)
+    if relative < 0 -> return None
+    Val(Span{start: start + relative, end: start + relative + written.count_bytes()})
 }
 
 state_graph_json: fn(graph: SemStateGraph) -> String {
@@ -436,7 +440,7 @@ event_dispatcher_facts: fn(path: String, source: String, modules: [JetDriverDocM
     loop call in index.calls {
         if call.module_path != doc_module.path -> next
         call_source_span: event_call_span(src, call.span) ?? call.span
-        call_source: if call_source_span.end <= src.len() -> src.slice(call_source_span.start, call_source_span.end) else -> call.callee
+        call_source: if call_source_span.end <= src.count_bytes() -> foundation_byte_text(src.bytes(), call_source_span.start, call_source_span.end) else -> call.callee
         receiver: event_receiver(src, index, call.span, doc_module.path)
         kind := event_constructor_kind(src, call.span, call.callee, aliases)
         if kind == None && receiver == .Val(found) {
@@ -477,8 +481,9 @@ event_module_aliases: fn(imports: [ImportDecl]) -> [String] {
 }
 
 event_constructor_kind: fn(src: String, call_span: Span, callee: String, aliases: [String]) -> String? {
-    end: if call_span.start < src.len() -> call_span.start else -> src.len()
-    before: src.slice(0, end).trim_end()
+    src_bytes: src.bytes()
+    end: if call_span.start < src_bytes.len() -> call_span.start else -> src_bytes.len()
+    before: foundation_byte_text(src_bytes, 0, end).trim_end()
     qualified := false
     loop alias in aliases {
         if before.ends_with("{alias}.") -> qualified = true
@@ -534,10 +539,10 @@ definition_for_anchor: fn(index: SemIndex, target: SemAnchor) -> SemDef? {
 event_receiver: fn(src: String, index: SemIndex, call_span: Span, module_path: String) -> CanvasEventOperand? {
     best := SemRef?{None}
     loop reference in index.references {
-        if reference.module_path != module_path || reference.span.end > call_span.start || call_span.start > src.len() {
+        if reference.module_path != module_path || reference.span.end > call_span.start || call_span.start > src.count_bytes() {
             next
         }
-        if src.slice(reference.span.end, call_span.start).trim() != "." -> next
+        if foundation_byte_text(src.bytes(), reference.span.end, call_span.start).trim() != "." -> next
         if best == .Val(current) && current.span.end > reference.span.end -> next
         best = Val(reference)
     }

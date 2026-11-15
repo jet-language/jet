@@ -3,6 +3,7 @@
 use {
     cli_files: core.files
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[foundation_byte_text]
 }
 
 JetCLIDevtoolsExample: struct {
@@ -18,8 +19,8 @@ jet_cli_devtools_example: fn(spec: String) -> JetCLIDevtoolsExample JetCLIReadEr
  bytes: spec.bytes()
  loop split < bytes.len() && bytes[split] != (U8{47}) -> split += 1
  if split == 0 || split >= bytes.len() - 1 -> return Err(jet_cli_read_error("expected `<topic>/<name>`, got `{spec}`"))
- topic: spec.slice(0..<split)
- name: spec.slice((split + 1)..<bytes.len())
+ topic: foundation_byte_text(bytes, 0, split)
+ name: foundation_byte_text(bytes, split + 1, bytes.len())
  directory: cli_files.join("Examples", topic)
  greeting: "scaffold: {topic}/{name}"
  Ok(JetCLIDevtoolsExample{

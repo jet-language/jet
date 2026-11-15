@@ -1,7 +1,7 @@
 // `print_explanation` and `run_explain`. Diagnostic essays reuse the existing
 // Foundation registry/renderer.
 use {
-    jet_foundation.[DiagnosticExplanation, Func, TraitImplBlock, diagnostic_explanation, diagnostic_explanation_render]
+    jet_foundation.[DiagnosticExplanation, Func, TraitImplBlock, diagnostic_explanation, diagnostic_explanation_render, foundation_byte_text]
     jet_driver.[JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverSourceQueryResult, jet_driver_explain_code]
 }
 
@@ -101,8 +101,9 @@ jet_cli_diagnostic_type_literal: fn(source: String, methods: [Func], name: Strin
         if method.name != name || method.body.len() != 1 -> next
         if method.body[0] == .Expr(literal) {
             if literal == .Str(_, span, _) {
-                if span.start + 1 > span.end - 1 || span.end > source.len() -> return None
-                return Val(source.slice((span.start + 1)..<(span.end - 1)))
+                bytes: source.bytes()
+                if span.start + 1 > span.end - 1 || span.end > bytes.len() -> return None
+                return Val(foundation_byte_text(bytes, span.start + 1, span.end - 1))
             }
         }
     }

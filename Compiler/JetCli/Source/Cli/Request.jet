@@ -37,6 +37,7 @@ use {
         compiler_take_rows,
         compiler_threads_failure_text,
         compiler_transfer_rows,
+        foundation_byte_text,
         foundation_json_quote,
         ModuleLayer,
         Program,
@@ -1130,7 +1131,7 @@ jet_cli_memory_available: fn() -[FS]> Int? Never! {
         }
         if path == "" || path == "/" -> break
         cut: path.rfind("/")
-        path = if cut > 0 -> path.slice(0, cut) else -> ""
+        path = if cut > 0 -> foundation_byte_text(path.bytes(), 0, cut) else -> ""
     }
     Val(available)
 }
@@ -2614,7 +2615,7 @@ jet_cli_trace_splice: fn(sink: JetCLITraceSink, label: String, text: String) Nev
     loop line in text.lines() {
         if line.starts_with("{{\"name\":\"process_name\",") {
             at: line.find(JET_CLI_TRACE_NAME_ARG)
-            if at >= 0 && line.ends_with("}}}},") -> name = line.slice(at + JET_CLI_TRACE_NAME_ARG.len(), line.len() - 3)
+            if at >= 0 && line.ends_with("}}}},") -> name = foundation_byte_text(line.bytes(), at + JET_CLI_TRACE_NAME_ARG.len(), line.count_bytes() - 3)
             next
         }
         if line.starts_with("{{\"name\":\"trace.start\",") {
