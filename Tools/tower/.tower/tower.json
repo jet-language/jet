@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6952,
-    "rev": 105110,
+    "rev": 105125,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25518,75 +25518,75 @@
       "criteria": [
         {
           "n": 3,
-          "text": "The complete custom HTTPS example declares metadata, three ordered HTTPS origins, the Acme decoder, one archive selector and one existing installer.",
+          "text": "The complete custom HTTPS example declares metadata, three ordered HTTPS origins, the Acme decoder, one archive selector and one existing installer, and it evaluates. Proof: `jet test Compiler --profile packages --filter ModuleEvalReleases/custom_https_example`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:20:24.392Z"
+          "at": "2026-11-15T05:00:51.687Z"
         },
         {
           "n": 4,
-          "text": "The finite decoder types and ReleaseDecodeError are defined. The decoder is pure, bounded and cannot expose direct-feed signature, key or proof fields.",
+          "text": "The finite decoder types and ReleaseDecodeError are defined; the decoder is pure and bounded and cannot expose direct-feed signature, key or proof fields. Proof: `jet test Compiler --profile packages --filter Release/decoder_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-11T03:02:02.110Z"
+          "at": "2026-11-15T05:00:52.623Z"
         },
         {
           "n": 5,
-          "text": "Release.github derives one repository from the `Releases` source (`RefSource.Releases`). Release.https keeps logical source target and metadata authority separate.",
+          "text": "Release.github derives one repository from the `Releases` source (`RefSource.Releases`), and Release.https keeps the logical source target and the metadata authority separate. Proof: `jet test Compiler --profile packages --filter Release/resolver_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-11T03:02:02.110Z"
+          "at": "2026-11-15T05:00:53.573Z"
         },
         {
           "n": 6,
-          "text": "Provider validation rejects empty fields, malformed RFC3339 times, unsafe URLs, unsupported formats, unsafe paths, oversized data and ambiguous trees.",
+          "text": "Provider validation refuses empty fields, malformed RFC3339 times, unsafe URLs, unsupported formats, unsafe paths, oversized data and ambiguous trees, each with its registered error. Proof: `jet test Compiler --profile packages --filter Release/validation_refuses_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-11T03:02:02.110Z"
+          "at": "2026-11-15T05:00:54.475Z"
         },
         {
           "n": 7,
-          "text": "Bare and prefixed SHA-256 assertions normalize to one lowercase 64-hex Sha256 value. Malformed and unknown algorithms fail.",
+          "text": "Bare and prefixed SHA-256 assertions normalize to one lowercase 64-hex Sha256 value, and malformed values and unknown algorithms fail. Proof: `jet test Compiler --profile packages --filter Release/sha256_normalize`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-11T03:02:02.110Z"
+          "at": "2026-11-15T05:00:55.383Z"
         },
         {
           "n": 8,
-          "text": "Metadata, artifact and redirect origins are authorized before their requests or follows. New origins cannot be trusted retroactively.",
+          "text": "Metadata, artifact and redirect origins are authorized before their requests or follows, and a new origin cannot be trusted after the fact. Proof: `jet test Compiler --profile packages --filter Release/origins_authorized_first`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-11T03:02:02.110Z"
+          "at": "2026-11-15T05:00:56.398Z"
         },
         {
           "n": 9,
-          "text": "Raw, archive and app-bundle selectors stage one explicit asset and reuse exactly one existing installer. Release trust never authorizes Build or launch.",
+          "text": "Raw, archive and app-bundle selectors stage one explicit asset and reuse exactly one existing installer, and release trust never authorizes a build or a launch. Proof: `jet test Compiler --profile packages --filter Release/selector_one_installer`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-11T03:02:02.110Z"
+          "at": "2026-11-15T05:00:57.331Z"
         },
         {
           "n": 10,
-          "text": "Existing BuildStep.fetch hash and credential-free laws remain unchanged.",
+          "text": "The existing BuildStep.fetch hash and credential-free rules are unchanged by this card. Proof: `jet test Compiler --profile packages --filter BuildStep/fetch_` passes unchanged before and after.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:20:25.272Z"
+          "at": "2026-11-15T05:00:58.325Z"
         },
         {
           "n": 11,
@@ -25599,30 +25599,30 @@
         },
         {
           "n": 15,
-          "text": "[retarget] Option A (ratified) is the only shipped form: Pkg.adapt carries resolver and asset beside source; no Recipe.release wrapper exists.",
+          "text": "Option A (D-RELEASE-RECIPE1=A) is the only form: `Pkg.adapt` carries `resolver:` and `asset:` beside `source:`, and no `Recipe.release` wrapper exists. Proof: `git grep -n 'Recipe.release' -- Jetpack` finds only the E1270 rejection claim.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:33:15.445Z"
+          "at": "2026-11-15T05:00:59.339Z"
         },
         {
           "n": 17,
-          "text": "`jet test Compiler --profile packages --filter Release` passes with PackageModel/Tests/Release.jet and EnvModel/Tests/ModuleEvalReleases.jet claims covering the A declaration, E1270 rejections (other source, duplicate selector, Recipe.release) and SHA-256 normalization; `JET=jet jet Jetpack/Bootstrap/Check.jet --area EnvModel` exits 0.",
+          "text": "PackageModel/Tests/Release.jet and EnvModel/Tests/ModuleEvalReleases.jet cover the A declaration, the E1270 refusals (another source, a duplicate selector, `Recipe.release`) and SHA-256 normalization. Proof: `jet test Compiler --profile packages --filter Release` and `JET=jet jet Jetpack/Bootstrap/Check.jet --area EnvModel` exit 0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:52:57.831Z"
+          "at": "2026-11-15T05:01:00.335Z"
         },
         {
           "n": 18,
-          "text": "[#3031] First unpinned install and explicit update discover moving releases. Launch and pinned offline replay never do discovery. `jetpack update --deps` changes only the channel lock. `jetpack use <ref> --prep` realizes a user profile independent of the project. Both scopes share one candidate, origin, trust, hash and artifact contract. GitHub pagination completes within 100 pages and 10k candidates, or fails with a typed error. Moving selectors require a valid RFC3339 published_at, and only maximal-time ties fail. Exact tags select one tag. GitHub and custom feeds map to one candidate record. Candidate and redirect origins are authorized before any request. Pins, caches and receipts bind candidate identity and observed bytes. No credential or signed URL is persisted. Proof: `Jetpack/Bootstrap/check.sh --area Provider --tests` prints CHECK OK with the ReleaseResolution claims.",
+          "text": "A first unpinned install and an explicit update discover moving releases, while a launch and a pinned offline replay never do discovery. Proof: `jet test Compiler --profile packages --filter ReleaseResolution/discovery_only_on_install_and_update`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:58:20.664Z"
+          "at": "2026-11-15T05:01:01.263Z"
         },
         {
           "n": 19,
@@ -25686,6 +25686,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T01:52:42.815Z"
+        },
+        {
+          "n": 26,
+          "text": "GitHub release pagination completes within 100 pages and 10,000 candidates, or fails with a typed error. Proof: `jet test Compiler --profile packages --filter ReleaseResolution/github_pagination_bounds`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:00:47.940Z"
+        },
+        {
+          "n": 27,
+          "text": "A moving selector needs a valid RFC3339 published_at and fails only on a tie at the latest time, and an exact tag selects one tag. Proof: `jet test Compiler --profile packages --filter ReleaseResolution/moving_selector_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:00:48.899Z"
+        },
+        {
+          "n": 28,
+          "text": "GitHub and custom feeds map to one candidate record, and installs and user-profile realizations share one candidate, origin, trust, hash and artifact contract. Proof: `jet test Compiler --profile packages --filter ReleaseResolution/one_candidate_record`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:00:49.838Z"
+        },
+        {
+          "n": 29,
+          "text": "Pins, caches and receipts bind candidate identity and observed bytes, and no credential or signed URL is ever persisted. Proof: `jet test Compiler --profile packages --filter ReleaseResolution/pins_bind_bytes_no_credentials`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T05:00:50.748Z"
         }
       ],
       "refs": [
@@ -25716,12 +25752,12 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-10T22:59:01.979Z",
-      "updated": "2026-11-13T01:55:44.800Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:01:01.263Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 25
+      "criteriaLastN": 29
     },
     {
       "id": "c01k5lts",
@@ -215759,6 +215795,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:01:01.263Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03habw5",
+      "note": "#18: strip debris; split into c18 and c26-c29; the update --deps and use --prep half is #6941 c2; was: [#3031] First unpinned install and explicit update discover moving releases. Launch and pinned offline replay never do discovery. `jetpack update --deps` changes only the channel lock. `jetpack use <r"
+    },
+    {
+      "at": "2026-11-15T05:01:00.336Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03habw5",
+      "note": "#17: wording; was: `jet test Compiler --profile packages --filter Release` passes with PackageModel/Tests/Release.jet and EnvModel/Tests/ModuleEvalReleases.jet claims covering the A declaration, E1270 rejections (other "
+    },
+    {
+      "at": "2026-11-15T05:00:59.339Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03habw5",
+      "note": "#15: strip debris; proof; was: [retarget] Option A (ratified) is the only shipped form: Pkg.adapt carries resolver and asset beside source; no Recipe.release wrapper exists."
+    },
+    {
+      "at": "2026-11-15T05:00:58.325Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03habw5",
+      "note": "#10: proof; was: Existing BuildStep.fetch hash and credential-free laws remain unchanged."
+    },
+    {
+      "at": "2026-11-15T05:00:57.331Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03habw5",
+      "note": "#9: proof; was: Raw, archive and app-bundle selectors stage one explicit asset and reuse exactly one existing installer. Release trust never authorizes Build or launch."
+    },
+    {
+      "at": "2026-11-15T05:00:56.398Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03habw5",
+      "note": "#8: proof; was: Metadata, artifact and redirect origins are authorized before their requests or follows. New origins cannot be trusted retroactively."
+    },
+    {
+      "at": "2026-11-15T05:00:55.383Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03habw5",
+      "note": "#7: proof; was: Bare and prefixed SHA-256 assertions normalize to one lowercase 64-hex Sha256 value. Malformed and unknown algorithms fail."
+    },
+    {
+      "at": "2026-11-15T05:00:54.475Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03habw5",
+      "note": "#6: proof; was: Provider validation rejects empty fields, malformed RFC3339 times, unsafe URLs, unsupported formats, unsafe paths, oversized data and ambiguous trees."
+    },
+    {
+      "at": "2026-11-15T05:00:53.573Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03habw5",
+      "note": "#5: proof; was: Release.github derives one repository from the `Releases` source (`RefSource.Releases`). Release.https keeps logical source target and metadata authority separate."
+    },
+    {
+      "at": "2026-11-15T05:00:52.623Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03habw5",
+      "note": "#4: proof; was: The finite decoder types and ReleaseDecodeError are defined. The decoder is pure, bounded and cannot expose direct-feed signature, key or proof fields."
+    },
+    {
+      "at": "2026-11-15T05:00:51.687Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03habw5",
+      "note": "#3: proof; was: The complete custom HTTPS example declares metadata, three ordered HTTPS origins, the Acme decoder, one archive selector and one existing installer."
+    },
+    {
+      "at": "2026-11-15T05:00:50.748Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c03habw5",
+      "note": "#29 Pins, caches and receipts bind candidate identity and observ"
+    },
+    {
+      "at": "2026-11-15T05:00:49.839Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c03habw5",
+      "note": "#28 GitHub and custom feeds map to one candidate record, and ins"
+    },
+    {
+      "at": "2026-11-15T05:00:48.899Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c03habw5",
+      "note": "#27 A moving selector needs a valid RFC3339 published_at and fai"
+    },
+    {
+      "at": "2026-11-15T05:00:47.940Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c03habw5",
+      "note": "#26 GitHub release pagination completes within 100 pages and 10,"
+    },
     {
       "at": "2026-11-15T04:59:48.768Z",
       "by": "TowerKeeper-1",
