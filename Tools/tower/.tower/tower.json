@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106325,
+    "rev": 106350,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49979,11 +49979,12 @@
         {
           "n": 7,
           "text": "A #Profiled instrumentation library sends meta.events call timings to a sink, and its overhead per call is measured and recorded (Docs/audits/2026-11-14-debugging-profiling-review.md). Proof: `jet test Compiler --profile cases --filter perf/profiled_marker_sends_call_timings`, plus a committed overhead measurement.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:21:55.589Z"
+          "evidence": "Merged into #6841 c3: #6841 c3 owns the compile-time instrumentation that sends call timings to a sink; the overhead budget is #6841 c6.",
+          "at": "2026-11-15T11:38:38.875Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
@@ -50014,8 +50015,8 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:53.383Z",
-      "updated": "2026-11-15T04:22:27.322Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:38:38.875Z",
+      "updatedBy": "TowerKeeper-2",
       "goals": [
         "G5"
       ],
@@ -84184,8 +84185,8 @@
     {
       "id": "c0zn6gbs",
       "num": 6538,
-      "title": "Two golden runners disagree: testkit golden FAILs 18 examples with no expected stream, which run-feature-examples skips, and io/path depends on cwd",
-      "body": "Found by AsmPar-1 on dev 163d4852ad (w22 s2), 2026-11-01. Examples goldens have two runners. Tools/agent/run-feature-examples.mjs (the wave's default-tier golden) skips an example with no expected .out or .err.out ('no native golden', line 366). Tools/testkit's golden suite FAILs the same example with 'missing expected stream' (Golden.jet:184) at every tier, o0 included: TESTKIT_ARGS='--tier o0 --filter collections/data_battery' jet test Tools/testkit 'suite golden'. The 18 examples: data_battery, job_queue, native_resource_streams, foundations/{arrays, bridges, capabilities, distributed, dsl, exact, realtime, receipts, storage, text, units}, opaque_handles, ui/battery, ui/surface, web/state_surface. Separately, Examples io/path walks the relative Path.from('Examples/features/io') (path.jet:26): it prints 'walk non-empty: true' from the repo root (run-feature-examples) and 'false' from testkit's staged directory. One meaning needs one rule. Under I5 every example needs a golden, so the likely fix is to give the 18 real goldens and remove the .mjs skip, and to make io/path independent of cwd. Lists: $JET_SCRATCH_ROOT/lanes/AsmPar/selfab/gold-r41/.",
+      "title": "Examples goldens: every example has an expected stream, and Path output does not depend on the working directory",
+      "body": "Update 2026-11-15 (TowerKeeper-2): one golden runner remains. Tools/agent/run-feature-examples.mjs was deleted in c515c4ea10 (#6035 c3), and the examples moved to concept areas in 2c3e68a70b, so the old paths below are history. The testkit golden suite (Compiler/JetTestKit/Source/Golden.jet:318) FAILs an example with no expected stream; c1 gives each one a stream, and the Path criterion covers io/path (now Examples/Systems/Files/Path.jet).\n\nFound by AsmPar-1 on dev 163d4852ad (w22 s2), 2026-11-01. Examples goldens have two runners. Tools/agent/run-feature-examples.mjs (the wave's default-tier golden) skips an example with no expected .out or .err.out ('no native golden', line 366). Tools/testkit's golden suite FAILs the same example with 'missing expected stream' (Golden.jet:184) at every tier, o0 included: TESTKIT_ARGS='--tier o0 --filter collections/data_battery' jet test Tools/testkit 'suite golden'. The 18 examples: data_battery, job_queue, native_resource_streams, foundations/{arrays, bridges, capabilities, distributed, dsl, exact, realtime, receipts, storage, text, units}, opaque_handles, ui/battery, ui/surface, web/state_surface. Separately, Examples io/path walks the relative Path.from('Examples/features/io') (path.jet:26): it prints 'walk non-empty: true' from the repo root (run-feature-examples) and 'false' from testkit's staged directory. One meaning needs one rule. Under I5 every example needs a golden, so the likely fix is to give the 18 real goldens and remove the .mjs skip, and to make io/path independent of cwd. Lists: $JET_SCRATCH_ROOT/lanes/AsmPar/selfab/gold-r41/.",
       "kind": "bug",
       "track": "epoch",
       "epoch": "e5",
@@ -84284,7 +84285,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T09:11:08.072Z",
-      "updated": "2026-11-15T11:38:07.991Z",
+      "updated": "2026-11-15T11:38:40.410Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 6
     },
@@ -91573,11 +91574,12 @@
         {
           "n": 1,
           "text": "Tower's write path is Jet: the Tower CLI (card, decision and milestone writes) runs as Jet under Tools/tower with no node process, and no Tools/agent gate spawns node. Proof: `git ls-files Tools/tower | rg '\\.mjs$'` is empty and `git grep -nE '\"node\"|tower\\.mjs' -- Tools/agent` is empty.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:02:08.563Z"
+          "evidence": "Merged into #6311 c4: #6311 c4 owns the same Tower cutover to Jet with no node fallback. The other Tools/ ports in this body are out of scope under AGENTS.md (4add2b9357) and #5072 c20, and Tools/compiler-modules is gone.",
+          "at": "2026-11-15T11:38:35.183Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [
@@ -91591,8 +91593,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T16:32:42.207Z",
-      "updated": "2026-11-13T02:02:08.563Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:35.183Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 1
     },
     {
@@ -93697,11 +93699,13 @@
       ],
       "refs": [],
       "tags": [],
-      "goals": [],
+      "goals": [
+        "G10"
+      ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T06:30:13.586Z",
-      "updated": "2026-11-15T11:37:52.290Z",
+      "updated": "2026-11-15T11:38:41.970Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 2
     },
@@ -94109,7 +94113,7 @@
       "id": "c0qoe1b9",
       "num": 6719,
       "title": "Codegen: pixel-loop throughput (fill leaf through a &struct field place, slow U64 arithmetic at O2, O0 indexed stores ~3 ns/element)",
-      "body": "Found by WaylandLead3 while speeding up the core.ui rasterizer (#6718); repro in Micro.jet from the renderer lane. (1) The O2 fill leaf doesn't fire for stores through a &struct field place: 1.15 ns/B vs 0.07 ns/B for a local. (2) U64 arithmetic takes ~10 ns/iteration even at O2, no faster than O0. (3) An O0 indexed store costs ~3 ns/element, so per-pixel Jet code can't redraw 1080p in a few ms at O0 (jet run). Fix each at its root in the compiler (IR/backend), not with library workarounds. The same semantics on every tier (I9).",
+      "body": "Found by WaylandLead3 while speeding up the core.ui rasterizer (#6718); the renderer lane's Micro.jet repro is gone, so the proofs are cases and the pixel-loops gauntlet entry. (1) The O2 fill leaf doesn't fire for stores through a &struct field place: 1.15 ns/B vs 0.07 ns/B for a local. (2) U64 arithmetic takes ~10 ns/iteration even at O2, no faster than O0. (3) An O0 indexed store costs ~3 ns/element, so per-pixel Jet code can't redraw 1080p in a few ms at O0 (jet run). Fix each at its root in the compiler (IR/backend), not with library workarounds. The same semantics on every tier (I9).",
       "kind": "bug",
       "track": "epoch",
       "epoch": "e5",
@@ -94166,7 +94170,7 @@
       "parentId": "c0f9brds",
       "needsAcceptance": false,
       "created": "2026-11-09T13:21:28.909Z",
-      "updated": "2026-11-15T11:38:10.702Z",
+      "updated": "2026-11-15T11:38:43.498Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 3
     },
@@ -95896,11 +95900,11 @@
         {
           "n": 9,
           "text": "D-HOST-NONCE2=A is built (ratified 2026-11-13). Reading the /proc entry of a child the operation started counts as Exec, so the typed memory and open-file limit errors stay. The vault lock becomes a kernel-released flock (HostFileLock), so no vault call reads another process's entry, a crashed writer's lock is free at once, and the ten-minute stale wait and the pid check are gone. The lock file is deleted on release, and its identity is rechecked after locking. host-reads.md lists the one remaining read, and --deny=FS.Read states what it does not cover. Proof: a case where a writer is killed mid-write and the next write proceeds at once, a case for two concurrent writers, and the child-limit cases still reporting which limit stopped the child.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T12:16:07.072Z"
+          "evidence": "dev 10123844b2: the vault write lock is a kernel-released flock (HostFileLock) with no process-entry read, deleted on release and rechecked after locking; its witness (VaultProviderWitness.c, VaultProviderTests.jet) forks a writer that takes the lock, gets Locked for a second writer, SIGKILLs the writer, and the next commit succeeds at once and leaves no lock file; census OK line, rc=0 (seed-b14). dev c490f18529: spec.md and host-reads.md H22 rule the child /proc read under Exec, cli.md says what --deny=FS.Read does not cover, and process_session_resource_limit_exhaustion_names_each_limit_all_tiers and process_session_resource_limits_match_all_execution_tiers pass on the g6-cut3b jet.",
+          "at": "2026-11-15T11:38:36.148Z"
         }
       ],
       "refs": [],
@@ -95911,8 +95915,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T01:52:19.959Z",
-      "updated": "2026-11-15T01:23:17.832Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:36.148Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 9
     },
     {
@@ -97587,20 +97591,22 @@
         {
           "n": 1,
           "text": "FmtCorpus --check rc 0 and the fmt_is_lossless_on_supported_source_corpus guard passes on dev with the batch jet. The root (formatter or source) is fixed once: either jet fmt prints the ratified lambda form, or the sources are reformatted by `jet fmt` in one cutover commit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T12:56:01.617Z"
+          "evidence": "Merged into #6898 c12: #6898 c12 owns the whole-corpus jet fmt --check guard; the corpus cutover 1c687e2e63 and the empty-lambda stability fix 3dd55d97db are on dev.",
+          "at": "2026-11-15T11:38:37.092Z",
+          "closure": "obsolete"
         },
         {
           "n": 2,
           "text": "jet fmt is idempotent on every corpus source: a second pass changes nothing. G5DevX-2 (2026-11-13) found 3 unstable sources, now left out of the corpus: Jetpack/Store/Tests/StoreIngestLate.jet and two tests/conformance/corpus/core/web files. Proof: they rejoin the corpus, and FmtCorpus --check rc 0.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T14:05:01.809Z"
+          "evidence": "Moved to #6898 c15: fmt idempotency and the three excluded sources belong with the formatter corpus card.",
+          "at": "2026-11-15T11:38:37.987Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
@@ -97620,8 +97626,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T12:55:59.987Z",
-      "updated": "2026-11-14T04:04:13.306Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:37.987Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 3
     },
     {
@@ -98320,7 +98326,7 @@
       "id": "c0prey1k",
       "num": 6799,
       "title": "App menus, context menus, the tray and the macOS menu bar on the native app host",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). This build card waits on the D-WEBAPP-SHAPE1 ratification. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G1).",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G1).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -98371,15 +98377,15 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:39.597Z",
-      "updated": "2026-11-14T03:24:49.249Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:46.814Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 3
     },
     {
       "id": "c0f4o904",
       "num": 6800,
       "title": "Notifications: local notifications on desktop and phones, and push through APNs, FCM and Web Push from one typed server call",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). This build card waits on the D-WEBAPP-SHAPE1 ratification. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G2).",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G2).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -98430,7 +98436,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:41.131Z",
-      "updated": "2026-11-15T11:38:21.205Z",
+      "updated": "2026-11-15T11:38:48.399Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 3
     },
@@ -98438,7 +98444,7 @@
       "id": "c01pk3vf",
       "num": 6801,
       "title": "Background work: deferred and periodic jobs on phones (BGTaskScheduler, WorkManager) and desktops; browsers run none (server jobs and push cover the web)",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). This build card waits on the D-WEBAPP-SHAPE1 ratification. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G3).",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G3).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -98489,15 +98495,15 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:42.496Z",
-      "updated": "2026-11-14T03:24:53.350Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:50.335Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 3
     },
     {
       "id": "c0mq8xwu",
       "num": 6802,
       "title": "Files: native open and save pickers, folder access that persists, and the browser's file pickers, as one typed API",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). This build card waits on the D-WEBAPP-SHAPE1 ratification. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G4).",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G4).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -98548,15 +98554,15 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:43.767Z",
-      "updated": "2026-11-14T03:24:55.322Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:51.903Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 3
     },
     {
       "id": "c097myt8",
       "num": 6803,
       "title": "Camera, sensors and location as typed streams behind declared device permissions",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). This build card waits on the D-WEBAPP-SHAPE1 ratification. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G5).",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G5).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -98598,8 +98604,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:45.126Z",
-      "updated": "2026-11-14T03:24:57.224Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:53.674Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 2
     },
     {
@@ -99110,12 +99116,12 @@
         },
         {
           "n": 2,
-          "text": "Streamed regions resume (D-RESUME1) with no hydration replay. A read that fails after the 200 status is sent renders its region's error branch. Proof: `jet test Compiler --profile cases --filter web_app/streamed_region_errors_render_their_error_branch`.",
+          "text": "Streamed regions resume (D-RESUME1) with no hydration replay. A read that fails after the 200 status is sent renders its region's error branch. Proof: `jet test Compiler --profile cases --filter web_app/streamed_region_errors_render_their_error_branch`. Where a page splits into regions follows open decision D-STREAM-REGION1.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:49.670Z"
+          "at": "2026-11-15T11:38:24.408Z"
         }
       ],
       "refs": [],
@@ -99126,7 +99132,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:57.804Z",
-      "updated": "2026-11-15T11:38:23.253Z",
+      "updated": "2026-11-15T11:38:24.408Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 2
     },
@@ -99237,12 +99243,12 @@
         },
         {
           "n": 2,
-          "text": "Built assets have content-hashed names and are served with public, max-age=31536000, immutable. Changing an asset changes its name. Proof: `jet test Compiler --profile cases --filter web_build/hashed_assets_are_immutable`.",
+          "text": "Built assets (images, fonts, icons and static files) have content-hashed names and are served with public, max-age=31536000, immutable. Changing an asset changes its name. Proof: `jet test Compiler --profile cases --filter web_build/hashed_assets_are_immutable`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:54.391Z"
+          "at": "2026-11-15T11:38:25.641Z"
         },
         {
           "n": 3,
@@ -99280,8 +99286,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:00.487Z",
-      "updated": "2026-11-15T02:49:28.895Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:38:25.641Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 5
     },
     {
@@ -99355,12 +99361,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A ui.asset path with no file is a compile error that names the path. Fonts, icons and static files get content-hashed names. Proof: `jet test Compiler --profile cases --filter web_build/missing_asset_is_a_compile_error`.",
+          "text": "A ui.asset path with no file is a compile error that names the path. Proof: `jet test Compiler --profile cases --filter web_build/missing_asset_is_a_compile_error`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:57.223Z"
+          "at": "2026-11-15T11:38:26.959Z"
         },
         {
           "n": 2,
@@ -99380,8 +99386,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:03.765Z",
-      "updated": "2026-11-14T03:25:23.409Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:26.959Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 2
     },
     {
@@ -99423,12 +99429,12 @@
         },
         {
           "n": 3,
-          "text": "Overlays (dialogs, popovers, sheets and toasts) stack in one order. Scroll containers and sticky headers work on both layout engines. kit.list rows and ui.local state are keyed by identity, so filtering or moving Crewboard cards never moves local state to another row. The preview tests of 6.4 (three widths, two text sizes, both themes) report the four measures of 6.5. Proof: `jet test Compiler --profile cases --filter ui_style/overlays_scrolling_and_row_identity` and `jet test Compiler --profile golden --filter ui_style/crewboard_previews`.",
+          "text": "Overlays (dialogs, popovers, sheets and toasts) stack in one order, and scroll containers and sticky headers work on both layout engines. Proof: `jet test Compiler --profile cases --filter ui_style/overlays_and_scrolling`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:44:00.980Z"
+          "at": "2026-11-15T11:38:27.918Z"
         },
         {
           "n": 4,
@@ -99457,7 +99463,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:05.205Z",
-      "updated": "2026-11-15T11:37:58.446Z",
+      "updated": "2026-11-15T11:38:27.918Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 5
     },
@@ -99688,12 +99694,12 @@
         },
         {
           "n": 3,
-          "text": "With .GitHub (and .Stripe) the framework drops a delivery whose X-GitHub-Delivery (Stripe event id) it has run, recording the ID in the webhook's transaction and keeping it 30 days. Proof: `jet test Compiler --profile cases --filter web_app/webhook_redelivery_runs_once`.",
+          "text": "With .GitHub (and .Stripe) the framework drops a delivery whose X-GitHub-Delivery (Stripe event id) it has run, recording the ID in the webhook's transaction and keeping it 30 days. Proof: `jet test Compiler --profile cases --filter web_app/webhook_redelivery_runs_once`. The store that keeps delivery IDs follows open decision D-DB-TABLE1.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T17:08:53.387Z"
+          "at": "2026-11-15T11:38:28.812Z"
         },
         {
           "n": 4,
@@ -99713,8 +99719,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:31.447Z",
-      "updated": "2026-11-15T03:57:26.254Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T11:38:28.812Z",
+      "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 4
     },
     {
@@ -99738,12 +99744,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`kit.Form<T>` exposes one typed field per member of T, so `f.text(f.title, ...)` is checked; the form runs T's validate block as the person types. Proof: an executable example under Examples/ (a kit.Form over a struct with a validate block) prints its field errors as typed input arrives, golden on O0, O1, O2 and web; and a UI snapshot shows the error for a field name T does not have. (#6792 r2 gap K8)",
+          "text": "`kit.Form<T>` exposes one typed field per member of T, so `f.text(f.title, ...)` is checked, and the form runs T's validate block as the person types. Proof: `jet test Compiler --profile golden --filter Web/FormTypedFields` (a kit.Form over a struct with a validate block prints its field errors as typed input arrives) on O0, O1, O2 and web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T08:47:48.083Z"
+          "at": "2026-11-15T11:38:29.700Z"
         },
         {
           "n": 2,
@@ -99799,7 +99805,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:33.941Z",
-      "updated": "2026-11-15T11:37:59.406Z",
+      "updated": "2026-11-15T11:38:29.700Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 6
     },
@@ -99830,21 +99836,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A typed table stores #Secret fields with a storage codec that never reaches the wire codec; get/put/insert/query carry DB.Read and DB.Write and record read and write sets for D-INVALIDATE1. Proof: an executable example with a db.Table<K, T> holding a #Secret field prints its stored and wire forms (the secret absent from the wire), golden on O0, O1 and O2; a case shows a query's read set invalidating a live query after a write; a UI snapshot shows the effect error for a put without DB.Write. (#6792 r2 gap K9)",
+          "text": "A typed table stores #Secret fields with a storage codec that never reaches the wire codec. Proof: `jet test Compiler --profile golden --filter Data/TableSecretField` (a db.Table<K, T> holding a #Secret field prints its stored and wire forms, the secret absent from the wire) on O0, O1 and O2. The table declaration form follows open decision D-DB-TABLE1.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T08:47:49.682Z"
+          "at": "2026-11-15T11:38:30.598Z"
         },
         {
           "n": 2,
-          "text": "D-DATA-EVOLVE1=A: a typed table's #Table steps and the D-SERVICE-UPGRADE1 migrate function derive from the type's one migration block, and a stored table upgrades across one schema change. Waits on #Table and the generation handoff. Proof: `jet test Compiler --profile golden --filter Data/TableMigration` passes on o0, o1 and o2.",
+          "text": "D-DATA-EVOLVE1=A: a typed table's #Table steps and the D-SERVICE-UPGRADE1 migrate function derive from the type's one migration block, and a stored table upgrades across one schema change. Waits on #Table and the generation handoff. Proof: `jet test Compiler --profile golden --filter Data/TableMigration` passes on o0, o1 and o2. The table declaration form follows open decision D-DB-TABLE1.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T02:29:47.445Z"
+          "at": "2026-11-15T11:38:31.498Z"
         },
         {
           "n": 3,
@@ -99873,7 +99879,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:36.307Z",
-      "updated": "2026-11-15T11:38:01.626Z",
+      "updated": "2026-11-15T11:38:31.498Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 4
     },
@@ -100079,12 +100085,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:. Each push or mail a job sends gets its own key, made from the run key, the recipient and the send open: or link: value, sent hashed to fit each transport limit. app.notify and app.mail pass it to the transport: APNs apns-collapse-id, FCM android.notification.tag on a non-collapsible message, Web Push Topic header and notification tag, and mail Message-ID. A retried run repeats each key even when its query returns rows in another order, so a repeat replaces its earlier copy, and two different sends from one job never share a key. Proof: `jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`.",
+          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:. Proof: `jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:49:51.672Z"
+          "at": "2026-11-15T11:38:32.396Z"
         },
         {
           "n": 2,
@@ -100176,7 +100182,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-15T11:38:02.576Z",
+      "updated": "2026-11-15T11:38:32.396Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 10
     },
@@ -100201,12 +100207,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "auth.Accounts builders verify_email, reset_password, passkeys, two_factor and limit_sign_in(per_minute:) each work end to end on the test host: a new account cannot sign in before it confirms; a reset link is single-use and expires in an hour; a WebAuthn passkey signs in; a TOTP code is required once turned on, with recovery codes; the sixth failed sign-in in a minute for one address waits. Proof: `jet test Compiler --profile cases --filter web_app/account_lifecycle_end_to_end`.",
+          "text": "auth.Accounts.verify_email works end to end on the test host: a new account cannot sign in before it confirms its address. Proof: `jet test Compiler --profile cases --filter web_app/account_verify_email_blocks_sign_in`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T17:08:14.375Z"
+          "at": "2026-11-15T11:38:33.308Z"
         },
         {
           "n": 2,
@@ -100237,12 +100243,12 @@
         },
         {
           "n": 5,
-          "text": "Invitations and membership: accepting an invitation deletes it; an invitation lapses after its expiry and a nightly job deletes it; the members policy refuses a member insert from a lapsed invitation; auth.verified_email returns the lowercased address. set_role, remove_member and leave keep at least one owner (LastOwner); a removed member's open live queries re-run and are refused; jobs that push check membership first. Proof: `jet test Compiler --profile cases --filter web_app/membership_lifecycle_keeps_an_owner_and_refuses_the_removed`.",
+          "text": "Invitations: accepting an invitation deletes it; an invitation lapses after its expiry and a nightly job deletes it; the members policy refuses a member insert from a lapsed invitation; auth.verified_email returns the lowercased address. Proof: `jet test Compiler --profile cases --filter web_app/invitation_lifecycle`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:43:07.776Z"
+          "at": "2026-11-15T11:38:34.230Z"
         },
         {
           "n": 6,
@@ -100298,7 +100304,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:12.993Z",
-      "updated": "2026-11-15T11:38:07.074Z",
+      "updated": "2026-11-15T11:38:34.230Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 10
     },
@@ -100951,7 +100957,7 @@
     {
       "id": "c0oe96sn",
       "num": 6839,
-      "title": "ui profile regressions found by the batch-17 ui sweep",
+      "title": "Sweep regressions: the batch-17 ui sweep, the 2026-11-14 cases sweep and the 2026-11-15 p162 collect-all sweep",
       "body": "The full ui profile on the batch-17 jet had 155 FAIL (157 on batch 16). G5DevX-2 and G6Meta-4 triaged every row on 2026-11-13. Rows whose new text was correct are re-blessed in light SUBs that cite the commit that changed the text. The rows below are real regressions, grouped by root. Each criterion names its owner in brackets. Diffs: Lander5 b17proofs/2.out on the gate-p22 jet.",
       "kind": "bug",
       "track": "sidequest",
@@ -101213,7 +101219,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-15T11:38:15.329Z",
+      "updated": "2026-11-15T11:38:45.144Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 24
     },
@@ -218087,6 +218093,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T11:38:53.675Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c097myt8",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:38:51.904Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0mq8xwu",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:38:50.335Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c01pk3vf",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:38:48.399Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0f4o904",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:38:46.814Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0prey1k",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:38:45.145Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0oe96sn",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T11:38:43.498Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0qoe1b9",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:38:41.970Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c01xp5ri",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-15T11:38:40.411Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0zn6gbs",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T11:38:38.875Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-meet",
+      "ref": "c0x5guom",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T11:38:37.987Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-meet",
+      "ref": "c0awq7vy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T11:38:37.092Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-meet",
+      "ref": "c0awq7vy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T11:38:36.148Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-meet",
+      "ref": "c0mf9ybj",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T11:38:35.183Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-meet",
+      "ref": "c09z2sp5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T11:38:34.230Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0b5xq4b",
+      "note": "#5: Split: membership has its own proof.; was: Invitations and membership: accepting an invitation deletes it; an invitation lapses after its expiry and a nightly job deletes it; the members policy refuses a member insert from a lapsed invitation;"
+    },
+    {
+      "at": "2026-11-15T11:38:33.308Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0b5xq4b",
+      "note": "#1: Split into the five builders, each with one proof.; was: auth.Accounts builders verify_email, reset_password, passkeys, two_factor and limit_sign_in(per_minute:) each work end to end on the test host: a new account cannot sign in before it confirms; a reset"
+    },
+    {
+      "at": "2026-11-15T11:38:32.396Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0se7lpr",
+      "note": "#1: Split: the per-send keys have their own proof.; was: app.enqueue inside a #App.SignedIn method stores the job call in that method transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried w"
+    },
+    {
+      "at": "2026-11-15T11:38:31.498Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0429qak",
+      "note": "#2: Links the open decision that shapes it.; was: D-DATA-EVOLVE1=A: a typed table's #Table steps and the D-SERVICE-UPGRADE1 migrate function derive from the type's one migration block, and a stored table upgrades across one schema change. Waits on #T"
+    },
+    {
+      "at": "2026-11-15T11:38:30.598Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0429qak",
+      "note": "#1: Split into the secret codec, read and write sets, and the effect error, each with one proof.; was: A typed table stores #Secret fields with a storage codec that never reaches the wire codec; get/put/insert/query carry DB.Read and DB.Write and record read and write sets for D-INVALIDATE1. Proof: an "
+    },
+    {
+      "at": "2026-11-15T11:38:29.700Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c00xuadc",
+      "note": "#1: Split: the unknown-field error has its own proof.; was: `kit.Form<T>` exposes one typed field per member of T, so `f.text(f.title, ...)` is checked; the form runs T's validate block as the person types. Proof: an executable example under Examples/ (a kit.F"
+    },
+    {
+      "at": "2026-11-15T11:38:28.812Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0voqhky",
+      "note": "#3: Links the open decision that shapes it.; was: With .GitHub (and .Stripe) the framework drops a delivery whose X-GitHub-Delivery (Stripe event id) it has run, recording the ID in the webhook's transaction and keeping it 30 days. Proof: `jet test C"
+    },
+    {
+      "at": "2026-11-15T11:38:27.918Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0ha077m",
+      "note": "#3: Split into overlays and scrolling, row identity, and the preview goldens.; was: Overlays (dialogs, popovers, sheets and toasts) stack in one order. Scroll containers and sticky headers work on both layout engines. kit.list rows and ui.local state are keyed by identity, so filteri"
+    },
+    {
+      "at": "2026-11-15T11:38:26.959Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0tgi103",
+      "note": "#1: Hashed names are #6814 c2.; was: A ui.asset path with no file is a compile error that names the path. Fonts, icons and static files get content-hashed names. Proof: `jet test Compiler --profile cases --filter web_build/missing_asset_"
+    },
+    {
+      "at": "2026-11-15T11:38:25.641Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c0b8qwec",
+      "note": "#2: Owns hashed names for every asset kind (#6816 c1 drops its copy).; was: Built assets have content-hashed names and are served with public, max-age=31536000, immutable. Changing an asset changes its name. Proof: `jet test Compiler --profile cases --filter web_build/hashed_"
+    },
+    {
+      "at": "2026-11-15T11:38:24.408Z",
+      "by": "TowerKeeper-2",
+      "action": "card.criteria-edit",
+      "ref": "c02vkuef",
+      "note": "#2: Links the open decision that shapes it.; was: Streamed regions resume (D-RESUME1) with no hydration replay. A read that fails after the 200 status is sent renders its region's error branch. Proof: `jet test Compiler --profile cases --filter web_a"
+    },
+    {
       "at": "2026-11-15T11:38:23.253Z",
       "by": "TowerKeeper-2",
       "action": "card.criteria-edit",
@@ -221431,713 +221612,6 @@
       "action": "card.criteria-meet",
       "ref": "c0i891tv",
       "note": "#13"
-    },
-    {
-      "at": "2026-11-15T05:42:17.165Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0i891tv",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T05:42:16.209Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0i891tv",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T05:42:15.042Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0i891tv",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T05:42:14.104Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0i891tv",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T05:42:13.161Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0i891tv",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T05:42:11.720Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0i891tv",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T05:42:10.697Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0i891tv",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T05:42:09.713Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0i891tv",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T05:42:08.662Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0i891tv",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-15T05:42:07.700Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0i891tv",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T05:42:06.701Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0i891tv",
-      "note": "#57: strip debris; proof; was: End metric: startup is as fast as physically possible: exec-to-exit cycles and instructions of the hello and taskfile cells match their asm-parity references within noise. (moved from #6533 c2)"
-    },
-    {
-      "at": "2026-11-15T05:42:05.741Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0i891tv",
-      "note": "#35: proof; name the catalog; was: Every G10 kernel beats Rust (Jet/Rust < 1.00, same run) and is measured against the best hand-written assembly for the workload, with the gap to that ceiling reported per kernel and closed largest-fir"
-    },
-    {
-      "at": "2026-11-15T05:42:04.664Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0i891tv",
-      "note": "#15: proof; absorbs c4 and c30; was: Work backwards from hand-optimized machine code (owner direction 2026-11-11). A kernel catalog covers each common code shape: counted and iterator loops, list sum and map, text scan and compare, struc"
-    },
-    {
-      "at": "2026-11-15T05:42:03.691Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0i891tv",
-      "note": "#3: proof; was: The perf gate fails any corpus program over the bound, and a plan document (Docs/proposals) names the codegen and runtime design changes, with modelled gains, that close the gap without per-program tr"
-    },
-    {
-      "at": "2026-11-15T05:42:02.455Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0i891tv",
-      "note": "#2: proof; was: For every corpus program, `jet build` (default flags) runs within 1.10x of its assembly reference in cycles, with identical output; any program over that bound has a named codegen root on a card."
-    },
-    {
-      "at": "2026-11-15T05:42:01.389Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0i891tv",
-      "note": "#1: proof; was: A perf corpus with a hand-written optimized x86-64 assembly reference per program, plus a measurement harness (cycles and instructions, perf stat best of N on a pinned CPU), is committed under Tools/p"
-    },
-    {
-      "at": "2026-11-15T05:42:00.282Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0lt36hf",
-      "note": "#17 The ratified surface/plain performance contract, paired-prog"
-    },
-    {
-      "at": "2026-11-15T05:41:58.993Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0lt36hf",
-      "note": "#16 A frozen workload manifest covers systems, service, CLI, lib"
-    },
-    {
-      "at": "2026-11-15T05:41:57.831Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0lt36hf",
-      "note": "#15 The release gate passes with zero unowned losses; any remain"
-    },
-    {
-      "at": "2026-11-15T05:41:56.615Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0lt36hf",
-      "note": "#14 Every applicable native, cross-target, O0, O1, O2, normal an"
-    },
-    {
-      "at": "2026-11-15T05:41:55.517Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0lt36hf",
-      "note": "#13 The pinned report reproduces every current Jet loss with the"
-    },
-    {
-      "at": "2026-11-15T05:41:54.524Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0g80ty3",
-      "note": "Classic benchmark kernels beat C and Rust: the benchmarks-game set, tensor-map, enum dispatch, gradients and sprites, and the Doom renderer"
-    },
-    {
-      "at": "2026-11-15T05:41:53.605Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c010rbgm",
-      "note": "Automatic acceleration keeps its fallback: column copies and auto-parallel loops consume checked facts and keep the serial meaning on every tier"
-    },
-    {
-      "at": "2026-11-15T05:41:52.679Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0lpm2b4",
-      "note": "One verified optimizer pipeline: O0 is the reference, passes are canonical and deterministic, stale facts fail closed, and adaptive rebuild is opt-in"
-    },
-    {
-      "at": "2026-11-15T05:41:51.726Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c05y3url",
-      "note": "Hot loops emit what a hand-writer would: tag compares, no entry uniqueness test, range-only slices, cheap appends, two-instruction stop polls and no frame traffic"
-    },
-    {
-      "at": "2026-11-15T05:41:50.756Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0pwthed",
-      "note": "Data costs what it should: packed list strides, non-atomic unshared reference counts, unboxed scalar options and allocation-free aggregate captures"
-    },
-    {
-      "at": "2026-11-15T05:41:42.103Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00cqn1l",
-      "note": "#9 The WebSocket live hub sends an invalidation only to connect"
-    },
-    {
-      "at": "2026-11-15T05:41:40.937Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00cqn1l",
-      "note": "#8 A write inside a database transaction marks the live binding"
-    },
-    {
-      "at": "2026-11-15T05:39:30.881Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T05:39:29.910Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-15T05:39:28.907Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-15T05:39:27.930Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-15T05:39:26.922Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-15T05:39:25.932Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T05:39:24.855Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T05:39:23.858Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T05:39:22.854Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T05:39:21.884Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-15T05:39:20.936Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T05:39:19.909Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T05:39:18.827Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c08skdgk",
-      "note": "#12 Web wasm artifact size (#5201): The harness reports artifact"
-    },
-    {
-      "at": "2026-11-15T05:39:17.836Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c08skdgk",
-      "note": "#11 Web page size and first output (#5201): The w06 page's shipp"
-    },
-    {
-      "at": "2026-11-15T05:39:16.713Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0wowe4m",
-      "note": "#6 Embedded runtime size and call speed (#6386): The runtime a "
-    },
-    {
-      "at": "2026-11-15T05:39:15.607Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0g6fxb9",
-      "note": "#14 Script startup beats Lua: on one host, the same-run median o"
-    },
-    {
-      "at": "2026-11-15T05:39:14.318Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0g6fxb9",
-      "note": "#13 After a one-line edit to a 30-line script that uses core.fil"
-    },
-    {
-      "at": "2026-11-15T05:39:13.088Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0g6fxb9",
-      "note": "#12 Peak RSS of `jet run hello.jet` with no kept program or cach"
-    },
-    {
-      "at": "2026-11-15T05:39:11.830Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0g6fxb9",
-      "note": "#11 With no kept program, cache or incremental state, `jet run h"
-    },
-    {
-      "at": "2026-11-15T05:39:10.355Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c01642i8",
-      "note": "Compiler and runtime stacks hold: valid programs never overflow the compiler stack, thread stacks are sized by measurement, and the hosted CLI links glibc dynamically"
-    },
-    {
-      "at": "2026-11-15T05:38:24.421Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#30: proof; was: Tool twins as binaries: every landed #5072 tool twin is recorded with its default jet build size, its function count and its run wall and peak against its original, beside the hand-written reference o"
-    },
-    {
-      "at": "2026-11-15T05:38:23.216Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#29: proof; was: Per-function code size: no Core or generated function carries code its callers cannot reach or expansion a hand-written version would not. Measured by Main on seed-b13, 2026-11-12, default jet build: "
-    },
-    {
-      "at": "2026-11-15T05:38:22.024Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#28: proof; was: Hash reach: a program calling only crypto.sha256 links only SHA-256. Measured by Main on seed-b13, 2026-11-12 ($JET_SCRATCH_ROOT/lanes/Main/bin14/sha): 229,680 B with 183 KB .text, of which __core_cry"
-    },
-    {
-      "at": "2026-11-15T05:38:20.825Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#27: strip debris; proof; was: Web wasm artifact size (#5201): (was #2867) The harness reports artifact_bytes for every web rail. Jet's wasm artifact is no larger than the Rust wasm artifact for the same program. (Re-homed 2026-11-"
-    },
-    {
-      "at": "2026-11-15T05:38:19.315Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#26: proof; was: Web page size and first output (#5201): The w06 page's shipped code (gzip) is smaller than the esbuild-minified TypeScript version of the same program and than Pyodide's, and it reaches first output s"
-    },
-    {
-      "at": "2026-11-15T05:38:17.884Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#25: proof; was: Embedded runtime size and call speed (#6386): (was #6023) The runtime a host links for a guest that uses only core.text and core.math is smaller than the Lua 5.4.7 interpreter (329,248 bytes), and 10M"
-    },
-    {
-      "at": "2026-11-15T05:38:16.627Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#24: proof; was: Once the no-cache `jet run` beats the kept-program path on every ScriptBench workload, the kept-program cache (Compiler/JetCli ScriptCache: keep slots, background full builds, the stdin entry cache) i"
-    },
-    {
-      "at": "2026-11-15T05:38:15.578Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#22: proof; was: Core and Prelude ship precompiled inside the jet binary: checked interfaces and machine code produced when jet is built, part of the toolchain identity and immutable (no runtime cache, nothing to inva"
-    },
-    {
-      "at": "2026-11-15T05:38:14.650Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#21: proof; was: (was #5949 c16) Script startup beats Lua: on one host, the same-run median of `jet run hello.jet` and of `jet run` after an edit are each below lua 5.4 hello.lua, by design rather than by reusing a ke"
-    },
-    {
-      "at": "2026-11-15T05:38:13.676Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#20: proof; was: (was #5476) After a one-line edit to a 30-line script that uses core.files and core.regex, `jet run` prints its first output sooner than `python3` runs the equivalent script (hyperfine with a prepare "
-    },
-    {
-      "at": "2026-11-15T05:38:12.733Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#19: proof; was: (was #5476) Peak RSS of `jet run hello.jet` with no kept program or cache (GNU time %M, median of 10) is below `lua hello.lua` on the same host."
-    },
-    {
-      "at": "2026-11-15T05:38:11.766Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#18: proof; was: (was #5476) With no kept program, cache or incremental state, `jet run hello.jet` (a fresh process, nothing reused from an earlier run) shows a lower mean than `luajit hello.lua` under `hyperfine -N -"
-    },
-    {
-      "at": "2026-11-15T05:38:10.830Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#16: proof; was: (was #4155) [#4317] Generated codec decoders are compact (out-of-line or table-driven), with no unnecessary recursive-edge boxing and the format preserved. Size and time receipts compare against 15.9 "
-    },
-    {
-      "at": "2026-11-15T05:38:09.909Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#15: proof; was: (was #4155) [#4258] Known-value module constants fold to IR constants. Larger aggregates get static storage once. Only #Static stays addressable."
-    },
-    {
-      "at": "2026-11-15T05:38:08.926Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#14: proof; was: (was #6017) Until both thresholds pass, the job runs in report mode and logs size and start time on this card for each change; it turns blocking in the change that first passes both."
-    },
-    {
-      "at": "2026-11-15T05:38:07.943Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#13: proof; was: (was #6017) The thresholds live in one table in the binary-size budget doc, and the job reads them from there."
-    },
-    {
-      "at": "2026-11-15T05:38:07.002Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#12: proof; was: (was #6017) A local perf gate builds hello with the smallest-size build profile, records binary size and the median start time over 50 runs on the reference Linux x86-64 machine, and fails when size e"
-    },
-    {
-      "at": "2026-11-15T05:38:06.099Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#10: strip debris; turn the question into an outcome with proof; was: (was #4919) (was #5467) Runtime threads reserve 192 MiB of stack each: right default for user programs?"
-    },
-    {
-      "at": "2026-11-15T05:38:05.220Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#9: strip debris; outcome and proof; was: (was #4919) (was #4964) Native jet runs the compiler on the 8 MiB main stack (deep recursion overflows unless ulimit -s is raised)"
-    },
-    {
-      "at": "2026-11-15T05:38:04.337Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#8: strip debris; proof; was: (was #4919) (was #4768) Jet linker: dynamic linking for the D-OS-FLOOR1 glibc path (PT_INTERP/DT_NEEDED plus bundled glibc stubs) for the hosted CLI."
-    },
-    {
-      "at": "2026-11-15T05:38:03.422Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#7: strip debris; outcome and proof; was: (was #4919) (was #4689) jet run aborts with 'jet-compiler has overflowed its stack' on small valid programs (fuzz finding; jet check and emit pass)"
-    },
-    {
-      "at": "2026-11-15T05:38:02.489Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#6: proof; was: For every program in the size corpus (hello, one program per required perf cell, and every landed #5072 tool twin, each with a hand-written, optimized x86-64 assembly reference committed beside it tha"
-    },
-    {
-      "at": "2026-11-15T05:38:01.466Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#5: proof; was: The size win comes from the root design (pay-for-what-you-use runtime, lazy runtime initialization, liveness through every runtime and Core layer, no unconditional startup machinery), with no hello-wo"
-    },
-    {
-      "at": "2026-11-15T05:38:00.534Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#4: proof; was: Final binary size is a required metric in every required perf cell of the canonical manifest, and the gate fails any cell where Jet's default build is not strictly smaller than every peer; a hello-wor"
-    },
-    {
-      "at": "2026-11-15T05:37:59.606Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#3: proof; was: Jet's default build (jet build, no size flags) of hello and of every required perf workload is strictly smaller than each peer's smallest output for the same program (Zig ReleaseSmall stripped, C musl"
-    },
-    {
-      "at": "2026-11-15T05:37:58.679Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#2: proof; was: Runtime startup and print pull in only what the program uses: a program that never spawns tasks, allocates or formats links none of that machinery, by liveness and lazy initialization, with one meanin"
-    },
-    {
-      "at": "2026-11-15T05:37:57.727Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c031o59x",
-      "note": "#10: strip debris; proof; was: [#2520] Measure duplicated generic instances as a percentage of backend time on phase-1 units. Only above 15%, give each instance exactly one deterministic placement. If the trigger is conclusively un"
-    },
-    {
-      "at": "2026-11-15T05:37:56.754Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c031o59x",
-      "note": "#9: proof; was: Plan step 4, the compiler compiled well. Starts only once the language is mostly stable (the major syntax, semantics and Core churn is done), so tuning isn't wiped out by later cutovers: Jet's own rel"
-    },
-    {
-      "at": "2026-11-15T05:37:55.828Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c031o59x",
-      "note": "#8: proof; was: Plan step 3, fused per-function pipeline: each function goes parse -> check -> lower -> select -> encode while its data is still in cache, with no whole-program intermediate copy, and a direct executa"
-    },
-    {
-      "at": "2026-11-15T05:37:54.745Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c031o59x",
-      "note": "#7: proof; was: Plan step 2, data-oriented core: every compiler name, symbol, type and function is an interned u32 id (no String keys in maps). AST, types and IR are flat struct-of-arrays columns, compiler data lives"
-    },
-    {
-      "at": "2026-11-15T05:37:53.844Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c031o59x",
-      "note": "#6: proof; was: Plan step 1, use the machine: average parallelism goes from about 5 to at least 24 of 32 threads. Modules stream through the pipeline as soon as their dependencies are checked (no phase-wide barriers)"
-    },
-    {
-      "at": "2026-11-15T05:37:52.843Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c031o59x",
-      "note": "#4: proof; was: Guards walk the tree once. A tests/guards run builds one shared file index of the tree in process (each path with its kind and size, and contents read on demand and held only for that run), walked onc"
-    },
-    {
-      "at": "2026-11-15T05:37:51.786Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c031o59x",
-      "note": "#3: proof; was: End metric: `jet build` of the corpus runs at 30M lines per second or faster, with output identical to the slower build."
-    },
-    {
-      "at": "2026-11-15T05:37:50.819Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c031o59x",
-      "note": "#2: proof; was: Each compiler phase has a lines/s budget, and the budgets compose to 30M lines per second end to end; every phase over its budget names its root on a card."
-    },
-    {
-      "at": "2026-11-15T05:37:49.921Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c031o59x",
-      "note": "#1: proof; was: A compile-throughput cell measures `jet check` and `jet build` (O0 and --release) of a representative million-line corpus in lines per second on the reference machine, recorded every wave."
-    },
-    {
-      "at": "2026-11-15T05:36:51.931Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03obxd3",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T05:36:50.542Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0w0b4wd",
-      "note": "#5: proof; was: A full gauntlet rerun on the current dev jet is recorded and posted to the owner: the per-entry, per-peer table and the list of losses on each metric."
-    },
-    {
-      "at": "2026-11-15T05:36:49.070Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0zupuj4",
-      "note": "#4: proof; was: Measured: compile-time cost (comptime.bodies plus the re-finalize) of check RunColdContext and jetc-trace before and after, each showing the gain."
-    },
-    {
-      "at": "2026-11-15T05:36:47.466Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0zupuj4",
-      "note": "#3: proof; was: Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier."
-    },
-    {
-      "at": "2026-11-15T05:36:45.781Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0zupuj4",
-      "note": "#2: proof; was: One compile-time child runs per compile, stays warm for that compile only, and exits with it. Compile-time functions are compiled on the copy-and-patch O0 path (#6795), and values cross through a shar"
-    },
-    {
-      "at": "2026-11-15T05:36:44.346Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0zupuj4",
-      "note": "#1: proof; was: A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations "
-    },
-    {
-      "at": "2026-11-15T05:36:43.075Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b3gyq2",
-      "note": "#4: proof; was: Measured: O0 compile time and code bytes for a generic-heavy program (for example Core collections used at 20 element types) against per-type specialization, plus a second program. Run-time cost at O0"
-    },
-    {
-      "at": "2026-11-15T05:36:41.863Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b3gyq2",
-      "note": "#3: proof; was: Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier."
-    },
-    {
-      "at": "2026-11-15T05:36:40.598Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b3gyq2",
-      "note": "#2: proof; was: At O0, each generic function is compiled once and receives its type information (size, alignment, trait method tables) as a hidden argument. O1 and O2 keep per-type specialization."
-    },
-    {
-      "at": "2026-11-15T05:36:39.424Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0b3gyq2",
-      "note": "#1: proof; was: A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations "
-    },
-    {
-      "at": "2026-11-15T05:36:38.207Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0okfgjw",
-      "note": "#4: proof; was: Measured: front-end wall time on the largest single module of the #5479 c1 cell scales with threads (16 threads at least 8× faster than 1), and a second large file shows the same scaling."
-    },
-    {
-      "at": "2026-11-15T05:36:37.054Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0okfgjw",
-      "note": "#3: proof; was: Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier."
-    },
-    {
-      "at": "2026-11-15T05:36:35.976Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0okfgjw",
-      "note": "#2: proof; was: A file is lexed and parsed in parallel chunks split at top-level declaration boundaries found by a SIMD pre-scan, and joined in source order. Any language rule this needs is ratified on a ballot first"
-    },
-    {
-      "at": "2026-11-15T05:36:34.716Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0okfgjw",
-      "note": "#1: proof; was: A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations "
-    },
-    {
-      "at": "2026-11-15T05:36:33.415Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c00g7rk8",
-      "note": "#4: proof; was: Measured: O0 backend CPU time per function falls at least 10× on the #5479 c1 cell, and a second program (jetc-trace) shows the same gain. Run-time speed of O0 code is reported beside it and stays wit"
-    },
-    {
-      "at": "2026-11-15T05:36:32.121Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c00g7rk8",
-      "note": "#3: proof; was: Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier."
-    },
-    {
-      "at": "2026-11-15T05:36:30.793Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c00g7rk8",
-      "note": "#2: proof; was: O0 code generation emits every IR opcode by copying and patching a toolchain-built stencil, with no instruction selection or register allocation at O0. The stencil set is built by Compiler/build.jet a"
-    },
-    {
-      "at": "2026-11-15T05:36:29.546Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c00g7rk8",
-      "note": "#1: proof; was: A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations "
     }
   ],
   "nextNum": 368,
