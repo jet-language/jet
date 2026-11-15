@@ -829,8 +829,17 @@ sema_build_facts_reject_debug_traces: fn(facts: SemaBuildFacts) -> Bool Never! {
 // tables built from its module rows: name resolutions and the binding rows
 // they examine. One counter set is shared by every copy of a graph and by
 // those scope tables; it counts only when the graph's `counting` is set, so
-// an uncounted lookup costs one flag test.
+// an uncounted lookup costs one flag test. Each count is one atomic add under
+// a shared read permit, so threads that count don't wait for each other.
 SemaLookupCounters: struct {
+    module_lookups: Atomic<Int>
+    name_lookups: Atomic<Int>
+    scope_lookups: Atomic<Int>
+    scope_compares: Atomic<Int>
+}
+
+// The counts of a SemaLookupCounters at one moment.
+SemaLookupCounts: struct {
     module_lookups: Int
     name_lookups: Int
     scope_lookups: Int
@@ -4336,8 +4345,8 @@ sema_registration_package_settled: fn(graph: SemaRegistrationGraph, module_id: M
 sema_registration_module_index: fn(graph: SemaRegistrationGraph, module_id: ModuleID) -> Int? {
     if graph.counting {
         counters := graph.lookup_counters
-        permit: counters.guard_edit()
-        permit.value.module_lookups += 1
+        permit: counters.guard_read()
+        _: permit.value.module_lookups.add(1)
     }
     position: module_index(module_id)
     if position >= graph.module_rows.len() || graph.module_rows[position] < 0 -> return None
@@ -4358,8 +4367,10 @@ sema_registration_module_id: fn(graph: SemaRegistrationGraph, identity: String) 
 }
 
 // The graph's lookup counts so far (SemaLookupCounters).
-sema_registration_lookup_counts: fn(graph: SemaRegistrationGraph) -> SemaLookupCounters {
-    SemaLookupCounters{module_lookups: graph.lookup_counters.module_lookups, name_lookups: graph.lookup_counters.name_lookups, scope_lookups: graph.lookup_counters.scope_lookups, scope_compares: graph.lookup_counters.scope_compares}
+sema_registration_lookup_counts: fn(graph: SemaRegistrationGraph) -> SemaLookupCounts {
+    counters := graph.lookup_counters
+    permit: counters.guard_read()
+    SemaLookupCounts{module_lookups: permit.value.module_lookups.load(), name_lookups: permit.value.name_lookups.load(), scope_lookups: permit.value.scope_lookups.load(), scope_compares: permit.value.scope_compares.load()}
 }
 
 // The registered module NAME (`core.term`) of module `module_id` (identity
@@ -5467,8 +5478,8 @@ sema_registration_lookup_name: fn(graph: SemaRegistrationGraph, module_identity:
 sema_registration_lookup_name_at: fn(graph: SemaRegistrationGraph, module_index: Int, module_identity: ModuleID, name: String) -> SemaRegistrationResolvedSymbol? {
     if graph.counting {
         counters := graph.lookup_counters
-        permit: counters.guard_edit()
-        permit.value.name_lookups += 1
+        permit: counters.guard_read()
+        _: permit.value.name_lookups.add(1)
     }
     // One hash of the name serves every table below (A1).
     hash: name_rows_hash(name)

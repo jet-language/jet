@@ -2321,9 +2321,9 @@ sema_scope_name_slot: fn(table: SemaScopeTable, name: String) -> Int? Never! {
 sema_scope_counted: fn(table: SemaScopeTable, compares: Int, found: &&Int?) -> Int? {
     if table.lookup_counters == .Val(handle) {
         counters := handle.counters
-        permit: counters.guard_edit()
-        permit.value.scope_lookups += 1
-        permit.value.scope_compares += compares
+        permit: counters.guard_read()
+        _: permit.value.scope_lookups.add(1)
+        _: permit.value.scope_compares.add(compares)
     }
     found
 }
