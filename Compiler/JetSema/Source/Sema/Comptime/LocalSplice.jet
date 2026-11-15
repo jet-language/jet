@@ -189,86 +189,100 @@ sema_local_splice_same_keys: fn(before: [String:Bool], after: [String:Bool]) -> 
     true
 }
 
-// Moves the function-check rows of `modules[index]` out, leaving them empty.
-// The result and the ones after it move out of the list and back in, so no
-// row is copied.
-sema_module_body_rows_take: fn(modules: &[SemaGraphModuleResult], index: Int) -> SemaModuleBodyRows Never! {
+// Moves the function-check rows of each module `indexes` names (ascending)
+// out of `modules`, leaving them empty, and returns them in `indexes` order.
+// The modules from the first index on move out of the list and back in once,
+// whatever the count of indexes, so no row is copied and no module moves
+// twice.
+sema_module_body_rows_take: fn(modules: &[SemaGraphModuleResult], indexes: [Int]) -> [SemaModuleBodyRows] Never! {
+    taken := [SemaModuleBodyRows]{}
+    if indexes.len() == 0 -> return taken
     later := [SemaGraphModuleResult]{}
-    loop modules.len() > index + 1 {
+    loop modules.len() > indexes[0] {
         moved := modules.pop() ?? break
         later.push(moved)
     }
-    result := modules.pop() ?? panic("a local value splice lost its owner module")
-    rows := SemaModuleBodyRows{
-        functions: result.functions.move(),
-        call_facts: result.call_facts.move(),
-        hardware_use: result.hardware_use.move(),
-        name_references: result.name_references.move(),
-        comptime_requests: result.comptime_requests.move(),
-        comptime_body_sources: result.comptime_body_sources.move(),
-        compute_facts: result.compute_facts.move(),
-        exact_int_reachable: result.exact_int_reachable,
-        copy_events: result.copy_events.move(),
-        diagnostics: result.diagnostics.move(),
-        complete: result.complete,
-        failure_facts: result.failure_facts.move(),
-        incomplete_reasons: result.incomplete_reasons.move(),
-        injected_function_keys: result.injected_function_keys.move(),
-        tests: result.tests.move(),
-    }
-    result.functions = [FnBody]{}
-    result.call_facts = [SemaCallSiteFact]{}
-    result.hardware_use = sema_hardware_empty_use()
-    result.name_references = [SemaNameReferenceFact]{}
-    result.comptime_requests = [SemaComptimeRequest]{}
-    result.comptime_body_sources = [SemaComptimeBodySource]{}
-    result.compute_facts = [SemaComputeFunctionFacts]{}
-    result.exact_int_reachable = false
-    result.copy_events = [SemaCopyEvent]{}
-    result.diagnostics = [Diagnostic]{}
-    result.complete = true
-    result.failure_facts = [SemaFunctionFailureFacts]{}
-    result.incomplete_reasons = [String]{}
-    result.injected_function_keys = [String]{}
-    result.tests = [TTestFact]{}
-    modules.push(result)
+    next_index := 0
     loop later.len() > 0 {
-        moved := later.pop() ?? break
-        modules.push(moved)
+        result := later.pop() ?? break
+        if next_index < indexes.len() && indexes[next_index] == modules.len() {
+            taken.push(SemaModuleBodyRows{
+                functions: result.functions.move(),
+                call_facts: result.call_facts.move(),
+                hardware_use: result.hardware_use.move(),
+                name_references: result.name_references.move(),
+                comptime_requests: result.comptime_requests.move(),
+                comptime_body_sources: result.comptime_body_sources.move(),
+                compute_facts: result.compute_facts.move(),
+                exact_int_reachable: result.exact_int_reachable,
+                copy_events: result.copy_events.move(),
+                diagnostics: result.diagnostics.move(),
+                complete: result.complete,
+                failure_facts: result.failure_facts.move(),
+                incomplete_reasons: result.incomplete_reasons.move(),
+                injected_function_keys: result.injected_function_keys.move(),
+                tests: result.tests.move(),
+            })
+            result.functions = [FnBody]{}
+            result.call_facts = [SemaCallSiteFact]{}
+            result.hardware_use = sema_hardware_empty_use()
+            result.name_references = [SemaNameReferenceFact]{}
+            result.comptime_requests = [SemaComptimeRequest]{}
+            result.comptime_body_sources = [SemaComptimeBodySource]{}
+            result.compute_facts = [SemaComputeFunctionFacts]{}
+            result.exact_int_reachable = false
+            result.copy_events = [SemaCopyEvent]{}
+            result.diagnostics = [Diagnostic]{}
+            result.complete = true
+            result.failure_facts = [SemaFunctionFailureFacts]{}
+            result.incomplete_reasons = [String]{}
+            result.injected_function_keys = [String]{}
+            result.tests = [TTestFact]{}
+            next_index += 1
+        }
+        modules.push(result)
     }
-    rows
+    if next_index != indexes.len() -> panic("a local value splice lost its owner module")
+    taken
 }
 
-// Moves `rows` back into `modules[index]`, as sema_module_body_rows_take
-// moved them out.
-sema_module_body_rows_put: fn(modules: &[SemaGraphModuleResult], index: Int, rows: &&SemaModuleBodyRows) Never! {
+// Moves `rows`, one per module `indexes` names (ascending), back into those
+// modules, as sema_module_body_rows_take moved them out.
+sema_module_body_rows_put: fn(modules: &[SemaGraphModuleResult], indexes: [Int], rows: &&[SemaModuleBodyRows]) Never! {
     owned := rows.move()
+    if owned.len() != indexes.len() -> panic("a local value splice lost its owner rows")
+    if indexes.len() == 0 -> return
+    owned.reverse()
     later := [SemaGraphModuleResult]{}
-    loop modules.len() > index + 1 {
+    loop modules.len() > indexes[0] {
         moved := modules.pop() ?? break
         later.push(moved)
     }
-    result := modules.pop() ?? panic("a local value splice lost its owner module")
-    result.functions = owned.functions.move()
-    result.call_facts = owned.call_facts.move()
-    result.hardware_use = owned.hardware_use.move()
-    result.name_references = owned.name_references.move()
-    result.comptime_requests = owned.comptime_requests.move()
-    result.comptime_body_sources = owned.comptime_body_sources.move()
-    result.compute_facts = owned.compute_facts.move()
-    result.exact_int_reachable = owned.exact_int_reachable
-    result.copy_events = owned.copy_events.move()
-    result.diagnostics = owned.diagnostics.move()
-    result.complete = owned.complete
-    result.failure_facts = owned.failure_facts.move()
-    result.incomplete_reasons = owned.incomplete_reasons.move()
-    result.injected_function_keys = owned.injected_function_keys.move()
-    result.tests = owned.tests.move()
-    modules.push(result)
+    next_index := 0
     loop later.len() > 0 {
-        moved := later.pop() ?? break
-        modules.push(moved)
+        result := later.pop() ?? break
+        if next_index < indexes.len() && indexes[next_index] == modules.len() {
+            put: owned.pop() ?? panic("a local value splice lost its owner rows")
+            result.functions = put.functions.move()
+            result.call_facts = put.call_facts.move()
+            result.hardware_use = put.hardware_use.move()
+            result.name_references = put.name_references.move()
+            result.comptime_requests = put.comptime_requests.move()
+            result.comptime_body_sources = put.comptime_body_sources.move()
+            result.compute_facts = put.compute_facts.move()
+            result.exact_int_reachable = put.exact_int_reachable
+            result.copy_events = put.copy_events.move()
+            result.diagnostics = put.diagnostics.move()
+            result.complete = put.complete
+            result.failure_facts = put.failure_facts.move()
+            result.incomplete_reasons = put.incomplete_reasons.move()
+            result.injected_function_keys = put.injected_function_keys.move()
+            result.tests = put.tests.move()
+            next_index += 1
+        }
+        modules.push(result)
     }
+    if next_index != indexes.len() -> panic("a local value splice lost its owner module")
 }
 
 // What a splice is done with: the earlier check's rows, the pass's bodies of
@@ -809,8 +823,7 @@ sema_local_splice_owners: fn(
     graph.core_wave_rows = owners.move()
     hook_access: sema_host_hook_access(host_hooks)
     checked_types: sema_stage_checked_types(modules)
-    held := [SemaModuleBodyRows]{}
-    loop module_index in owner_modules -> held.push(sema_module_body_rows_take(modules, module_index))
+    held: sema_module_body_rows_take(modules, owner_modules)
     // Each check records the codecs and derived methods it demands afresh:
     // a generated body stands only on demand, so the two checks must demand
     // the same ones, or the full recheck generates other bodies than the
@@ -822,24 +835,17 @@ sema_local_splice_owners: fn(
     // one takes (sema_finalize_pass_open) carry to the second.
     earlier_graph := sema_finalize_check_modules(graph, earlier_values, earlier_functions, checked_types, owner_modules, true, hook_access, threads, "sema.local_values", trace_sink, facts, modules)
     graph = earlier_graph.move()
-    before := [SemaModuleBodyRows]{}
-    loop module_index in owner_modules -> before.push(sema_module_body_rows_take(modules, module_index))
+    before: sema_module_body_rows_take(modules, owner_modules)
     pass_start := sema_local_splice_demand_empty()
     earlier_demand: sema_local_splice_demand_swap(graph, pass_start)
     pass_graph := sema_finalize_check_modules(graph, values, comptime_functions, checked_types, owner_modules, true, hook_access, threads, "sema.local_values", trace_sink, facts, modules)
     graph = pass_graph.move()
     pass_demand: sema_local_splice_demand_swap(graph, finalized_demand)
-    after := [SemaModuleBodyRows]{}
-    loop module_index in owner_modules -> after.push(sema_module_body_rows_take(modules, module_index))
+    after := sema_module_body_rows_take(modules, owner_modules)
     if trace_sink == .Val(sink) -> sink.begin("sema.local_values.compare", "", -1, -1)
     owners = graph.core_wave_rows.move()
     graph.core_wave_rows = [String:Bool]{}
-    row := owner_modules.len()
-    loop held.len() > 0 {
-        row -= 1
-        rows := held.pop() ?? break
-        sema_module_body_rows_put(modules, owner_modules[row], rows)
-    }
+    sema_module_body_rows_put(modules, owner_modules, held)
     // A landed local whose outcome is a run-time reason stays run-time code,
     // so it is still a site of the pass's check, as of the full recheck's;
     // only the sites that got values leave the source rows.
@@ -868,7 +874,7 @@ sema_local_splice_owners: fn(
     if trace_sink == .Val(sink) -> sink.progress("counters.sema.local_values_spliced", owners.len(), -1)
     if trace_sink == .Val(sink) -> sink.begin("sema.local_values.splice", "", -1, -1)
     stamped: sema_local_splice_stamped(into)
-    row = owner_modules.len()
+    row := owner_modules.len()
     loop after.len() > 0 {
         row -= 1
         rows := after.pop() ?? break
