@@ -53,6 +53,23 @@ carrier: fn(even: Bool) -> String {
     }
 }
 
+// A callee that declares its failure keeps `.Ok` and `.Err` for its carrier,
+// even when its success enum declares those cases itself.
+#Error
+Refusal: struct { message: String }
+
+parse: fn(v: Int) -> Reply Refusal! {
+    if v < 0 -> return Err(Refusal{message: "negative"})
+    Reply.Ok(v)
+}
+
+refusal: fn(v: Int) -> String {
+    if parse(v) == {
+        .Ok(_) -> { panic("expected {v} to be refused") }
+        .Err(error) -> error.message
+    }
+}
+
 run: fn() {
     print(table_value(4))
     print(table_value(-1))
@@ -63,4 +80,5 @@ run: fn() {
     print(test_bind(2))
     print(carrier(true))
     print(carrier(false))
+    print(refusal(-3))
 }

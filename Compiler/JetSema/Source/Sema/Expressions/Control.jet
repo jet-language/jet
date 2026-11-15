@@ -537,10 +537,19 @@ sema_pattern_names_success_case: fn(pattern: Pattern, success: Type, environment
 // The user enum a carrier subject's call root succeeds with. Its patterns
 // name that enum's own `Ok`/`Err` cases, when it declares them, before the
 // carrier's: the subject is then that enum (sema_expression_carrier_case_subject).
-sema_expression_carrier_success_enum: fn(subject: Expr, carrier: TExpr?, scopes: SemaScopeTable) -> Type? {
+// A callee that declares a failure it can fail with (`Expr Refusal!`) keeps
+// `.Ok`/`.Err` for its carrier, whatever its success enum declares. Grouping
+// and access marks pass the carrier root through to the call, as
+// sema_check_expression does, so a table's parenthesized header is that call.
+sema_expression_carrier_success_enum: fn(subject: Expr, carrier: TExpr?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Type? {
+    if subject == .Paren(inner, _, _) -> return sema_expression_carrier_success_enum(inner, carrier, environment, program, scopes)
+    if subject == .Place(inner, _, _, _) -> return sema_expression_carrier_success_enum(inner, carrier, environment, program, scopes)
     if !sema_expression_propagating_call(subject, scopes) -> return None
     if carrier == .Val(checked) {
-        if sema_expr_unwrap_tag(checked.ty) == .Result(ok, _) {
+        if sema_expr_unwrap_tag(checked.ty) == .Result(ok, error) {
+            if sema_failure_callee(Val(subject), environment, program, scopes) == .Val(callee) {
+                if !callee.inferable && sema_expr_unwrap_tag(error) != (Type.Named{name: "Never"}) -> return None
+            }
             success: sema_expr_unwrap_tag(ok)
             if success == .Named(_) || success == .Apply(_, _) -> return Val(success)
         }
@@ -562,7 +571,7 @@ sema_expression_carrier_case_subject: fn(subject: Expr, carrier: &&TExpr?, envir
 sema_check_pattern_subject: fn(subject: Expr, pattern: Pattern, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_pattern_consumes_result_carrier(pattern) -> return sema_check_expression(subject, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     carrier: sema_check_expression_carrier(subject, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    success: sema_expression_carrier_success_enum(subject, carrier, scopes)
+    success: sema_expression_carrier_success_enum(subject, carrier, environment, program, scopes)
     if success == None || !sema_pattern_tests_carrier(pattern, success, environment, program) -> return carrier
     sema_expression_carrier_case_subject(subject, carrier, environment, program, scopes, context, diagnostics)
 }
@@ -1931,7 +1940,7 @@ sema_expression_if_bind_subject: fn(subject: Expr, condition: Expr, else_value: 
     subject_span: expr_span(subject)
     carrier: sema_expression_if_condition_tests_carrier(condition, None, environment, program) || sema_expression_if_chain_tests_carrier(else_value, subject_span, None, environment, program)
     checked_subject := if carrier -> sema_check_expression_carrier(subject, None, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(subject, None, environment, program, scopes, state, tail_store, context, diagnostics)
-    success: if carrier -> sema_expression_carrier_success_enum(subject, checked_subject, scopes) else -> None
+    success: if carrier -> sema_expression_carrier_success_enum(subject, checked_subject, environment, program, scopes) else -> None
     if success != None && (sema_expression_if_condition_tests_carrier(condition, success, environment, program) || sema_expression_if_chain_tests_carrier(else_value, subject_span, success, environment, program)) {
         checked_subject = sema_expression_carrier_case_subject(subject, checked_subject.move(), environment, program, scopes, context, diagnostics)
     }

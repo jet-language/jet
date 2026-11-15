@@ -1307,7 +1307,7 @@ sema_stmt_check_subject_switch: fn(subject: Expr, arms: [SwitchArm], else_body: 
         if sema_expression_if_condition_tests_carrier(arm.cond, None, environment, program) -> carrier = true
     }
     checked_subject := if carrier -> sema_check_expression_carrier(subject, None, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(subject, None, environment, program, scopes, state, tail_store, context, diagnostics)
-    success: if carrier -> sema_expression_carrier_success_enum(subject, checked_subject, scopes) else -> None
+    success: if carrier -> sema_expression_carrier_success_enum(subject, checked_subject, environment, program, scopes) else -> None
     if success != None {
         names_case := false
         loop arm in arms {
