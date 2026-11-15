@@ -3835,84 +3835,84 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 57,
+      "line": 63,
       "column": 5,
       "reason": "futex wake borrows a live aligned word and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 72,
+      "line": 78,
       "column": 5,
       "reason": "futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 148,
+      "line": 154,
       "column": 5,
       "reason": "base points into the kernel's vDSO image, mapped readable for the process lifetime"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 172,
+      "line": 178,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same resolved address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 176,
+      "line": 182,
       "column": 9,
       "reason": "the vDSO's clock_gettime(clockid_t, struct timespec *) writes the caller's two timespec words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 181,
+      "line": 187,
       "column": 9,
       "reason": "clock_gettime writes the caller's two timespec words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 189,
+      "line": 195,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 198,
+      "line": 204,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 240,
+      "line": 246,
       "column": 9,
       "reason": "x86 pause only hints that this thread is waiting in a spin loop"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 277,
+      "line": 283,
       "column": 5,
       "reason": "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 294,
+      "line": 300,
       "column": 5,
       "reason": "an elided section: only this thread has written the lock word and the count since sync_sole_enter"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 306,
+      "line": 312,
       "column": 5,
       "reason": "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0"
     },
@@ -10546,18 +10546,18 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 22:5 | "atomic exchange on an aligned live synchronization word" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 28:5 | "atomic fetch-add on an aligned live synchronization word" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 34:5 | "atomic compare-exchange on an aligned live synchronization word" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 57:5 | "futex wake borrows a live aligned word and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 72:5 | "futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 148:5 | "base points into the kernel's vDSO image, mapped readable for the process lifetime" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 172:9 | "an idempotent install: every writer stores the same resolved address" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 176:9 | "the vDSO's clock_gettime(clockid_t, struct timespec *) writes the caller's two timespec words" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 181:9 | "clock_gettime writes the caller's two timespec words" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 189:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 198:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 240:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 277:5 | "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 294:5 | "an elided section: only this thread has written the lock word and the count since sync_sole_enter" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 306:5 | "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 63:5 | "futex wake borrows a live aligned word and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 78:5 | "futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 154:5 | "base points into the kernel's vDSO image, mapped readable for the process lifetime" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 178:9 | "an idempotent install: every writer stores the same resolved address" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 182:9 | "the vDSO's clock_gettime(clockid_t, struct timespec *) writes the caller's two timespec words" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 187:9 | "clock_gettime writes the caller's two timespec words" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 195:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 204:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 246:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 283:5 | "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 300:5 | "an elided section: only this thread has written the lock word and the count since sync_sole_enter" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 312:5 | "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0" |
 | Compiler | Compiler/JetRuntime/Source/Task.jet | 625:9 | "written once, zeroed first, under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/TerminalColor.jet | 8:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TerminalInput.jet | 22:5 | "runtime-init runs before any other thread exists" |

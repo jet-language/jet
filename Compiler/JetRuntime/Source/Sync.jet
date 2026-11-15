@@ -53,7 +53,13 @@ sync_wake: fn(address: I64, count: I64) {
     sync_futex_wake(address, remaining)
 }
 
+// A wake while the process has one thread (sync_sole) has no waiter to reach:
+// the only thread that could wait on the futex is the one waking, so no
+// system call is made. A thread that clears sync_sole issues its membarrier
+// before it can wait, which orders this thread's store to the word ahead of
+// that wait's check, so the skipped wake is never one a new waiter needs.
 sync_futex_wake: fn(address: I64, count: I64) {
+    if (sync_sole != I64{0}) -> return
     #Unsafe("futex wake borrows a live aligned word and retains no pointer") {
         _ := os_syscall_i64(I64{202}, address, I64{129}, count, I64{0}, I64{0}, I64{0})
     }
