@@ -332,8 +332,8 @@ sema_registration_unit_facts: fn(graph: SemaRegistrationGraph) -> [SemaRegistrat
 // Rust unit_fact_for_type resolves a module-qualified name through its
 // declaring module's registry, so the compiler-owned `Duration`/`Instant`
 // time rows name only the bare built-in carriers: Core/Time's source struct
-// `<corelib>/...::Instant` is a nominal with Comparable/Equatable hooks, not
-// the core.units point.
+// `Instant`, under its Core module identity, is a nominal with
+// Comparable/Equatable hooks, not the core.units point.
 sema_registration_unit_fact_for_type: fn(graph: SemaRegistrationGraph, ty: Type) -> SemaRegistrationUnitFact? {
     name: sema_registration_unit_leaf_name(ty) ?? return None
     qualified: sema_registration_unit_type_is_qualified(ty)
@@ -4350,8 +4350,8 @@ sema_registration_lookup_counts: fn(graph: SemaRegistrationGraph) -> SemaLookupC
     SemaLookupCounts{module_lookups: permit.value.module_lookups.load(), name_lookups: permit.value.name_lookups.load(), scope_lookups: permit.value.scope_lookups.load(), scope_compares: permit.value.scope_compares.load()}
 }
 
-// The registered module NAME (`core.term`) of module `module_id` (identity
-// `<corelib>/core.term`).
+// The registered module NAME (`core.term`) of module `module_id` (its Core
+// module identity for a Core module).
 sema_registration_module_name: fn(graph: SemaRegistrationGraph, module_id: ModuleID) -> String? {
     index: sema_registration_module_index(graph, module_id) ?? return None
     Val(graph.modules[index].module_name)

@@ -46,6 +46,7 @@ use jet_foundation.[
     type_name,
     name_start,
     sema_effect_covers,
+    core_identity_is,
 ]
 
 // The frame of the binding `name` that a use at `use_span` inside the lambda
@@ -1500,7 +1501,7 @@ sema_expression_optional_fn_slot: fn(expected: Type?, environment: SemaScopeEnvi
 sema_expression_lambda_expects_http_handler: fn(expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     wanted: expected ?? return false
     if sema_call_resolved_type(wanted, environment, program) == {
-        .Named(name) -> name == "<corelib>/core.http.server::HTTPHandler"
+        .Named(name) -> core_identity_is(name, "core.http.server", "HTTPHandler")
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }

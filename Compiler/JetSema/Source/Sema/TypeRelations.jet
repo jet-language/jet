@@ -57,6 +57,8 @@ use jet_foundation.[
     type_union_member_tag,
     name_rows_get_text,
     core_identity_in_module,
+    core_identity_is,
+    MODULE_CORE_PREFIX,
     is_compute_tensor_family,
     ModuleID,
     module_is_core,
@@ -628,7 +630,8 @@ sema_type_compute_tensor_compatible: fn(required: Type, offered: Type) -> Bool N
 }
 
 sema_type_is_erased_tensor: fn(ty: Type) -> Bool Never! {
-    ty == (Type.Named{name: "Tensor"}) || ty == (Type.Named{name: "<corelib>/core.compute::Tensor"})
+    if ty == .Named(name) -> return name == "Tensor" || core_identity_is(name, "core.compute", "Tensor")
+    false
 }
 
 // The registered row of a type symbol (the first registered row, kept
@@ -2139,7 +2142,7 @@ sema_type_assignable_in_graph_at: fn(graph: SemaRegistrationGraph, required: Typ
 // Rust `resolve_type` names a qualified Core type export (`files.Stat`) by
 // its bare leaf, the spelling a fixed Core row returns (`core.files.stat`'s
 // `Stat`). Registration gives the export its owner's canonical identity
-// (`<corelib>/core.files::Stat`), so a canonical Core
+// (the Stat of the core.files module identity), so a canonical Core
 // nominal meets the bare leaf when its owner Core module exports that type
 // and the leaf names nothing in the caller's module. As in Rust, a Core
 // record that only shares a built-in typed head's leaf (`core.files.path`'s
@@ -2162,7 +2165,7 @@ sema_type_core_leaf_form: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int
 
 // The bare leaf a canonical Core nominal `name` meets, if any (see above).
 sema_type_core_leaf_name: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> String? {
-    if !name.starts_with("<corelib>/") -> return None
+    if !name.starts_with(MODULE_CORE_PREFIX) -> return None
     parts: name.split("::").to_list()
     if parts.len() < 2 -> return None
     last: parts.len() - 1
