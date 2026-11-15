@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6968,
-    "rev": 105769,
+    "rev": 105775,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60802,39 +60802,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A compile-throughput cell measures `jet check` and `jet build` (O0 and --release) of a representative million-line corpus in lines per second on the reference machine, recorded every wave.",
+          "text": "A compile-throughput cell measures `jet check` and `jet build` (O0 and --release) of a representative million-line corpus in lines per second on the reference machine, recorded every wave. Proof: `jet Tools/perf/compile-throughput/Throughput.jet` receipt for the wave.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:23:16.682Z"
+          "at": "2026-11-15T05:37:49.921Z"
         },
         {
           "n": 2,
-          "text": "Each compiler phase has a lines/s budget, and the budgets compose to 30M lines per second end to end; every phase over its budget names its root on a card.",
+          "text": "Each compiler phase has a lines/s budget, and the budgets compose to 30M lines per second end to end; every phase over its budget names its root on a card. Proof: the phase budget table in Docs/spec/reference/compiler-speed.md and the c1 cell receipt (`jet Tools/perf/compile-throughput/Throughput.jet`, cold and uncached, n=3 median).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:23:17.783Z"
+          "at": "2026-11-15T05:37:50.819Z"
         },
         {
           "n": 3,
-          "text": "End metric: `jet build` of the corpus runs at 30M lines per second or faster, with output identical to the slower build.",
+          "text": "End metric: `jet build` of the corpus runs at 30M lines per second or faster, with output identical to the slower build. Proof: the c1 cell receipt (`jet Tools/perf/compile-throughput/Throughput.jet`, cold and uncached, n=3 median).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:23:18.822Z"
+          "at": "2026-11-15T05:37:51.786Z"
         },
         {
           "n": 4,
-          "text": "Guards walk the tree once. A tests/guards run builds one shared file index of the tree in process (each path with its kind and size, and contents read on demand and held only for that run), walked once and handed to every guard. None of the 43 guards that walk the tree walks it itself. Acceptance: the guards pass unchanged, a source scan proves no guard calls a directory walk, and the 4-shard tests/guards run takes under 30 s cold on a dev export, down from about 75–90 s, measured before and after. Owner: Lander2, after the Land.jet census SUB.",
+          "text": "Guards walk the tree once. A tests/guards run builds one shared file index of the tree in process (each path with its kind and size, and contents read on demand and held only for that run), walked once and handed to every guard. None of the 43 guards that walk the tree walks it itself. Acceptance: the guards pass unchanged, a source scan proves no guard calls a directory walk, and the 4-shard tests/guards run takes under 30 s cold on a dev export, down from about 75–90 s, measured before and after. Owner: Lander2, after the Land.jet census SUB. Proof: `jet test tests/guards` passes, `jet test tests/guards --filter guard_no_dir_walk` passes, and a committed before-and-after timing of the 4-shard run.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:12:46.727Z"
+          "at": "2026-11-15T05:37:52.843Z"
         },
         {
           "n": 5,
@@ -60847,21 +60847,21 @@
         },
         {
           "n": 6,
-          "text": "Plan step 1, use the machine: average parallelism goes from about 5 to at least 24 of 32 threads. Modules stream through the pipeline as soon as their dependencies are checked (no phase-wide barriers), comptime runs in parallel, work queues are wait-free, and the allocator keeps per-thread arenas so threads take no global lock. 32 threads beat 16. Gate: at least 400K lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
+          "text": "Plan step 1, use the machine: average parallelism goes from about 5 to at least 24 of 32 threads. Modules stream through the pipeline as soon as their dependencies are checked (no phase-wide barriers), comptime runs in parallel, work queues are wait-free, and the allocator keeps per-thread arenas so threads take no global lock. 32 threads beat 16. Gate: at least 400K lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens). Proof: the c1 cell receipt (`jet Tools/perf/compile-throughput/Throughput.jet`, cold and uncached, n=3 median).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:18:43.301Z"
+          "at": "2026-11-15T05:37:53.844Z"
         },
         {
           "n": 7,
-          "text": "Plan step 2, data-oriented core: every compiler name, symbol, type and function is an interned u32 id (no String keys in maps). AST, types and IR are flat struct-of-arrays columns, compiler data lives in per-phase arenas freed in bulk, and compiler data carries no reference counts. Peak RSS falls under 1 GB (#5910). Gate: at most 5 µs of CPU per line and at least 5M lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
+          "text": "Plan step 2, data-oriented core: every compiler name, symbol, type and function is an interned u32 id (no String keys in maps). AST, types and IR are flat struct-of-arrays columns, compiler data lives in per-phase arenas freed in bulk, and compiler data carries no reference counts. Peak RSS falls under 1 GB (#5910). Gate: at most 5 µs of CPU per line and at least 5M lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens). Proof: the c1 cell receipt (`jet Tools/perf/compile-throughput/Throughput.jet`, cold and uncached, n=3 median).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:18:44.544Z"
+          "at": "2026-11-15T05:37:54.745Z"
         },
         {
           "n": 8,
@@ -60907,8 +60907,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T04:36:08.280Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:37:54.745Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G11"
       ],
@@ -217600,6 +217600,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:37:54.745Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c031o59x",
+      "note": "#7: proof; was: Plan step 2, data-oriented core: every compiler name, symbol, type and function is an interned u32 id (no String keys in maps). AST, types and IR are flat struct-of-arrays columns, compiler data lives"
+    },
+    {
+      "at": "2026-11-15T05:37:53.844Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c031o59x",
+      "note": "#6: proof; was: Plan step 1, use the machine: average parallelism goes from about 5 to at least 24 of 32 threads. Modules stream through the pipeline as soon as their dependencies are checked (no phase-wide barriers)"
+    },
+    {
+      "at": "2026-11-15T05:37:52.843Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c031o59x",
+      "note": "#4: proof; was: Guards walk the tree once. A tests/guards run builds one shared file index of the tree in process (each path with its kind and size, and contents read on demand and held only for that run), walked onc"
+    },
+    {
+      "at": "2026-11-15T05:37:51.786Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c031o59x",
+      "note": "#3: proof; was: End metric: `jet build` of the corpus runs at 30M lines per second or faster, with output identical to the slower build."
+    },
+    {
+      "at": "2026-11-15T05:37:50.819Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c031o59x",
+      "note": "#2: proof; was: Each compiler phase has a lines/s budget, and the budgets compose to 30M lines per second end to end; every phase over its budget names its root on a card."
+    },
+    {
+      "at": "2026-11-15T05:37:49.921Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c031o59x",
+      "note": "#1: proof; was: A compile-throughput cell measures `jet check` and `jet build` (O0 and --release) of a representative million-line corpus in lines per second on the reference machine, recorded every wave."
+    },
     {
       "at": "2026-11-15T05:36:51.931Z",
       "by": "TowerKeeper-1",
