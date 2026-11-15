@@ -16,15 +16,17 @@
 // captured packet carries its demand either way, and a load records it
 // again. The packet's ids are written as positions in lists of their keys
 // in that check (symbol and declaration keys, module identities), which a
-// compile resolves to its own ids. The check's finalization writes the
-// captures as the bodies file (sema_core_bodies_bytes), which the Core
-// library writes as `{prefix}.bodies`:
+// compile resolves to its own ids, and its strings as positions in the list
+// of the strings it holds, each once (BodyCodecOut.indexed). The check's
+// finalization writes the captures as the bodies file
+// (sema_core_bodies_bytes), which the Core library writes as
+// `{prefix}.bodies`:
 //
 //   header, context, count, a table of two offsets per body in key order
 //   (SEMA_CORE_BODIES_OFFSET_BYTES little-endian bytes each), its key's and
 //   its record's, then the keys in key order, then per body in key order
-//   its record: symbol keys, declaration keys, module identities, packet
-//   bytes
+//   its record: symbol keys, declaration keys, module identities, the
+//   packet's strings, packet bytes
 //
 // each string and list in the codec's form (BodyCodecRows.jet) and the
 // packet bytes as their count and the bytes. The context is the facts of
@@ -72,7 +74,7 @@ use jet_foundation.[
     symbol_table_key,
 ]
 
-SEMA_CORE_BODIES_HEADER: "jet core bodies 4"
+SEMA_CORE_BODIES_HEADER: "jet core bodies 5"
 
 // The width of an offset in a bodies file's table, in little-endian bytes.
 SEMA_CORE_BODIES_OFFSET_BYTES: 8
@@ -81,14 +83,16 @@ SEMA_CORE_BODIES_OFFSET_BYTES: 8
 SEMA_CORE_BODIES_ENTRY_BYTES: 16
 
 // One captured check: the function's symbol key, its packet's bytes, the
-// keys of the symbols, declarations and modules the bytes name by
-// position, and its place among the captures (sema_core_bodies_bytes).
+// keys of the symbols, declarations and modules and the strings the bytes
+// name by position, and its place among the captures
+// (sema_core_bodies_bytes).
 SemaCoreBody: struct {
     key: String
     bytes: [U8]
     symbols: [String]
     decls: [String]
     modules: [String]
+    strings: [String]
     ordinal: Int{0}
 }
 
@@ -207,11 +211,12 @@ sema_core_body_capture: fn(program: SemaProgramTables, owner_id: SymbolID, check
         packet.codec_demand = compiler_take_rows<String>(demand.codecs)
         packet.derive_demand = compiler_take_rows<String>(demand.derived)
         out := body_codec_out()
+        out.indexed = true
         body_codec_put_semaparallelbody(out, packet)
         symbols: loop id in out.symbols -> "{symbol_table_key(graph.symbols, id)}"
         decls: loop id in out.decls -> "{decl_table_key(graph.decls, graph.symbols, id)}"
         modules: loop id in out.modules -> "{module_text(graph.module_table, id)}"
-        bodies.push(SemaCoreBody{key: "{symbol_table_key(graph.symbols, owner_id)}", bytes: out.bytes.move(), symbols: symbols, decls: decls, modules: modules})
+        bodies.push(SemaCoreBody{key: "{symbol_table_key(graph.symbols, owner_id)}", bytes: out.bytes.move(), symbols: symbols, decls: decls, modules: modules, strings: out.strings.move()})
     }
     sema_check_drain_body(packet, diagnostics, call_facts, comptime_requests, name_references)
 }
@@ -250,6 +255,7 @@ sema_core_bodies_bytes: fn(bodies: &&[SemaCoreBody], context: String) -> [U8] Ne
         sema_core_bodies_put_keys(out, sorted[index].symbols)
         sema_core_bodies_put_keys(out, sorted[index].decls)
         sema_core_bodies_put_keys(out, sorted[index].modules)
+        sema_core_bodies_put_keys(out, sorted[index].strings)
         body_codec_put_count(out, sorted[index].bytes.len())
         out.bytes.extend(sorted[index].bytes)
     }
@@ -321,7 +327,8 @@ sema_core_bodies_problem: fn(bytes: [U8]) -> String? Never! {
             return Val("record {position} starts at byte {at}, not at byte {expected}, where the one before it ends")
         }
         input := sema_core_bodies_record(bytes, at)
-        loop _ in 0..<3 -> _: sema_core_bodies_keys(bytes, input)
+        // Its keys' three lists and its packet's strings.
+        loop _ in 0..<4 -> _: sema_core_bodies_keys(bytes, input)
         size: body_codec_get_count(bytes, input, 1)
         if input.failed -> return Val("record {position} is cut short or malformed")
         expected = input.at + size
@@ -505,13 +512,14 @@ sema_core_body_read: fn(bodies: SemaCoreBodies?, records: SemaCoreBodiesRecords?
 }
 
 // The packet of the record at byte `at` of `bytes`, record `position` of
-// its bodies file (sema_core_body_read).
+// its bodies file (sema_core_body_read). The record's list of the packet's
+// strings is read into `input`'s pool, each string once, and the packet
+// takes its strings from the list.
 sema_core_body_decode: fn(bytes: [U8], at: Int, graph: SemaRegistrationGraph, position: Int, input: &BodyCodecIn) -> SemaParallelBody? {
     record := sema_core_bodies_record(bytes, at)
     symbol_keys: sema_core_bodies_keys(bytes, record)
     decl_keys: sema_core_bodies_keys(bytes, record)
     module_keys: sema_core_bodies_keys(bytes, record)
-    size: body_codec_get_count(bytes, record, 1)
     if record.failed {
         panic("internal compiler error: record {position} of the Core bodies file does not read")
     }
@@ -528,11 +536,20 @@ sema_core_body_decode: fn(bytes: [U8], at: Int, graph: SemaRegistrationGraph, po
         modules.push(module_find(graph.module_table, module_key) ?? return None)
     }
     input.at = record.at
-    input.end = record.at + size
+    input.end = bytes.len()
     input.failed = false
+    input.indexed = false
+    strings: sema_core_bodies_keys(bytes, input)
+    size: body_codec_get_count(bytes, input, 1)
+    if input.failed {
+        panic("internal compiler error: record {position} of the Core bodies file does not read")
+    }
+    input.end = input.at + size
     input.symbols = symbols.move()
     input.decls = decls.move()
     input.modules = modules.move()
+    input.strings = strings.move()
+    input.indexed = true
     packet: body_codec_get_semaparallelbody(bytes, input)
     if input.failed || input.at != input.end || packet.checked == None {
         panic("internal compiler error: the packet of record {position} of the Core bodies file does not read")

@@ -558,7 +558,10 @@ drained back into the module's rows, so the capture moves rows and copies
 none. A method's packet carries no method input: its diagnostics already
 hold its preparation's, as a prepared packet's do, and a compile recomputes
 the input against its own memory plan. A packet's id lists are written as
-keys in that check (symbol and declaration keys, module identities). The
+keys in that check (symbol and declaration keys, module identities), and
+its strings as positions in a list of them its record holds, each string
+once: a check repeats a few spellings (`param`, `local`, a span's file)
+many times, and a load interns each one once. The
 library writes the captures as `{prefix}.bodies`: a header, the context, a
 table of record offsets, then one record per function in key order. A Core
 demand wave can check a function the body pass checked before, against the

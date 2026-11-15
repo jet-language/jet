@@ -336,6 +336,50 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
     }
 }
 
+// A Core bodies record holds its packet's strings apart, each once, and the
+// packet names each by its position (BodyCodecOut.indexed).
+#Test("a checked body packet whose strings are listed apart reads back as it was") {
+    failures := [String]{}
+    packets: body_codec_packets(failures)
+    if packets.len() < 8 -> failures.push("only {packets.len()} packets were built")
+    loop packet in packets {
+        out := body_codec_out()
+        out.indexed = true
+        body_codec_put_semaparallelbody(out, packet)
+        listed := [String:Bool]{}
+        loop text in out.strings {
+            if listed.has_key(text) {
+                failures.push("packet {packet.job_index}: the string `{text}` is listed twice")
+            }
+            listed[text] = true
+        }
+        input := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move(), indexed: true, strings: out.strings.move()}
+        read: body_codec_get_semaparallelbody(out.bytes, input)
+        if input.failed || input.at != input.end {
+            failures.push("packet {packet.job_index}: the read failed at byte {input.at} of {input.end}")
+            next
+        }
+        if "{read:Debug}" != "{packet:Debug}" {
+            failures.push("packet {packet.job_index}: the packet read back differs")
+        }
+        again := body_codec_out()
+        again.indexed = true
+        body_codec_put_semaparallelbody(again, read)
+        if again.bytes != out.bytes || again.strings != input.strings {
+            failures.push("packet {packet.job_index}: the packet read back writes other bytes or strings")
+        }
+        // A position past the list fails the read.
+        short := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: input.symbols.move(), decls: input.decls.move(), modules: input.modules.move(), indexed: true}
+        body_codec_get_semaparallelbody(out.bytes, short)
+        if listed.len() > 0 && !short.failed {
+            failures.push("packet {packet.job_index}: a read without its strings did not fail")
+        }
+    }
+    if failures.len() > 0 {
+        panic("BodyCodec collected {failures.len()} failures:\n{failures.join("\n")}")
+    }
+}
+
 #Test("a checked body packet read cut short fails and ends") {
     failures := [String]{}
     packets: body_codec_packets(failures)
@@ -387,12 +431,13 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
         symbols: sema_core_bodies_keys(bodies.bytes, record)
         decls: sema_core_bodies_keys(bodies.bytes, record)
         modules: sema_core_bodies_keys(bodies.bytes, record)
+        strings: sema_core_bodies_keys(bodies.bytes, record)
         size: body_codec_get_count(bodies.bytes, record, 1)
         end: record.at + size
         if keys.get(key) == None {
             failures.push("{key}: captured, but no checked Prelude function has its key")
         }
-        input := BodyCodecIn{at: record.at, end: end, failed: false, symbols: (loop _ in symbols -> SymbolID{id: U32{1}}), decls: (loop _ in decls -> DeclID{row: stand.row}), modules: (loop _ in modules -> ModuleID{id: U32{1}})}
+        input := BodyCodecIn{at: record.at, end: end, failed: false, symbols: (loop _ in symbols -> SymbolID{id: U32{1}}), decls: (loop _ in decls -> DeclID{row: stand.row}), modules: (loop _ in modules -> ModuleID{id: U32{1}}), indexed: true, strings: strings.move()}
         packet: body_codec_get_semaparallelbody(bodies.bytes, input)
         if input.failed || input.at != end {
             failures.push("{key}: the packet read failed at byte {input.at} of {end}")
@@ -419,9 +464,9 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
 // the file holds one record of it, the later capture's.
 #Test("a Core bodies file keeps the last capture of a function checked twice") {
     captures := [SemaCoreBody]{
-        SemaCoreBody{key: "core.b", bytes: [U8]{U8{1}}, symbols: [String]{}, decls: [String]{}, modules: [String]{}},
-        SemaCoreBody{key: "core.a", bytes: [U8]{U8{2}}, symbols: [String]{}, decls: [String]{}, modules: [String]{}},
-        SemaCoreBody{key: "core.b", bytes: [U8]{U8{3}, U8{4}}, symbols: [String]{"core.a"}, decls: [String]{}, modules: [String]{}},
+        SemaCoreBody{key: "core.b", bytes: [U8]{U8{1}}, symbols: [String]{}, decls: [String]{}, modules: [String]{}, strings: [String]{}},
+        SemaCoreBody{key: "core.a", bytes: [U8]{U8{2}}, symbols: [String]{}, decls: [String]{}, modules: [String]{}, strings: [String]{}},
+        SemaCoreBody{key: "core.b", bytes: [U8]{U8{3}, U8{4}}, symbols: [String]{"core.a"}, decls: [String]{}, modules: [String]{}, strings: [String]{"core.b"}},
     }
     file := sema_core_bodies_bytes(captures.move(), "context")
     if sema_core_bodies_problem(file) == .Val(problem) {
@@ -443,8 +488,9 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
         symbols: sema_core_bodies_keys(read.bytes, record)
         _: sema_core_bodies_keys(read.bytes, record)
         _: sema_core_bodies_keys(read.bytes, record)
+        strings: sema_core_bodies_keys(read.bytes, record)
         size: body_codec_get_count(read.bytes, record, 1)
-        last: symbols == ([String]{"core.a"}) && size == 2 && read.bytes[record.at] == U8{3}
+        last: symbols == ([String]{"core.a"}) && strings == ([String]{"core.b"}) && size == 2 && read.bytes[record.at] == U8{3}
         if !last -> panic("BodyCodec: the record of `core.b` is not its last capture")
     }
 }
@@ -462,7 +508,7 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
     }
     loop entry in 0..<2 {
         out.bytes[table + entry * SEMA_CORE_BODIES_ENTRY_BYTES + SEMA_CORE_BODIES_OFFSET_BYTES] = U8{out.bytes.len()}
-        loop _ in 0..<3 -> body_codec_put_count(out, 0)
+        loop _ in 0..<4 -> body_codec_put_count(out, 0)
         body_codec_put_count(out, 1)
         out.bytes.push(U8{entry})
     }

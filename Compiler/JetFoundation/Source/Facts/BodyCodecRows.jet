@@ -14,9 +14,15 @@
 // compile, and a reader (BodyCodecIn) takes the same lists resolved to the ids
 // of the compile it reads into. A SymbolID local to the body (SYMBOL_LOCAL_BIT,
 // a row of the body's own BodyTree.symbols) and id 0 are written as they are.
+//
+// A writer in `indexed` mode lists strings the same way (BodyCodecOut.strings)
+// and writes each as its position in the list, so a body that repeats a
+// spelling holds it once; the caller writes the list beside the bytes, and a
+// reader in `indexed` mode takes it (BodyCodecIn.strings).
 use body_codec_math: core.math
 
-// The bytes a put wrote, and the ids they name by position.
+// The bytes a put wrote, and the ids and, in `indexed` mode, the strings
+// they name by position.
 BodyCodecOut: struct {
     bytes: [U8]
     symbols: [SymbolID]
@@ -26,6 +32,10 @@ BodyCodecOut: struct {
     symbol_at: [U32:Int]
     decl_at: [Int:Int]
     module_at: [U32:Int]
+    indexed: Bool{false}
+    strings: [String]{[String]{}}
+    // Each listed string's position, by the string.
+    string_at: [String:Int]{[String:Int]{}}
 }
 
 body_codec_out: fn() -> BodyCodecOut Never! {
@@ -38,7 +48,8 @@ body_codec_out: fn() -> BodyCodecOut Never! {
 // enum's fallback variant, so a failed get still ends; the caller checks
 // `failed`. Each string a get reads is the one String `spellings` holds for
 // its spelling (body_codec_get_string), so the strings a body repeats share
-// it, and so do those of every body read with one pool the caller keeps.
+// it, and so do those of every body read with one pool the caller keeps; in
+// `indexed` mode it is the one of `strings` at the position the bytes hold.
 BodyCodecIn: struct {
     at: Int
     end: Int
@@ -47,6 +58,8 @@ BodyCodecIn: struct {
     decls: [DeclID]
     modules: [ModuleID]
     spellings: NameTable{name_table_sized(2)}
+    indexed: Bool{false}
+    strings: [String]{[String]{}}
 }
 
 body_codec_put_uvarint: fn(out: &BodyCodecOut, value: Int) Never! {
@@ -138,15 +151,35 @@ body_codec_get_bool: fn(bytes: [U8], input: &BodyCodecIn) -> Bool Never! {
     bytes[input.at - 1] == U8{1}
 }
 
+// A string: its bytes, or in `indexed` mode its position in `out.strings`,
+// listed there the first time it is put.
 body_codec_put_string: fn(out: &BodyCodecOut, value: String) Never! {
+    if out.indexed {
+        if out.string_at.get(value) == .Val(position) {
+            body_codec_put_uvarint(out, position)
+            return
+        }
+        position: out.strings.len()
+        out.string_at[value] = position
+        out.strings.push("{value}")
+        body_codec_put_uvarint(out, position)
+        return
+    }
     bytes: value.bytes()
     body_codec_put_uvarint(out, bytes.len())
     out.bytes.extend(bytes)
 }
 
 // The string of the next bytes: the String `input.spellings` holds for
-// their spelling, interned there when it is new.
+// their spelling, interned there when it is new; in `indexed` mode the one
+// of `input.strings` at the position they hold.
 body_codec_get_string: fn(bytes: [U8], input: &BodyCodecIn) -> String Never! {
+    if input.indexed {
+        position: body_codec_get_uvarint(bytes, input)
+        if input.failed -> return ""
+        if position >= input.strings.len() -> return body_codec_malformed(input)
+        return input.strings[position]
+    }
     size: body_codec_get_count(bytes, input, 1)
     if input.failed || size == 0 -> return ""
     at: input.at
@@ -157,7 +190,8 @@ body_codec_get_string: fn(bytes: [U8], input: &BodyCodecIn) -> String Never! {
     text
 }
 
-// A string that is not UTF-8: the read fails.
+// A string that is not UTF-8, or a position past the listed strings: the
+// read fails.
 body_codec_malformed: fn(input: &BodyCodecIn) -> String Never! {
     input.failed = true
     ""
