@@ -1,0 +1,66 @@
+use {
+    app
+    core.reactive.loadable.[Loadable]
+}
+
+#Error
+BoardError: enum {
+    NoBoard
+}
+
+Board: struct {
+    tasks: Int
+    runs: Int
+}
+
+BOARD: Shared{Board{tasks: 3, runs: 0}}
+
+// The source reads no caller-dependent input: the task count of one board,
+// counting its own runs.
+open_tasks: fn(board: String) -[DB.Read]> Int BoardError! {
+    if board == "" -> return Err(BoardError.NoBoard)
+    state := BOARD.guard_edit()
+    state.value.runs += 1
+    if board == "crewboard" -> state.value.tasks else -> 0
+}
+
+runs: fn() -> Int {
+    state := BOARD.guard_edit()
+    state.value.runs
+}
+
+add_task: fn() {
+    state := BOARD.guard_edit()
+    state.value.tasks += 1
+}
+
+shown: fn(state: Loadable<Int, BoardError>) -> String {
+    if state == {
+        .Loaded(value) -> "{value}"
+        .Failed(reason) -> if reason == {
+            .NoBoard -> "failed: no board"
+        }
+        .Idle | .Loading -> "pending"
+    }
+}
+
+// Each subscriber binds the query itself, as each request handler does.
+subscriber: fn(name: String, board: String) {
+    binding: app.live(open_tasks, board)
+    print("{name} sees {shown(app.state(binding))}")
+}
+
+run: fn() {
+    subscriber("alice", "crewboard")
+    subscriber("bob", "crewboard")
+    subscriber("carol", "crewboard")
+    print("source runs for three subscribers: {runs()}")
+    add_task()
+    app.invalidate(open_tasks, "crewboard")
+    subscriber("alice", "crewboard")
+    subscriber("bob", "crewboard")
+    subscriber("carol", "crewboard")
+    print("source runs after one write: {runs()}")
+    subscriber("dave", "archive")
+    print("source runs with other arguments: {runs()}")
+}
