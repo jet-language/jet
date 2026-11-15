@@ -421,31 +421,38 @@ reassigning it.
 
 The orchestrator does every build and test. It keeps every worker's next task
 queued and lands each passing submission on `dev` as its own commit. Landing
-runs one loop, never a train (owner order, 2026-11-11):
+runs one continuous cycle, never a train, and the heavy-job slot never sits
+idle while a submission waits (owner order, 2026-11-15):
 
-1. **Land on targeted proof.** Each submission runs only its own named proof
-   lines with the current batch compiler, one or two submissions at a time. A
-   pass lands on `dev` at once; a failure goes straight back to its worker as
-   one list and that worker's top priority, and holds back nothing else. A
-   submission that changes the compiler, the runtime or Core and whose proof
-   needs a compiler built from it lands on its touched-file checks, and its
-   proof lines run on the next batch compiler.
-   Ready work never waits: no list, fix pass, stack or train holds a
-   submission that is ready, and none waits for a build, a measurement or
-   other submissions (owner order, 2026-11-14). When the next batch compiler
-   finds failures, they are collected in one sweep and fixed together while
-   every other submission keeps landing.
-2. **Build a batch compiler.** About every 20 landings or two hours, the
-   orchestrator builds one compiler from the tip of `dev` with
-   `jet build --profile dev Compiler` and runs its self-check and the proof
-   lines waiting on it. It becomes the compiler every intake uses. If the build
-   breaks, the commit that broke it is reverted at once, so `dev` always builds.
-   Each batch compiler is a bisect point.
-3. **Sweep with the full suite.** Every three or four batch compilers, the
-   whole suite runs once in collect-all mode and is compared with the last full
-   run only. Every new failure is grouped by root, each root gets one owner,
-   and the whole list is fixed in one sweep. That swept compiler becomes the
-   owner's next a0.0.N release through `Tools/release/Main.jet` `admit`.
+1. **One census takes everything ready.** A cycle starts with every
+   submission in the inbox and checks them together in one collect-all census
+   (`Tools/agent/Land.jet census`). A submission that conflicts only in a
+   generated file is applied without that file, and the generators are rerun
+   (`Tools/agent/DiagnosticRows.jet --write` and every generator the census
+   checks). Only a conflict in hand-written source goes back to its worker. A
+   failing census row holds back only the submissions that cause it; the rest
+   land on `dev` at once, one commit each.
+2. **The census build is the batch compiler.** The census's own
+   `jet build Compiler` becomes the compiler every intake uses; nothing is
+   built twice. When the census held a submission back, its snapshot is not
+   the landed tip, and the batch compiler is built from the tip instead. If a
+   build breaks, the commit that broke it is reverted at once, so `dev` always
+   builds. Each batch compiler is a bisect point.
+3. **Every batch compiler runs the full suite.** On it, at once: each landed
+   submission's proof lines (from its `tests` file) and the whole suite in
+   collect-all mode (the cases profile beside ui, golden and core), compared
+   with the previous cycle's run. A new failure can only come from that
+   cycle's submissions, so it goes to its worker at once, as one list, and
+   becomes that worker's top priority. Passing proof lines meet their criteria
+   on Tower in the same cycle.
+4. **The next cycle starts at once.** Submissions that arrived during a cycle
+   start the next one as soon as the slot frees. About every two hours, the
+   speed gate and self-check run on the current batch compiler, inside the
+   cycle. Each full suite run with no new failures may become the owner's next
+   a0.0.N release through `Tools/release/Main.jet` `admit`.
+
+Workers check against the current batch compiler (the seed) before they
+submit, so a cycle finds only what their touched-file checks cannot.
 
 Landing throughput is the measure of progress. These standing owner orders
 keep it high:
@@ -458,8 +465,8 @@ keep it high:
   directly, with no new code.
 
 The orchestrator may name one Lander and one Closer. The Lander runs the
-landing, batch-compiler and sweep loop in the orchestrator's place, landing
-whatever passed and sending every failure to its owner. The Closer
+landing cycle in the orchestrator's place, landing whatever passed and
+sending every failure to its owner. The Closer
 takes the cards with the fewest open criteria, runs each criterion's proof,
 and hands the orchestrator the evidence. Tower writes, owner gates and
 dispatch stay with the orchestrator.
