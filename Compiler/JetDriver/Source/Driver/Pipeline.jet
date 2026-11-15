@@ -195,6 +195,7 @@ use {
         TFunctionRef,
         TOutputCheckFact,
         TTestFact,
+        compiler_take_rows,
         compiler_transfer_rows,
         core_module_export,
         diagnostic_column_at,
@@ -970,7 +971,8 @@ JetDriverComptimeRunIndex: struct {
     owners_built: Bool
     // Each function any closure or prefetch of the run named, by its node
     // id: `node_keys` interns `module\nkey` to the id, and `nodes`,
-    // `checked_at` and `waiting_at` hold one row per id.
+    // `checked_at`, `waiting_at` and the `prefetched` rows hold one row per
+    // id.
     node_keys: NameRows{name_rows()}
     nodes: [JetDriverComptimeClosureNode]{[JetDriverComptimeClosureNode]{}}
     // The first row of each node's function in the run's checked
@@ -987,15 +989,19 @@ JetDriverComptimeRunIndex: struct {
     // result itself (JetDriverComptimeClosureRow), so each later closure
     // that reuses the row skips its body walks.
     closure_rows: [Int:JetDriverComptimeClosureRow]{[Int:JetDriverComptimeClosureRow]{}}
-    // Node -> the check jet_driver_comptime_prefetch made of its function
-    // ahead of the pass, which the first closure that would check it takes
-    // instead (jet_driver_comptime_prefetched), and the body refs the
-    // closure row it keeps would compute (JetDriverComptimeClosureRow).
-    // A check that splices local values keeps the run's value count when it
-    // was made, in `prefetched_marks`.
-    prefetched: [Int:SemaComptimeFunctionResult]{[Int:SemaComptimeFunctionResult]{}}
-    prefetched_refs: [Int:[JetDriverComptimeFunctionRef]]{[Int:[JetDriverComptimeFunctionRef]]{}}
-    prefetched_marks: [Int:Int]{[Int:Int]{}}
+    // Per node, the check jet_driver_comptime_prefetch made of its function
+    // ahead of the pass (its one row, or none), which the first closure that
+    // would check it takes instead (jet_driver_comptime_prefetched), and,
+    // when `prefetched_has_refs`, the body refs the closure row it keeps
+    // would compute (JetDriverComptimeClosureRow). A check that splices
+    // local values keeps the run's value count when it was made in
+    // `prefetched_marks` (-1: none). Rows by node, not maps: a closure takes
+    // each check out in place, where a map's removal shifts every later
+    // entry.
+    prefetched: [[SemaComptimeFunctionResult]]{[[SemaComptimeFunctionResult]]{}}
+    prefetched_refs: [[JetDriverComptimeFunctionRef]]{[[JetDriverComptimeFunctionRef]]{}}
+    prefetched_has_refs: [Bool]{[Bool]{}}
+    prefetched_marks: [Int]{[Int]{}}
     // What the run's body walks have read of each nominal type's render
     // methods (jet_driver_comptime_owner_refs).
     render: SemaComptimeRenderMemo{SemaComptimeRenderMemo{}}
@@ -1324,6 +1330,10 @@ jet_driver_comptime_node_id: fn(index: &JetDriverComptimeRunIndex, module_identi
     index.nodes.push(JetDriverComptimeClosureNode{})
     index.checked_at.push(-1)
     index.waiting_at.push(-1)
+    index.prefetched.push([SemaComptimeFunctionResult]{})
+    index.prefetched_refs.push([JetDriverComptimeFunctionRef]{})
+    index.prefetched_has_refs.push(false)
+    index.prefetched_marks.push(-1)
     id
 }
 
@@ -1596,9 +1606,9 @@ jet_driver_comptime_function_closure: fn(
                 // at the position it is pushed to below.
                 kept_row := if reused_row >= 0 -> reused_row else if index.checked_at[node] < 0 && !unlanded -> checked_functions.len() else -> -1
                 if kept_row >= 0 && index.closure_rows.get(kept_row) == None {
-                    prefetched_refs: index.prefetched_refs.remove(node)
-                    if prefetched_refs == .Val(refs) {
-                        index.closure_rows[kept_row] = JetDriverComptimeClosureRow{refs: refs}
+                    if index.prefetched_has_refs[node] {
+                        index.prefetched_has_refs[node] = false
+                        index.closure_rows[kept_row] = JetDriverComptimeClosureRow{refs: compiler_take_rows<JetDriverComptimeFunctionRef>(index.prefetched_refs[node])}
                     }
                 }
                 closure_row: jet_driver_comptime_closure_row(graph, index, kept_row, checked, function, module_value && impurity == None, local_value)
@@ -1658,8 +1668,10 @@ jet_driver_comptime_function_closure: fn(
 // A check that splices local values is dropped when one of them landed in
 // `values` since it was made: the closure checks the function again.
 jet_driver_comptime_prefetched: fn(index: &JetDriverComptimeRunIndex, node: Int, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> SemaComptimeFunctionResult? {
-    checked: index.prefetched.remove(node) ?? return None
-    if index.prefetched_marks.remove(node) == .Val(mark) {
+    checked: index.prefetched[node].pop() ?? return None
+    mark: index.prefetched_marks[node]
+    index.prefetched_marks[node] = -1
+    if mark >= 0 {
         loop at in mark..<values.len() {
             loop source in checked.comptime_body_sources {
                 if values[at].module_identity == source.module_identity && values[at].key == source.key -> return None
@@ -1683,9 +1695,7 @@ jet_driver_comptime_prefetched: fn(index: &JetDriverComptimeRunIndex, node: Int,
 // makes no checks here (jet_driver_comptime_prefetches). The result is the
 // number of checks kept.
 jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, index: &JetDriverComptimeRunIndex, memory_plan: &[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], prechecks: [SemaComptimeItemCheck?], threads: CompilerThreads) -> Int {
-    index.prefetched = [Int:SemaComptimeFunctionResult]{}
-    index.prefetched_refs = [Int:[JetDriverComptimeFunctionRef]]{}
-    index.prefetched_marks = [Int:Int]{}
+    jet_driver_comptime_prefetch_clear(index)
     if !jet_driver_comptime_prefetches(threads) -> return 0
     seen := [Int:Bool]{}
     seeds: jet_driver_comptime_prefetch_seeds(programs[0], index, prechecks, seen)
@@ -1700,6 +1710,19 @@ jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs
         _ := walkers.join() ?? panic(compiler_threads_failure_text(err))
     }
     kept
+}
+
+// Drops the checks and refs an earlier prefetch of the run kept that no
+// closure took.
+jet_driver_comptime_prefetch_clear: fn(index: &JetDriverComptimeRunIndex) Never! {
+    loop node in 0..<index.nodes.len() {
+        if index.prefetched[node].len() > 0 -> index.prefetched[node] = [SemaComptimeFunctionResult]{}
+        if index.prefetched_has_refs[node] {
+            index.prefetched_refs[node] = [JetDriverComptimeFunctionRef]{}
+            index.prefetched_has_refs[node] = false
+        }
+        index.prefetched_marks[node] = -1
+    }
 }
 
 // Whether `threads` admit the comptime prefetches, so a pass's items are
@@ -1815,6 +1838,7 @@ jet_driver_comptime_prefetch_keep: fn(program: SemaProgramTables, index: &JetDri
                     jet_driver_comptime_prefetch_add(index, seen, next_jobs, found.module_identity, found.function_key)
                 }
                 index.prefetched_refs[node] = refs
+                index.prefetched_has_refs[node] = true
             }
         }
         loop call in check.calls {
@@ -1822,7 +1846,7 @@ jet_driver_comptime_prefetch_keep: fn(program: SemaProgramTables, index: &JetDri
         }
         jet_driver_comptime_prefetch_keys(graph, index, seen, next_jobs, check.reachable_function_keys)
         if check.comptime_body_sources.len() > 0 -> index.prefetched_marks[node] = mark
-        index.prefetched[node] = check
+        index.prefetched[node] = [SemaComptimeFunctionResult]{check}
         kept += 1
     }
     next_jobs
@@ -1852,7 +1876,7 @@ jet_driver_comptime_prefetch_node: fn(index: JetDriverComptimeRunIndex, seen: &[
         return
     }
     seen[node] = true
-    if index.checked_at[node] >= 0 || index.waiting_at[node] >= 0 || index.prefetched.has_key(node) || index.nodes[node].settled {
+    if index.checked_at[node] >= 0 || index.waiting_at[node] >= 0 || index.prefetched[node].len() > 0 || index.nodes[node].settled {
         return
     }
     jobs.push(SemaComptimeFunctionJob{module_identity: module_identity, function_key: function_key})

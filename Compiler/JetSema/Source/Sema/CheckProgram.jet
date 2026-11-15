@@ -8409,9 +8409,13 @@ sema_comptime_dependencies_from_references: fn(graph: SemaRegistrationGraph, ref
     dependencies := [String]{}
     if references.len() == 0 -> return dependencies
     wanted := [String:Bool]{}
+    // The modules the references name constants of: a staged value of any
+    // other module is never looked up, so the scan skips it unhashed.
+    wanted_modules := [U32:Bool]{}
     loop reference in references {
         if reference.symbol.kind == SymbolKind.Constant {
             wanted[symbol_table_key(graph.symbols, reference.symbol.id)] = true
+            wanted_modules[reference.symbol.module_identity.id] = true
         }
     }
     if wanted.len() == 0 -> return dependencies
@@ -8420,6 +8424,7 @@ sema_comptime_dependencies_from_references: fn(graph: SemaRegistrationGraph, ref
     staged := [String:Bool]{}
     loop value in values {
         if value.kind != SemaComptimeItemKind.Constant -> next
+        if wanted_modules.get(value.module_identity.id) == None -> next
         if wanted.get(value.key) == None -> next
         staged["{value.module_identity.id}|{value.key}"] = true
     }
@@ -8560,9 +8565,15 @@ sema_comptime_drop_close_keys: fn(graph: SemaRegistrationGraph, tree: BodyTree, 
     loop statement in tree.stmts {
         if statement == .Assign(_, _, value, _, _) -> dropped.push(value)
     }
+    // A type's walk is the same at each of its drops, and one walk adds
+    // every key it can, so each of the tree's types is walked once.
     seen := [String:Bool]{}
+    walked := [Bool]{}
+    loop _ in tree.types.types -> walked.push(false)
     loop id in dropped {
         type_id: checked_expr_type_id(tree.expr_types, id) ?? next
+        if walked[type_id] -> next
+        walked[type_id] = true
         sema_comptime_close_methods_add(graph, tree.types.types[type_id], module_identity, seen, keys)
     }
 }
