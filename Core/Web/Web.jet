@@ -136,7 +136,7 @@ __AppHandler: struct {
     }
 }
 
-__app_handler: fn(call: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> __AppHandler Never! {
+priv app_handler: fn(call: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> __AppHandler Never! {
     __AppHandler{__cell: Shared{__AppHandlerCell{call: call.move()}}}
 }
 
@@ -199,14 +199,14 @@ __AppState: struct {
     images: [__ImageNode]
     image_bytes: [String:[U8]]
     image_settings: __ImageSettings
-    // Whether the app is served under `jet dev`, which __app_serve reads once
+    // Whether the app is served under `jet dev`, which app_serve reads once
     // from the environment, so an image page reads no environment itself.
     dev: Bool
     // The handler of GET `/a/*jet_image`, made with the first page, which is
     // where its file reads are charged; serving the app only adds the row.
     image_handler: HTTPHandler?
     // The endpoint and webhook rows, which a served app with a trace
-    // export spans (`__app_trace_install`).
+    // export spans (`app_trace_install`).
     traced: [__AppTraced]
 }
 
@@ -238,16 +238,16 @@ App: struct {
     __route: fn(self, path: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String, at: SourceLocation{#caller}) -> App Never! {
         target: self.copy()
         page: path.copy()
-        http_server.__route_add(__app_table(self), "GET", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_page_response(target, page, request)) }), "", at)
+        http_server.__route_add(app_table(self), "GET", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_page_response(target, page, request)) }), "", at)
         guard := self.__state.guard_edit()
         if guard.value.image_handler == None {
-            guard.value.image_handler = Val(__app_image_handler(self))
+            guard.value.image_handler = Val(app_image_handler(self))
         }
         mode: guard.value.mode.copy()
         explicit: guard.value.explicit_mode
         route: __AppRoute{
             path: path,
-            handler: __app_handler(handler),
+            handler: app_handler(handler),
             identity: identity,
             binding: binding,
             mode: mode,
@@ -271,7 +271,7 @@ App: struct {
     // unmatched navigation.
     __boundary: fn(self, kind: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String) -> App Never! {
         guard := self.__state.guard_edit()
-        boundary: __app_handler(handler)
+        boundary: app_handler(handler)
         if kind == "not_found" {
             guard.value.not_found = Val(boundary)
             return self.copy()
@@ -293,9 +293,9 @@ App: struct {
     // `action`, `form` and `data`: one POST `/actions/<name>` server function
     // each. The first action or form after a route is that route's form.
     __action: fn(self, kind: String, name: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, at: SourceLocation{#caller}) -> App Never! {
-        reply: __app_handler(handler)
+        reply: app_handler(handler)
         served: reply.copy()
-        http_server.__route_add(__app_table(self), "POST", "/actions/{name}", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_action_response(served, request)) }), "", at)
+        http_server.__route_add(app_table(self), "POST", "/actions/{name}", http_server.__handler(fn(request: HTTPRequest) { Ok(app_action_response(served, request)) }), "", at)
         guard := self.__state.guard_edit()
         last: guard.value.routes.len() - 1
         if last >= 0 && (kind == "action" || kind == "form") && guard.value.routes[last].form == "" {
@@ -314,7 +314,7 @@ App: struct {
         last: guard.value.routes.len() - 1
         if last < 0 -> panic("app loader `{identity}` has no preceding route")
         route := guard.value.routes[last].copy()
-        route.loader = Val(__app_handler(handler))
+        route.loader = Val(app_handler(handler))
         route.loader_identity = identity
         route.loader_data_type = data_type
         route.preload = preload
@@ -331,13 +331,13 @@ App: struct {
         if effect_name != "" -> effects.push(effect_name.copy())
         security := [String]{}
         if policy != "" -> security.push(policy.copy())
-        mounted: __app_handler(handler)
+        mounted: app_handler(handler)
         reads: mounted.copy()
         writes: mounted.copy()
-        base: __app_trim_slashes(prefix)
-        table: __app_table(self)
-        http_server.__route_add(table, "GET", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_mount_response(reads, request)) }), "", at)
-        http_server.__route_add(table, "POST", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_mount_response(writes, request)) }), "", at)
+        base: app_trim_slashes(prefix)
+        table: app_table(self)
+        http_server.__route_add(table, "GET", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(app_mount_response(reads, request)) }), "", at)
+        http_server.__route_add(table, "POST", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(app_mount_response(writes, request)) }), "", at)
         guard := self.__state.guard_edit()
         guard.value.mounts.push(__AppMount{prefix: prefix, handler: mounted, effects: effects, security: security})
         self.copy()
@@ -348,9 +348,9 @@ App: struct {
     // method's arguments, runs it, and gives the encoded reply. `limit` and
     // `window_ns` are the marker's `limit:` and `per:` (`__AppRemote`).
     __remote_public: fn(self, path: String, answer: &&fn(__RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
-        endpoint: __AppRemote{answer: answer, limit: __app_remote_limit(limit, window_ns)}
-        __app_traced(self, path, __app_endpoint_method(path))
-        http_server.__route_add(__app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_remote_response(endpoint, request)) }), "", at)
+        endpoint: __AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns)}
+        app_traced(self, path, app_endpoint_method(path))
+        http_server.__route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_remote_response(endpoint, request)) }), "", at)
         self.copy()
     }
 
@@ -360,17 +360,17 @@ App: struct {
     // A call past the marker's `limit:` is answered 429 first; until sign-in
     // names an account, the count is per network address.
     __remote_signed_in: fn(self, path: String, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
-        counted: __app_remote_limit(limit, window_ns)
-        __app_traced(self, path, __app_endpoint_method(path))
+        counted: app_remote_limit(limit, window_ns)
+        app_traced(self, path, app_endpoint_method(path))
         http_server.__route_add(
-            __app_table(self),
+            app_table(self),
             "POST",
             path,
             http_server.__handler(fn(request: HTTPRequest) {
-                if __app_remote_limited(counted, request) == .Val(wait_ns) {
-                    return Ok(__app_limited(wait_ns))
+                if app_remote_limited(counted, request) == .Val(wait_ns) {
+                    return Ok(app_limited(wait_ns))
                 }
-                Ok(__app_json(401, __app_error_json("`{request.path}` needs a signed-in caller")))
+                Ok(app_json(401, app_error_json("`{request.path}` needs a signed-in caller")))
             }),
             "",
             at,
@@ -382,13 +382,13 @@ App: struct {
     // (sema lowers each here). `params` names the method's path parameters,
     // in its order, joined by commas. `key` runs the service's
     // `#App.SigningKey` method on them, and `answer` runs the webhook on them
-    // and the delivery's body (`__app_webhook_response`).
+    // and the delivery's body (`app_webhook_response`).
     __webhook: fn(self, path: String, signature: Signature, params: String, key: &&fn(__RemoteArgs) -[Net, FS.Read]> String? [FieldError]!, answer: &&fn(__RemoteArgs) -[Net, FS.Read]> String [FieldError]!, at: SourceLocation{#caller}) -> App Never! {
         names := [String]{}
         if params != "" -> names = params.split(",").to_list()
         hook: __AppWebhook{signature: signature, params: names, key: key, answer: answer}
-        __app_traced(self, path, "")
-        http_server.__route_add(__app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_webhook_response(hook, request)) }), "", at)
+        app_traced(self, path, "")
+        http_server.__route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_webhook_response(hook, request)) }), "", at)
         self.copy()
     }
 
@@ -397,45 +397,45 @@ App: struct {
     // with the route's checked contract (sema lowers each). `at` is the
     // registering call's place, which a refused or duplicate row names.
     __http_route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
-        http_server.__route_add(__app_table(self), method, pattern, http_server.__handler(handler), contract, at)
+        http_server.__route_add(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
         self.copy()
     }
 
     // A route whose pattern is a run-time value: it is checked, and listed,
     // when it registers.
     __http_route_dynamic: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
-        http_server.__route_add_dynamic(__app_table(self), method, pattern, http_server.__handler(handler), contract, at)
+        http_server.__route_add_dynamic(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
         self.copy()
     }
 
     // `app.custom(method, path, handler)` whose method is a run-time value.
     __http_route_custom: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
-        http_server.__route_add_custom(__app_table(self), method, pattern, http_server.__handler(handler), contract, at)
+        http_server.__route_add_custom(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
         self.copy()
     }
 
     // `app.middleware(layer)`: the first registered layer is the outermost,
     // and every row, pages included, answers through it.
     __http_middleware: fn(self, middleware: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) -> App Never! {
-        http_server.__layer_add(__app_table(self), middleware)
+        http_server.__layer_add(app_table(self), middleware)
         self.copy()
     }
 
     // GET `{prefix}/*` answers from the files under `root`.
     static_files: fn(self, prefix: String, root: String, *, index: Bool?{None}, dotfiles: Bool?{None}, follow_links: Bool?{None}, at: SourceLocation{#caller}) -> App Never! {
-        http_server.__static_files(__app_table(self), prefix, root, index, dotfiles, follow_links, at)
+        http_server.__static_files(app_table(self), prefix, root, index, dotfiles, follow_links, at)
         self.copy()
     }
 
     // Answer cross-origin requests by `policy` (`server.cors_policy(…)`).
     cors: fn(self, policy: HTTPCorsPolicy) -> App Never! {
-        http_server.__layer_add(__app_table(self), fn(next: HTTPHandler) { http_server.__cors_handler(policy, next) })
+        http_server.__layer_add(app_table(self), fn(next: HTTPHandler) { http_server.__cors_handler(policy, next) })
         self.copy()
     }
 
     // Echo a valid incoming `x-request-id` on the response.
     request_id: fn(self) -> App Never! {
-        http_server.__layer_add(__app_table(self), fn(next: HTTPHandler) { http_server.__request_id_handler(next) })
+        http_server.__layer_add(app_table(self), fn(next: HTTPHandler) { http_server.__request_id_handler(next) })
         self.copy()
     }
 
@@ -445,17 +445,17 @@ App: struct {
         self.copy()
     }
 
-    csr: fn(self) -> App Never! { __app_mode(self, "csr") }
+    csr: fn(self) -> App Never! { app_mode(self, "csr") }
 
-    ssr: fn(self) -> App Never! { __app_mode(self, "ssr") }
+    ssr: fn(self) -> App Never! { app_mode(self, "ssr") }
 
-    ssg: fn(self) -> App Never! { __app_mode(self, "ssg") }
+    ssg: fn(self) -> App Never! { app_mode(self, "ssg") }
 
-    stream: fn(self) -> App Never! { __app_mode(self, "stream") }
+    stream: fn(self) -> App Never! { app_mode(self, "stream") }
 
-    streaming: fn(self) -> App Never! { __app_mode(self, "stream") }
+    streaming: fn(self) -> App Never! { app_mode(self, "stream") }
 
-    island: fn(self) -> App Never! { __app_mode(self, "island") }
+    island: fn(self) -> App Never! { app_mode(self, "island") }
 
     hydration_dev: fn(self) -> App Never! {
         guard := self.__state.guard_edit()
@@ -549,31 +549,31 @@ App: struct {
         self.copy()
     }
 
-    facts_json: fn(self) -> String Never! { __app_facts_json(self) }
+    facts_json: fn(self) -> String Never! { app_facts_json(self) }
 
     // Serve on 127.0.0.1 until the process stops, on the port __app_port
     // chooses: `JET_APP_PORT`, else `port`, else 8080. One ready line names
     // the address once the socket listens.
     serve: fn(self, port: Int?{None}) Never! -[Env, IO, Net, FS.Read, Time]> {
-        __app_serve(self, __app_port(port))
+        app_serve(self, __app_port(port))
     }
 
     serve_on: fn(self, port: Int) Never! -[Env, IO, Net, FS.Read, Time]> {
-        __app_serve(self, __app_port(Val(port)))
+        app_serve(self, __app_port(Val(port)))
     }
 
     // A server over the table on `address`; the labelled `tls:` option
     // serves HTTPS and `deadline:` bounds each connection's reads and writes.
     // A failed bind is the caller's error to handle.
     bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net]> HTTPServer HTTPError! {
-        __app_image_route(self)
-        http_server.__bind(address, __app_table(self), tls, deadline)
+        app_image_route(self)
+        http_server.__bind(address, app_table(self), tls, deadline)
     }
 
     // Answer the one connection `listener` accepts next.
     serve_once: fn(self, listener: TCPListener) HTTPError! -[Net, FS.Read, Time]> {
-        __app_image_route(self)
-        http_server.__serve_once(listener, __app_table(self))
+        app_image_route(self)
+        http_server.__serve_once(listener, app_table(self))
     }
 }
 
@@ -610,27 +610,27 @@ app: fn() -> App Never! {
 // `port` under "APP_", the project `.env` under them), then serve the app
 // `build` makes from it as `App.serve(port)` does. Settings that do not decode,
 // or a `build` that fails, stop the program before any socket binds
-// (__app_settings, __app_build_failure).
+// (app_settings, app_build_failure).
 serve: fn<Settings: Decode>(*, prefix: String, build: fn(Settings) -> App, port: Int?{None}) Never! -[Env, IO, Net, FS, Exec, Time]> {
-    settings: __app_settings<Settings>(prefix)
-    app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, __app_build_failure("{err}"))
-    __app_serve(app, __app_port(port))
+    settings: app_settings<Settings>(prefix)
+    app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, app_build_failure("{err}"))
+    app_serve(app, __app_port(port))
 }
 
 // `web.bind<Settings>(address, prefix:, build:)`: `serve`'s settings step,
 // then `App.bind` of the app `build` makes on `address`, with the trace
-// export `serve` starts (`__app_trace_start`).
+// export `serve` starts (`app_trace_start`).
 bind: fn<Settings: Decode>(address: String, *, prefix: String, build: fn(Settings) -> App, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Env, IO, Net, FS, Exec, Time]> HTTPServer HTTPError! {
-    settings: __app_settings<Settings>(prefix)
-    app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, __app_build_failure("{err}"))
-    __app_image_route(app)
-    _: __app_trace_start(app)
-    http_server.__bind(address, __app_table(app), tls, deadline)
+    settings: app_settings<Settings>(prefix)
+    app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, app_build_failure("{err}"))
+    app_image_route(app)
+    _: app_trace_start(app)
+    http_server.__bind(address, app_table(app), tls, deadline)
 }
 
 // The stop report of a `build` that fails on the decoded settings: the app
 // was never made, so nothing listens.
-__app_build_failure: fn(failure: String) -> String Never! {
+priv app_build_failure: fn(failure: String) -> String Never! {
     "Stop: The app's build failed on its settings, so it does not listen:\n  {failure}"
 }
 
@@ -641,30 +641,30 @@ C_APP_SETTINGS_EXIT: 78
 // the E2416 stop, exit 78 (core.rt.__coded_stop, its EXIT_CONFIG): every
 // failure on its own line, naming the variable and field path, a secret value
 // hidden (core.sys __decode_errors).
-__app_settings: fn<Settings: Decode>(prefix: String) -[Env, IO, FS, Exec, Time]> Settings Never! {
-    core.sys.decode<Settings>(prefix: prefix) ?? core.rt.__coded_stop("E2416", __app_settings_failure(err))
+priv app_settings: fn<Settings: Decode>(prefix: String) -[Env, IO, FS, Exec, Time]> Settings Never! {
+    core.sys.decode<Settings>(prefix: prefix) ?? core.rt.__coded_stop("E2416", app_settings_failure(err))
 }
 
 // The E2416 stop's message for the settings that did not decode.
-__app_settings_failure: fn(errors: [FieldError]) -> String Never! {
+priv app_settings_failure: fn(errors: [FieldError]) -> String Never! {
     report := "The app's settings did not decode, so it does not listen:"
     loop error in errors -> report = "{report}\n  {error.reason}"
     report
 }
 
-__app_mode: fn(app: App, mode: String) -> App Never! {
+priv app_mode: fn(app: App, mode: String) -> App Never! {
     guard := app.__state.guard_edit()
     guard.value.mode = mode
     guard.value.explicit_mode = true
     app.copy()
 }
 
-__app_state: fn(app: App) -> __AppState Never! {
+priv app_state: fn(app: App) -> __AppState Never! {
     guard: app.__state.guard_read()
     guard.value.copy()
 }
 
-__app_table: fn(app: App) -> HTTPMux Never! {
+priv app_table: fn(app: App) -> HTTPMux Never! {
     guard: app.__state.guard_read()
     guard.value.table.copy()
 }
@@ -704,27 +704,27 @@ __app_dev: fn() -> Bool Never! {
 // program's own answers it. Stderr names the port and what chose it
 // (__app_port) before the ready line. The spans still queued for export when
 // serving stops are sent before it returns.
-__app_serve: fn(app: App, chosen: __AppPort) Never! -[Env, IO, Net, FS.Read, Time]> {
+priv app_serve: fn(app: App, chosen: __AppPort) Never! -[Env, IO, Net, FS.Read, Time]> {
     dev: __app_dev()
     if dev {
         guard := app.__state.guard_edit()
         guard.value.dev = true
     }
-    table: __app_table(app)
-    if dev -> __app_dev_reload(table)
-    __app_image_route(app)
-    if !__app_has_root_catch_all(table) {
+    table: app_table(app)
+    if dev -> app_dev_reload(table)
+    app_image_route(app)
+    if !app_has_root_catch_all(table) {
         fallback: app.copy()
-        http_server.__route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_not_found_response(fallback, request)) }), "", #here)
+        http_server.__route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(app_not_found_response(fallback, request)) }), "", #here)
     }
-    trace: __app_trace_start(app)
+    trace: app_trace_start(app)
     core.term.eprint("web app port {chosen.port}: {chosen.source}")
     server: __app_listen(table, chosen.port, dev)
     _: server.serve() ?? panic("web app server failed: {err}")
-    if trace == .Val(export) -> __app_trace_flush(export)
+    if trace == .Val(export) -> app_trace_flush(export)
 }
 
-__app_has_root_catch_all: fn(table: HTTPMux) -> Bool Never! {
+priv app_has_root_catch_all: fn(table: HTTPMux) -> Bool Never! {
     loop route in http_server.__mux_routes(table) {
         if route.method == "GET" && route.pattern.starts_with("/*") -> return true
     }
@@ -753,7 +753,7 @@ __app_listen: fn(mux: HTTPMux, port: Int, dev: Bool) -[Net, IO, Time.Wait]> HTTP
                 return server
             }
             .Err(error) -> {
-                busy: __app_port_busy(error)
+                busy: app_port_busy(error)
                 if dev && busy && candidate < 65535 && candidate - port + 1 < C_APP_DEV_PORT_TRIES {
                     candidate += 1
                 } else {
@@ -765,7 +765,7 @@ __app_listen: fn(mux: HTTPMux, port: Int, dev: Bool) -[Net, IO, Time.Wait]> HTTP
     }
 }
 
-__app_port_busy: fn(error: NetError) -> Bool Never! {
+priv app_port_busy: fn(error: NetError) -> Bool Never! {
     if error == {
         .AddressInUse(_) -> true
         .InvalidInput(_) | .PermissionDenied(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
@@ -777,13 +777,13 @@ __app_port_busy: fn(error: NetError) -> Bool Never! {
 // browser to come back in 300 ms. The script every served page carries keeps
 // the first id it reads and reloads the page when a restarted program answers
 // with another.
-__app_dev_reload: fn(table: HTTPMux) Never! {
+priv app_dev_reload: fn(table: HTTPMux) Never! {
     boot: "{rt.clock_mono_ns()}"
-    http_server.__route_add(table, "GET", "/__jet/reload", http_server.__handler(fn(_request: HTTPRequest) { Ok(__app_dev_reload_response(boot)) }), "", #here)
-    http_server.__layer_add(table, fn(next: HTTPHandler) { __app_dev_layer(next) })
+    http_server.__route_add(table, "GET", "/__jet/reload", http_server.__handler(fn(_request: HTTPRequest) { Ok(app_dev_reload_response(boot)) }), "", #here)
+    http_server.__layer_add(table, fn(next: HTTPHandler) { app_dev_layer(next) })
 }
 
-__app_dev_reload_response: fn(boot: String) -> HTTPResponse Never! {
+priv app_dev_reload_response: fn(boot: String) -> HTTPResponse Never! {
     typed: web_http.headers_set(web_http.headers(), "content-type", "text/event-stream")
     fields: web_http.headers_set(typed, "cache-control", "no-cache")
     payload: web_http.body_text("retry: 300\ndata: {boot}\n\n")
@@ -792,12 +792,12 @@ __app_dev_reload_response: fn(boot: String) -> HTTPResponse Never! {
 
 C_APP_DEV_RELOAD_SCRIPT: "<script>(function(){{var boot=null;new EventSource(\"/__jet/reload\").onmessage=function(event){{if(boot===null){{boot=event.data}}else if(event.data!==boot){{location.reload()}}}}}})()</script>"
 
-__app_dev_layer: fn(next: HTTPHandler) -> HTTPHandler Never! {
-    http_server.__handler(fn(request: HTTPRequest) { __app_dev_page(next, request) })
+priv app_dev_layer: fn(next: HTTPHandler) -> HTTPHandler Never! {
+    http_server.__handler(fn(request: HTTPRequest) { app_dev_page(next, request) })
 }
 
 // An HTML page gets the live-reload script before its closing body tag.
-__app_dev_page: fn(next: HTTPHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
+priv app_dev_page: fn(next: HTTPHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
     answered := next.handle(request) ?? return Err(err)
     kind: answered.header("content-type") ?? return Ok(answered)
     if !kind.starts_with("text/html") -> return Ok(answered)
@@ -811,7 +811,7 @@ __app_dev_page: fn(next: HTTPHandler, request: HTTPRequest) -[Net, FS.Read]> HTT
     Ok(answered)
 }
 
-__app_route: fn(app: App, path: String) -> __AppRoute? Never! {
+priv app_route: fn(app: App, path: String) -> __AppRoute? Never! {
     guard: app.__state.guard_read()
     loop route in guard.value.routes {
         if route.path == path -> return Val(route.copy())
@@ -821,41 +821,41 @@ __app_route: fn(app: App, path: String) -> __AppRoute? Never! {
 
 // A route request: run the route's loader, then its handler with the
 // loader's data; a failure renders the route's error boundary.
-__app_page_response: fn(app: App, path: String, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    route: __app_route(app, path) ?? return __app_html(500, WebPage{title: "Route error", body: "route `{path}` is not registered on the app graph"}, "")
+priv app_page_response: fn(app: App, path: String, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    route: app_route(app, path) ?? return app_html(500, WebPage{title: "Route error", body: "route `{path}` is not registered on the app graph"}, "")
     call := __AppCall{request: request, data: ""}
     if route.loader == .Val(loader) {
         if loader.run(call) == {
             .JSON(text) -> call.data = text
-            .Rejected(message) -> return __app_boundary(400, route.error, "Route error", message, call)
-            .Failed(message) -> return __app_boundary(500, route.error, "Route error", message, call)
-            .Page(_) -> return __app_boundary(500, route.error, "Route error", "the loader of `{path}` rendered a page instead of data", call)
+            .Rejected(message) -> return app_boundary(400, route.error, "Route error", message, call)
+            .Failed(message) -> return app_boundary(500, route.error, "Route error", message, call)
+            .Page(_) -> return app_boundary(500, route.error, "Route error", "the loader of `{path}` rendered a page instead of data", call)
         }
     }
     if route.handler.run(call) == {
         .Page(rendered) -> {
-            placed: __app_images(app, rendered.body)
+            placed: app_images(app, rendered.body)
             if placed.failure != "" {
-                return __app_boundary(500, route.error, "Route error", placed.failure, call)
+                return app_boundary(500, route.error, "Route error", placed.failure, call)
             }
-            __app_html(200, WebPage{title: "{rendered.title}", body: placed.body}, __app_route_data(path, request.path, call.data))
+            app_html(200, WebPage{title: "{rendered.title}", body: placed.body}, app_route_data(path, request.path, call.data))
         }
-        .Rejected(message) -> __app_boundary(400, route.error, "Route error", message, call)
-        .Failed(message) -> __app_boundary(500, route.error, "Route error", message, call)
-        .JSON(_) -> __app_boundary(500, route.error, "Route error", "the handler of `{path}` returned data instead of a page", call)
+        .Rejected(message) -> app_boundary(400, route.error, "Route error", message, call)
+        .Failed(message) -> app_boundary(500, route.error, "Route error", message, call)
+        .JSON(_) -> app_boundary(500, route.error, "Route error", "the handler of `{path}` returned data instead of a page", call)
     }
 }
 
-__app_not_found_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    state: __app_state(app)
-    __app_boundary(404, state.not_found, "Not found", "no web route matches `{request.path}`", __AppCall{request: request, data: ""})
+priv app_not_found_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    state: app_state(app)
+    app_boundary(404, state.not_found, "Not found", "no web route matches `{request.path}`", __AppCall{request: request, data: ""})
 }
 
 // Registers GET `/a/*jet_image`, which answers the app's image addresses,
 // unless the app has no page, routes something under `/a/` itself or did
 // this before.
-__app_image_route: fn(app: App) Never! {
-    table: __app_table(app)
+priv app_image_route: fn(app: App) Never! {
+    table: app_table(app)
     loop route in http_server.__mux_routes(table) {
         if route.pattern.starts_with(C_IMAGE_PREFIX) {
             return
@@ -867,17 +867,17 @@ __app_image_route: fn(app: App) Never! {
     }
 }
 
-// The handler __app_image_route adds. Only a page places an image, so
+// The handler app_image_route adds. Only a page places an image, so
 // `__route` makes it with the app's first page.
-__app_image_handler: fn(app: App) -> HTTPHandler Never! {
+priv app_image_handler: fn(app: App) -> HTTPHandler Never! {
     target: app.copy()
-    http_server.__handler(fn(request: HTTPRequest) { Ok(__app_image_response(target, request)) })
+    http_server.__handler(fn(request: HTTPRequest) { Ok(app_image_response(target, request)) })
 }
 
 // The image at `request`'s address, else the app's not-found page.
-__app_image_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    if __app_image_answer(app, request.path) == .Val(answer) -> return answer
-    __app_not_found_response(app, request)
+priv app_image_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if app_image_answer(app, request.path) == .Val(answer) -> return answer
+    app_not_found_response(app, request)
 }
 
 // ── Images ──────────────────────────────────────────────────────────────
@@ -892,7 +892,7 @@ __app_image_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPRe
 // bytes: the source digest, width, format, quality and encoder version.
 // Changing any of them gives a new URL and leaves every other URL valid.
 // Every image URL answers GET with immutable caching. A variant is encoded
-// the first time it is asked for, by `__image_variant_bytes`, the one
+// the first time it is asked for, by `image_variant_bytes`, the one
 // function every variant is made by.
 
 // The encoder version in every variant key: a changed encoder renames every
@@ -959,10 +959,10 @@ __image_settings: fn() -> __ImageSettings Never! {
 // an app page it becomes a `<picture>` of the source's variants, with the
 // original as the fallback `<img>`.
 image: fn(src: String, *, alt: String) -> String Never! {
-    "{C_IMAGE_MARK}{__app_html_attr(src)}\" alt=\"{__app_html_attr(alt)}\">"
+    "{C_IMAGE_MARK}{app_html_attr(src)}\" alt=\"{app_html_attr(alt)}\">"
 }
 
-__image_mime: fn(format: ImageFormat) -> String Never! {
+priv image_mime: fn(format: ImageFormat) -> String Never! {
     if format == {
         .PNG -> "image/png"
         .JPEG -> "image/jpeg"
@@ -970,7 +970,7 @@ __image_mime: fn(format: ImageFormat) -> String Never! {
     }
 }
 
-__image_extension: fn(format: ImageFormat) -> String Never! {
+priv image_extension: fn(format: ImageFormat) -> String Never! {
     if format == {
         .PNG -> "png"
         .JPEG -> "jpg"
@@ -981,7 +981,7 @@ __image_extension: fn(format: ImageFormat) -> String Never! {
 // The URL path an image source's names start with: the prefix, its directory
 // and its file stem ("Public/hero.jpg" is "/a/Public/hero"). None for a path
 // that is absolute, climbs out, names a hidden part, or has no stem.
-__image_url_stem: fn(source: String) -> String? Never! {
+priv image_url_stem: fn(source: String) -> String? Never! {
     parts: source.split("/").to_list()
     kept := [String]{}
     loop (index, part) in parts {
@@ -1004,13 +1004,13 @@ __image_url_stem: fn(source: String) -> String? Never! {
 }
 
 // The key of one variant: a hash of every input that decides its bytes.
-__image_key: fn(digest: String, width: Int, format: ImageFormat, quality: Int, encoder: String) -> String Never! {
-    crypto.sha256("jet-image\n{digest}\n{width}\n{__image_extension(format)}\n{quality}\n{encoder}").hex()
+priv image_key: fn(digest: String, width: Int, format: ImageFormat, quality: Int, encoder: String) -> String Never! {
+    crypto.sha256("jet-image\n{digest}\n{width}\n{image_extension(format)}\n{quality}\n{encoder}").hex()
 }
 
 // The asset node of the source `data` read from `source`.
-__image_node: fn(source: String, data: [U8], settings: __ImageSettings) -> __ImageNode ImageError! {
-    stem: __image_url_stem(source) ?? return Err(.Unsupported)
+priv image_node: fn(source: String, data: [U8], settings: __ImageSettings) -> __ImageNode ImageError! {
+    stem: image_url_stem(source) ?? return Err(.Unsupported)
     info: codec.inspect(data, C_IMAGE_LIMITS) ?? return Err(err)
     if info.format == .GIF -> return Err(.Unsupported)
     digest: crypto.sha256(data).hex()
@@ -1025,20 +1025,20 @@ __image_node: fn(source: String, data: [U8], settings: __ImageSettings) -> __Ima
                 if width < 1 || width >= info.width -> next
                 scaled: (info.height * width + info.width /% 2) /% info.width
                 height: if scaled < 1 -> 1 else -> scaled
-                key: __image_key(digest, width, format, quality, C_IMAGE_ENCODER)
-                path: "{stem}.{key.slice(0, 16)}.{width}.{__image_extension(format)}"
+                key: image_key(digest, width, format, quality, C_IMAGE_ENCODER)
+                path: "{stem}.{key.slice(0, 16)}.{width}.{image_extension(format)}"
                 variants.push(__ImageVariant{width: width, height: height, format: format.copy(), quality: quality, key: key, path: path})
             }
         }
     }
-    path: "{stem}.{digest.slice(0, 16)}.{__image_extension(info.format)}"
+    path: "{stem}.{digest.slice(0, 16)}.{image_extension(info.format)}"
     Ok(__ImageNode{source: "{source}", digest: digest, width: info.width, height: info.height, format: info.format, path: path, variants: variants})
 }
 
 // The bytes of `variant` of the source `data`: decoded, scaled by area
 // average, and encoded. A variant in the source's own format that comes out
 // no smaller than the source is the source's bytes.
-__image_variant_bytes: fn(data: [U8], node: __ImageNode, variant: __ImageVariant) -> [U8] ImageError! {
+priv image_variant_bytes: fn(data: [U8], node: __ImageNode, variant: __ImageVariant) -> [U8] ImageError! {
     decoded: codec.decode(data, C_IMAGE_LIMITS) ?? return Err(err)
     scaled: codec.resize(decoded, variant.width, variant.height, .Area, C_IMAGE_LIMITS) ?? return Err(err)
     quality: if variant.format == .JPEG -> variant.quality else -> C_IMAGE_QUALITY
@@ -1052,8 +1052,8 @@ __image_variant_bytes: fn(data: [U8], node: __ImageNode, variant: __ImageVariant
 // The markup of `node` with `alt` text: a `<picture>` with one `<source>`
 // per variant format, the original among its own format's candidates, and
 // the original as the fallback `<img>`; the `<img>` alone without variants.
-__image_picture: fn(node: __ImageNode, alt: String) -> String Never! {
-    fallback: "<img src=\"{__app_html_attr(node.path)}\" alt=\"{__app_html_attr(alt)}\" width=\"{node.width}\" height=\"{node.height}\">"
+priv image_picture: fn(node: __ImageNode, alt: String) -> String Never! {
+    fallback: "<img src=\"{app_html_attr(node.path)}\" alt=\"{app_html_attr(alt)}\" width=\"{node.width}\" height=\"{node.height}\">"
     if node.variants.len() == 0 -> return fallback
     formats := [ImageFormat]{}
     loop variant in node.variants {
@@ -1066,12 +1066,12 @@ __image_picture: fn(node: __ImageNode, alt: String) -> String Never! {
             if variant.format == format -> candidates.push("{variant.path} {variant.width}w")
         }
         if format == node.format -> candidates.push("{node.path} {node.width}w")
-        sources.push("<source type=\"{__image_mime(format)}\" srcset=\"{__app_html_attr(candidates.join(", "))}\">")
+        sources.push("<source type=\"{image_mime(format)}\" srcset=\"{app_html_attr(candidates.join(", "))}\">")
     }
     "<picture>{sources.join("")}{fallback}</picture>"
 }
 
-__image_problem: fn(problem: ImageError) -> String Never! {
+priv image_problem: fn(problem: ImageError) -> String Never! {
     if problem == {
         .Malformed -> "it is not a PNG or JPEG file it can read"
         .Unsupported -> "it is a kind of image web.image does not serve (a GIF, or a JPEG that is not baseline or extended sequential)"
@@ -1079,13 +1079,13 @@ __image_problem: fn(problem: ImageError) -> String Never! {
     }
 }
 
-// An attribute value `__app_html_attr` wrote, as it was.
-__image_unescape: fn(value: String) -> String Never! {
+// An attribute value `app_html_attr` wrote, as it was.
+priv image_unescape: fn(value: String) -> String Never! {
     value.replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 }
 
 // `body` with each `web.image` placeholder replaced by its markup.
-__app_images: fn(app: App, body: String) -[FS.Read]> __ImagePage Never! {
+priv app_images: fn(app: App, body: String) -[FS.Read]> __ImagePage Never! {
     pieces: body.split(C_IMAGE_MARK).to_list()
     out := [String]{}
     loop (index, piece) in pieces {
@@ -1098,7 +1098,7 @@ __app_images: fn(app: App, body: String) -[FS.Read]> __ImagePage Never! {
         if parts.len() < 4 || parts[1] != " alt=" || !parts[3].starts_with(">") {
             return __ImagePage{body: "", failure: "an `<img data-jet-image>` the page wrote is not one web.image made"}
         }
-        placed: __app_image(app, __image_unescape(parts[0]), __image_unescape(parts[2]))
+        placed: app_image(app, image_unescape(parts[0]), image_unescape(parts[2]))
         if placed.failure != "" -> return placed
         out.push(placed.body)
         rest := [String]{}
@@ -1114,22 +1114,22 @@ __app_images: fn(app: App, body: String) -[FS.Read]> __ImagePage Never! {
 // The markup of the image at `source`. A served app plans each source once;
 // under `jet dev` it reads the source on every page, so an edited image gets
 // new URLs.
-__app_image: fn(app: App, source: String, alt: String) -[FS.Read]> __ImagePage Never! {
-    if !__app_served_dev(app) {
+priv app_image: fn(app: App, source: String, alt: String) -[FS.Read]> __ImagePage Never! {
+    if !app_served_dev(app) {
         guard: app.__state.guard_read()
         loop node in guard.value.images {
             if node.source == source {
-                return __ImagePage{body: __image_picture(node, alt), failure: ""}
+                return __ImagePage{body: image_picture(node, alt), failure: ""}
             }
         }
     }
-    if __image_url_stem(source) == None {
+    if image_url_stem(source) == None {
         return __ImagePage{body: "", failure: "web.image can't use `{source}`: name a file with an extension under the working directory, through no hidden part and no `..`"}
     }
     data: core.files.read_bytes(source) ?? return __ImagePage{body: "", failure: "web.image can't read `{source}`: {err}"}
     guard := app.__state.guard_edit()
-    node: __image_node(source, data, guard.value.image_settings) ?? return __ImagePage{body: "", failure: "web.image can't use `{source}`: {__image_problem(err)}"}
-    markup: __image_picture(node, alt)
+    node: image_node(source, data, guard.value.image_settings) ?? return __ImagePage{body: "", failure: "web.image can't use `{source}`: {image_problem(err)}"}
+    markup: image_picture(node, alt)
     known := false
     loop existing in guard.value.images {
         if existing.path == node.path -> known = true
@@ -1138,8 +1138,8 @@ __app_image: fn(app: App, source: String, alt: String) -[FS.Read]> __ImagePage N
     __ImagePage{body: markup, failure: ""}
 }
 
-// Whether __app_serve found the app under `jet dev`.
-__app_served_dev: fn(app: App) -> Bool Never! {
+// Whether app_serve found the app under `jet dev`.
+priv app_served_dev: fn(app: App) -> Bool Never! {
     guard: app.__state.guard_read()
     guard.value.dev
 }
@@ -1148,10 +1148,10 @@ __app_served_dev: fn(app: App) -> Bool Never! {
 // variant of the source its name comes from, planned afresh so an address
 // is valid exactly while its source and settings still make it. None when
 // no source makes it.
-__app_image_answer: fn(app: App, path: String) -[FS.Read]> HTTPResponse? Never! {
-    if __app_image_cached(app, path) == .Val(answer) -> return Val(answer)
+priv app_image_answer: fn(app: App, path: String) -[FS.Read]> HTTPResponse? Never! {
+    if app_image_cached(app, path) == .Val(answer) -> return Val(answer)
     name: path.slice(C_IMAGE_PREFIX.len(), path.len())
-    if __image_url_stem(name) == None -> return None
+    if image_url_stem(name) == None -> return None
     pieces: name.split(".").to_list()
     // `stem.digest.ext` names an original, `stem.key.width.ext` a variant.
     loop dropped in ([Int]{2, 3}) {
@@ -1161,7 +1161,7 @@ __app_image_answer: fn(app: App, path: String) -[FS.Read]> HTTPResponse? Never! 
             if at + dropped < pieces.len() -> stem.push("{piece}")
         }
         loop extension in ([String]{"png", "jpg", "jpeg", "PNG", "JPG", "JPEG"}) {
-            if __app_image_from(app, "{stem.join(".")}.{extension}", path) == .Val(answer) {
+            if app_image_from(app, "{stem.join(".")}.{extension}", path) == .Val(answer) {
                 return Val(answer)
             }
         }
@@ -1170,15 +1170,15 @@ __app_image_answer: fn(app: App, path: String) -[FS.Read]> HTTPResponse? Never! 
 }
 
 // The answer to GET `path` when the source at `source` makes it.
-__app_image_from: fn(app: App, source: String, path: String) -[FS.Read]> HTTPResponse? Never! {
+priv app_image_from: fn(app: App, source: String, path: String) -[FS.Read]> HTTPResponse? Never! {
     data: core.files.read_bytes(source) ?? return None
     guard := app.__state.guard_edit()
-    node: __image_node(source, data, guard.value.image_settings) ?? return None
-    if node.path == path -> return Val(__image_response(data, node.format))
+    node: image_node(source, data, guard.value.image_settings) ?? return None
+    if node.path == path -> return Val(image_response(data, node.format))
     loop variant in node.variants {
         if variant.path != path -> next
-        bytes: __image_variant_bytes(data, node, variant) ?? return None
-        answer: __image_response(bytes, variant.format)
+        bytes: image_variant_bytes(data, node, variant) ?? return None
+        answer: image_response(bytes, variant.format)
         guard.value.image_bytes["{path}"] = bytes
         return Val(answer)
     }
@@ -1186,34 +1186,34 @@ __app_image_from: fn(app: App, source: String, path: String) -[FS.Read]> HTTPRes
 }
 
 // The answer to a variant encoded before.
-__app_image_cached: fn(app: App, path: String) -> HTTPResponse? Never! {
+priv app_image_cached: fn(app: App, path: String) -> HTTPResponse? Never! {
     guard: app.__state.guard_read()
     format: if path.ends_with(".png") -> ImageFormat.PNG else -> ImageFormat.JPEG
     if guard.value.image_bytes.get(path) == .Val(bytes) {
-        return Val(__image_response(bytes, format))
+        return Val(image_response(bytes, format))
     }
     None
 }
 
-__image_response: fn(bytes: [U8], format: ImageFormat) -> HTTPResponse Never! {
-    typed: web_http.headers_set(web_http.headers(), "content-type", __image_mime(format))
+priv image_response: fn(bytes: [U8], format: ImageFormat) -> HTTPResponse Never! {
+    typed: web_http.headers_set(web_http.headers(), "content-type", image_mime(format))
     fields: web_http.headers_set(typed, "cache-control", C_IMAGE_CACHE)
     http_server.response_body(200, web_http.body_bytes(bytes), fields)
 }
 
 // The boundary's page, or a page of `title` and `message` without one; a
 // boundary that fails itself shows both messages.
-__app_boundary: fn(status: Int, boundary: __AppHandler?, title: String, message: String, call: __AppCall) -[Net, FS.Read]> HTTPResponse Never! {
-    handler: boundary ?? return __app_html(status, WebPage{title: title, body: message}, "")
+priv app_boundary: fn(status: Int, boundary: __AppHandler?, title: String, message: String, call: __AppCall) -[Net, FS.Read]> HTTPResponse Never! {
+    handler: boundary ?? return app_html(status, WebPage{title: title, body: message}, "")
     if handler.run(call) == {
-        .Page(rendered) -> __app_html(status, rendered, "")
-        .Rejected(failure) -> __app_html(status, WebPage{title: title, body: "{message}\n{failure}"}, "")
-        .Failed(failure) -> __app_html(status, WebPage{title: title, body: "{message}\n{failure}"}, "")
-        .JSON(_) -> __app_html(status, WebPage{title: title, body: message}, "")
+        .Page(rendered) -> app_html(status, rendered, "")
+        .Rejected(failure) -> app_html(status, WebPage{title: title, body: "{message}\n{failure}"}, "")
+        .Failed(failure) -> app_html(status, WebPage{title: title, body: "{message}\n{failure}"}, "")
+        .JSON(_) -> app_html(status, WebPage{title: title, body: message}, "")
     }
 }
 
-__app_html: fn(status: Int, rendered: WebPage, route_data: String) -> HTTPResponse Never! {
+priv app_html: fn(status: Int, rendered: WebPage, route_data: String) -> HTTPResponse Never! {
     document: "<!doctype html><html><head><meta charset=\"utf-8\"><title>{rendered.title}</title></head><body>{rendered.body}{route_data}</body></html>"
     fields: core.http.headers_set(core.http.headers(), "content-type", "text/html; charset=utf-8")
     payload: core.http.body_text(document)
@@ -1222,31 +1222,31 @@ __app_html: fn(status: Int, rendered: WebPage, route_data: String) -> HTTPRespon
 
 // The route identity and navigation status a served page publishes; the
 // body is the route's encoded loader data, `null` without a loader.
-__app_route_data: fn(route: String, url: String, data: String) -> String Never! {
-    body: if data == "" -> "null" else -> __app_script_safe(data)
-    "<script type=\"application/json\" id=\"jet-route-data\" data-route=\"{__app_html_attr(route)}\" data-url=\"{__app_html_attr(url)}\" data-status=\"ready\">{body}</script>"
+priv app_route_data: fn(route: String, url: String, data: String) -> String Never! {
+    body: if data == "" -> "null" else -> app_script_safe(data)
+    "<script type=\"application/json\" id=\"jet-route-data\" data-route=\"{app_html_attr(route)}\" data-url=\"{app_html_attr(url)}\" data-status=\"ready\">{body}</script>"
 }
 
 // A server function call: same-origin POST only; the JSON result answers
 // with a content security policy.
-__app_action_response: fn(handler: __AppHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    if !__app_same_origin(request) {
-        return __app_json(403, __app_error_json("cross-origin server function call"))
+priv app_action_response: fn(handler: __AppHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if !app_same_origin(request) {
+        return app_json(403, app_error_json("cross-origin server function call"))
     }
     if handler.run(__AppCall{request: request, data: ""}) == {
-        .JSON(text) -> __app_json(200, text)
-        .Rejected(message) -> __app_json(400, __app_error_json(message))
-        .Failed(message) -> __app_json(500, __app_error_json(message))
-        .Page(_) -> __app_json(500, __app_error_json("a server function rendered a page"))
+        .JSON(text) -> app_json(200, text)
+        .Rejected(message) -> app_json(400, app_error_json(message))
+        .Failed(message) -> app_json(500, app_error_json(message))
+        .Page(_) -> app_json(500, app_error_json("a server function rendered a page"))
     }
 }
 
-__app_mount_response: fn(handler: __AppHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+priv app_mount_response: fn(handler: __AppHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     if handler.run(__AppCall{request: request, data: ""}) == {
-        .JSON(text) -> __app_json(200, text)
-        .Page(rendered) -> __app_html(200, rendered, "")
-        .Rejected(message) -> __app_json(400, __app_error_json(message))
-        .Failed(message) -> __app_json(500, __app_error_json(message))
+        .JSON(text) -> app_json(200, text)
+        .Page(rendered) -> app_html(200, rendered, "")
+        .Rejected(message) -> app_json(400, app_error_json(message))
+        .Failed(message) -> app_json(500, app_error_json(message))
     }
 }
 
@@ -1275,13 +1275,13 @@ __AppRemoteWindow: struct {
 // have ended are dropped first.
 APP_REMOTE_LIMIT_ADDRESSES: 65536
 
-__app_remote_limit: fn(calls: Int, window_ns: Int) -> __AppRemoteLimit Never! {
+priv app_remote_limit: fn(calls: Int, window_ns: Int) -> __AppRemoteLimit Never! {
     __AppRemoteLimit{calls: calls, window_ns: window_ns, windows: Shared{[String:__AppRemoteWindow]{}}}
 }
 
 // How long until `request`'s address may call again when its window's calls
 // are used up; None counts the call in.
-__app_remote_limited: fn(limit: __AppRemoteLimit, request: HTTPRequest) -> Int? Never! {
+priv app_remote_limited: fn(limit: __AppRemoteLimit, request: HTTPRequest) -> Int? Never! {
     if limit.calls <= 0 -> return None
     now: rt.clock_mono_ns()
     guard := limit.windows.guard_edit()
@@ -1305,9 +1305,9 @@ __app_remote_limited: fn(limit: __AppRemoteLimit, request: HTTPRequest) -> Int? 
 
 // A call past its endpoint's limit: 429 with `Retry-After`, in whole seconds,
 // which a Remote reads as `CallError.Unreachable` with the retry time.
-__app_limited: fn(wait_ns: Int) -> HTTPResponse Never! {
+priv app_limited: fn(wait_ns: Int) -> HTTPResponse Never! {
     seconds: (wait_ns + 999999999) /% 1000000000
-    refused: __app_json(429, __app_error_json("too many calls: retry after {seconds} s"))
+    refused: app_json(429, app_error_json("too many calls: retry after {seconds} s"))
     refused.__with_header("retry-after", "{seconds}")
 }
 
@@ -1333,16 +1333,16 @@ __RemoteArgs: struct {
 }
 
 // A call of an endpoint method: 200 with its reply, or 422 with the field
-// errors (`__app_invalid_json`) when the body is no JSON array of arguments
+// errors (`app_invalid_json`) when the body is no JSON array of arguments
 // the method takes.
-__app_remote_response: fn(endpoint: __AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    if __app_remote_limited(endpoint.limit, request) == .Val(wait_ns) {
-        return __app_limited(wait_ns)
+priv app_remote_response: fn(endpoint: __AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if app_remote_limited(endpoint.limit, request) == .Val(wait_ns) {
+        return app_limited(wait_ns)
     }
-    text: request.text() ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
-    tree: live_json.parse(text) ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
-    reply: endpoint.answer(__RemoteArgs{tree: tree}) ?? return __app_json(422, __app_invalid_json(err))
-    __app_json(200, reply)
+    text: request.text() ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
+    tree: live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
+    reply: endpoint.answer(__RemoteArgs{tree: tree}) ?? return app_json(422, app_invalid_json(err))
+    app_json(200, reply)
 }
 
 // One webhook method of a mounted service: how its sender signs, the names
@@ -1361,11 +1361,11 @@ __AppWebhook: struct {
 // is decoded. Then the webhook runs on the path parameters and the decoded
 // body: 200 with its reply, 500 when it fails, or 422 with the field errors
 // when the body is no JSON the method takes.
-__app_webhook_response: fn(hook: __AppWebhook, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    unsigned: __app_json(401, __app_error_json("`{request.path}` takes only deliveries signed with its key"))
+priv app_webhook_response: fn(hook: __AppWebhook, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    unsigned: app_json(401, app_error_json("`{request.path}` takes only deliveries signed with its key"))
     values := [String]{}
     loop name in hook.params {
-        values.push(__app_json_string(request.param(name) ?? ""))
+        values.push(app_json_string(request.param(name) ?? ""))
     }
     params: live_json.parse("[{values.join(",")}]") ?? return unsigned
     // A path parameter the key method can't take, or no key: either is 401.
@@ -1373,13 +1373,13 @@ __app_webhook_response: fn(hook: __AppWebhook, request: HTTPRequest) -[Net, FS.R
     sent: request.header(__webhook_header(hook.signature)) ?? return unsigned
     text: request.text() ?? return unsigned
     if !__webhook_signed(hook.signature, key, sent, text) -> return unsigned
-    _ := live_json.parse(text) ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
+    _ := live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
     values.push(text)
-    delivery: live_json.parse("[{values.join(",")}]") ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
-    reply: hook.answer(__RemoteArgs{tree: delivery}) ?? return __app_json(422, __app_invalid_json(err))
+    delivery: live_json.parse("[{values.join(",")}]") ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
+    reply: hook.answer(__RemoteArgs{tree: delivery}) ?? return app_json(422, app_invalid_json(err))
     // `__reply_err` leads a failed run's reply.
-    if reply.starts_with("{{\"err\":") -> return __app_json(500, reply)
-    __app_json(200, reply)
+    if reply.starts_with("{{\"err\":") -> return app_json(500, reply)
+    app_json(200, reply)
 }
 
 // ── Traces ──────────────────────────────────────────────────────────────
@@ -1402,13 +1402,13 @@ __AppTraced: struct {
     method: String
 }
 
-__app_traced: fn(app: App, pattern: String, method: String) Never! {
+priv app_traced: fn(app: App, pattern: String, method: String) Never! {
     guard := app.__state.guard_edit()
     guard.value.traced.push(__AppTraced{pattern: pattern, method: method})
 }
 
 // An endpoint's method: the last segment of its row's path.
-__app_endpoint_method: fn(path: String) -> String Never! {
+priv app_endpoint_method: fn(path: String) -> String Never! {
     parts := path.split("/").to_list()
     parts.pop() ?? ""
 }
@@ -1431,25 +1431,25 @@ C_APP_TRACE_BATCH: 512
 // The OTEL_* variables the export reads, by name; an unset one is absent.
 __app_trace_env: fn() -> [String:String] Never! {
     values := [String:String]{}
-    __app_trace_env_put(values, "OTEL_SDK_DISABLED")
-    __app_trace_env_put(values, "OTEL_TRACES_EXPORTER")
-    __app_trace_env_put(values, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-    __app_trace_env_put(values, "OTEL_EXPORTER_OTLP_ENDPOINT")
-    __app_trace_env_put(values, "OTEL_SERVICE_NAME")
-    __app_trace_env_put(values, "OTEL_BSP_SCHEDULE_DELAY")
-    __app_trace_env_put(values, "OTEL_BSP_MAX_QUEUE_SIZE")
-    __app_trace_env_put(values, "OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
+    app_trace_env_put(values, "OTEL_SDK_DISABLED")
+    app_trace_env_put(values, "OTEL_TRACES_EXPORTER")
+    app_trace_env_put(values, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+    app_trace_env_put(values, "OTEL_EXPORTER_OTLP_ENDPOINT")
+    app_trace_env_put(values, "OTEL_SERVICE_NAME")
+    app_trace_env_put(values, "OTEL_BSP_SCHEDULE_DELAY")
+    app_trace_env_put(values, "OTEL_BSP_MAX_QUEUE_SIZE")
+    app_trace_env_put(values, "OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
     values
 }
 
-__app_trace_env_put: fn(values: &[String:String], name: String) Never! {
+priv app_trace_env_put: fn(values: &[String:String], name: String) Never! {
     raw: core.sys.__env_value(name) ?? return
     values[name.copy()] = String.from_bytes(raw) ?? return
 }
 
 // The export `values` ask for; None when they name no collector or turn the
 // export off. A count that is not a whole number in range keeps its default.
-__app_trace_settings: fn(values: [String:String]) -> __AppTraceSettings? Never! {
+priv app_trace_settings: fn(values: [String:String]) -> __AppTraceSettings? Never! {
     if (values.get("OTEL_SDK_DISABLED") ?? "").trim().to_lower() == "true" -> return None
     exporters := (values.get("OTEL_TRACES_EXPORTER") ?? "").trim().to_lower()
     if exporters == "" -> exporters = "otlp"
@@ -1466,19 +1466,19 @@ __app_trace_settings: fn(values: [String:String]) -> __AppTraceSettings? Never! 
     }
     service := (values.get("OTEL_SERVICE_NAME") ?? "").trim()
     if service == "" -> service = "unknown_service"
-    max_queue: __app_trace_count(values, "OTEL_BSP_MAX_QUEUE_SIZE", C_APP_TRACE_MAX_QUEUE, 1)
-    batch: __app_trace_count(values, "OTEL_BSP_MAX_EXPORT_BATCH_SIZE", C_APP_TRACE_BATCH, 1)
+    max_queue: app_trace_count(values, "OTEL_BSP_MAX_QUEUE_SIZE", C_APP_TRACE_MAX_QUEUE, 1)
+    batch: app_trace_count(values, "OTEL_BSP_MAX_EXPORT_BATCH_SIZE", C_APP_TRACE_BATCH, 1)
     Val(__AppTraceSettings{
         url: url,
         service: service,
-        delay_ms: __app_trace_count(values, "OTEL_BSP_SCHEDULE_DELAY", C_APP_TRACE_DELAY_MS, 0),
+        delay_ms: app_trace_count(values, "OTEL_BSP_SCHEDULE_DELAY", C_APP_TRACE_DELAY_MS, 0),
         max_queue: max_queue,
         batch: if batch > max_queue -> max_queue else -> batch,
     })
 }
 
 // The whole number `name` holds when it is at least `least`, else `fallback`.
-__app_trace_count: fn(values: [String:String], name: String, fallback: Int, least: Int) -> Int Never! {
+priv app_trace_count: fn(values: [String:String], name: String, fallback: Int, least: Int) -> Int Never! {
     text: values.get(name) ?? return fallback
     count: Int.parse(text.trim()) ?? return fallback
     if count < least -> return fallback
@@ -1515,18 +1515,18 @@ __AppTraceQueue: struct {
 
 // Reads the export variables and, when they name a collector, puts the
 // tracing layer on the app's table and starts the export task.
-__app_trace_start: fn(app: App) -[Env, Net, FS.Read, Time]> __AppTraceExport? Never! {
-    settings: __app_trace_settings(__app_trace_env()) ?? return None
-    export: __app_trace_install(app, settings, core.time.unix_ns() - rt.clock_mono_ns())
+priv app_trace_start: fn(app: App) -[Env, Net, FS.Read, Time]> __AppTraceExport? Never! {
+    settings: app_trace_settings(__app_trace_env()) ?? return None
+    export: app_trace_install(app, settings, core.time.unix_ns() - rt.clock_mono_ns())
     held: export.copy()
-    exporter: task { __app_trace_export_loop(held) }
+    exporter: task { app_trace_export_loop(held) }
     exporter.detach()
     Val(export)
 }
 
 // The layer that spans the app's traced rows, over an empty queue.
-__app_trace_install: fn(app: App, settings: __AppTraceSettings, epoch_ns: Int) -> __AppTraceExport Never! {
-    table: __app_table(app)
+priv app_trace_install: fn(app: App, settings: __AppTraceSettings, epoch_ns: Int) -> __AppTraceExport Never! {
+    table: app_table(app)
     guard: app.__state.guard_read()
     rows := [__AppTraceRow]{}
     loop route in http_server.__mux_routes(table) {
@@ -1540,34 +1540,34 @@ __app_trace_install: fn(app: App, settings: __AppTraceSettings, epoch_ns: Int) -
     }
     export: __AppTraceExport{settings: settings, rows: rows, epoch_ns: epoch_ns, queue: Shared{__AppTraceQueue{spans: [TraceSpan]{}, first: 0, count: 0, dropped: 0, ids: 0}}}
     held: export.copy()
-    http_server.__layer_add(table, fn(next: HTTPHandler) { __app_trace_handler(held, next) })
+    http_server.__layer_add(table, fn(next: HTTPHandler) { app_trace_handler(held, next) })
     export
 }
 
-__app_trace_handler: fn(export: __AppTraceExport, next: HTTPHandler) -> HTTPHandler Never! {
-    http_server.__handler(fn(request: HTTPRequest) { __app_trace_apply(export, next, request) })
+priv app_trace_handler: fn(export: __AppTraceExport, next: HTTPHandler) -> HTTPHandler Never! {
+    http_server.__handler(fn(request: HTTPRequest) { app_trace_apply(export, next, request) })
 }
 
 // One request through the layer: a traced row's answer is timed and queued
 // as a server span; any other request passes straight through.
-__app_trace_apply: fn(export: __AppTraceExport, next: HTTPHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
-    row: __app_trace_row(export.rows, request) ?? return next.handle(request)
+priv app_trace_apply: fn(export: __AppTraceExport, next: HTTPHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
+    row: app_trace_row(export.rows, request) ?? return next.handle(request)
     start: rt.clock_mono_ns()
-    answered := next.handle(request) ?? return __app_trace_failed(export, export.rows[row], request, start, err)
-    __app_trace_push(export, __app_trace_span(export, export.rows[row], request, start, rt.clock_mono_ns(), answered.status))
+    answered := next.handle(request) ?? return app_trace_failed(export, export.rows[row], request, start, err)
+    app_trace_push(export, app_trace_span(export, export.rows[row], request, start, rt.clock_mono_ns(), answered.status))
     Ok(answered)
 }
 
 // A traced request whose handler failed: its span has the status the server
 // answers that failure with.
-__app_trace_failed: fn(export: __AppTraceExport, row: __AppTraceRow, request: HTTPRequest, start: Int, error: HTTPError) -> HTTPResponse HTTPError! {
+priv app_trace_failed: fn(export: __AppTraceExport, row: __AppTraceRow, request: HTTPRequest, start: Int, error: HTTPError) -> HTTPResponse HTTPError! {
     status: http_server.__error_response(error).status
-    __app_trace_push(export, __app_trace_span(export, row, request, start, rt.clock_mono_ns(), status))
+    app_trace_push(export, app_trace_span(export, row, request, start, rt.clock_mono_ns(), status))
     Err(error)
 }
 
 // The index of the traced row `request` selects.
-__app_trace_row: fn(rows: [__AppTraceRow], request: HTTPRequest) -> Int? Never! {
+priv app_trace_row: fn(rows: [__AppTraceRow], request: HTTPRequest) -> Int? Never! {
     if request.method != "POST" -> return None
     segments: http_server.__path_segments(http_server.access_log_path(request.path)) ?? return None
     loop index in 0..<rows.len() {
@@ -1577,12 +1577,12 @@ __app_trace_row: fn(rows: [__AppTraceRow], request: HTTPRequest) -> Int? Never! 
 }
 
 // The server span of one traced request, its ids still to be given
-// (`__app_trace_push`). A valid W3C `traceparent` puts it in the caller's
+// (`app_trace_push`). A valid W3C `traceparent` puts it in the caller's
 // trace under the caller's span; without one it starts a trace. Its request
 // id is the one the server tagged the request with: the caller's
 // `x-request-id` when that is valid, else the server's own.
-__app_trace_span: fn(export: __AppTraceExport, row: __AppTraceRow, request: HTTPRequest, start: Int, end: Int, status: Int) -> TraceSpan Never! {
-    caller: __app_traceparent(request.header("traceparent") ?? "")
+priv app_trace_span: fn(export: __AppTraceExport, row: __AppTraceRow, request: HTTPRequest, start: Int, end: Int, status: Int) -> TraceSpan Never! {
+    caller: app_traceparent(request.header("traceparent") ?? "")
     attributes := [LogField]{
         log.field("jet.request_id", request.header("x-request-id") ?? ""),
         log.field("http.request.method", "POST"),
@@ -1610,20 +1610,20 @@ __AppTraceParent: struct {
     span_id: String
 }
 
-__app_traceparent: fn(header: String) -> __AppTraceParent Never! {
+priv app_traceparent: fn(header: String) -> __AppTraceParent Never! {
     none: __AppTraceParent{trace_id: "", span_id: ""}
     parts: header.trim().split("-").to_list()
     if parts.len() < 4 -> return none
     // Version ff is invalid; a later version may add fields after these four.
-    if !__app_lower_hex(parts[0], 2) || parts[0] == "ff" -> return none
+    if !app_lower_hex(parts[0], 2) || parts[0] == "ff" -> return none
     if parts[0] == "00" && parts.len() != 4 -> return none
-    if !__app_lower_hex(parts[1], 32) || !__app_lower_hex(parts[2], 16) || !__app_lower_hex(parts[3], 2) -> return none
+    if !app_lower_hex(parts[1], 32) || !app_lower_hex(parts[2], 16) || !app_lower_hex(parts[3], 2) -> return none
     if parts[1] == "00000000000000000000000000000000" || parts[2] == "0000000000000000" -> return none
     __AppTraceParent{trace_id: parts[1].copy(), span_id: parts[2].copy()}
 }
 
 // Whether `text` is `size` lowercase hex digits.
-__app_lower_hex: fn(text: String, size: Int) -> Bool Never! {
+priv app_lower_hex: fn(text: String, size: Int) -> Bool Never! {
     raw: text.bytes()
     if raw.len() != size -> return false
     loop byte in raw {
@@ -1637,7 +1637,7 @@ __app_lower_hex: fn(text: String, size: Int) -> Bool Never! {
 // trace, its trace id: both from the export's start time and the span's
 // count. On a full queue it takes the oldest span's place, and the
 // `jet.trace.dropped_spans` metric counts the loss.
-__app_trace_push: fn(export: __AppTraceExport, span: &&TraceSpan) Never! {
+priv app_trace_push: fn(export: __AppTraceExport, span: &&TraceSpan) Never! {
     capacity: export.settings.max_queue
     guard := export.queue.guard_edit()
     guard.value.ids += 1
@@ -1661,7 +1661,7 @@ __app_trace_push: fn(export: __AppTraceExport, span: &&TraceSpan) Never! {
 }
 
 // Takes up to one batch of the oldest queued spans.
-__app_trace_take: fn(export: __AppTraceExport) -> [TraceSpan] Never! {
+priv app_trace_take: fn(export: __AppTraceExport) -> [TraceSpan] Never! {
     capacity: export.settings.max_queue
     guard := export.queue.guard_edit()
     size: if guard.value.count < export.settings.batch -> guard.value.count else -> export.settings.batch
@@ -1673,22 +1673,22 @@ __app_trace_take: fn(export: __AppTraceExport) -> [TraceSpan] Never! {
 }
 
 // The export task: every schedule delay, the queue goes out.
-__app_trace_export_loop: fn(export: __AppTraceExport) Never! -[Net, Time.Wait]> {
+priv app_trace_export_loop: fn(export: __AppTraceExport) Never! -[Net, Time.Wait]> {
     loop {
         core.tasks.sleep(export.settings.delay_ms)
-        __app_trace_flush(export)
+        app_trace_flush(export)
     }
 }
 
 // Sends the queued spans, one batch a request. A batch the collector does
 // not take with a 2xx is dropped and counted, so a collector that is down
 // never holds more than the queue's bound.
-__app_trace_flush: fn(export: __AppTraceExport) Never! -[Net, Time.Wait]> {
+priv app_trace_flush: fn(export: __AppTraceExport) Never! -[Net, Time.Wait]> {
     loop {
-        batch: __app_trace_take(export)
+        batch: app_trace_take(export)
         size: batch.len()
         if size == 0 -> return
-        if !__app_trace_post(export.settings, batch) {
+        if !app_trace_post(export.settings, batch) {
             guard := export.queue.guard_edit()
             guard.value.dropped += size
             log_rt.metric_publish("jet.trace.dropped_spans", guard.value.dropped)
@@ -1697,7 +1697,7 @@ __app_trace_flush: fn(export: __AppTraceExport) Never! -[Net, Time.Wait]> {
     }
 }
 
-__app_trace_post: fn(settings: __AppTraceSettings, batch: [TraceSpan]) -[Net, Time.Wait]> Bool Never! {
+priv app_trace_post: fn(settings: __AppTraceSettings, batch: [TraceSpan]) -[Net, Time.Wait]> Bool Never! {
     body: log.otlp_traces_json(settings.service, batch)
     sent: web_http.__request("POST", settings.url).__with_header("content-type", "application/json").__with_body(body)
     answer: sent.send() ?? return false
@@ -1706,28 +1706,28 @@ __app_trace_post: fn(settings: __AppTraceSettings, batch: [TraceSpan]) -[Net, Ti
 
 // `{"invalid": [{"path": …, "reason": …}, …]}`, the 422 body a Remote reads
 // back as `CallError.Invalid`.
-__app_invalid_json: fn(errors: [FieldError]) -> String Never! {
+priv app_invalid_json: fn(errors: [FieldError]) -> String Never! {
     entries := [String]{}
     loop error in errors {
-        entries.push("{{\"path\":{__app_json_string(error.path)},\"reason\":{__app_json_string(error.reason)}}}")
+        entries.push("{{\"path\":{app_json_string(error.path)},\"reason\":{app_json_string(error.reason)}}}")
     }
     "{{\"invalid\":[{entries.join(",")}]}}"
 }
 
-__app_json: fn(status: Int, text: String) -> HTTPResponse Never! {
+priv app_json: fn(status: Int, text: String) -> HTTPResponse Never! {
     typed: core.http.headers_set(core.http.headers(), "content-type", "application/json")
     fields: core.http.headers_set(typed, "content-security-policy", "default-src 'self'")
     payload: core.http.body_text(text)
     http_server.response_body(status, payload, fields)
 }
 
-__app_error_json: fn(message: String) -> String Never! {
-    "{{\"error\":{__app_json_string(message)}}}"
+priv app_error_json: fn(message: String) -> String Never! {
+    "{{\"error\":{app_json_string(message)}}}"
 }
 
 // A request without an Origin header is same-origin; one with it must name
 // the Host it was sent to.
-__app_same_origin: fn(request: HTTPRequest) -> Bool Never! {
+priv app_same_origin: fn(request: HTTPRequest) -> Bool Never! {
     origin: request.header("origin") ?? return true
     host: request.header("host") ?? return false
     plain: "http://{host}"
@@ -1735,81 +1735,81 @@ __app_same_origin: fn(request: HTTPRequest) -> Bool Never! {
     origin == plain || origin == secure
 }
 
-__app_trim_slashes: fn(prefix: String) -> String Never! {
+priv app_trim_slashes: fn(prefix: String) -> String Never! {
     raw: prefix.bytes()
     end := raw.len()
     loop end > 0 && raw[end - 1] == (U8{47}) -> end -= 1
     String.from_bytes(raw.slice(0, end)) ?? ""
 }
 
-__app_push: fn(out: &[U8], text: String) Never! {
+priv app_push: fn(out: &[U8], text: String) Never! {
     loop byte in text.bytes() -> out.push(byte)
 }
 
-__app_hex_digit: fn(value: Int) -> U8 Never! {
+priv app_hex_digit: fn(value: Int) -> U8 Never! {
     digits: "0123456789abcdef".bytes()
     digits[value]
 }
 
-__app_json_string: fn(value: String) -> String Never! {
+priv app_json_string: fn(value: String) -> String Never! {
     out := [U8]{34}
     loop byte in value.bytes() {
         n: Int{byte}
         if n == 34 || n == 92 {
             out.push(U8{92})
             out.push(byte)
-        } else if n == 10 { __app_push(out, "\\n") } else if n == 13 { __app_push(out, "\\r") } else if n == 9 {
-            __app_push(out, "\\t")
+        } else if n == 10 { app_push(out, "\\n") } else if n == 13 { app_push(out, "\\r") } else if n == 9 {
+            app_push(out, "\\t")
         } else if n < 32 {
-            __app_push(out, "\\u00")
-            out.push(__app_hex_digit(n >> 4))
-            out.push(__app_hex_digit(n.bit_and(15)))
+            app_push(out, "\\u00")
+            out.push(app_hex_digit(n >> 4))
+            out.push(app_hex_digit(n.bit_and(15)))
         } else { out.push(byte) }
     }
     out.push(U8{34})
     String.from_bytes(out) ?? ""
 }
 
-__app_html_attr: fn(value: String) -> String Never! {
+priv app_html_attr: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
         n: Int{byte}
-        if n == 38 -> __app_push(out, "&amp;") else if n == 60 -> __app_push(out, "&lt;") else if n == 62 {
-            __app_push(out, "&gt;")
-        } else if n == 34 { __app_push(out, "&quot;") } else { out.push(byte) }
+        if n == 38 -> app_push(out, "&amp;") else if n == 60 -> app_push(out, "&lt;") else if n == 62 {
+            app_push(out, "&gt;")
+        } else if n == 34 { app_push(out, "&quot;") } else { out.push(byte) }
     }
     String.from_bytes(out) ?? ""
 }
 
 // JSON inside a `<script>` element: every `<` as `\u003c`.
-__app_script_safe: fn(text: String) -> String Never! {
+priv app_script_safe: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
-        if byte == (U8{60}) -> __app_push(out, "\\u003c") else -> out.push(byte)
+        if byte == (U8{60}) -> app_push(out, "\\u003c") else -> out.push(byte)
     }
     String.from_bytes(out) ?? ""
 }
 
-__app_json_list: fn(values: [String]) -> String Never! {
+priv app_json_list: fn(values: [String]) -> String Never! {
     items := [String]{}
-    loop value in values -> items.push(__app_json_string(value))
+    loop value in values -> items.push(app_json_string(value))
     "[{items.join(",")}]"
 }
 
 // The debug spelling of a string list (`["a", "b"]`) the policy rows use.
-__app_debug_list: fn(values: [String]) -> String Never! {
+priv app_debug_list: fn(values: [String]) -> String Never! {
     items := [String]{}
-    loop value in values -> items.push(__app_json_string(value))
+    loop value in values -> items.push(app_json_string(value))
     "[{items.join(", ")}]"
 }
 
-__app_json_or_null: fn(value: String) -> String Never! {
+priv app_json_or_null: fn(value: String) -> String Never! {
     if value == "" -> return "null"
-    __app_json_string(value)
+    app_json_string(value)
 }
 
 // FNV-1a 64 of `path\0handler`: the route's cache identity.
-__app_route_identity: fn(path: String, handler: String) -> String Never! {
+priv app_route_identity: fn(path: String, handler: String) -> String Never! {
     hash := U64{14695981039346656037}
     bytes := path.bytes()
     bytes.push(U8{0})
@@ -1817,7 +1817,7 @@ __app_route_identity: fn(path: String, handler: String) -> String Never! {
     loop byte in bytes -> hash = wrapping((hash.bit_xor(U64{Int{byte}})) * U64{1099511628211})
     out := [U8]{}
     loop index in 0..<16 {
-        out.push(__app_hex_digit(Int{(hash >> (60 - index * 4)).bit_and(U64{15})}))
+        out.push(app_hex_digit(Int{(hash >> (60 - index * 4)).bit_and(U64{15})}))
     }
     "route-{String.from_bytes(out) ?? ""}"
 }
@@ -1825,20 +1825,20 @@ __app_route_identity: fn(path: String, handler: String) -> String Never! {
 // One route field of the binding sema serialized: `p:<name>=<Type>` is a
 // path parameter, `s=<codec>:<name>=<Type>[?],…` the search fields, `d` the
 // loader data.
-__app_field_json: fn(name: String, ty: String, codec: String, required: Bool) -> String Never! {
-    "{{\"name\":{__app_json_string(name)},\"ty\":{__app_json_string(ty)},\"codec\":{__app_json_string(codec)},\"required\":{required},\"default\":null}}"
+priv app_field_json: fn(name: String, ty: String, codec: String, required: Bool) -> String Never! {
+    "{{\"name\":{app_json_string(name)},\"ty\":{app_json_string(ty)},\"codec\":{app_json_string(codec)},\"required\":{required},\"default\":null}}"
 }
 
-__app_search_field_json: fn(item: String, codec: String) -> String Never! {
+priv app_search_field_json: fn(item: String, codec: String) -> String Never! {
     parts: item.split("=").to_list()
     if parts.len() != 2 -> panic("invalid app search field binding `{item}`")
     raw: parts[1].bytes()
     optional: raw.len() > 0 && raw[raw.len() - 1] == (U8{63})
     ty: if optional -> String.from_bytes(raw.slice(0, raw.len() - 1)) ?? "" else -> parts[1].copy()
-    __app_field_json(parts[0], ty, codec, !optional)
+    app_field_json(parts[0], ty, codec, !optional)
 }
 
-__app_route_facts_json: fn(route: __AppRoute) -> String Never! {
+priv app_route_facts_json: fn(route: __AppRoute) -> String Never! {
     path_params := [String]{}
     search_params := [String]{}
     search_codec := "query"
@@ -1848,40 +1848,40 @@ __app_route_facts_json: fn(route: __AppRoute) -> String Never! {
             field: String.from_bytes(item.bytes().slice(2, item.bytes().len())) ?? ""
             parts: field.split("=").to_list()
             if parts.len() != 2 -> panic("invalid app path binding `{item}`")
-            path_params.push(__app_field_json(parts[0], parts[1], "path", true))
+            path_params.push(app_field_json(parts[0], parts[1], "path", true))
         } else if item.starts_with("s=") {
             spec: String.from_bytes(item.bytes().slice(2, item.bytes().len())) ?? ""
             pieces: spec.split(":").to_list()
             if pieces.len() != 2 -> panic("invalid app search binding `{item}`")
             search_codec = pieces[0].copy()
             loop field in pieces[1].split(",") {
-                if field != "" -> search_params.push(__app_search_field_json(field, search_codec))
+                if field != "" -> search_params.push(app_search_field_json(field, search_codec))
             }
         } else { panic("invalid app route binding `{item}`") }
     }
-    identity: __app_route_identity(route.path, route.identity)
-    loader_contract: if route.loader_identity == "" -> "null" else -> "{{\"handler\":{__app_json_string(route.loader_identity)},\"data_type\":{__app_json_string(route.loader_data_type)},\"dependency\":{__app_json_string(route.identity)},\"preload\":{route.preload},\"cache_identity\":{__app_json_string(identity)}}}"
-    reason: if route.explicit_mode -> __app_json_list([String]{"explicit render mode `{route.mode}`"}) else -> "[]"
-    override_mode: if route.explicit_mode -> __app_json_string(route.mode) else -> "null"
-    "{{\"route_identity\":{__app_json_string(identity)},\"path_params\":[{path_params.join(",")}],\"search_params\":[{search_params.join(",")}],\"search_codec\":{__app_json_string(search_codec)},\"loader_contract\":{loader_contract},\"pending_boundary\":{__app_json_or_null(route.pending_identity)},\"not_found_boundary\":null,\"error_boundary\":{__app_json_or_null(route.error_identity)},\"mode\":{__app_json_string(route.mode)},\"reason\":{reason},\"effects\":[],\"interactive\":false,\"loader\":{__app_json_or_null(route.loader_identity)},\"form\":{__app_json_or_null(route.form)},\"cache\":\"unspecified\",\"override_mode\":{override_mode},\"pending_boundary_id\":null,\"island\":null}}"
+    identity: app_route_identity(route.path, route.identity)
+    loader_contract: if route.loader_identity == "" -> "null" else -> "{{\"handler\":{app_json_string(route.loader_identity)},\"data_type\":{app_json_string(route.loader_data_type)},\"dependency\":{app_json_string(route.identity)},\"preload\":{route.preload},\"cache_identity\":{app_json_string(identity)}}}"
+    reason: if route.explicit_mode -> app_json_list([String]{"explicit render mode `{route.mode}`"}) else -> "[]"
+    override_mode: if route.explicit_mode -> app_json_string(route.mode) else -> "null"
+    "{{\"route_identity\":{app_json_string(identity)},\"path_params\":[{path_params.join(",")}],\"search_params\":[{search_params.join(",")}],\"search_codec\":{app_json_string(search_codec)},\"loader_contract\":{loader_contract},\"pending_boundary\":{app_json_or_null(route.pending_identity)},\"not_found_boundary\":null,\"error_boundary\":{app_json_or_null(route.error_identity)},\"mode\":{app_json_string(route.mode)},\"reason\":{reason},\"effects\":[],\"interactive\":false,\"loader\":{app_json_or_null(route.loader_identity)},\"form\":{app_json_or_null(route.form)},\"cache\":\"unspecified\",\"override_mode\":{override_mode},\"pending_boundary_id\":null,\"island\":null}}"
 }
 
-__app_facts_json: fn(app: App) -> String Never! {
-    state: __app_state(app)
+priv app_facts_json: fn(app: App) -> String Never! {
+    state: app_state(app)
     routes := [String]{}
     loop route in state.routes {
-        routes.push("    {{\"path\": {__app_json_string(route.path)}, \"handler\": {__app_json_string(route.identity)}, \"provenance\": \"runtime\", \"render_facts\": {__app_route_facts_json(route)}}}")
+        routes.push("    {{\"path\": {app_json_string(route.path)}, \"handler\": {app_json_string(route.identity)}, \"provenance\": \"runtime\", \"render_facts\": {app_route_facts_json(route)}}}")
     }
     actions := [String]{}
     loop action in state.actions {
-        server: if action.handler == None -> "null" else -> "{{\"name\":{__app_json_string(action.name)},\"endpoint\":{__app_json_string("/actions/{action.name}")},\"method\":\"POST\",\"csrf\":\"same-origin\",\"middleware\":[]}}"
-        actions.push("    {{\"name\": {__app_json_string(action.name)}, \"handler\": \"callable\", \"kind\": {__app_json_string(action.kind)}, \"preload\": {action.preload}, \"server_function\": {server}}}")
+        server: if action.handler == None -> "null" else -> "{{\"name\":{app_json_string(action.name)},\"endpoint\":{app_json_string("/actions/{action.name}")},\"method\":\"POST\",\"csrf\":\"same-origin\",\"middleware\":[]}}"
+        actions.push("    {{\"name\": {app_json_string(action.name)}, \"handler\": \"callable\", \"kind\": {app_json_string(action.kind)}, \"preload\": {action.preload}, \"server_function\": {server}}}")
     }
     route_rows: if routes.len() == 0 -> "" else -> "{routes.join(",\n")}\n"
     action_rows: if actions.len() == 0 -> "" else -> "{actions.join(",\n")}\n"
     // The Jet query module keeps no process-wide registry, so the graph
     // names no queries.
-    "{{\n  \"hydration\": {__app_json_string(state.hydration)},\n  \"shared_tir\": true,\n  \"routes\": [\n{route_rows}  ],\n  \"actions\": [\n{action_rows}  ],\n  \"queries\": [],\n  \"security\": {__app_debug_list(state.security)},\n  \"assets\": {__app_debug_list(state.assets)},\n  \"split\": {__app_debug_list(state.split)},\n  \"cache\": {__app_debug_list(state.cache)},\n  \"a11y\": {__app_debug_list(state.a11y)},\n  \"adapters\": {__app_debug_list(state.adapters)}\n}}"
+    "{{\n  \"hydration\": {app_json_string(state.hydration)},\n  \"shared_tir\": true,\n  \"routes\": [\n{route_rows}  ],\n  \"actions\": [\n{action_rows}  ],\n  \"queries\": [],\n  \"security\": {app_debug_list(state.security)},\n  \"assets\": {app_debug_list(state.assets)},\n  \"split\": {app_debug_list(state.split)},\n  \"cache\": {app_debug_list(state.cache)},\n  \"a11y\": {app_debug_list(state.a11y)},\n  \"adapters\": {app_debug_list(state.adapters)}\n}}"
 }
 
 Context: struct {
@@ -1912,25 +1912,25 @@ Session: struct {
 // `web.openapi(app)` checks as `__openapi_app(app)` below (sema
 // sema_call_http_web_openapi_mux); a router renders its route table the same way.
 openapi: fn(router: HTTPRouter) -> String OpenAPIError! {
-    __openapi_mux(web_http.__router_mux(router))
+    openapi_mux(web_http.__router_mux(router))
 }
 
 // An App's document: its handler rows; pages, server functions and static
 // files carry no endpoint contract and are not API operations.
-__openapi_app: fn(app: App) -> String OpenAPIError! { __openapi_mux(__app_table(app)) }
+__openapi_app: fn(app: App) -> String OpenAPIError! { openapi_mux(app_table(app)) }
 
 // OpenAPI for an HTTPMux (`JetHTTPRouteSource for JetHTTPMux` and
 // `jet_web_openapi`): each route's checked contract is parsed
 // (jet_openapi_contract_input) and checked against the route registered, then
 // the routes are canonicalized and checked as one document
 // (JetOpenApiDocument::with_openapi) and rendered (::json).
-__openapi_mux: fn(mux: HTTPMux) -> String OpenAPIError! {
+priv openapi_mux: fn(mux: HTTPMux) -> String OpenAPIError! {
     routes := [__OpenAPIRoute]{}
     loop route in http_server.__mux_routes(mux) {
         if route.contract == "" -> next
-        routes.push(__openapi_route_input(route.contract, route.method, route.pattern) ?? return Err(err))
+        routes.push(openapi_route_input(route.contract, route.method, route.pattern) ?? return Err(err))
     }
-    __openapi_document(routes, "Jet HTTP Router", "1")
+    openapi_document(routes, "Jet HTTP Router", "1")
 }
 
 // Why `web.openapi` could not render a document: a route's checked contract
@@ -1949,10 +1949,10 @@ OpenAPIError: struct {
     }
 }
 
-__openapi_fault: fn(message: String) -> OpenAPIError Never! { OpenAPIError{message: message} }
+priv openapi_fault: fn(message: String) -> OpenAPIError Never! { OpenAPIError{message: message} }
 
 __OpenAPIParameter: struct {
-    // Index into __openapi_locations(): path, query, header, cookie.
+    // Index into openapi_locations(): path, query, header, cookie.
     location: Int
     name: String
     // The canonical rendered schema and its definition problems.
@@ -1991,7 +1991,7 @@ __OpenAPIPattern: struct {
 }
 
 __OpenAPIRoute: struct {
-    // Index into __openapi_methods(), JetOpenApiHttpMethod order; a custom
+    // Index into openapi_methods(), JetOpenApiHttpMethod order; a custom
     // method ranks after them all and is `token`, exactly as sent.
     method: Int
     token: String
@@ -2010,31 +2010,31 @@ __OpenAPIRoute: struct {
 // field for CONNECT or for a custom method, so their operations go under
 // OpenAPI 3.2 `additionalOperations` (keyed by the method as sent) and that
 // document says 3.2.0.
-__openapi_methods: fn() -> [String] Never! {
+priv openapi_methods: fn() -> [String] Never! {
     [String]{"get", "put", "post", "delete", "options", "head", "patch", "trace", "connect"}
 }
 
-__openapi_additional_method: fn(route: __OpenAPIRoute) -> Bool Never! {
-    route.token != "" || __openapi_methods()[route.method] == "connect"
+priv openapi_additional_method: fn(route: __OpenAPIRoute) -> Bool Never! {
+    route.token != "" || openapi_methods()[route.method] == "connect"
 }
 
 // A route's method as sent: the upper-case standard name, or the custom
 // token exactly (so `get` and `GET` are two routes).
-__openapi_route_method: fn(route: __OpenAPIRoute) -> String Never! {
+priv openapi_route_method: fn(route: __OpenAPIRoute) -> String Never! {
     if route.token != "" -> return route.token.copy()
-    __openapi_methods()[route.method].to_upper()
+    openapi_methods()[route.method].to_upper()
 }
 
 // The method part of a derived operation id: the Path Item field of a
 // standard method, or `custom_` and the token, which no standard field is.
 __openapi_operation_method: fn(route: __OpenAPIRoute) -> String Never! {
     if route.token != "" -> return "custom_{route.token}"
-    __openapi_methods()[route.method].copy()
+    openapi_methods()[route.method].copy()
 }
 
-__openapi_locations: fn() -> [String] Never! { [String]{"path", "query", "header", "cookie"} }
+priv openapi_locations: fn() -> [String] Never! { [String]{"path", "query", "header", "cookie"} }
 
-__openapi_index: fn(values: [String], value: String) -> Int? {
+priv openapi_index: fn(values: [String], value: String) -> Int? {
     loop index in 0..<values.len() {
         if values[index] == value -> return Val(index)
     }
@@ -2043,23 +2043,23 @@ __openapi_index: fn(values: [String], value: String) -> Int? {
 
 // The rank of a method as sent: a standard method is exactly its upper-case
 // name, and any other token (`get` too) is a custom method, ranked last.
-__openapi_method: fn(value: String) -> Int Never! {
-    methods: __openapi_methods()
+priv openapi_method: fn(value: String) -> Int Never! {
+    methods: openapi_methods()
     loop index in 0..<methods.len() {
         if methods[index].to_upper() == value -> return index
     }
     methods.len()
 }
 
-__openapi_problem: fn(path: String, reason: String) -> String Never! {
+priv openapi_problem: fn(path: String, reason: String) -> String Never! {
     if path == "" -> return reason.copy()
     "{path}: {reason}"
 }
 
-__openapi_pattern: fn(pattern: String) -> __OpenAPIPattern OpenAPIError! {
+priv openapi_pattern: fn(pattern: String) -> __OpenAPIPattern OpenAPIError! {
     parsed: http_server.__route_parse(pattern)
     if parsed.problem != "" {
-        return Err(__openapi_fault("invalid HTTP route `{pattern}`: {parsed.problem}"))
+        return Err(openapi_fault("invalid HTTP route `{pattern}`: {parsed.problem}"))
     }
     key := ""
     names := [String]{}
@@ -2081,125 +2081,125 @@ __openapi_pattern: fn(pattern: String) -> __OpenAPIPattern OpenAPIError! {
     Ok(__OpenAPIPattern{path: http_server.__route_openapi_path(parsed.segments), key: key, names: names, catch_alls: catch_alls})
 }
 
-__openapi_object: fn(value: Dyn) -> [(key: String, value: Dyn)] OpenAPIError! {
+priv openapi_object: fn(value: Dyn) -> [(key: String, value: Dyn)] OpenAPIError! {
     if value == {
         .Object(members) -> return Ok(members)
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(__openapi_fault("OpenAPI route contract must be an object"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(openapi_fault("OpenAPI route contract must be an object"))
     }
 }
 
-__openapi_is_object: fn(value: Dyn) -> Bool Never! {
+priv openapi_is_object: fn(value: Dyn) -> Bool Never! {
     if value == {
         .Object(_) -> true
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> false
     }
 }
 
-__openapi_member: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn? {
+priv openapi_member: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn? {
     loop pair in fields {
         if pair.key == name -> return Val(pair.value)
     }
     None
 }
 
-__openapi_field: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn OpenAPIError! {
-    value: __openapi_member(fields, name) ?? return Err(__openapi_fault("OpenAPI route contract is missing `{name}`"))
+priv openapi_field: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn OpenAPIError! {
+    value: openapi_member(fields, name) ?? return Err(openapi_fault("OpenAPI route contract is missing `{name}`"))
     Ok(value)
 }
 
-__openapi_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String OpenAPIError! {
-    value: __openapi_field(fields, name) ?? return Err(err)
+priv openapi_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String OpenAPIError! {
+    value: openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Text(text) -> return Ok(text)
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be text"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(openapi_fault("OpenAPI route contract field `{name}` must be text"))
     }
 }
 
-__openapi_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String? OpenAPIError! {
-    value: __openapi_field(fields, name) ?? return Err(err)
+priv openapi_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String? OpenAPIError! {
+    value: openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Null -> return Ok(String?{None})
         .Text(text) -> return Ok(Val(text))
-        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be text or null"))
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(openapi_fault("OpenAPI route contract field `{name}` must be text or null"))
     }
 }
 
-__openapi_bool: fn(fields: [(key: String, value: Dyn)], name: String) -> Bool OpenAPIError! {
-    value: __openapi_field(fields, name) ?? return Err(err)
+priv openapi_bool: fn(fields: [(key: String, value: Dyn)], name: String) -> Bool OpenAPIError! {
+    value: openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Bool(flag) -> return Ok(flag)
-        .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be boolean"))
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(openapi_fault("OpenAPI route contract field `{name}` must be boolean"))
     }
 }
 
-__openapi_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] OpenAPIError! {
-    value: __openapi_field(fields, name) ?? return Err(err)
+priv openapi_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] OpenAPIError! {
+    value: openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Array(items) -> return Ok(items)
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(openapi_fault("OpenAPI route contract field `{name}` must be an array"))
     }
 }
 
-__openapi_integer: fn(fields: [(key: String, value: Dyn)], name: String) -> Int OpenAPIError! {
-    value: __openapi_field(fields, name) ?? return Err(err)
+priv openapi_integer: fn(fields: [(key: String, value: Dyn)], name: String) -> Int OpenAPIError! {
+    value: openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Int(number) -> return Ok(number)
         .Number(text) -> {
-            number: Int.parse(text) ?? return Err(__openapi_fault("OpenAPI route contract field `{name}` is out of range"))
+            number: Int.parse(text) ?? return Err(openapi_fault("OpenAPI route contract field `{name}` is out of range"))
             return Ok(number)
         }
-        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an integer"))
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(openapi_fault("OpenAPI route contract field `{name}` must be an integer"))
     }
 }
 
 // jet_openapi_contract_schema then render_json: the schema rendered canonically
 // (object properties by name). Definition problems (validate_definition) are
 // collected in `errors` under `path`.
-__openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String OpenAPIError! {
-    fields: __openapi_object(value) ?? return Err(err)
-    if __openapi_member(fields, "type") == .Val(kind) {
-        return __openapi_typed_schema(kind, fields, path, errors)
+priv openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String OpenAPIError! {
+    fields: openapi_object(value) ?? return Err(err)
+    if openapi_member(fields, "type") == .Val(kind) {
+        return openapi_typed_schema(kind, fields, path, errors)
     }
-    if __openapi_member(fields, "anyOf") == .Val(any_of) {
+    if openapi_member(fields, "anyOf") == .Val(any_of) {
         items: if any_of == {
             .Array(entries) -> entries
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
-                return Err(__openapi_fault("OpenAPI schema `anyOf` must be an array"))
+                return Err(openapi_fault("OpenAPI schema `anyOf` must be an array"))
             }
         }
-        if items.len() == 2 && __openapi_is_object(items[1]) {
+        if items.len() == 2 && openapi_is_object(items[1]) {
             probe := [String]{}
-            second: __openapi_schema(items[1], path, probe) ?? return Err(err)
+            second: openapi_schema(items[1], path, probe) ?? return Err(err)
             if second == "{{\"type\":\"null\"}}" {
-                inner: __openapi_schema(items[0], path, errors) ?? return Err(err)
+                inner: openapi_schema(items[0], path, errors) ?? return Err(err)
                 return Ok("{{\"anyOf\":[{inner},{{\"type\":\"null\"}}]}}")
             }
         }
     }
-    if __openapi_member(fields, "oneOf") == .Val(one_of) {
+    if openapi_member(fields, "oneOf") == .Val(one_of) {
         items: if one_of == {
             .Array(entries) -> entries
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
-                return Err(__openapi_fault("OpenAPI schema `oneOf` must be an array"))
+                return Err(openapi_fault("OpenAPI schema `oneOf` must be an array"))
             }
         }
         if items.len() == 0 {
-            errors.push(__openapi_problem(path, "oneOf needs at least one schema"))
+            errors.push(openapi_problem(path, "oneOf needs at least one schema"))
         }
         rendered := [String]{}
         loop item in items {
-            rendered.push(__openapi_schema(item, path, errors) ?? return Err(err))
+            rendered.push(openapi_schema(item, path, errors) ?? return Err(err))
         }
         return Ok("{{\"oneOf\":[{rendered.join(",")}]}}")
     }
     Ok("{{}}")
 }
 
-__openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path: String, errors: &[String]) -> String OpenAPIError! {
+priv openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path: String, errors: &[String]) -> String OpenAPIError! {
     name: if kind == {
         .Text(text) -> text
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
-            return Err(__openapi_fault("OpenAPI schema `type` must be text"))
+            return Err(openapi_fault("OpenAPI schema `type` must be text"))
         }
     }
     if name == "null" -> return Ok("{{\"type\":\"null\"}}")
@@ -2208,90 +2208,90 @@ __openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path:
     if name == "number" -> return Ok("{{\"type\":\"number\",\"format\":\"double\"}}")
     if name == "string" -> return Ok("{{\"type\":\"string\"}}")
     if name == "array" {
-        items: __openapi_field(fields, "items") ?? return Err(err)
-        item: __openapi_schema(items, path, errors) ?? return Err(err)
+        items: openapi_field(fields, "items") ?? return Err(err)
+        item: openapi_schema(items, path, errors) ?? return Err(err)
         return Ok("{{\"type\":\"array\",\"items\":{item}}}")
     }
-    if name != "object" -> return Err(__openapi_fault("unsupported OpenAPI schema type `{name}`"))
-    declared: __openapi_field(fields, "properties") ?? return Err(err)
+    if name != "object" -> return Err(openapi_fault("unsupported OpenAPI schema type `{name}`"))
+    declared: openapi_field(fields, "properties") ?? return Err(err)
     properties := if declared == {
         .Object(members) -> members
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
-            return Err(__openapi_fault("OpenAPI object schema `properties` must be an object"))
+            return Err(openapi_fault("OpenAPI object schema `properties` must be an object"))
         }
     }
     required := [String]{}
-    if __openapi_member(fields, "required") == .Val(listed) {
+    if openapi_member(fields, "required") == .Val(listed) {
         entries: if listed == {
             .Array(items) -> items
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
-                return Err(__openapi_fault("OpenAPI schema `required` must be an array"))
+                return Err(openapi_fault("OpenAPI schema `required` must be an array"))
             }
         }
         loop entry in entries {
             if entry == {
                 .Text(text) -> required.push(text)
-                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI schema `required` names must be text"))
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(openapi_fault("OpenAPI schema `required` names must be text"))
             }
         }
     }
-    additional: __openapi_field(fields, "additionalProperties") ?? return Err(err)
+    additional: openapi_field(fields, "additionalProperties") ?? return Err(err)
     open: if additional == {
         .Bool(flag) -> flag
         .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
-            return Err(__openapi_fault("OpenAPI object schema `additionalProperties` must be boolean"))
+            return Err(openapi_fault("OpenAPI object schema `additionalProperties` must be boolean"))
         }
     }
     properties.sort_by(fn(left: (key: String, value: Dyn), right: (key: String, value: Dyn)) { left.key <=> right.key })
     rendered := [String]{}
     required_names := [String]{}
     loop property in properties {
-        schema: __openapi_schema(property.value, "{path}.{property.key}", errors) ?? return Err(err)
-        rendered.push("{__app_json_string(property.key)}:{schema}")
-        if required.contains(property.key) -> required_names.push(__app_json_string(property.key))
+        schema: openapi_schema(property.value, "{path}.{property.key}", errors) ?? return Err(err)
+        rendered.push("{app_json_string(property.key)}:{schema}")
+        if required.contains(property.key) -> required_names.push(app_json_string(property.key))
     }
     out := "{{\"type\":\"object\",\"properties\":{{{rendered.join(",")}}},\"additionalProperties\":{open}"
     if required_names.len() > 0 -> out = "{out},\"required\":[{required_names.join(",")}]"
     Ok("{out}}}")
 }
 
-__openapi_parameter: fn(value: Dyn) -> __OpenAPIParameter OpenAPIError! {
-    fields: __openapi_object(value) ?? return Err(err)
-    location_text: __openapi_text(fields, "in") ?? return Err(err)
-    location: __openapi_index(__openapi_locations(), location_text) ?? return Err(__openapi_fault("unsupported OpenAPI parameter location `{location_text}`"))
-    name: __openapi_text(fields, "name") ?? return Err(err)
-    schema_value: __openapi_field(fields, "schema") ?? return Err(err)
+priv openapi_parameter: fn(value: Dyn) -> __OpenAPIParameter OpenAPIError! {
+    fields: openapi_object(value) ?? return Err(err)
+    location_text: openapi_text(fields, "in") ?? return Err(err)
+    location: openapi_index(openapi_locations(), location_text) ?? return Err(openapi_fault("unsupported OpenAPI parameter location `{location_text}`"))
+    name: openapi_text(fields, "name") ?? return Err(err)
+    schema_value: openapi_field(fields, "schema") ?? return Err(err)
     schema_errors := [String]{}
-    schema: __openapi_schema(schema_value, name, schema_errors) ?? return Err(err)
-    required: __openapi_bool(fields, "required") ?? return Err(err)
-    catch_all: __openapi_bool(fields, "catch_all") ?? return Err(err)
+    schema: openapi_schema(schema_value, name, schema_errors) ?? return Err(err)
+    required: openapi_bool(fields, "required") ?? return Err(err)
+    catch_all: openapi_bool(fields, "catch_all") ?? return Err(err)
     Ok(__OpenAPIParameter{location: location, name: name, schema: schema, schema_errors: schema_errors, required: required, catch_all: catch_all})
 }
 
-__openapi_body: fn(value: Dyn) -> __OpenAPIBody OpenAPIError! {
-    fields: __openapi_object(value) ?? return Err(err)
-    required: __openapi_bool(fields, "required") ?? return Err(err)
-    content_type: __openapi_text(fields, "content_type") ?? return Err(err)
-    schema_value: __openapi_field(fields, "schema") ?? return Err(err)
+priv openapi_body: fn(value: Dyn) -> __OpenAPIBody OpenAPIError! {
+    fields: openapi_object(value) ?? return Err(err)
+    required: openapi_bool(fields, "required") ?? return Err(err)
+    content_type: openapi_text(fields, "content_type") ?? return Err(err)
+    schema_value: openapi_field(fields, "schema") ?? return Err(err)
     schema_errors := [String]{}
-    schema: __openapi_schema(schema_value, "requestBody", schema_errors) ?? return Err(err)
+    schema: openapi_schema(schema_value, "requestBody", schema_errors) ?? return Err(err)
     Ok(__OpenAPIBody{required: required, content_type: content_type, schema: schema, schema_errors: schema_errors})
 }
 
-__openapi_response: fn(value: Dyn) -> __OpenAPIResponse OpenAPIError! {
-    fields: __openapi_object(value) ?? return Err(err)
-    status: __openapi_integer(fields, "status") ?? return Err(err)
+priv openapi_response: fn(value: Dyn) -> __OpenAPIResponse OpenAPIError! {
+    fields: openapi_object(value) ?? return Err(err)
+    status: openapi_integer(fields, "status") ?? return Err(err)
     if status < 0 || status > 65535 {
-        return Err(__openapi_fault("OpenAPI response status is outside the u16 range"))
+        return Err(openapi_fault("OpenAPI response status is outside the u16 range"))
     }
-    schema_value: __openapi_field(fields, "schema") ?? return Err(err)
+    schema_value: openapi_field(fields, "schema") ?? return Err(err)
     schema_errors := [String]{}
     schema := String?{None}
     if !(schema_value == Dyn.Null) {
-        schema = Val(__openapi_schema(schema_value, "response", schema_errors) ?? return Err(err))
+        schema = Val(openapi_schema(schema_value, "response", schema_errors) ?? return Err(err))
     }
-    description: __openapi_text(fields, "description") ?? return Err(err)
-    content_type: if __openapi_optional_text(fields, "content_type") == {
+    description: openapi_text(fields, "description") ?? return Err(err)
+    content_type: if openapi_optional_text(fields, "content_type") == {
         .Ok(text) -> text
         .Err(fault) -> {
             return Err(fault)
@@ -2300,64 +2300,64 @@ __openapi_response: fn(value: Dyn) -> __OpenAPIResponse OpenAPIError! {
     Ok(__OpenAPIResponse{status: status, description: description, schema: schema, schema_errors: schema_errors, content_type: content_type})
 }
 
-__openapi_security: fn(value: Dyn) -> __OpenAPISecurity OpenAPIError! {
-    fields: __openapi_object(value) ?? return Err(err)
-    listed: __openapi_array(fields, "scopes") ?? return Err(err)
+priv openapi_security: fn(value: Dyn) -> __OpenAPISecurity OpenAPIError! {
+    fields: openapi_object(value) ?? return Err(err)
+    listed: openapi_array(fields, "scopes") ?? return Err(err)
     scopes := [String]{}
     loop scope in listed {
         if scope == {
             .Text(text) -> scopes.push(text)
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI security scopes must be text"))
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(openapi_fault("OpenAPI security scopes must be text"))
         }
     }
-    scheme: __openapi_text(fields, "scheme") ?? return Err(err)
+    scheme: openapi_text(fields, "scheme") ?? return Err(err)
     Ok(__OpenAPISecurity{scheme: scheme, scopes: scopes})
 }
 
 // jet_openapi_contract_input and JetOpenApiRouteFact::from_input, checked
 // against the method and pattern the mux registered.
-__openapi_route_input: fn(contract: String, method: String, pattern: String) -> __OpenAPIRoute OpenAPIError! {
-    value: live_json.parse(contract) ?? return Err(__openapi_fault("invalid checked OpenAPI route contract: {err.reason}"))
-    fields: __openapi_object(value) ?? return Err(err)
-    method_text: __openapi_text(fields, "method") ?? return Err(err)
-    rank: __openapi_method(method_text)
-    token: if rank == __openapi_methods().len() -> method_text.copy() else -> ""
-    pattern_text: __openapi_text(fields, "pattern") ?? return Err(err)
-    parsed: __openapi_pattern(pattern_text) ?? return Err(err)
-    path: __openapi_text(fields, "path") ?? return Err(err)
+priv openapi_route_input: fn(contract: String, method: String, pattern: String) -> __OpenAPIRoute OpenAPIError! {
+    value: live_json.parse(contract) ?? return Err(openapi_fault("invalid checked OpenAPI route contract: {err.reason}"))
+    fields: openapi_object(value) ?? return Err(err)
+    method_text: openapi_text(fields, "method") ?? return Err(err)
+    rank: openapi_method(method_text)
+    token: if rank == openapi_methods().len() -> method_text.copy() else -> ""
+    pattern_text: openapi_text(fields, "pattern") ?? return Err(err)
+    parsed: openapi_pattern(pattern_text) ?? return Err(err)
+    path: openapi_text(fields, "path") ?? return Err(err)
     if path != parsed.path {
-        return Err(__openapi_fault("checked OpenAPI route path does not match its route pattern"))
+        return Err(openapi_fault("checked OpenAPI route path does not match its route pattern"))
     }
-    parameter_values: __openapi_array(fields, "parameters") ?? return Err(err)
+    parameter_values: openapi_array(fields, "parameters") ?? return Err(err)
     parameters := [__OpenAPIParameter]{}
-    loop item in parameter_values { parameters.push(__openapi_parameter(item) ?? return Err(err)) }
-    response_values: __openapi_array(fields, "responses") ?? return Err(err)
+    loop item in parameter_values { parameters.push(openapi_parameter(item) ?? return Err(err)) }
+    response_values: openapi_array(fields, "responses") ?? return Err(err)
     responses := [__OpenAPIResponse]{}
-    loop item in response_values { responses.push(__openapi_response(item) ?? return Err(err)) }
+    loop item in response_values { responses.push(openapi_response(item) ?? return Err(err)) }
     if responses.len() == 0 {
-        return Err(__openapi_fault("checked OpenAPI route contract has no responses"))
+        return Err(openapi_fault("checked OpenAPI route contract has no responses"))
     }
-    security_values: __openapi_array(fields, "security") ?? return Err(err)
+    security_values: openapi_array(fields, "security") ?? return Err(err)
     security := [__OpenAPISecurity]{}
-    loop item in security_values { security.push(__openapi_security(item) ?? return Err(err)) }
-    operation_id: __openapi_text(fields, "operation_id") ?? return Err(err)
-    body_value: __openapi_field(fields, "request_body") ?? return Err(err)
+    loop item in security_values { security.push(openapi_security(item) ?? return Err(err)) }
+    operation_id: openapi_text(fields, "operation_id") ?? return Err(err)
+    body_value: openapi_field(fields, "request_body") ?? return Err(err)
     body := __OpenAPIBody?{None}
-    if !(body_value == Dyn.Null) -> body = Val(__openapi_body(body_value) ?? return Err(err))
-    _: __openapi_text(fields, "provenance") ?? return Err(err)
-    summary: if __openapi_optional_text(fields, "summary") == {
+    if !(body_value == Dyn.Null) -> body = Val(openapi_body(body_value) ?? return Err(err))
+    _: openapi_text(fields, "provenance") ?? return Err(err)
+    summary: if openapi_optional_text(fields, "summary") == {
         .Ok(text) -> text
         .Err(fault) -> {
             return Err(fault)
         }
     }
-    registered: __openapi_pattern(pattern) ?? return Err(err)
+    registered: openapi_pattern(pattern) ?? return Err(err)
     if method != method_text || registered.key != parsed.key {
-        return Err(__openapi_fault("checked OpenAPI contract does not match route `{method} {pattern}`"))
+        return Err(openapi_fault("checked OpenAPI contract does not match route `{method} {pattern}`"))
     }
     route := __OpenAPIRoute{method: rank, token: token, path: parsed.path, names: parsed.names, catch_alls: parsed.catch_alls, operation_id: operation_id, summary: summary, parameters: parameters, body: body, responses: responses, security: security}
     if route.operation_id == "" {
-        route.operation_id = __openapi_operation_id(__openapi_operation_method(route), route.path)
+        route.operation_id = openapi_operation_id(__openapi_operation_method(route), route.path)
     }
     Ok(route)
 }
@@ -2365,7 +2365,7 @@ __openapi_route_input: fn(contract: String, method: String, pattern: String) -> 
 // jet_openapi_operation_id_for_path: FNV-1a 64 of
 // `jet-openapi-operation-v1:<method>\0<path>`, the method as
 // __openapi_operation_method names it.
-__openapi_operation_id: fn(name: String, path: String) -> String Never! {
+priv openapi_operation_id: fn(name: String, path: String) -> String Never! {
     bytes := "jet-openapi-operation-v1:".bytes()
     loop byte in name.bytes() -> bytes.push(byte)
     bytes.push(U8{0})
@@ -2374,12 +2374,12 @@ __openapi_operation_id: fn(name: String, path: String) -> String Never! {
     loop byte in bytes -> hash = wrapping((hash.bit_xor(U64{Int{byte}})) * U64{1099511628211})
     out := [U8]{}
     loop index in 0..<16 {
-        out.push(__app_hex_digit(Int{(hash >> (60 - index * 4)).bit_and(U64{15})}))
+        out.push(app_hex_digit(Int{(hash >> (60 - index * 4)).bit_and(U64{15})}))
     }
     "jet_{name}_{String.from_bytes(out) ?? ""}"
 }
 
-__openapi_compare_lists: fn(left: [String], right: [String]) -> Ordering Never! {
+priv openapi_compare_lists: fn(left: [String], right: [String]) -> Ordering Never! {
     common: if left.len() < right.len() -> left.len() else -> right.len()
     loop index in 0..<common {
         if left[index] != right[index] -> return left[index] <=> right[index]
@@ -2387,7 +2387,7 @@ __openapi_compare_lists: fn(left: [String], right: [String]) -> Ordering Never! 
     left.len() <=> right.len()
 }
 
-__openapi_canonical: fn(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
+priv openapi_canonical: fn(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
     out := route
     out.parameters.sort_by(fn(left: __OpenAPIParameter, right: __OpenAPIParameter) {
         if left.location != right.location -> return left.location <=> right.location
@@ -2405,7 +2405,7 @@ __openapi_canonical: fn(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
     }
     security.sort_by(fn(left: __OpenAPISecurity, right: __OpenAPISecurity) {
         if left.scheme != right.scheme -> return left.scheme <=> right.scheme
-        __openapi_compare_lists(left.scopes, right.scopes)
+        openapi_compare_lists(left.scopes, right.scopes)
     })
     out.security = security
     out
@@ -2413,9 +2413,9 @@ __openapi_canonical: fn(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
 
 // JetOpenApiDocument::with_openapi then ::json, with no security schemes: a mux
 // declares none.
-__openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String) -> String OpenAPIError! {
+priv openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String) -> String OpenAPIError! {
     routes := [__OpenAPIRoute]{}
-    loop input in inputs -> routes.push(__openapi_canonical(input))
+    loop input in inputs -> routes.push(openapi_canonical(input))
     routes.sort_by(fn(left: __OpenAPIRoute, right: __OpenAPIRoute) {
         if left.path != right.path -> return left.path <=> right.path
         if left.method != right.method -> return left.method <=> right.method
@@ -2423,7 +2423,7 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
         left.operation_id <=> right.operation_id
     })
     if title == "" || version == "" {
-        return Err(__openapi_fault("OpenAPI info title and version must not be empty"))
+        return Err(openapi_fault("OpenAPI info title and version must not be empty"))
     }
     errors := [String]{}
     keys := [String]{}
@@ -2438,7 +2438,7 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
         if operation_ids.contains(route.operation_id) {
             errors.push("duplicate OpenAPI operationId `{route.operation_id}`")
         } else { operation_ids.push(route.operation_id.copy()) }
-        key: "{__openapi_route_method(route)} {route.path}"
+        key: "{openapi_route_method(route)} {route.path}"
         if keys.contains(key) -> errors.push("duplicate OpenAPI route `{key}`") else {
             keys.push(key.copy())
         }
@@ -2446,7 +2446,7 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
         parameter_keys := [String]{}
         declared := [String]{}
         loop parameter in route.parameters {
-            location: __openapi_locations()[parameter.location]
+            location: openapi_locations()[parameter.location]
             parameter_key: "{location}:{parameter.name}"
             if parameter_keys.contains(parameter_key) {
                 schema_errors.push("parameter: duplicate {location} parameter `{parameter.name}`")
@@ -2454,10 +2454,10 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
             if parameter.location == 0 {
                 declared.push(parameter.name.copy())
                 if !route.names.contains(parameter.name) {
-                    schema_errors.push(__openapi_problem(parameter.name, "path parameter is not present in the route template"))
+                    schema_errors.push(openapi_problem(parameter.name, "path parameter is not present in the route template"))
                 }
                 if parameter.catch_all != route.catch_alls.contains(parameter.name) {
-                    schema_errors.push(__openapi_problem(parameter.name, "path parameter catch-all fact disagrees with the canonical route pattern"))
+                    schema_errors.push(openapi_problem(parameter.name, "path parameter catch-all fact disagrees with the canonical route pattern"))
                 }
             }
             loop problem in parameter.schema_errors -> schema_errors.push(problem.copy())
@@ -2465,14 +2465,14 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
                 schema_errors.push("parameter: parameter name must not be empty")
             }
             if parameter.location == 0 && !parameter.required {
-                schema_errors.push(__openapi_problem(parameter.name, "path parameters are always required"))
+                schema_errors.push(openapi_problem(parameter.name, "path parameters are always required"))
             }
         }
         template := route.names.copy()
         template.sort()
         loop name in template {
             if !declared.contains(name) {
-                schema_errors.push(__openapi_problem(name, "route template parameter has no parameter fact"))
+                schema_errors.push(openapi_problem(name, "route template parameter has no parameter fact"))
             }
         }
         if route.body == .Val(body) {
@@ -2499,7 +2499,7 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
         }
         loop problem in schema_errors -> errors.push(problem.copy())
     }
-    if errors.len() > 0 -> return Err(__openapi_fault(errors.join("; ")))
+    if errors.len() > 0 -> return Err(openapi_fault(errors.join("; ")))
     paths := [String]{}
     additional_operations := false
     index := 0
@@ -2508,11 +2508,11 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
         methods := [String]{}
         additional := [String]{}
         loop index < routes.len() && routes[index].path == path {
-            if __openapi_additional_method(routes[index]) {
+            if openapi_additional_method(routes[index]) {
                 // Keyed by the method as sent: CONNECT, or the custom token.
-                additional.push("{__app_json_string(__openapi_route_method(routes[index]))}:{__openapi_route_json(routes[index])}")
+                additional.push("{app_json_string(openapi_route_method(routes[index]))}:{openapi_route_json(routes[index])}")
             } else {
-                methods.push("{__app_json_string(__openapi_methods()[routes[index].method])}:{__openapi_route_json(routes[index])}")
+                methods.push("{app_json_string(openapi_methods()[routes[index].method])}:{openapi_route_json(routes[index])}")
             }
             index += 1
         }
@@ -2520,33 +2520,33 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
             methods.push("\"additionalOperations\":{{{additional.join(",")}}}")
             additional_operations = true
         }
-        paths.push("{__app_json_string(path)}:{{{methods.join(",")}}}")
+        paths.push("{app_json_string(path)}:{{{methods.join(",")}}}")
     }
     openapi_version: if additional_operations -> "3.2.0" else -> "3.1.0"
-    Ok("{{\"openapi\":\"{openapi_version}\",\"info\":{{\"title\":{__app_json_string(title)},\"version\":{__app_json_string(version)}}},\"paths\":{{{paths.join(",")}}}}}")
+    Ok("{{\"openapi\":\"{openapi_version}\",\"info\":{{\"title\":{app_json_string(title)},\"version\":{app_json_string(version)}}},\"paths\":{{{paths.join(",")}}}}}")
 }
 
 // jet_openapi_route_json and jet_openapi_parameter_json.
-__openapi_route_json: fn(route: __OpenAPIRoute) -> String Never! {
-    out := "{{\"operationId\":{__app_json_string(route.operation_id)}"
-    if route.summary == .Val(summary) -> out = "{out},\"summary\":{__app_json_string(summary)}"
+priv openapi_route_json: fn(route: __OpenAPIRoute) -> String Never! {
+    out := "{{\"operationId\":{app_json_string(route.operation_id)}"
+    if route.summary == .Val(summary) -> out = "{out},\"summary\":{app_json_string(summary)}"
     if route.parameters.len() > 0 {
         rendered := [String]{}
         loop parameter in route.parameters {
             required: parameter.required || parameter.location == 0
-            rendered.push("{{\"name\":{__app_json_string(parameter.name)},\"in\":{__app_json_string(__openapi_locations()[parameter.location])},\"required\":{required},\"schema\":{parameter.schema}}}")
+            rendered.push("{{\"name\":{app_json_string(parameter.name)},\"in\":{app_json_string(openapi_locations()[parameter.location])},\"required\":{required},\"schema\":{parameter.schema}}}")
         }
         out = "{out},\"parameters\":[{rendered.join(",")}]"
     }
     if route.body == .Val(body) {
-        out = "{out},\"requestBody\":{{\"required\":{body.required},\"content\":{{{__app_json_string(body.content_type)}:{{\"schema\":{body.schema}}}}}}}"
+        out = "{out},\"requestBody\":{{\"required\":{body.required},\"content\":{{{app_json_string(body.content_type)}:{{\"schema\":{body.schema}}}}}}}"
     }
     responses := [String]{}
     loop response in route.responses {
-        rendered := "\"{response.status}\":{{\"description\":{__app_json_string(response.description)}"
+        rendered := "\"{response.status}\":{{\"description\":{app_json_string(response.description)}"
         if response.schema == .Val(schema) {
             if response.content_type == .Val(content_type) {
-                rendered = "{rendered},\"content\":{{{__app_json_string(content_type)}:{{\"schema\":{schema}}}}}"
+                rendered = "{rendered},\"content\":{{{app_json_string(content_type)}:{{\"schema\":{schema}}}}}"
             }
         }
         responses.push("{rendered}}}")
@@ -2556,8 +2556,8 @@ __openapi_route_json: fn(route: __OpenAPIRoute) -> String Never! {
         rendered := [String]{}
         loop requirement in route.security {
             scopes := [String]{}
-            loop scope in requirement.scopes -> scopes.push(__app_json_string(scope))
-            rendered.push("{{{__app_json_string(requirement.scheme)}:[{scopes.join(",")}]}}")
+            loop scope in requirement.scopes -> scopes.push(app_json_string(scope))
+            rendered.push("{{{app_json_string(requirement.scheme)}:[{scopes.join(",")}]}}")
         }
         out = "{out},\"security\":[{rendered.join(",")}]"
     }
@@ -2580,17 +2580,17 @@ auth_routes: fn(auth: Auth) -> [String] Never! {
 auth_show: fn(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
 
 #Test("an OpenAPI route contract that does not parse or match comes back as an OpenAPIError") {
-    not_json: if __openapi_route_input("{{", "GET", "/a") == {
+    not_json: if openapi_route_input("{{", "GET", "/a") == {
         .Ok(_) -> ""
         .Err(fault) -> fault.message
     }
     assert(not_json.starts_with("invalid checked OpenAPI route contract: "))
-    not_object: if __openapi_route_input("[]", "GET", "/a") == {
+    not_object: if openapi_route_input("[]", "GET", "/a") == {
         .Ok(_) -> ""
         .Err(fault) -> fault.message
     }
     assert(not_object == "OpenAPI route contract must be an object")
-    bad_route: if __openapi_pattern("/a/*rest/b") == {
+    bad_route: if openapi_pattern("/a/*rest/b") == {
         .Ok(_) -> ""
         .Err(fault) -> "{fault}"
     }
@@ -2615,29 +2615,29 @@ auth_show: fn(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
     secret: "It's a Secret to Everybody"
     body: "\"hi\""
     signed: "sha256={crypto.hex_encode(crypto.hmac_sha256(secret.bytes(), body.bytes()))}"
-    assert_eq(__app_webhook_test_status(hook, "jet", signed, body), 200)
-    assert_eq(__app_webhook_test_status(hook, "jet", signed, "\"bye\""), 401)
-    assert_eq(__app_webhook_test_status(hook, "jet", "", body), 401)
-    assert_eq(__app_webhook_test_status(hook, "other", signed, body), 401)
+    assert_eq(app_webhook_test_status(hook, "jet", signed, body), 200)
+    assert_eq(app_webhook_test_status(hook, "jet", signed, "\"bye\""), 401)
+    assert_eq(app_webhook_test_status(hook, "jet", "", body), 401)
+    assert_eq(app_webhook_test_status(hook, "other", signed, body), 401)
     unparsed: "hi"
-    assert_eq(__app_webhook_test_status(hook, "jet", "sha256={crypto.hex_encode(crypto.hmac_sha256(secret.bytes(), unparsed.bytes()))}", unparsed), 422)
+    assert_eq(app_webhook_test_status(hook, "jet", "sha256={crypto.hex_encode(crypto.hmac_sha256(secret.bytes(), unparsed.bytes()))}", unparsed), 422)
 }
 
 // The status `hook` answers a delivery of `body` to `/hooks/{project}`
 // signed `sent` ("" sends no signature).
-__app_webhook_test_status: fn(hook: __AppWebhook, project: String, sent: String, body: String) -[Net, FS.Read]> Int Never! {
+priv app_webhook_test_status: fn(hook: __AppWebhook, project: String, sent: String, body: String) -[Net, FS.Read]> Int Never! {
     fields := web_http.headers()
     if sent != "" -> fields = web_http.headers_set(fields, "X-Hub-Signature-256", sent)
     request := web_http.__server_request("POST", "/hooks/{project}", web_http.body_text(body), fields)
     request.__params = [web_http.Header]{web_http.Header{name: "project", value: project}}
-    __app_webhook_response(hook, request).status
+    app_webhook_response(hook, request).status
 }
 
 #Test("trace settings follow the OpenTelemetry SDK variables") {
-    assert(!(__app_trace_settings([String:String]{}) == .Val(_)))
+    assert(!(app_trace_settings([String:String]{}) == .Val(_)))
     base := [String:String]{}
     base["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
-    chosen: __app_trace_settings(base) ?? panic("an endpoint names a collector")
+    chosen: app_trace_settings(base) ?? panic("an endpoint names a collector")
     assert_eq(chosen.url, "http://127.0.0.1:4318/v1/traces")
     assert_eq(chosen.service, "unknown_service")
     assert_eq(chosen.delay_ms, 5000)
@@ -2649,7 +2649,7 @@ __app_webhook_test_status: fn(hook: __AppWebhook, project: String, sent: String,
     tuned["OTEL_BSP_SCHEDULE_DELAY"] = "50"
     tuned["OTEL_BSP_MAX_QUEUE_SIZE"] = "8"
     tuned["OTEL_BSP_MAX_EXPORT_BATCH_SIZE"] = "100"
-    traces: __app_trace_settings(tuned) ?? panic("a traces endpoint names a collector")
+    traces: app_trace_settings(tuned) ?? panic("a traces endpoint names a collector")
     assert_eq(traces.url, "http://collector/traces")
     assert_eq(traces.service, "crew")
     assert_eq(traces.delay_ms, 50)
@@ -2657,20 +2657,20 @@ __app_webhook_test_status: fn(hook: __AppWebhook, project: String, sent: String,
     assert_eq(traces.batch, 8)
     wrong := base.copy()
     wrong["OTEL_BSP_MAX_QUEUE_SIZE"] = "0"
-    assert_eq((__app_trace_settings(wrong) ?? panic("a bad size keeps its default")).max_queue, 2048)
+    assert_eq((app_trace_settings(wrong) ?? panic("a bad size keeps its default")).max_queue, 2048)
     off := base.copy()
     off["OTEL_SDK_DISABLED"] = "TRUE"
-    assert(!(__app_trace_settings(off) == .Val(_)))
+    assert(!(app_trace_settings(off) == .Val(_)))
     other := base.copy()
     other["OTEL_TRACES_EXPORTER"] = "none"
-    assert(!(__app_trace_settings(other) == .Val(_)))
+    assert(!(app_trace_settings(other) == .Val(_)))
     listed := base.copy()
     listed["OTEL_TRACES_EXPORTER"] = "console, otlp"
-    assert(__app_trace_settings(listed) == .Val(_))
+    assert(app_trace_settings(listed) == .Val(_))
 }
 
 #Test("a traceparent is taken only when it is valid W3C trace context") {
-    taken: __app_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+    taken: app_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
     assert_eq(taken.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736")
     assert_eq(taken.span_id, "00f067aa0ba902b7")
     refused := [String]{
@@ -2682,19 +2682,19 @@ __app_webhook_test_status: fn(hook: __AppWebhook, project: String, sent: String,
         "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-later",
         "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7",
     }
-    loop header in refused -> assert_eq(__app_traceparent(header).trace_id, "")
-    assert_eq(__app_traceparent("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-later").span_id, "00f067aa0ba902b7")
+    loop header in refused -> assert_eq(app_traceparent(header).trace_id, "")
+    assert_eq(app_traceparent("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-later").span_id, "00f067aa0ba902b7")
 }
 
 #Test("with no collector named an app runs no trace layer; with one, an endpoint call is one span") {
     served: app().__remote_public("/api/status", fn(args: __RemoteArgs) { Ok(args.__reply_value<String>("up")) }, 0, 0)
-    table: __app_table(served)
+    table: app_table(served)
     // No collector named: nothing is installed, so a request runs no layer.
-    assert(!(__app_trace_settings([String:String]{}) == .Val(_)))
+    assert(!(app_trace_settings([String:String]{}) == .Val(_)))
     assert_eq(http_server.__mux_layers(table).len(), 0)
     named := [String:String]{}
     named["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
-    export: __app_trace_install(served, __app_trace_settings(named) ?? panic("an endpoint names a collector"), 1000)
+    export: app_trace_install(served, app_trace_settings(named) ?? panic("an endpoint names a collector"), 1000)
     assert_eq(http_server.__mux_layers(table).len(), 1)
     fields := web_http.headers_set(web_http.headers(), "traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
     fields = web_http.headers_set(fields, "x-request-id", "4bf92f3577b34da6a3ce929d0e0e4736")
@@ -2703,7 +2703,7 @@ __app_webhook_test_status: fn(hook: __AppWebhook, project: String, sent: String,
     // Only the traced rows are spanned.
     refused: http_server.__dispatch(table, web_http.__server_request("GET", "/api/status", web_http.body_empty(), web_http.headers()))
     assert_eq(refused.status, 405)
-    spans: __app_trace_take(export)
+    spans: app_trace_take(export)
     assert_eq(spans.len(), 1)
     assert_eq(spans[0].trace_id, "4bf92f3577b34da6a3ce929d0e0e4736")
     assert_eq(spans[0].parent_span_id, "00f067aa0ba902b7")
@@ -2719,25 +2719,25 @@ __app_webhook_test_status: fn(hook: __AppWebhook, project: String, sent: String,
     named := [String:String]{}
     named["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
     named["OTEL_BSP_MAX_QUEUE_SIZE"] = "2"
-    export: __app_trace_install(app(), __app_trace_settings(named) ?? panic("an endpoint names a collector"), 0)
-    __app_trace_push(export, __app_trace_test_span("a"))
-    __app_trace_push(export, __app_trace_test_span("b"))
-    __app_trace_push(export, __app_trace_test_span("c"))
-    assert_eq(__app_trace_test_names(export), "b,c")
-    __app_trace_push(export, __app_trace_test_span("d"))
-    assert_eq(__app_trace_test_names(export), "d")
+    export: app_trace_install(app(), app_trace_settings(named) ?? panic("an endpoint names a collector"), 0)
+    app_trace_push(export, app_trace_test_span("a"))
+    app_trace_push(export, app_trace_test_span("b"))
+    app_trace_push(export, app_trace_test_span("c"))
+    assert_eq(app_trace_test_names(export), "b,c")
+    app_trace_push(export, app_trace_test_span("d"))
+    assert_eq(app_trace_test_names(export), "d")
     guard: export.queue.guard_read()
     assert_eq(guard.value.dropped, 1)
     assert_eq(guard.value.count, 0)
 }
 
-__app_trace_test_span: fn(name: String) -> TraceSpan Never! {
+priv app_trace_test_span: fn(name: String) -> TraceSpan Never! {
     TraceSpan{trace_id: "", span_id: "", parent_span_id: "", name: name, kind: .Server, start_ns: 0, end_ns: 0, attributes: [LogField]{}, status: log.SpanStatus.Unset}
 }
 
 // The names of the spans one take gives, in order.
-__app_trace_test_names: fn(export: __AppTraceExport) -> String Never! {
+priv app_trace_test_names: fn(export: __AppTraceExport) -> String Never! {
     names := [String]{}
-    loop span in __app_trace_take(export) -> names.push(span.name.copy())
+    loop span in app_trace_take(export) -> names.push(span.name.copy())
     names.join(",")
 }
