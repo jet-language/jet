@@ -95,7 +95,7 @@ PIECE: Regex{"([^ \t\r\n'\"\\]+)|\\(.)|'([^']*)'|\"((?:[^\"\\]|\\.)*)\""}
 REPR_ESCAPES: ["\\": "\\\\", "\n": "\\n", "\r": "\\r", "\t": "\\t", "'": "\\'", "\"": "\\\""]
 
 // What JET_MEASURE prints.
-#Decode
+#Codable(only: .Decode)
 Measured: struct {
     wall_ns: Int
     peak_kib: Int
@@ -105,7 +105,7 @@ Measured: struct {
 }
 
 // The Jet arm of a row, in the Jet worker's key order.
-#Encode
+#Codable(only: .Encode)
 JetRow: struct {
     wall_ns: Int
     peak_kib: Int
@@ -113,7 +113,7 @@ JetRow: struct {
     expected_stdout: String
 }
 
-#Encode
+#Codable(only: .Encode)
 Row: struct {
     case: String
     n: Int
@@ -121,7 +121,7 @@ Row: struct {
     jet: JetRow
 }
 
-#Encode
+#Codable(only: .Encode)
 Report: struct {
     benchmark: String
     results: [Row]

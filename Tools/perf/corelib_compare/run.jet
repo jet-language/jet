@@ -103,7 +103,7 @@ RUST_WORKLOAD: [
 ].join("\n")
 
 // One build as the report records it, its keys in sorted order.
-#Encode
+#Codable(only: .Encode)
 Build: struct {
     artifact: String
     exit: Int
@@ -111,7 +111,7 @@ Build: struct {
     stdout: String
 }
 
-#Encode
+#Codable(only: .Encode)
 Builds: struct {
     jet_source_aot: Build
     rust_core_aot: Build
@@ -119,34 +119,34 @@ Builds: struct {
 }
 
 // What an arm that does not build prints.
-#Encode
+#Codable(only: .Encode)
 Unbuilt: struct {
     builds: Builds
     metric: String
     #Rename("pass") passed: Bool
 }
 
-#Encode
+#Codable(only: .Encode)
 Arm: struct {
     median_ns: Int
     ratio_to_rust_native: Float
     samples: [Int]
 }
 
-#Encode
+#Codable(only: .Encode)
 Arms: struct {
     jet_source_aot: Arm
     rust_core_aot: Arm
     rust_native: Arm
 }
 
-#Encode
+#Codable(only: .Encode)
 JetRatios: struct {
     jet_source_aot: Float
     rust_core_aot: Float
 }
 
-#Encode
+#Codable(only: .Encode)
 Report: struct {
     arms: Arms
     builds: Builds

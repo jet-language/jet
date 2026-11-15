@@ -20,7 +20,7 @@ Run a lesson from the repository root, for example `jet run Examples/Data/<Lesso
 - [EncodingCanonical](EncodingCanonical.jet) — Canonical CBOR and XML use the encoding core directly.
 - [EncodingStreamTypes](EncodingStreamTypes.jet) — Shared encoding values reachable from Jet.
 - [HandCodec](HandCodec.jet) — Hand-written and derived codecs share one public protocol.
-- [Migrations](Migrations/) — #PublishedSchema structs + migration blocks.
+- [Migrations](Migrations/) — #Codable(published) structs + migration blocks.
 - [SerdeGeneric](SerdeGeneric.jet) — generic #Codable.
 - [ShapeProjection](ShapeProjection.jet) — One shape fact feeds every projection.
 - [UnionCodec](UnionCodec.jet) — An anonymous union encodes and decodes through its structural enum, alone and as a struct field, and a decoded union matches by member.

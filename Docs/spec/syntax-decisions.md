@@ -2698,9 +2698,10 @@ do not contribute stored state.
 
 `Debug` remains the dev-facing lens; `#Redact` carries the secrets story.
 Explicit opt-in markers for the other derive families remain
-`#Comparable` and the codability family `#Codable`
-(≡ `#[Encode, Decode]`), `#Encode`, `#Decode` (D-SERDE4, D-MARKERMOVE3).
-`Serialize`/`Deserialize` are not Jet words. Field-level wire markers stay on
+`#Comparable` and the codability family `#Codable`, which derives `Encode`
+and `Decode`; `#Codable(only: .Encode)` and `#Codable(only: .Decode)` derive
+one direction (D-SERDE4, D-MARKERMOVE3, D-CODABLE-OPTIONS1).
+`Serialize`/`Deserialize` are not Jet words. A field's wire options stay on
 the `#` plane (see Serde under Core library).
 
 **D-DISPLAYDBG1 / D-DISPLAY-SHAPE — Display & Debug**: `Display` is
@@ -5190,22 +5191,24 @@ the whole-file one-shot is `append_all(path, text)`; the streaming handle's
 `.append(…)` is untouched.
 
 **Serde & encoding** *(D-SERDE1–12, D-ENC1, D-JSONVERB1, D-SERDE-ACCESS,
-D-ENC-YAML1)*: one format-agnostic data model. `#Codable` (≡
-`#[Encode, Decode]`), `#Encode`, `#Decode` derives — a built-in compiler
-field-walk, not S56 reflection. Formats are adapters in **`core.encoding`**
+D-ENC-YAML1, D-CODABLE-OPTIONS1)*: one format-agnostic data model. `#Codable`
+derives `Encode` and `Decode`, and `#Codable(only: .Encode)` or
+`#Codable(only: .Decode)` one of them — a built-in compiler
+field-walk, not S56 reflection. A distinct type codes as its base without a
+marker (D-CODABLE-DISTINCT1). Formats are adapters in **`core.encoding`**
 (`core.encoding.[json,csv,toml,yaml]`); encode verbs `to_string` /
 `to_string_pretty`; typed decode `decode<T>` (target inferable from the
 binding type; bare `decode(s)` yields dynamic `Dyn`). Hand-impl surface:
 `encode`/`decode` verbs over `Dyn`
 (`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); accumulated `[FieldError]`
 values with `{ path, reason }`; encode infallible. Field markers (`#` plane):
-`#Rename("x")`, `#Skip`, declaration defaults `field: T{expr}`, `#Flatten`;
-a type's `#Rename(.Camel|.Snake|.Pascal|.Kebab|.Screaming)` (E2409,
-D-RENAME-CASE1). Enum wire:
-externally tagged default, single-value variants bare; `#Discriminant("type")`
-internal (single unnamed payload under `"value"`), `#Untagged`. Unknown wire
-keys ignored by default;
-`#DenyUnknownFields` errors (E2412). Generic `#Codable` auto-adds
+`#Rename("x")`, `#Codable(.Skip)`, declaration defaults `field: T{expr}`,
+`#Codable(.Flatten)`; a type's `#Rename(.Camel|.Snake|.Pascal|.Kebab|.Screaming)`
+(E2409, D-RENAME-CASE1). Enum wire:
+externally tagged default, single-value variants bare; `#Codable(tag: .Field("type"))`
+internal (single unnamed payload under `"value"`), `#Codable(tag: .None)`
+untagged. Unknown wire keys ignored by default;
+`#Codable(unknown: .Deny)` errors (E2412). Generic `#Codable` auto-adds
 `Encode`/`Decode` bounds to wire-reaching type params only. Dynamic trees get
 `?`-chaining accessors (`.field(name)`, `.at(i)`, `.int()`, `.text()`, …).
 YAML parser is std-only, YAML 1.2 core incl. anchors.
@@ -5226,7 +5229,7 @@ D-VALIDATE-DECODE1)*: the hand-writable codec
 surface is a first-class `Encode`/`Decode` protocol — a type implements
   `encode(self) Dyn` and `decode(tree: Dyn) T ![FieldError]` to own
   its wire form (e.g. a validated newtype serializing as a
-bare string). The built-in `#Codable`/`#Encode`/`#Decode` derives become
+bare string). The built-in `#Codable` derives become
 ordinary derives that contribute the same checked Jet items and enter sema
 (R11, D-META-CODE1) — no compiler-synthesized Rust, no R11 carve-out.
 Ratifying this also fixes cross-module `decode<T>` (derive output
@@ -6573,7 +6576,7 @@ D-EXEC2=A)*: the Cranelift debug-AOT backend and its card #3953 dev-image
 runner are removed with the JIT. Every native `jet build`, including the
 default, `fast`, and `debug` profiles, emits Rust and builds with rustc/LLVM.
 
-**Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `#PublishedSchema` types
+**Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `#Codable(published)` types
 snapshot field layout; a breaking change without a migration is E0910.
 Verbs: `add f: T = val`; `remove f`; `change f: Old -> New via { old ->
 expr }` (converter: inline `via` → `impl New.From(Old)` in scope → E0910); no
@@ -6587,7 +6590,7 @@ steps run silently inside that call; no second decoder or compatibility wrapper
 exists.
 **D-MIGRATE4 (=A, ratified 2026-07-03, c105migrate4; shipped)**: the runtime
 half — codegen lowers each `migration { }` block to a step function; decoding
-a `#PublishedSchema` type first tries the current shape (prefer-newest
+a `#Codable(published)` type first tries the current shape (prefer-newest
 ambiguity rule), on mismatch detects the source shape by field-name set
 (newest matching historical shape wins) and walks the chain oldest→current
 applying steps. Plain `decode` applies silently. No matching shape → the

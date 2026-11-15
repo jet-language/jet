@@ -96,7 +96,7 @@ through sema's checked call graph before execution.
 
 ## Published schemas
 
-`#PublishedSchema` records have a lockfile-style snapshot in
+`#Codable(published)` records have a lockfile-style snapshot in
 `.jet/cache/schema/<Type>.snapshot`. The canonical sema codec records the
 format version, type, published version, optional `squashed_before` cutoff,
 and declaration-order field names and types. Field reordering is not breaking.

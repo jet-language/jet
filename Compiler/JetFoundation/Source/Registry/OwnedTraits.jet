@@ -79,8 +79,6 @@ OwnedTrait: struct {
     auto_derive_family: String?
     // `#Name` on a distinct type re-exposes it from the base type.
     bundle: Bool
-    // The distinct-type marker that bundles the family (`CodableAsBase`).
-    bundle_family: String?
     // A list, map, option or union has it when its elements do.
     through_elements: Bool
 }
@@ -259,14 +257,12 @@ owned_trait_requirers: fn(trait_name: String) -> [String] Never! {
     names
 }
 
-// The traits a family marker derives (`auto_derive_family`, `Codable`) or
-// bundles (`bundle_family`, `CodableAsBase`), in table order; empty when
-// `marker` names no such family.
-owned_trait_family: fn(marker: String, bundle: Bool) -> [String] Never! {
+// The traits a family marker derives (`auto_derive_family`, `Codable`), in
+// table order; empty when `marker` names no such family.
+owned_trait_family: fn(marker: String) -> [String] Never! {
     members := [String]{}
     loop owned in OWNED_TRAITS {
-        family: if bundle -> owned.bundle_family else -> owned.auto_derive_family
-        if family == .Val(name) && name == marker -> members.push(owned.name.copy())
+        if owned.auto_derive_family == .Val(name) && name == marker -> members.push(owned.name.copy())
     }
     members
 }
@@ -275,29 +271,20 @@ owned_trait_family: fn(marker: String, bundle: Bool) -> [String] Never! {
 // control: a trait it derives, or a family of them. `!{marker}` refuses it.
 owned_trait_auto_derive_marker: fn(marker: String) -> Bool Never! {
     if owned_trait(marker) == .Val(owned) && owned.auto_derive -> return true
-    owned_trait_family(marker, false).len() > 0
+    owned_trait_family(marker).len() > 0
 }
 
-// The traits `#{marker}` on a distinct type re-exposes from its base type:
-// the trait itself when it bundles, or the members of a bundle family.
-owned_trait_bundle: fn(marker: String) -> [String] Never! {
-    if owned_trait(marker) == .Val(owned) && owned.bundle -> return [String]{marker.copy()}
-    owned_trait_family(marker, true)
-}
-
-// The distinct-type marker that grants `trait_name`: the trait itself when
-// it bundles, else its bundle family (`CodableAsBase` for `Encode`).
-owned_trait_bundle_marker: fn(trait_name: String) -> String? Never! {
-    owned: owned_trait(trait_name) ?? return None
-    if owned.bundle -> return Val(owned.name.copy())
-    if owned.bundle_family == .Val(family) -> return Val(family.copy())
-    None
+// Whether `#{marker}` on a distinct type re-exposes the trait it names from
+// its base type.
+owned_trait_bundle: fn(marker: String) -> Bool Never! {
+    owned: owned_trait(marker) ?? return false
+    owned.bundle
 }
 
 // Whether the derive or marker `marker` gives a type a codec: a codec trait
 // or a family whose members are codec traits (`Codable`, `Encode`).
 owned_trait_codec_marker: fn(marker: String) -> Bool Never! {
-    names := owned_trait_family(marker, false)
+    names := owned_trait_family(marker)
     if names.len() == 0 -> return owned_trait_codec(marker)
     loop name in names {
         if !owned_trait_codec(name) -> return false

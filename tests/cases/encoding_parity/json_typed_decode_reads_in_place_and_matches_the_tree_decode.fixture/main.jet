@@ -16,13 +16,12 @@ Inner: struct {
     y: Float?
 }
 
-#[Codable, DenyUnknownFields]
+#Codable(unknown: .Deny)
 Strict: struct {
     a: Int
     #Rename("bee") b: String
 }
 
-#CodableAsBase
 Usd: distinct Int
 
 #Codable
@@ -45,7 +44,7 @@ Row: struct {
     ok: Bool
     raw: Dyn
     blob: [U8]
-    #Skip note: String?
+    #Codable(.Skip) note: String?
 }
 
 show_errors: fn(label: String, errors: [FieldError]) {

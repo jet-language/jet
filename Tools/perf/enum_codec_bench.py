@@ -141,13 +141,13 @@ FORM_INFO: dict[str, dict[str, Any]] = {
     "internal": {
         "description": "internally tagged canonical enum representation",
         "entrypoint": "core.encoding.json.to_string/decode<T>",
-        "marker": '#Discriminant("type")',
+        "marker": '#Codable(tag: .Field("type"))',
         "runtime_supported": True,
     },
     "untagged": {
         "description": "untagged canonical enum representation",
         "entrypoint": "core.encoding.json.to_string/decode<T>",
-        "marker": "#Untagged",
+        "marker": "#Codable(tag: .None)",
         "runtime_supported": True,
     },
     "adjacent": {

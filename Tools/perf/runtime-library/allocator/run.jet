@@ -42,7 +42,7 @@ SIGNALS: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGAB
 
 // One build step as build.json records it: the exit code or null, the
 // signal's name or null, and why it did not start when it did not.
-#Encode
+#Codable(only: .Encode)
 Step: struct {
     name: String
     rc: Dyn
@@ -50,26 +50,26 @@ Step: struct {
     error: String?
 }
 
-#Encode
+#Codable(only: .Encode)
 Input: struct {
     file: String
     sha256: String
 }
 
-#Encode
+#Codable(only: .Encode)
 SourceHashes: struct {
     driver: String
     rust: String
 }
 
-#Encode
+#Codable(only: .Encode)
 Inputs: struct {
     o0: Input
     o1: Input
     remaining: Input
 }
 
-#[Encode, Rename(.Camel)]
+#[Codable(only: .Encode), Rename(.Camel)]
 Pins: struct {
     cell: String
     iterations: Int
@@ -82,14 +82,14 @@ Pins: struct {
     inputs: Inputs
 }
 
-#Encode
+#Codable(only: .Encode)
 Build: struct {
     pins: Pins
     steps: [Step]
 }
 
 // One timed run's samples.jsonl line.
-#[Encode, Rename(.Camel)]
+#[Codable(only: .Encode), Rename(.Camel)]
 Sample: struct {
     arm: String
     round: Int
@@ -105,7 +105,7 @@ Sample: struct {
 
 // An arm in result.json: its median, least and most only when every round
 // printed the expected checksum.
-#[Encode, Rename(.Camel)]
+#[Codable(only: .Encode), Rename(.Camel)]
 Measured: struct {
     binary: String
     sha256: String
@@ -116,20 +116,20 @@ Measured: struct {
     max_ms: Float?
 }
 
-#Encode
+#Codable(only: .Encode)
 Arms: struct {
     #Rename("O0") o0: Measured
     #Rename("O1") o1: Measured
     #Rename("Rust") rust: Measured
 }
 
-#Encode
+#Codable(only: .Encode)
 Ratios: struct {
     #Rename("O0/Rust") o0: Float?
     #Rename("O1/Rust") o1: Float?
 }
 
-#[Encode, Rename(.Camel)]
+#[Codable(only: .Encode), Rename(.Camel)]
 Result: struct {
     pins: Pins
     expected: String

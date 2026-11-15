@@ -10,6 +10,7 @@ use jet_foundation.[
     ExprMember,
     ExprPair,
     IndexKind,
+    MARKER_CODABLE,
     Measure,
     NodeKind,
     OrFallback,
@@ -35,7 +36,8 @@ use jet_foundation.[
     name_index,
     name_intern,
     name_table,
-    owned_trait_bundle_marker,
+    owned_trait_bundle,
+    owned_trait_codec,
     type_identity_equal,
     type_name,
     module_is_core,
@@ -1539,15 +1541,21 @@ sema_expression_displayable: fn(ty: Type, environment: SemaScopeEnvironment, pro
     }
 }
 
-// The bundle markers of a distinct type named in this scope, in the order
-// its derives came from them.
+// The markers that grant a distinct type named in this scope its forwarded
+// operations, in the order its derives came from them: each bundle trait's
+// own, and `#Codable` for a codec it asked for.
 sema_expression_distinct_bundles: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [String]? {
     owner: sema_expression_type_symbol(scopes, environment, program, name) ?? return None
     definition: sema_scope_declaration_distinct(environment, program, owner.id) ?? return None
     granted := [String]{}
     loop derived in definition.derives {
-        marker: owned_trait_bundle_marker(derived.name) ?? next
-        if !granted.contains("#{marker}") -> granted.push("#{marker}")
+        marker := ""
+        if {
+            owned_trait_bundle(derived.name) -> marker = "#{derived.name}"
+            owned_trait_codec(derived.name) -> marker = "#{MARKER_CODABLE}"
+            else -> next
+        }
+        if !granted.contains(marker) -> granted.push(marker)
     }
     Val(granted)
 }

@@ -1,17 +1,17 @@
 // The options of `#Codable`, the one serialization marker. On a type it
 // takes `only: .Encode | .Decode` (one direction; both when absent),
 // `unknown: .Deny` (a decoded key the struct doesn't declare fails),
-// `tag: .External | .Field("kind") | .None` (how an enum names its case),
-// `from: .Base` (a distinct type codes as its base) and the bare word
-// `published` (the struct's wire shape is pinned for schema snapshots and
-// migrations). On a field it takes one form: `.Skip` leaves the field off the
-// wire and `.Flatten` splices a struct field's keys into the enclosing object.
-// The parser, sema, the formatter and the CLI read every option here.
+// `tag: .External | .Field("kind") | .None` (how an enum names its case) and
+// the bare word `published` (the struct's wire shape is pinned for schema
+// snapshots and migrations); on a distinct type it asks for the base's codec,
+// which a distinct type has by default. On a field it takes one form: `.Skip`
+// leaves the field off the wire and `.Flatten` splices a struct field's keys
+// into the enclosing object. The parser, sema, the formatter and the CLI read
+// every option here.
 
 CODABLE_ONLY: "only"
 CODABLE_UNKNOWN: "unknown"
 CODABLE_TAG: "tag"
-CODABLE_FROM: "from"
 CODABLE_PUBLISHED: "published"
 
 // The `#Codable` marker among `markers`, if one is written. `#!Codable`
@@ -76,11 +76,6 @@ codable_flattens: fn(markers: [Marker]) -> Bool Never! {
 codable_denies_unknown: fn(markers: [Marker]) -> Bool Never! {
     marker: codable_marker(markers) ?? return false
     codable_option_word(marker, CODABLE_UNKNOWN) == Val("Deny")
-}
-
-// Whether a distinct type codes as its base (`#Codable(from: .Base)`).
-codable_from_base: fn(marker: Marker) -> Bool Never! {
-    codable_option_word(marker, CODABLE_FROM) == Val("Base")
 }
 
 // Whether a struct's wire shape is published (`#Codable(published)`, or

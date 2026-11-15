@@ -29,12 +29,9 @@ use jet_foundation.[
     ImportDecl,
     Item,
     ItemTemplateLoop,
-    MARKER_FLATTEN,
     MARKER_INLINE,
     MARKER_META,
-    MARKER_SKIP,
     MARKER_STATIC,
-    MARKER_UNTAGGED,
     Marker,
     MarkerCallArg,
     MarkerDecl,
@@ -452,15 +449,8 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
                 if def.name == name {
                     if !jfmt_has_name(def.derives, "Decode") -> return None
                     if codable_tag_field(def.type_markers) != None -> return Val([SerdeWireShape]{SerdeWireShape.Object})
-                    loop marker in def.serde_markers {
-                        if marker.name == "Tag" -> return Val([SerdeWireShape]{SerdeWireShape.Object})
-                    }
-                    untagged := codable_untagged(def.type_markers)
-                    loop marker in def.serde_markers {
-                        if marker.name == MARKER_UNTAGGED -> untagged = true
-                    }
                     shapes := [SerdeWireShape]{}
-                    if !untagged {
+                    if !codable_untagged(def.type_markers) {
                         loop variant in def.variants {
                             if variant.payload == {
                                 .Unit -> shapes.push(SerdeWireShape.Text)
@@ -2168,10 +2158,7 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
     } else if member.kind == JFMT_MEMBER_FIELD {
         field: body.fields[member.index]
         jfmt_emit_leading_declaration(f, field.name_span.start)
-        skipped := codable_skips(field.serde_markers) || codable_flattens(field.serde_markers)
-        loop marker in field.serde_markers {
-            if marker.name == MARKER_SKIP || marker.name == MARKER_FLATTEN -> skipped = true
-        }
+        skipped: codable_skips(field.serde_markers) || codable_flattens(field.serde_markers)
         jfmt_fmt_field(f, field, derives_decode && !skipped)
     } else if member.kind == JFMT_MEMBER_CLI_BINDING {
         binding: body.cli_bindings[member.index]

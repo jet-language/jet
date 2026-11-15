@@ -1868,7 +1868,7 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
             // `#Interrupt`, `#Context`, `#Deadline` and `#Allow` are sema's,
             // `#FX` is the effect row's, `#Redact` marks fields and `#Root` a
             // parameter.
-            .FFI | .Import | .Memo | .Redact | .Root | .Commutative | .Static | .SingleUse | .PublishedSchema | .Interrupt | .Context | .FX | .Allow | .Deadline -> {}
+            .FFI | .Import | .Memo | .Redact | .Root | .Commutative | .Static | .SingleUse | .Interrupt | .Context | .FX | .Allow | .Deadline -> {}
         }
     }
     // `#Job` metadata and its `every:` schedule.
@@ -2080,7 +2080,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
 
 // Rust `attach_type_markers`: the markers, the derives and serde markers they
 // request, the package auto-derive default and the SingleUse/MustUse/
-// PublishedSchema facts. They apply once the whole body is read, so a marker
+// published-schema facts. They apply once the whole body is read, so a marker
 // line anywhere in the body counts the same as the markers above.
 parser_apply_struct_markers: fn(state: &JetParserState, value: &StructDef, markers: [Marker], grouped: Bool) {
     parser_apply_struct_type_markers(state, value, markers)
@@ -2607,10 +2607,6 @@ parser_apply_type_markers: fn(state: &JetParserState, value: &StructDef, markers
         if hook == .MustUse {
             value.is_must_use = true
             value.must_use_span = Val(marker.span)
-        }
-        if hook == .PublishedSchema {
-            value.is_published_schema = true
-            value.published_schema_span = Val(marker.span)
         }
     }
     // `#Codable(published)` pins the struct's wire shape.

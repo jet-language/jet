@@ -145,14 +145,14 @@ Options: struct {
     gains: String?
 }
 
-#Decode
+#Codable(only: .Decode)
 Fixture: struct {
     script: String
     out: String
     fresh: Bool{false}
 }
 
-#Decode
+#Codable(only: .Decode)
 Server: struct {
     script: String
     port: Int
@@ -160,7 +160,7 @@ Server: struct {
 }
 
 // The cell fields this tool reads; `what` and `gauntlet` are for its readers.
-#Decode
+#Codable(only: .Decode)
 Bench: struct {
     name: String
     jet: String
@@ -174,19 +174,21 @@ Bench: struct {
     scriptbench: [String]{[String]{}}
 }
 
-#Decode
+// Both codecs: `Workload` decodes its defaulted `servers` through the
+// default's encoded form.
+#Codable
 Served: struct {
     port: Int
     delay_ms: Int
 }
 
-#Decode
+#Codable(only: .Decode)
 Workload: struct {
     id: String
     servers: [Served]{[Served]{}}
 }
 
-#Decode
+#Codable(only: .Decode)
 Manifest: struct {
     workloads: [Workload]
 }
@@ -229,7 +231,7 @@ Pace: struct {
 }
 
 // A table row, written to results.json with the original's keys in its order.
-#Encode
+#Codable(only: .Encode)
 Row: struct {
     cell: String
     variant: String
@@ -247,13 +249,13 @@ Row: struct {
     cycles_gate: String
 }
 
-#Encode
+#Codable(only: .Encode)
 Gates: struct {
     size: Float
     cycles: Float
 }
 
-#Encode
+#Codable(only: .Encode)
 Results: struct {
     runs: Int
     interleaved: Bool
@@ -263,7 +265,7 @@ Results: struct {
     rows: [Row]
 }
 
-#Encode
+#Codable(only: .Encode)
 Timed: struct {
     ns: Int
     rss: Int
@@ -272,7 +274,7 @@ Timed: struct {
 
 // A variant's gains: the best wall time, the largest peak RSS, the stripped
 // size and every run.
-#Encode
+#Codable(only: .Encode)
 Measured: struct {
     ns: Int
     rss: Int
@@ -282,7 +284,7 @@ Measured: struct {
 
 // gains.json: the run's settings, each compiler's path under its label, and
 // every row.
-#Encode
+#Codable(only: .Encode)
 Gains: struct {
     best_of: Int
     interleaved: Bool

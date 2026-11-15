@@ -3,7 +3,7 @@
 // or syntax constant keeps a second list of them.
 use {
     owned_traits_files: core.files
-    jet_foundation.[OWNED_TRAITS, OwnedContract, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_bundle_marker, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_implies, owned_trait_literal, owned_trait_requirers, owned_trait_requires_listed, owned_trait_structural_names]
+    jet_foundation.[OWNED_TRAITS, OwnedContract, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_implies, owned_trait_literal, owned_trait_requirers, owned_trait_requires_listed, owned_trait_structural_names]
 }
 
 // The one file that may list the owned trait names.
@@ -12,9 +12,9 @@ OWNED_TRAITS_ROWS: "Compiler/JetFoundation/Source/Registry/OwnedTraitRows.jet"
 // The syntax registry, whose constants are spellings, not trait lists.
 OWNED_TRAITS_SYNTAX: "Compiler/JetFoundation/Data/Syntax"
 
-// A name the table answers for: a trait, or a derive or bundle family marker.
+// A name the table answers for: a trait, or a derive family marker.
 owned_traits_known: fn(name: String) -> Bool Never! {
-    owned_trait(name) != None || owned_trait_family(name, false).len() > 0 || owned_trait_family(name, true).len() > 0
+    owned_trait(name) != None || owned_trait_family(name).len() > 0
 }
 
 // The owned trait and family names one source line quotes, in order, each once.
@@ -63,7 +63,6 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
         }
         if !hooked && owned.operators.len() > 0 -> violations.push("`{owned.name}` has operators and no hook")
         if owned.auto_derive_family == .Val(family) && owned_trait(family) != None -> violations.push("`{owned.name}`'s derive family `{family}` is also a trait")
-        if owned.bundle_family == .Val(family) && owned_trait(family) != None -> violations.push("`{owned.name}`'s bundle family `{family}` is also a trait")
     }
     assert_eq(violations.join("\n"), "")
 }
@@ -72,10 +71,11 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
     assert(owned_trait_auto_derive_marker("Codable"))
     assert(owned_trait_auto_derive_marker("Debug"))
     assert(!owned_trait_auto_derive_marker("Display"))
-    assert_eq(owned_trait_family("Codable", false).join(" "), "Encode Decode")
-    assert_eq(owned_trait_bundle("CodableAsBase").join(" "), "Encode Decode")
-    assert_eq(owned_trait_bundle("Numeric").join(" "), "Numeric")
-    assert_eq(owned_trait_bundle("Debug").join(" "), "")
+    assert_eq(owned_trait_family("Codable").join(" "), "Encode Decode")
+    assert(!owned_trait_auto_derive_marker("Encode"))
+    assert(owned_trait_bundle("Numeric"))
+    assert(!owned_trait_bundle("Debug"))
+    assert(!owned_trait_bundle("Decode"))
     assert(owned_trait_codec("Decode"))
     assert(!owned_trait_codec("Codable"))
     assert(owned_trait_codec_marker("Codable"))
@@ -86,9 +86,6 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
     assert(!owned_trait_literal("Add"))
     assert(owned_trait_commutative("Mul"))
     assert(!owned_trait_commutative("Sub"))
-    assert_eq(owned_trait_bundle_marker("Decode") ?? "", "CodableAsBase")
-    assert_eq(owned_trait_bundle_marker("Numeric") ?? "", "Numeric")
-    assert(owned_trait_bundle_marker("Equatable") == None)
     assert_eq(owned_trait_requires_listed("Numeric"), "Add, Sub, Mul, and Comparable")
     assert(owned_trait_implies("Numeric", "Comparable"))
     assert(!owned_trait_implies("Comparable", "Numeric"))
@@ -130,7 +127,7 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
             value: parts[1].split("\"").to_list()[0]
             if !owned_traits_known(value) -> next
             marker: parts[0].starts_with("MARKER_")
-            if marker && !owned_trait_auto_derive_marker(value) && owned_trait_bundle(value).len() == 0 -> next
+            if marker && !owned_trait_auto_derive_marker(value) && !owned_trait_bundle(value) -> next
             violations.push("{entry.path}:{index + 1} spells `{value}` as {parts[0]}; OWNED_TRAITS owns it")
         }
     }

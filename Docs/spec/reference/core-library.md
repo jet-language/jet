@@ -4050,11 +4050,13 @@ The standard formats are exposed as `core.encoding.base32`, `base64`, `binary`,
 #### Typed codecs and validation
 
 A parser returns a `Dyn` (or a format-specific document). A typed codec
-maps a declared Jet type to and from that tree. `#Codable`, `#Encode`, and
-`#Decode` derive the typed encode/decode routes; field attributes such as
-`#Rename`, `#Skip`, `#Flatten`, `#DenyUnknownFields`, `#Discriminant`, and
-`#Untagged` describe the wire shape; `#Rename(.Camel)` on a type sets the
-casing of every field or variant. Unknown fields are
+maps a declared Jet type to and from that tree. `#Codable`, `#Codable(only: .Encode)`, and
+`#Codable(only: .Decode)` derive the typed encode/decode routes, and a distinct
+type codes as its base type with no marker. `#Rename` and the field options
+`#Codable(.Skip)` and `#Codable(.Flatten)` describe a field's wire shape; the
+type options `unknown: .Deny`, `tag: .Field("kind")` and `tag: .None` describe
+the type's, and `#Rename(.Camel)` on a type sets the casing of every field or
+variant. Unknown fields are
 ignored unless a type opts into rejection. A field conversion or missing
 required field is reported as a `FieldError` rather than silently defaulting to
 an unrelated type.
@@ -4067,7 +4069,7 @@ typed decoding check the destination range when reading it. `==` compares two
 decimal value at any precision, never through binary64, so `1.0` equals
 `1.00`, `1e400` equals `10e399` and `-0.0` equals `0.0`, and a `Number` never
 equals an `Int` or a `Float`. There is no public typed-text carrier.
-`#Codable` requests both directions; `#Encode` and `#Decode` request one-way derivation, and derivation is compiler-owned rather than macro- or reflection-driven (`D-SERDE1–8`). Typed `decode<T>` produces `T ![FieldError]` (or `[T] ![FieldError]` for CSV); each failure preserves its path and reason, and generic codec bounds are injected at the use site (`D-GENERIC-CALL1`; `D-SERDE6`; `D-SERDE9–12`). Hand-written codecs use the same `Encode`/`Decode` protocol and field-path accumulation (`D-SERDE2`; `D-SERDE13–16`).
+`#Codable` requests both directions; `#Codable(only: .Encode)` and `#Codable(only: .Decode)` request one-way derivation, and derivation is compiler-owned rather than macro- or reflection-driven (`D-SERDE1–8`). Typed `decode<T>` produces `T ![FieldError]` (or `[T] ![FieldError]` for CSV); each failure preserves its path and reason, and generic codec bounds are injected at the use site (`D-GENERIC-CALL1`; `D-SERDE6`; `D-SERDE9–12`). Hand-written codecs use the same `Encode`/`Decode` protocol and field-path accumulation (`D-SERDE2`; `D-SERDE13–16`).
 
 Validation can be declared as `validate { check(...) }`: all failed checks accumulate, and conditions and messages are purity-checked (`D-VALIDATE1`; `D-FIELDPOL1`; `S60/E3401`).
 The use-site escape is the bare Core builder `Validate.over(value)` (declared in `core.encoding.validate`, which the bare name loads on demand): `.check(condition, at: field, "message")` takes the same rule shape, where `at:` must name a field of the validated type (E0353/E0354). `.finish()` returns `T ![FieldError]` with every failed rule (`D-VALIDATE1`).

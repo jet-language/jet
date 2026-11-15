@@ -369,27 +369,13 @@ sema_checked_field_shape_names: fn(definition: StructDef, field: Field) -> TShap
     names
 }
 
-sema_checked_serde_attribute: fn(marker: Marker) -> TSerdeAttribute? {
-    kind: if marker.name == {
-        "Rename" -> Val(TSerdeAttributeKind.RenameAll)
-        "Discriminant" | "Tag" -> Val(TSerdeAttributeKind.Tag)
-        "Untagged" -> Val(TSerdeAttributeKind.Untagged)
-        "DenyUnknownFields" -> Val(TSerdeAttributeKind.DenyUnknownFields)
-        else -> None
-    }
-    kind_value: kind ?? return None
-    value: if kind_value == .RenameAll -> sema_checked_rename_case_word(marker) else -> sema_checked_marker_text(marker)
-    TSerdeAttribute{kind: kind_value, value: value, span: marker.span}
-}
-
-// The serde attributes of a type: its `#Rename` and the retiring wire
-// markers among `markers`, then the type options of its `#Codable`.
+// The serde attributes of a type: its `#Rename`, then the type options of its
+// `#Codable`.
 sema_checked_serde_attributes: fn(markers: [Marker], type_markers: [Marker]) -> [TSerdeAttribute] Never! {
     attributes := [TSerdeAttribute]{}
     loop marker in markers {
-        if marker.negated -> next
-        attribute: sema_checked_serde_attribute(marker) ?? next
-        attributes.push(attribute)
+        if marker.negated || marker.name != MARKER_RENAME -> next
+        attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.RenameAll, value: sema_checked_rename_case_word(marker), span: marker.span})
     }
     codable: codable_marker(type_markers) ?? return attributes
     if codable_denies_unknown(type_markers) -> attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.DenyUnknownFields, value: None, span: codable.span})
@@ -3059,7 +3045,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
             derives = sema_checked_type_derive_names(value.derives, definition, auto_derives.debug)
             auto_printable = auto_derives.printable && !sema_comparability_printable_blocked(graph, module_row.module_identity, definition)
             auto_derive_default = value.auto_derive_default
-            published_schema = value.is_published_schema || sema_checked_has_name(derives, "PublishedSchema")
+            published_schema = value.is_published_schema
             single_use = value.is_single_use
             must_use = value.is_must_use
             layout = sema_checked_layout(value.layout)

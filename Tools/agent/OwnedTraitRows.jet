@@ -39,9 +39,9 @@ METHOD_OPEN: Regex{"^[a-z][a-z0-9_]*: fn\("}
 NAME: Regex{"^[A-Z][A-Za-z0-9]*$"}
 METHOD_NAME: Regex{"^[a-z][a-z0-9_]*$"}
 FLAG_COLUMNS: [String]{"local", "bare_bound", "raw_return", "any_receiver", "commutative", "codec", "conversion", "derived", "checked_text", "auto_derive", "bundle", "through_elements"}
-TEXT_COLUMNS: [String]{"operators", "auto_derive_family", "bundle_family", "requires", "shares"}
-// The columns that name a family marker.
-FAMILY_COLUMNS: [String]{"auto_derive_family", "bundle_family"}
+TEXT_COLUMNS: [String]{"operators", "auto_derive_family", "requires", "shares"}
+// The column that names a family marker.
+FAMILY_COLUMN: "auto_derive_family"
 
 #Error
 OwnedTraitRowsError: struct {
@@ -370,7 +370,7 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
             contract = "OwnedContract.Methods{{methods: [OwnedMethod]{{\n{lines.join("")}    }}, associated: {quoted(source.associated)}, shares: {shares}}}"
         }
     }
-    Ok("    OwnedTrait{{name: \"{source.name}\", local: {flag(source, "local")}, bare_bound: {flag(source, "bare_bound")}, raw_return: {flag(source, "raw_return")}, contract: {contract}, operators: {quoted(words(source, "operators"))}, commutative: {flag(source, "commutative")}, requires: {quoted(words(source, "requires"))}, auto_derive: {flag(source, "auto_derive")}, auto_derive_family: {optional_text(source, "auto_derive_family")}, bundle: {flag(source, "bundle")}, bundle_family: {optional_text(source, "bundle_family")}, through_elements: {flag(source, "through_elements")}}},")
+    Ok("    OwnedTrait{{name: \"{source.name}\", local: {flag(source, "local")}, bare_bound: {flag(source, "bare_bound")}, raw_return: {flag(source, "raw_return")}, contract: {contract}, operators: {quoted(words(source, "operators"))}, commutative: {flag(source, "commutative")}, requires: {quoted(words(source, "requires"))}, auto_derive: {flag(source, "auto_derive")}, auto_derive_family: {optional_text(source, "auto_derive_family")}, bundle: {flag(source, "bundle")}, through_elements: {flag(source, "through_elements")}}},")
 }
 
 declared: fn(traits: [TraitSource], name: String) -> Bool Never! {
@@ -389,10 +389,8 @@ check_table: fn(traits: [TraitSource]) OwnedTraitRowsError! {
             if operators.contains(symbol) -> return Err(rows_fail("trait {source.name}: the operator `{symbol}` already belongs to another trait"))
             operators.push(symbol.copy())
         }
-        loop column in FAMILY_COLUMNS {
-            family: fact(source, column) ?? next
-            if declared(traits, family) -> return Err(rows_fail("trait {source.name}: the family marker `{family}` is also a trait name"))
-        }
+        family: fact(source, FAMILY_COLUMN) ?? next
+        if declared(traits, family) -> return Err(rows_fail("trait {source.name}: the family marker `{family}` is also a trait name"))
     }
 }
 
@@ -418,7 +416,7 @@ marker_text: fn(marker: String, traits: [TraitSource]) -> String Never! {
     bundles := [String]{}
     loop source in traits {
         if (source.name == marker && flag(source, "auto_derive")) || fact(source, "auto_derive_family") == Val((marker)) -> derives.push(source.name.copy())
-        if (source.name == marker && flag(source, "bundle")) || fact(source, "bundle_family") == Val((marker)) -> bundles.push(source.name.copy())
+        if source.name == marker && flag(source, "bundle") -> bundles.push(source.name.copy())
     }
     parts := [String]{}
     if derives.len() > 0 -> parts.push("On a struct or enum, derives {spelled(derives)} from its fields; `#!{marker}` refuses it.")
@@ -432,10 +430,8 @@ render_dictionary_rows: fn(source_text: String) -> String OwnedTraitRowsError! {
     markers := [String]{}
     loop source in traits {
         if (flag(source, "auto_derive") || flag(source, "bundle")) && !markers.contains(source.name) -> markers.push(source.name.copy())
-        loop column in FAMILY_COLUMNS {
-            family: fact(source, column) ?? next
-            if !markers.contains(family) -> markers.push(family.copy())
-        }
+        family: fact(source, FAMILY_COLUMN) ?? next
+        if !markers.contains(family) -> markers.push(family.copy())
     }
     markers.sort()
     rows := [String]{}

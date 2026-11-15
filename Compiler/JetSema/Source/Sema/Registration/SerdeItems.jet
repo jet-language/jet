@@ -1,9 +1,9 @@
 // (`expand_builtin_serde_items`): the built-in codecs are ordinary Jet impl
 // items. A struct or enum gets a compiler-built `impl T.Encode { encode:
 // fn(self) -> Dyn }` and/or `impl T.Decode { decode: fn(tree: Dyn) -> T
-// [FieldError]! }` when it derives the codec explicitly (`#Codable`, `#Encode`,
-// `#Decode`) or when the structural auto-derive selects it: every declaration
-// is Codable by default unless a `#!Codable`/`#!Encode`/`#!Decode` marker
+// [FieldError]! }` when it derives the codec explicitly (`#Codable`, both or
+// the direction its `only:` keeps) or when the structural auto-derive selects
+// it: every declaration is Codable by default unless `#!Codable` or `only:`
 // refuses it, a stored field has no wire form, or a hand-written `impl
 // T.Encode`/`impl T.Decode` already supplies that codec. A distinct type
 // codes as its base value by the same rule, its base standing in for its
@@ -282,27 +282,20 @@ sema_serde_items_derive_span: fn(derives: [NamedSpan], name_span: Span) -> Span 
     name_span.copy()
 }
 
-sema_serde_items_has_marker: fn(markers: [Marker], name: String) -> Bool Never! {
-    loop marker in markers {
-        if marker.name == name -> return true
-    }
-    false
-}
-
-// A field `#Codable(.Skip)` (or `#Skip`) leaves off the wire.
+// A field `#Codable(.Skip)` leaves off the wire.
 sema_serde_items_skips: fn(field: Field) -> Bool Never! {
-    codable_skips(field.serde_markers) || sema_serde_items_has_marker(field.serde_markers, "Skip")
+    codable_skips(field.serde_markers)
 }
 
-// A field `#Codable(.Flatten)` (or `#Flatten`) splices into its object.
+// A field `#Codable(.Flatten)` splices into its object.
 sema_serde_items_flattens: fn(field: Field) -> Bool Never! {
-    codable_flattens(field.serde_markers) || sema_serde_items_has_marker(field.serde_markers, "Flatten")
+    codable_flattens(field.serde_markers)
 }
 
 // A struct whose decoder refuses keys it doesn't declare:
-// `#Codable(unknown: .Deny)` (or `#DenyUnknownFields`).
+// `#Codable(unknown: .Deny)`.
 sema_serde_items_denies_unknown: fn(definition: StructDef) -> Bool Never! {
-    codable_denies_unknown(definition.type_markers) || sema_serde_items_has_marker(definition.serde_markers, "DenyUnknownFields")
+    codable_denies_unknown(definition.type_markers)
 }
 
 // Rust `codec_params`: every type parameter a wire type mentions gains the
@@ -345,7 +338,7 @@ sema_serde_items_struct_encode: fn(definition: StructDef, span: Span) -> Item Ne
     sema_serde_items_impl(definition.name, "Encode", [Func]{method}, definition.is_pub, definition.is_package_pub, span)
 }
 
-// A struct with no `#Flatten` field and no migration chain reads its members
+// A struct with no `#Codable(.Flatten)` field and no migration chain reads its members
 // from a `__DecodeSource` in document order (`__read`), and its
 // `decode(tree)` reads the tree through the same body. Any other struct and
 // every enum decode from the value's tree, which `__Decoding.read` captures
@@ -594,7 +587,7 @@ sema_serde_items_field_value: fn(field: Field, span: Span) -> Expr Never! {
 }
 
 // One `(key, value)` row per emitted field, in declaration order, handed to
-// `Dyn.Object`; an absent optional field appends nothing, and a `#Flatten`
+// `Dyn.Object`; an absent optional field appends nothing, and a `#Codable(.Flatten)`
 // field's encoded entries are inlined at its position. Linear in the field
 // count.
 sema_serde_items_struct_encode_body: fn(definition: StructDef, span: Span) -> [Stmt] Never! {
@@ -1065,7 +1058,7 @@ sema_serde_items_if_else: fn(cond: Expr, body: [Stmt], else_body: [Stmt], span: 
 
 // ---------------------------------------------------------------------------
 // Published-schema migration (Rust `struct_migration_decode`): a
-// decodable `#PublishedSchema` struct with `migration` blocks decodes silently
+// decodable `#Codable(published)` struct with `migration` blocks decodes silently
 // from every historical shape through ordinary generated items. Its `decode`
 // runs the current-shape decode first; when that fails, the walk helper
 // matches the object's key set against each historical shape (newest first,
@@ -1075,7 +1068,7 @@ sema_serde_items_if_else: fn(cond: Expr, body: [Stmt], else_body: [Stmt], span: 
 // match returns the current-shape failures. Each step is linear in the
 // object's entries.
 
-// The `migration` blocks of a non-generic `#PublishedSchema` struct, in source
+// The `migration` blocks of a non-generic `#Codable(published)` struct, in source
 // order. Empty (no migration chain) when a `change` has no converter: E0910
 // reports that block.
 sema_serde_items_migration_blocks: fn(definition: StructDef, items: [Item]) -> [MigrationDecl] Never! {
@@ -1307,18 +1300,14 @@ sema_serde_items_static_string: fn(marker: Marker) -> String? Never! {
     None
 }
 
-// An enum's internal tag key: `#Codable(tag: .Field("kind"))` (or `#Tag`).
+// An enum's internal tag key: `#Codable(tag: .Field("kind"))`.
 sema_serde_items_enum_tag: fn(definition: EnumDef) -> String? Never! {
-    if codable_tag_field(definition.type_markers) == .Val(key) -> return Val(key)
-    loop marker in definition.serde_markers {
-        if marker.name == "Tag" -> return sema_serde_items_static_string(marker)
-    }
-    None
+    codable_tag_field(definition.type_markers)
 }
 
-// An enum coded without a case name: `#Codable(tag: .None)` (or `#Untagged`).
+// An enum coded without a case name: `#Codable(tag: .None)`.
 sema_serde_items_untagged: fn(definition: EnumDef) -> Bool Never! {
-    codable_untagged(definition.type_markers) || sema_serde_items_has_marker(definition.serde_markers, "Untagged")
+    codable_untagged(definition.type_markers)
 }
 
 // Rust `serde_enum_variant_key`: the variant's `#Rename` (its `json:` label

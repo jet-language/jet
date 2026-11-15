@@ -46,7 +46,7 @@ TRUTHY: ["1", "true", "yes", "on"]
 // The default scratch parent, the original's Path.home() / ".cache" / "jet-dev" / "enum-codec-bench".
 SCRATCH_DEFAULT_PARTS: ["~", ".cache", "jet-dev", "enum-codec-bench"]
 
-#Encode
+#Codable(only: .Encode)
 Witness: struct {
     source_expression: String
     semantic_value: String
@@ -69,7 +69,7 @@ WIRE_PAYLOADS: [
     "adjacent": ["payload": "{{\"kind\":\"Write\",\"body\":\"hello\"}}", "evolution": "{{\"kind\":\"Archive\",\"body\":\"hello\"}}", "unknown": "{{\"kind\":\"Future\",\"body\":\"hello\"}}", "malformed": "{{\"kind\":\"Write\",\"body\":7}}"],
 ]
 
-#Encode
+#Codable(only: .Encode)
 FormInfo: struct {
     description: String
     entrypoint: String
@@ -79,8 +79,8 @@ FormInfo: struct {
 
 FORM_INFO: [
     "external": FormInfo{description: "externally tagged canonical enum representation", entrypoint: ENTRYPOINT, marker: "none", runtime_supported: true},
-    "internal": FormInfo{description: "internally tagged canonical enum representation", entrypoint: ENTRYPOINT, marker: "#Discriminant(\"type\")", runtime_supported: true},
-    "untagged": FormInfo{description: "untagged canonical enum representation", entrypoint: ENTRYPOINT, marker: "#Untagged", runtime_supported: true},
+    "internal": FormInfo{description: "internally tagged canonical enum representation", entrypoint: ENTRYPOINT, marker: "#Codable(tag: .Field(\"type\"))", runtime_supported: true},
+    "untagged": FormInfo{description: "untagged canonical enum representation", entrypoint: ENTRYPOINT, marker: "#Codable(tag: .None)", runtime_supported: true},
     "adjacent": FormInfo{description: "adjacently tagged tag/content representation", entrypoint: "adjacent marker entry point", marker: "unavailable", runtime_supported: false},
 ]
 
@@ -124,7 +124,7 @@ Bench: struct {
     profile: String
 }
 
-#Encode
+#Codable(only: .Encode)
 FieldStatus: struct {
     encoded_bytes: String
     allocation_count: String
@@ -132,7 +132,7 @@ FieldStatus: struct {
     decode_median_ns: String
 }
 
-#Encode
+#Codable(only: .Encode)
 Matrix: struct {
     id: String
     form: String
@@ -367,7 +367,7 @@ with_reason: fn(base: Matrix, fixed: (status: String, reason: String)) -> Matrix
     cell
 }
 
-// The cell as the report holds it: #Encode leaves an absent figure out, and
+// The cell as the report holds it: #Codable(only: .Encode) leaves an absent figure out, and
 // the report writes it as null.
 cell_tree: fn(cell: Matrix) -> Dyn Never! {
     tree := cell.encode()

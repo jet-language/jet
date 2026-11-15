@@ -64,7 +64,7 @@ Mapping: struct {
 }
 
 // The paused location as printed, lines 1-based.
-#[Encode, Rename(.Camel)]
+#[Codable(only: .Encode), Rename(.Camel)]
 PauseReport: struct {
     #Rename("sourceMappingURL") source_mapping_url: String
     #Rename("scriptParsedMapUrl") script_parsed_map_url: Bool
@@ -76,10 +76,10 @@ PauseReport: struct {
     jet_text: String
 }
 
-#[Encode, Rename(.Camel)]
+#[Codable(only: .Encode), Rename(.Camel)]
 BreakpointAt: struct { url: String, line_number: Int, column_number: Int }
 
-#Encode
+#Codable(only: .Encode)
 Navigation: struct { url: String }
 
 run: fn(args: LiveArgs) Failure! {

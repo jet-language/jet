@@ -335,7 +335,7 @@ tagged child in encounter order, including text-like nodes. Repeated child
 Clark keys become arrays in encounter order only in ordinary child-key
 projection; never regroup `$content`. XML names cannot begin with `@`, `$`, or
 `{`, so control keys do not collide. Existing `#Rename("key")` and
-`#DenyUnknownFields` apply. (D-ENCXML1=A)
+`#Codable(unknown: .Deny)` apply. (D-ENCXML1=A)
 
 `XMLError` is exactly
 

@@ -1,0 +1,22 @@
+# The registered codable-options1 plan (toolchain a0.0.45) rewrites every
+# retired wire marker as a `#Codable` option, in a source and in a Markdown
+# file's prose and fence: `#Encode` and `#Decode` as `only:`, both directions
+# and either beside `#Codable` as plain `#Codable`, a field's `#Skip` and
+# `#[Flatten]`, `#DenyUnknownFields`, `#Discriminant(k)` (in a string too,
+# escapes kept, and after a string's `\n` escape), `#Untagged` and
+# `#PublishedSchema` stacked on its own line above `#Codable`, beside the
+# markers it leaves (`Debug`, `Rename(.Camel)`). `#CodableAsBase` goes, with
+# its line when it stood alone. `#!Encode`, whose spelling depends on a
+# hand-written decoder, and a keyless `#Discriminant` are reported and left,
+# and `C#` and `#Encoded` stay. A second run finds nothing left to rewrite.
+fixture: codable_options1_rewrites_every_retired_wire_marker/input
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- codable-options1 --write before.jet guide.md
+exit: 0
+stdout: = "SKIP before.jet:34: `#!Encode` refuses one codec: write `#!Codable` when the type writes its decoder by hand, else `#Codable(only: .Decode)`\nSKIP before.jet:52: `#Discriminant` without its key\nEDIT before.jet 17\nEDIT guide.md 5\nTOTAL 22 sites in 2 files\n"
+file: before.jet = codable_options1_rewrites_every_retired_wire_marker/before.out
+file: guide.md = codable_options1_rewrites_every_retired_wire_marker/guide.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- codable-options1 --write before.jet guide.md
+exit: 0
+stdout: = "SKIP before.jet:33: `#!Encode` refuses one codec: write `#!Codable` when the type writes its decoder by hand, else `#Codable(only: .Decode)`\nSKIP before.jet:50: `#Discriminant` without its key\nTOTAL 0 sites in 0 files\n"
+file: before.jet = codable_options1_rewrites_every_retired_wire_marker/before.out
+file: guide.md = codable_options1_rewrites_every_retired_wire_marker/guide.out

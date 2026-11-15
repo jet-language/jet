@@ -911,7 +911,7 @@ package default can deny `auto_derive` through
 trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.
 A `Display` implementation also satisfies a `Printable` bound, and a list,
 fixed list or option is `Printable` when its element is.
-`#Codable` requests both codec directions; `#Encode` and `#Decode` request one
+`#Codable` requests both codec directions; `#Codable(only: .Encode)` and `#Codable(only: .Decode)` request one
 (D-AUTODERIVE1=E, D-AUTODERIVE-SYNTAX1=D).
 
 Float and F32 are Comparable by IEEE 754 totalOrder (-NaN < -inf < ... <
@@ -1186,7 +1186,7 @@ defined in the compile-time section above.
 
 ### Published schemas and migrations
 
-`#PublishedSchema Name: struct { … }` marks a public record whose field layout is
+`#Codable(published) Name: struct { … }` marks a public record whose field layout is
 snapshotted under `.jet/cache/schema/`. A later project build compares the
 current shape with that snapshot by field name, ignoring order. A breaking shape
 change is E0910 unless a `migration` block declares it. The four operations are:
@@ -1221,7 +1221,7 @@ Typed `decode<T>` is the one codec contract and returns `T ![FieldError]` (or
 has no second decoder or migration-report result (D-MIGRATE3=A as amended by
 D-VALIDATE-DECODE1=B).
 
-For a concrete `#PublishedSchema` type that derives `Decode` and has migration
+For a concrete `#Codable(published)` type that derives `Decode` and has migration
 blocks, decode first tries the current shape. If that fails, it compares the
 wire key set (after any field `#Rename` and type `#Rename(.Case)` treatment) with historical shapes
 from newest to oldest, rewrites the first match forward in source order, and

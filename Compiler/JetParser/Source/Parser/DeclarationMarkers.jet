@@ -42,7 +42,7 @@ parser_split_type_markers: fn(markers: [Marker]) -> (derives: [NamedSpan], serde
     derives := [NamedSpan]{}
     loop marker in markers {
         if marker.negated && owned_trait_auto_derive_marker(marker.name) -> next
-        family: owned_trait_family(marker.name, false)
+        family: owned_trait_family(marker.name)
         if family.len() > 0 {
             loop name in family {
                 if marker.name != MARKER_CODABLE || codable_derives(marker, name) -> derives.push(NamedSpan{name: name, span: marker.name_span})
@@ -50,7 +50,7 @@ parser_split_type_markers: fn(markers: [Marker]) -> (derives: [NamedSpan], serde
             next
         }
         if marker.name == {
-            "DenyUnknownFields" | "Tag" | "Untagged" | "Rename" | "Skip" | "Default" | "Flatten" -> serde.push(marker.copy())
+            "Rename" | "Default" -> serde.push(marker.copy())
             "Layout" | "Specified" | "Deprecated" | "Error" | "FX" -> {}
             else -> derives.push(NamedSpan{name: marker.name, span: marker.name_span})
         }

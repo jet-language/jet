@@ -69,19 +69,19 @@ PREFIX_MODULES: [Rule]{
     {pattern: Regex{"^mir_(?:pass|optimizer|lint)_"}, name: "JetOptimizer"},
 }
 
-#Decode
+#Codable(only: .Decode)
 MapFile: struct {
     path: String
     sha256: String{""}
 }
 
-#Decode
+#Codable(only: .Decode)
 SourceMap: struct {
     schema: String{""}
     files: [MapFile]
 }
 
-#Decode
+#Codable(only: .Decode)
 Summary: struct {
     #Rename("needsDwarf") needs_dwarf: Bool{false}
 }
@@ -127,14 +127,14 @@ Profile: struct {
     phases: Counts
 }
 
-#Encode
+#Codable(only: .Encode)
 TopRow: struct {
     name: String
     inclusive: Int
     #Rename("self") own: Int
 }
 
-#[Encode, Rename(.Camel)]
+#[Codable(only: .Encode), Rename(.Camel)]
 Report: struct {
     samples: Int
     graph: String

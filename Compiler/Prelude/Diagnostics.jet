@@ -13432,7 +13432,7 @@ BreakingSchemaChange: struct {
         meaning: "A breaking change to a published schema without a migration"
 
         what: fn(self) -> String {
-            "`#PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical"
+            "`#Codable(published)` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical"
         }
 
         why: fn(self) -> String {
@@ -20922,18 +20922,18 @@ FlattenNonStruct: struct {
         safety_reason: "Flatten splices a struct's keys into the object, so a field that is no struct has no keys to splice."
         expert_path: "none: the flattened field is a `#Codable` struct"
         stage: [.Compile]
-        meaning: "`#Flatten` on a field that isn't a struct"
+        meaning: "`#Codable(.Flatten)` on a field that isn't a struct"
         detail: true
-        fix_next: "Give the field a `#Codable` struct type, or remove `#Flatten`."
+        fix_next: "Give the field a `#Codable` struct type, or remove `#Codable(.Flatten)`."
 
-        what: fn(self) -> String { "`#Flatten` on `{self.field}` needs a struct-typed field." }
+        what: fn(self) -> String { "`#Codable(.Flatten)` on `{self.field}` needs a struct-typed field." }
 
         why: fn(self) -> String {
             "Flatten splices another struct's keys into this object, so the field must itself be a `#Codable` struct — not a primitive, list, or map."
         }
 
         fix: fn(self) -> String {
-            "Give `{self.field}` a `#Codable` struct type, or drop `#Flatten`."
+            "Give `{self.field}` a `#Codable` struct type, or drop `#Codable(.Flatten)`."
         }
     }
 }
@@ -20980,7 +20980,7 @@ MissingRequiredField: struct {
         }
 
         why: fn(self) -> String {
-            "Decoding into a `#Codable`/`#Decode` type found no wire value for a required field and the field has no declaration default (`T{{{{expr}}}}`) and isn't optional."
+            "Decoding into a `#Codable`/`#Codable(only: .Decode)` type found no wire value for a required field and the field has no declaration default (`T{{{{expr}}}}`) and isn't optional."
         }
 
         fix: fn(self) -> String {
@@ -21022,20 +21022,20 @@ UnknownDecodedField: struct {
         code: "E2412"
         safety_class: .Soundness
         safety_reason: "The type refuses unknown keys, so accepting one would silently drop data the type said must not be dropped."
-        expert_path: "none: the type leaves out `#DenyUnknownFields`"
+        expert_path: "none: the type leaves out `#Codable(unknown: .Deny)`"
         stage: [.Compile]
-        meaning: "A decoded key the `#DenyUnknownFields` struct doesn't declare"
+        meaning: "A decoded key the `#Codable(unknown: .Deny)` struct doesn't declare"
         detail: true
         no_fix: .Ambiguous
 
         what: fn(self) -> String { "`E2412: unknown field `{self.field}`` (runtime `FieldError`)." }
 
         why: fn(self) -> String {
-            "The struct is marked `#DenyUnknownFields` and the input carried a key the struct doesn't declare, so decoding fails instead of silently dropping it."
+            "The struct is marked `#Codable(unknown: .Deny)` and the input carried a key the struct doesn't declare, so decoding fails instead of silently dropping it."
         }
 
         fix: fn(self) -> String {
-            "Remove `#DenyUnknownFields` to ignore extra keys (the lenient default), add the field, or fix the producer."
+            "Remove `#Codable(unknown: .Deny)` to ignore extra keys (the lenient default), add the field, or fix the producer."
         }
     }
 }

@@ -155,10 +155,6 @@ UNIT_FAMILY_SCALE_FIELD: "scale"
 
 UNIT_FAMILY_OFFSET_FIELD: "offset"
 
-/// (ratified 2026-06-22): `#PublishedSchema` — marks a struct whose
-/// a declared migration is E0910. Written `#PublishedSchema` before `struct`.
-MARKER_PUBLISHED_SCHEMA: "PublishedSchema"
-
 /// Compiler-owned storage for the original ordered wire
 /// object. This is an emitted field, not a user-facing source spelling.
 PUBLISHED_UNKNOWN_FIELDS: "__jet_unknown_fields"
@@ -169,7 +165,7 @@ PUBLISHED_UNKNOWN_FIELDS: "__jet_unknown_fields"
 /// (unconsumed at scope end) / E0141 (unconsumed on one branch); aliasing one
 /// with `&`/`view` is E0142. `#SingleUse` values are move-only. The tag is
 /// compile-time only and erases in codegen (I3). Written `#SingleUse` before the
-/// `struct`/`enum`, same marker idiom as `#PublishedSchema`.
+/// `struct`/`enum`, same marker idiom as `#MustUse`.
 MARKER_SINGLE_USE: "SingleUse"
 
 /// `#Replayable fn` marks a function whose reachable effects must be
@@ -184,7 +180,7 @@ MARKER_REPLAYABLE: "Replayable"
 MARKER_MUST_USE: "MustUse"
 
 /// (ratified 2026-06-22): contextual keyword `migration` — introduces
-/// a migration block that declares how a `#PublishedSchema` struct changed between
+/// a migration block that declares how a `#Codable(published)` struct changed between
 /// releases. Used as `migration TypeName { rename old -> new }`.
 /// (ratified 2026-07-12, card #506): contextual keyword `validate`
 /// — introduces the in-body `validate { … }` block inside a struct definition
@@ -260,7 +256,7 @@ KW_REORDER_RETIRED: "reorder"
 KW_DROP_RETIRED: "drop"
 
 /// (ratified): `jet inspect schema` subcommand and its verbs. `status`
-/// reports each `#PublishedSchema` type's pinned shape; `squash --before <ver>`
+/// reports each `#Codable(published)` type's pinned shape; `squash --before <ver>`
 /// re-baselines snapshots to the current shape. There is NO `check` verb —
 /// `jet build`'s E0910 is already the CI gate.
 CMD_SCHEMA: "schema"
@@ -400,20 +396,7 @@ MARKER_RECEIPT: "Receipt"
                                                   // Per-field attributes (= A), written `#[…]` before a field.
 MARKER_RENAME: "Rename" // #[Rename("wire_key")] on a field or variant, #Rename(.Camel) on a type
 
-MARKER_SKIP: "Skip" // #[Skip]
-
 MARKER_DEFAULT: "Default" // #[Default] / #[Default(expr)]
-
-MARKER_FLATTEN: "Flatten" // #[Flatten]
-
-                                            // Container attributes, written `#[…]` before a struct/enum.
-MARKER_DENY_UNKNOWN_FIELDS: "DenyUnknownFields"
-
-/// Serde's internal discriminant field is not a
-/// compile-time fact tag.
-MARKER_TAG: "Discriminant"
-
-MARKER_UNTAGGED: "Untagged" // #[Untagged]
 
 // ── Maturity metadata values (ratified 2026-07-12) ──────────
 // Closed values for `#Meta(maturity: .Experimental | .Tested | .Hardened)`.

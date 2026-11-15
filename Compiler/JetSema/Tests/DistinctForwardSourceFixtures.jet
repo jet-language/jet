@@ -8,7 +8,7 @@ use {
 }
 
 #Test("a distinct's forwarded members format as Jet source") {
-    source: "// Leading lines put the distinct's span past the start of the file,\n// as in Examples/Types/DistinctForwarding.jet.\n#[Comparable, Printable, CodableAsBase]\nScore: distinct Int\n\nrun: fn() {{\n}}\n"
+    source: "// Leading lines put the distinct's span past the start of the file,\n// as in Examples/Types/DistinctForwarding.jet.\n#[Comparable, Printable]\nScore: distinct Int\n\nrun: fn() {{\n}}\n"
     parsed: parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("the fixture source must parse")
     forwarded: sema_derive_distinct_forward_source(parsed.program.items)

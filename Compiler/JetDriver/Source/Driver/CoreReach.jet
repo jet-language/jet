@@ -801,8 +801,8 @@ JetDriverReachItem: struct {
 // A lazy implementation of the load: its reach `item`, its row
 // (jet_driver_core_impl_reached), its trait as written
 // (`cipher.ForwardBlock`), and for an owned trait the names whose spelling
-// reaches the trait: its own, its codec method's, and its derive and bundle
-// families' (`Codable`, `CodableAsBase`).
+// reaches the trait: its own, its codec method's, and its derive family's
+// (`Codable`).
 JetDriverReachImpl: struct {
     item: Int
     row: JetDriverCoreImplRow
@@ -988,7 +988,6 @@ jet_driver_reach_impl: fn(reach: &JetDriverReach, module_name: String, type_name
         triggers.push(jet_driver_reach_word(reach, owned.name))
         if owned.contract == .Codec(verb) -> triggers.push(jet_driver_reach_word(reach, verb))
         if owned.auto_derive_family == .Val(family) -> triggers.push(jet_driver_reach_word(reach, family))
-        if owned.bundle_family == .Val(family) -> triggers.push(jet_driver_reach_word(reach, family))
     } else {
         parts: written.partition(".")
         trait_module = module_name.copy()

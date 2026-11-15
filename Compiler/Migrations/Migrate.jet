@@ -22,11 +22,13 @@ MigrationPlan: struct {
 migration_plans: fn() -> [MigrationPlan] {
     [MigrationPlan]{
         MigrationPlan{name: "lambda-shape1", toolchain: "a0.0.45"},
+        MigrationPlan{name: "codable-options1", toolchain: "a0.0.45"},
     }
 }
 
 migration_rewrite: fn(plan: String, path: String, text: String, source: Bool) -> MigrationOutcome {
     if plan == "lambda-shape1" -> return lambda_shape1_file(path, text, source)
+    if plan == "codable-options1" -> return codable_options1_file(path, text)
     panic("no migration plan named {plan}")
 }
 

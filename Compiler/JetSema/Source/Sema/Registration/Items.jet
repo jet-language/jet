@@ -26,7 +26,6 @@ use {
         MARKER_DOC,
         MARKER_RENAME,
         codable_form,
-        codable_from_base,
         codable_marker,
         codable_option,
         codable_tag_field,
@@ -3888,7 +3887,7 @@ sema_registration_cli_marker_string: fn(marker: Marker) -> String? {
 
 // (Rust `validate_serde_items`): on every type that derives a codec
 // explicitly, a container `#Rename(.Case)` names one of the closed casing
-// styles (E2409), `#Flatten` needs a struct-typed field (E2408), every
+// styles (E2409), `#Codable(.Flatten)` needs a struct-typed field (E2408), every
 // encoded or decoded field or payload needs a wire form (E2411), and every
 // decoded anonymous union needs one distinct outer wire shape per member
 // (E2415, or E2411 for a member with no known shape). Automatic codecs are
@@ -3907,7 +3906,7 @@ sema_registration_serde_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
             loop field in definition.fields {
                 flatten: sema_serde_items_flattens(field)
                 if flatten && !sema_registration_serde_struct_named(field.ty) {
-                    diagnostics.push(sema_error("E2408", field.name_span, "`#[Flatten]` on `{field.name}` needs a struct-typed field", "flatten splices another struct's keys into this object, so the field must be a `#[Codable]` struct — not a primitive, list, or map", "give `{field.name}` a `#[Codable]` struct type, or drop `#[Flatten]`"))
+                    diagnostics.push(sema_error("E2408", field.name_span, "`#Codable(.Flatten)` on `{field.name}` needs a struct-typed field", "flatten splices another struct's keys into this object, so the field must be a `#[Codable]` struct — not a primitive, list, or map", "give `{field.name}` a `#[Codable]` struct type, or drop `#Codable(.Flatten)`"))
                     next
                 }
                 if flatten || sema_serde_items_skips(field) -> next
@@ -3943,7 +3942,7 @@ sema_registration_serde_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
 // E0930: `#Codable` takes its type options on a type and one form on a
 // field. `.Skip` and `.Flatten` belong on a field and the type options on
 // the type; `tag:` applies to an enum, whose `.Field(…)` names its key as one
-// string, and `from: .Base` to a distinct type.
+// string.
 sema_registration_codable_options: fn(items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == .Struct(definition) {
@@ -3974,9 +3973,6 @@ sema_registration_codable_type: fn(item: Item, markers: [Marker], diagnostics: &
     if is_enum && codable_tag_field(markers) == Val("") {
         diagnostics.push(sema_registration_codable_error(marker, "`tag: .Field(…)` needs its key as one string", "the case name rides under this key in the encoded object", "write the key, as in `tag: .Field(\"kind\")`"))
     }
-    if !is_distinct && codable_from_base(marker) {
-        diagnostics.push(sema_registration_codable_error(marker, "`from: .Base` applies to distinct types only", "a distinct type codes as its base type; {shown} codes its own fields or cases", "remove `from: .Base`"))
-    }
 }
 
 sema_registration_codable_field: fn(markers: [Marker], diagnostics: &[Diagnostic]) {
@@ -3986,7 +3982,7 @@ sema_registration_codable_field: fn(markers: [Marker], diagnostics: &[Diagnostic
         if label != None -> labeled = true
     }
     if labeled || marker.args.len() != 1 || codable_form(marker) == None {
-        diagnostics.push(sema_registration_codable_error(marker, "`#Codable` on a field takes `.Skip` or `.Flatten`", "a field rides on the wire as written, skipped, or flattened; the options `only:`, `unknown:`, `tag:`, `from:` and `published` belong on the type", "write `#Codable(.Skip)` or `#Codable(.Flatten)` on the field, and the options on the type"))
+        diagnostics.push(sema_registration_codable_error(marker, "`#Codable` on a field takes `.Skip` or `.Flatten`", "a field rides on the wire as written, skipped, or flattened; the options `only:`, `unknown:`, `tag:` and `published` belong on the type", "write `#Codable(.Skip)` or `#Codable(.Flatten)` on the field, and the options on the type"))
     }
 }
 

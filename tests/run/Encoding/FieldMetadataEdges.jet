@@ -1,6 +1,6 @@
 // Field metadata edges on one #Codable model: missing, null and wrong-typed
-// fields stay distinct, #Flatten keys count as declared, and
-// #DenyUnknownFields rejects any other key with E2412.
+// fields stay distinct, #Codable(.Flatten) keys count as declared, and
+// #Codable(unknown: .Deny) rejects any other key with E2412.
 use json: core.encoding.json
 
 Address: struct {
@@ -8,10 +8,10 @@ Address: struct {
     zip: String
 }
 
-#[Codable, DenyUnknownFields]
+#Codable(unknown: .Deny)
 Customer: struct {
     name: String
-    #Flatten address: Address
+    #Codable(.Flatten) address: Address
     nickname: String?
     visits: Int{0}
 }

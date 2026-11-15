@@ -141,12 +141,12 @@ parser_distinct_marker_derives: fn(markers: [Marker]) -> [NamedSpan] Never! {
     loop marker in markers {
         if marker.name == MARKER_CODABLE {
             if marker.negated -> next
-            loop name in owned_trait_family(MARKER_CODABLE, false) {
+            loop name in owned_trait_family(MARKER_CODABLE) {
                 if codable_derives(marker, name) -> derives.push(NamedSpan{name: name, span: marker.name_span})
             }
             next
         }
-        loop name in owned_trait_bundle(marker.name) -> derives.push(NamedSpan{name: name, span: marker.name_span})
+        if owned_trait_bundle(marker.name) -> derives.push(NamedSpan{name: marker.name, span: marker.name_span})
     }
     derives
 }

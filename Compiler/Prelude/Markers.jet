@@ -251,17 +251,17 @@ Deprecated: struct {
 // options pick a variant of that one contract: `only:` derives a single
 // direction, `unknown: .Deny` refuses a decoded key the struct doesn't
 // declare, `tag:` sets how an enum names its case (`.External`, the default;
-// `.Field("kind")`, a key beside the payload; `.None`, no name), `from: .Base`
-// codes a distinct type as its base, and the bare word `published` pins a
-// struct's wire shape for schema snapshots and migrations. On a field it
-// takes one form: `.Skip` leaves the field off the wire and `.Flatten`
-// splices a struct field's keys into the enclosing object.
+// `.Field("kind")`, a key beside the payload; `.None`, no name), and the bare
+// word `published` pins a struct's wire shape for schema snapshots and
+// migrations. On a distinct type it asks for the base's codec, which the type
+// has by default. On a field it takes one form: `.Skip` leaves the field off
+// the wire and `.Flatten` splices a struct field's keys into the enclosing
+// object.
 Codable: struct {
     form: CodableField{none}
     only: CodableDirection{none}
     unknown: CodableUnknown{none}
     tag: CodableTag{none}
-    from: CodableOrigin{none}
     published: Bool{false}
 
     impl Marker {
@@ -273,24 +273,6 @@ Codable: struct {
 Receipt: struct {
     name: String
 
-    impl Marker {
-        sites: [.Type]
-    }
-}
-
-Encode: struct {
-    impl Marker {
-        sites: [.Type]
-    }
-}
-
-Decode: struct {
-    impl Marker {
-        sites: [.Type]
-    }
-}
-
-PublishedSchema: struct {
     impl Marker {
         sites: [.Type]
     }
@@ -321,12 +303,6 @@ Numeric: struct {
 }
 
 Printable: struct {
-    impl Marker {
-        sites: [.Type]
-    }
-}
-
-CodableAsBase: struct {
     impl Marker {
         sites: [.Type]
     }
@@ -412,26 +388,6 @@ As: struct {
     }
 }
 
-DenyUnknownFields: struct {
-    impl Marker {
-        sites: [.Type]
-    }
-}
-
-Discriminant: struct {
-    field: String
-
-    impl Marker {
-        sites: [.Type]
-    }
-}
-
-Untagged: struct {
-    impl Marker {
-        sites: [.Type]
-    }
-}
-
 Redact: struct {
     impl Marker {
         sites: [.Field]
@@ -456,18 +412,6 @@ Rename: struct {
 
     impl Marker {
         sites: [.Field, .Variant, .Type]
-    }
-}
-
-Skip: struct {
-    impl Marker {
-        sites: [.Field]
-    }
-}
-
-Flatten: struct {
-    impl Marker {
-        sites: [.Field]
     }
 }
 
