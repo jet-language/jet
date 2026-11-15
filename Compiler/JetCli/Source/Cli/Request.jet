@@ -1837,10 +1837,16 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             // no Core source is under test (Host.jet jet_cli_native_executable).
             built_in: compiled_request.core_tests == "" && jet_cli_core_built_in(snapshot.entry_path)
             // A traced run with per-function spans whose Core is the built-in
-            // one counts its Core demand's checks against the image's exports
+            // one counts its Core demand's checks against the Core facts this
+            // jet carries: the sealed keys, and each excluded key's reason
             // (JetSema CoreDemand.jet sema_core_bound_counters).
             if built_in && trace_sink == .Val(sink) {
-                if sink.functions -> compiled_request.core_bound_keys = jet_cli_core_bound_keys(jet_cli_runtime_part(JET_CLI_CORE_EXPORTS_FILE))
+                if sink.functions {
+                    facts: jet_cli_core_facts(jet_cli_runtime_part(JET_CLI_CORE_FACTS_FILE))
+                    compiled_request.core_bound_keys = facts.sealed.move()
+                    compiled_request.core_excluded_keys = facts.excluded.move()
+                    compiled_request.core_excluded_reasons = facts.reasons.move()
+                }
             }
             front := jet_cli_lowering_inputs(compiled_request, trace_sink)
             front.compile.core_built_in = built_in

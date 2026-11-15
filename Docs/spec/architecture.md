@@ -207,18 +207,25 @@ global `jet_core_fn_*` symbol named after its checked key and each writable
 process cell it builds (module storage, a memo store, a Shared site) a
 global `jet_core_cell_*` data symbol, so the program and Core share one copy
 of each. `core.exports` lists each symbol with its key and IR signature (the
-slot layouts of its parameters and result); `core.threads` is its thread
-receipt, read over the runtime's receipt, since Core starts threads through
-the runtime. A Core build failure fails the step with `core.issues`. The
-Core object puts each function and data object in a section of its own,
-past the 16-bit section indices through section 0 and `.symtab_shndx`. The
-step installs `jet-runtime/` beside the compiler: `native.key`,
-`jet_runtime.pack.o`, the library `jet_core.o` and its two lists, and
-`jet_runtime.image`, the runtime object and the Core object linked
-once at the run base (`LINK_RUN_BASE`), with its symbol table, a
+slot layouts of its parameters and result); `core.facts` lists each Core
+function's key with `sealed` when the function and every function its code
+reaches run the same code whatever program calls them, else the reason it
+is not sealed (`lowered`, `generic`, `intrinsic`, `skipped`,
+`open_dispatch`, `inline_always`, `function_value`: it calls through or
+takes a function value, or reaches a function that does); `core.threads` is
+its thread receipt, read over the runtime's receipt, since Core starts
+threads through the runtime. A Core build failure fails the step with
+`core.issues`. The Core object puts each function and data object in a
+section of its own, past the 16-bit section indices through section 0 and
+`.symtab_shndx`. The step installs `jet-runtime/` beside the compiler:
+`native.key`, `jet_runtime.pack.o`, the library `jet_core.o` and its three
+lists, and `jet_runtime.image`, the runtime object and the Core object
+linked once at the run base (`LINK_RUN_BASE`), with its symbol table, a
 `.jet.bind` section naming where it calls `main`, and a `.jet.exports` hash
-index of its defined global symbols. jet carries `jet_core.o` and the two
-lists as parts. A `jet run` whose Core is jet's built-in Core sources (a
+index of its defined global symbols. jet carries `jet_core.o` and the three
+lists as parts; `jet self devtools embed` refuses Core facts that disagree
+with the export list (an export without a facts row, or a facts row of a
+function the exports lack). A `jet run` whose Core is jet's built-in Core sources (a
 compile outside a toolchain tree) binds its Core calls to that Core code
 (`JetCli/Cli/Host.jet` `jet_cli_native_executable`, `IRChecks.core`): a
 call of a non-generic Core function whose bounds checks are the stock ones

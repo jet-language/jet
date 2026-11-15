@@ -390,25 +390,39 @@ sema_core_bound_charge: fn(trace_sink: CompilerTraceSink?, started: Int, count: 
     result.core_check_ns.push(sema_core_bound_clock(trace_sink) - started)
 }
 
-// How a finalization's Core demand splits over the Core functions the
-// runtime image exports (`bound_keys`), traced as counters once its rounds
-// ran: the driver counts so under a per-function trace whose Core is the
-// Core built into the jet. Each body a demand wave checked
-// (graph.core_checked) is in one part. `bound`: its key is an export.
-// `behind`: not an export, and only bound bodies, or bodies behind them,
-// name it, so a demand that stopped at the exports would not check it
-// either. `kept`: the rest. Each part counts its bodies and the task CPU
-// time their checks took (SemaGraphModuleResult.core_check_ns). The kept
-// bodies are those the demand's own walk reaches through no bound body:
-// from every checked body that did not wait for demand (the user's, the
-// Core ones checked up front) and the comptime functions, along the names
-// a body holds (sema_core_demand_body_keys) and its call-site facts. The
-// tables are keyed by symbol; a checked key no symbol holds counts as kept.
-sema_core_bound_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], comptime_functions: [SemaComptimeFunctionResult], bound_keys: [String], trace_sink: CompilerTraceSink?) Never! {
+// How a finalization's Core demand splits over the Core functions of the
+// runtime image's Core facts, traced as counters once its rounds ran: the
+// driver counts so under a per-function trace whose Core is the Core built
+// into the jet. `bound_keys` are the keys the facts seal (JetIR BuildCore.jet
+// IR_CORE_SEALED); `excluded_keys` the others, each with its reason at the
+// same position of `excluded_reasons`. Each body a demand wave checked
+// (graph.core_checked) is in one part. `bound`: its key is sealed and only
+// direct calls of the program's run-time code reach it. `behind`: not
+// bound, and only bound bodies, or bodies behind them, name it, so a demand
+// that stopped at the sealed keys would not check it either. `kept`: the
+// rest. Each part counts its bodies and the task CPU time their checks took
+// (SemaGraphModuleResult.core_check_ns). The kept bodies are those the
+// demand's own walk reaches through no bound body: from every checked body
+// that did not wait for demand (the user's, the Core ones checked up front),
+// along the names a body holds (sema_core_demand_body_keys) and its
+// call-site facts. A sealed key does not stop the walk where a body names it
+// as a value (a function value, a shared global's initializer), which needs
+// its checked body, and the comptime functions' walk, whose bodies the
+// compile-time run needs, stops nowhere. The tables are keyed by symbol; a
+// checked key no symbol holds counts as kept. Each kept body also counts
+// under the reason it is kept (`kept.<reason>`): its excluded key's reason,
+// `comptime` or `value` for a sealed one, `unlisted` for a key the facts
+// lack.
+sema_core_bound_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], comptime_functions: [SemaComptimeFunctionResult], bound_keys: [String], excluded_keys: [String], excluded_reasons: [String], trace_sink: CompilerTraceSink?) Never! {
     if trace_sink == None || graph.core_checked.len() == 0 -> return
     bound := [U32:Bool]{}
     loop key in bound_keys {
         if symbol_find(graph.symbols, key) == .Val(id) -> bound[id.id] = true
+    }
+    // Each excluded key's position in `excluded_reasons`.
+    excluded := [U32:Int]{}
+    loop (at, key) in excluded_keys {
+        if symbol_find(graph.symbols, key) == .Val(id) -> excluded[id.id] = at
     }
     // Each deferred checked body's module, position and check time, and the
     // module and position of each of its call-site facts.
@@ -418,11 +432,13 @@ sema_core_bound_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
     fact_index := [U32:Int]{}
     fact_rows := [[Int]]{}
     names := sema_core_demand_names_new()
+    valued := [U32:Bool]{}
     loop module_index in 0..<modules.len() {
         loop position in 0..<modules[module_index].functions.len() {
             key: modules[module_index].functions[position].key
             if graph.core_demand_rows.get(key) == None {
                 sema_core_demand_body_keys(modules[module_index].functions[position], graph.decls, graph.symbols, names)
+                sema_core_bound_values(modules[module_index].functions[position], graph, valued, names)
                 next
             }
             id: symbol_find(graph.symbols, key) ?? next
@@ -449,54 +465,61 @@ sema_core_bound_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
             fact_rows[at].push(position)
         }
     }
+    // The comptime functions' walk first, through every key; then the
+    // run-time walk, which stops at bound keys.
+    timed := sema_core_demand_names_new()
     loop result in comptime_functions {
-        if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, names)
+        if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, timed)
         loop fact in result.call_facts {
-            if fact.callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, names)
+            if fact.callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, timed)
         }
     }
     kept := [U32:Bool]{}
-    loop names.keys.len() > 0 {
-        key: names.keys.pop() ?? break
-        template: sema_core_demand_template_key(key)
-        if template != key -> names.keys.push(template)
-        if graph.core_demand_rows.get(key) == None -> next
-        id: symbol_find(graph.symbols, key) ?? next
-        if bound.get(id.id) != None || kept.get(id.id) != None -> next
-        kept[id.id] = true
-        if places.get(id.id) == .Val(module_index) {
-            sema_core_demand_body_keys(modules[module_index].functions[positions.get(id.id) ?? 0], graph.decls, graph.symbols, names)
-        }
-        if fact_index.get(id.id) == .Val(at) {
-            loop pair in 0..<fact_rows[at].len().div_euclid(2) {
-                fact_module: fact_rows[at][2 * pair]
-                if modules[fact_module].call_facts[fact_rows[at][2 * pair + 1]].callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, names)
-            }
-        }
-    }
+    comptime := [U32:Bool]{}
+    sema_core_bound_walk(graph, modules, places, positions, fact_index, fact_rows, [U32:Bool]{}, valued, timed, kept, comptime)
+    sema_core_bound_walk(graph, modules, places, positions, fact_index, fact_rows, bound, valued, names, kept, [U32:Bool]{})
     bound_bodies := 0
     bound_ns := 0
     behind_bodies := 0
     behind_ns := 0
     kept_bodies := 0
     kept_ns := 0
+    reasons := [String]{}
+    reason_counts := [Int]{}
     loop key in graph.core_checked.keys() {
-        found: symbol_find(graph.symbols, key)
+        found := symbol_find(graph.symbols, key)
+        if found == None -> found = symbol_find(graph.symbols, sema_core_demand_template_key(key))
+        reason := "unlisted"
         if found == .Val(id) {
             took: spent.get(id.id) ?? 0
-            if bound.get(id.id) != None {
-                bound_bodies += 1
-                bound_ns += took
-                next
-            }
             if kept.get(id.id) == None {
+                if bound.get(id.id) != None {
+                    bound_bodies += 1
+                    bound_ns += took
+                    next
+                }
                 behind_bodies += 1
                 behind_ns += took
                 next
             }
             kept_ns += took
+            if comptime.get(id.id) != None -> reason = "comptime"
+            if comptime.get(id.id) == None && bound.get(id.id) != None -> reason = "value"
+            if excluded.get(id.id) == .Val(at) -> reason = excluded_reasons[at]
         }
         kept_bodies += 1
+        place := reasons.len()
+        loop (at, name) in reasons {
+            if name == reason {
+                place = at
+                break
+            }
+        }
+        if place == reasons.len() {
+            reasons.push(reason)
+            reason_counts.push(0)
+        }
+        reason_counts[place] = reason_counts[place] + 1
     }
     if trace_sink == .Val(sink) {
         sink.progress("counters.sema.core_bound.exports", bound.len(), -1)
@@ -506,6 +529,81 @@ sema_core_bound_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         sink.progress("counters.sema.core_bound.behind_ns", behind_ns, -1)
         sink.progress("counters.sema.core_bound.kept_bodies", kept_bodies, -1)
         sink.progress("counters.sema.core_bound.kept_ns", kept_ns, -1)
+        // In name order: each round the least name not yet traced.
+        traced := (loop _ in 0..<reasons.len() -> false)
+        loop _ in 0..<reasons.len() {
+            least := -1
+            loop at in 0..<reasons.len() {
+                if !traced[at] && (least < 0 || reasons[at] < reasons[least]) -> least = at
+            }
+            traced[least] = true
+            sink.progress("counters.sema.core_bound.kept.{reasons[least]}", reason_counts[least], -1)
+        }
+    }
+}
+
+// The demand's walk for sema_core_bound_counters: every key `names` holds
+// and every key a body it reaches names (its body's names, its call-site
+// facts and the keys it names as values, `valued`), into `kept`, and into
+// `reached` too; a key in `stops` is passed by unless it is named as a
+// value. A stop named as a value after it was passed by is named again
+// (sema_core_bound_values), so the walk reads it then.
+sema_core_bound_walk: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], places: [U32:Int], positions: [U32:Int], fact_index: [U32:Int], fact_rows: [[Int]], stops: [U32:Bool], valued: &[U32:Bool], names: &SemaCoreDemandNames, kept: &[U32:Bool], reached: &[U32:Bool]) Never! {
+    loop names.keys.len() > 0 {
+        key: names.keys.pop() ?? break
+        template: sema_core_demand_template_key(key)
+        if template != key -> names.keys.push(template)
+        if graph.core_demand_rows.get(key) == None -> next
+        id: symbol_find(graph.symbols, key) ?? next
+        if kept.get(id.id) != None -> next
+        if stops.get(id.id) != None && valued.get(id.id) == None -> next
+        kept[id.id] = true
+        reached[id.id] = true
+        if places.get(id.id) == .Val(module_index) {
+            function: modules[module_index].functions[positions.get(id.id) ?? 0]
+            sema_core_demand_body_keys(function, graph.decls, graph.symbols, names)
+            sema_core_bound_values(function, graph, valued, names)
+        }
+        if fact_index.get(id.id) == .Val(at) {
+            loop pair in 0..<fact_rows[at].len().div_euclid(2) {
+                fact_module: fact_rows[at][2 * pair]
+                if modules[fact_module].call_facts[fact_rows[at][2 * pair + 1]].callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, names)
+            }
+        }
+    }
+}
+
+// The functions checked body `function` names as values (a named function
+// value, a shared global's initializer), each into `valued` and, the first
+// time, named again into `names`: the walk passed it by if it is a stop.
+sema_core_bound_values: fn(function: FnBody, graph: SemaRegistrationGraph, valued: &[U32:Bool], names: &SemaCoreDemandNames) Never! {
+    pending := [Int]{}
+    loop parameter in function.params {
+        if parameter.default == .Val(value) -> pending.push(value)
+    }
+    loop statement in function.body {
+        body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(child: Int) { pending.push(child) })
+    }
+    loop pending.len() > 0 {
+        expression: pending.pop() ?? break
+        node: body_node(function.tree, expression)
+        named := DeclID?{None}
+        if node.kind == .FnValue(kind) {
+            if kind == .NamedFn(value, _) -> named = value
+        }
+        if node.kind == .GlobalShared(initializer, _) -> named = Val(initializer)
+        if named == .Val(decl) {
+            if decl.row.index() < graph.decls.rows.len() {
+                key: graph.decls.rows[decl.row].key
+                if symbol_find(graph.symbols, key) == .Val(id) {
+                    if valued.get(id.id) == None {
+                        valued[id.id] = true
+                        names.keys.push(symbol_table_key(graph.symbols, id))
+                    }
+                }
+            }
+        }
+        body_each_expr_child(function.tree, node, fn(child: Int) { pending.push(child) })
     }
 }
 

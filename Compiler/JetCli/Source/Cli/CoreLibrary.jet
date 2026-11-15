@@ -5,17 +5,18 @@
 // package but those JET_CLI_CORE_LOWERED lists (JetIR BuildCore.jet
 // ir_build_core_library), checked by IR Lint after the build and after the
 // O2 optimizer, and written as `{prefix}.o`, `{prefix}.exports`
-// (ir_core_exports_text: each global's symbol, key and IR signature) and
-// `{prefix}.threads`, the exports whose call can start a second thread
-// (ir_thread_exports over the runtime's own receipt, since Core starts
-// threads through the runtime). The runtime image links the object beside
-// the runtime (jet_cli_runtime_pack).
+// (ir_core_exports_text: each global's symbol, key and IR signature),
+// `{prefix}.facts` (ir_core_facts_text: each Core function's key and whether
+// the library seals it) and `{prefix}.threads`, the exports whose call can
+// start a second thread (ir_thread_exports over the runtime's own receipt,
+// since Core starts threads through the runtime). The runtime image links
+// the object beside the runtime (jet_cli_runtime_pack).
 use {
     core_library_files: core.files
     core_library_sys: core.sys
     jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, jet_driver_check_outcome, jet_driver_checked_declarations, jet_driver_lowering_inputs, jet_driver_present_diagnostics]
     jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_transfer_rows, symbol_table]
-    jet_ir.[ir_build_core_library, ir_core_exports_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
+    jet_ir.[ir_build_core_library, ir_core_exports_text, ir_core_facts_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[JET_VERSION]
 }
 
@@ -94,6 +95,7 @@ jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_thr
         if object.errors.len() == 0 {
             core_library_files.write_bytes("{prefix}.o", object.bytes) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core object: {err}"}
             core_library_files.write("{prefix}.exports", ir_core_exports_text(library.rows)) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core exports: {err}"}
+            core_library_files.write("{prefix}.facts", ir_core_facts_text(library.facts)) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core facts: {err}"}
             core_library_files.write("{prefix}.threads", thread_exports.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core thread receipt: {err}"}
             skipped: loop failure in library.skipped -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
             core_library_files.write("{prefix}.skipped", skipped.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the skipped Core roots: {err}"}

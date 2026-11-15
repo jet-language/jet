@@ -857,8 +857,12 @@ and peak memory), the item being processed (a module or, with
 every body the compile lowers, and for an executable whose Core is the Core
 built into the jet the `sema.core_bound.*` counters: of the Core bodies the
 Core demand checked, how many and how much CPU time were for functions the
-runtime image exports (`bound_*`), for bodies only those name (`behind_*`),
-and for the rest (`kept_*`)), throttled progress counts, and the
+Core facts seal that only the program's run-time direct calls reach
+(`bound_*`), for bodies only those name (`behind_*`), and for the rest
+(`kept_*`), and how many kept bodies each reason keeps (`kept.<reason>`:
+the facts' reason the function is not sealed, `comptime` or `value` for a
+sealed one a compile-time function reaches or a body names as a value,
+`unlisted` for one the facts lack)), throttled progress counts, and the
 scaling counters. `--trace=FILE` writes the same events to FILE as Chrome
 trace-event lines, flushed per event, in the `JET_TRACE_FILE` trace format
 (`Tools/perf/jetc-trace/summarize.mjs FILE --watch`

@@ -25,6 +25,12 @@
 // the implementations the library knows, which a program's own types are
 // not among, so a program builds it itself.
 //
+// Beside the exports the library lists its facts (ir_core_facts_text): one
+// row per Core function key, IR_CORE_SEALED when the function and all it
+// reaches run the same code whatever program calls it, else the reason it
+// does not (an IR_CORE_EXCLUSIONS row). The runtime pack refuses lists that
+// disagree (ir_core_facts_disagree).
+//
 // A program bound to Core (IRChecks.core) calls each
 // exported Core function its code calls directly by that symbol, at the
 // call's own layouts, and builds no body for it (ir_core_bound); its Core
@@ -43,11 +49,59 @@ use {
 // data symbol.
 IRCoreExport: struct { symbol: String, key: String, signature: String }
 
+// Each row of the Core library's facts (ir_core_facts_text) is a Core
+// function's key and whether a program bound to the image may take the
+// function and everything it reaches as sealed (IR_CORE_SEALED), else why
+// not (an IR_CORE_EXCLUSIONS row), as one `key<TAB>reason` line
+// (ir_core_fact_line).
+//
+// The reason of a facts row whose function a bound program may take as
+// sealed: an export whose code, and the code of every function it reaches,
+// is the same whatever program calls it.
+IR_CORE_SEALED: "sealed"
+// A reason a Core function is not sealed, as its facts rows name it, and
+// whether the Core exports still keep the function (a program calls the
+// library's code for it, though it builds no Core body as sealed).
+IRCoreExclusion: struct { reason: String, exported: Bool }
+
+// The reasons a Core function is not sealed, each counted apart
+// (JetSema CoreDemand.jet sema_core_bound_counters).
+IR_CORE_EXCLUSIONS: [IRCoreExclusion]{
+    // Its package is one the library leaves out (JetCli CoreLibrary.jet
+    // JET_CLI_CORE_LOWERED).
+    IRCoreExclusion{reason: "lowered", exported: false},
+    // It has type parameters or owner binders, so its code depends on the
+    // types it is called at.
+    IRCoreExclusion{reason: "generic", exported: false},
+    // The compiler builds its calls itself.
+    IRCoreExclusion{reason: "intrinsic", exported: false},
+    // The library could not build it (IRCoreLibrary.skipped).
+    IRCoreExclusion{reason: "skipped", exported: false},
+    // It holds or reaches a trait value (ir_core_open).
+    IRCoreExclusion{reason: "open_dispatch", exported: false},
+    // It is `#Inline(Always)`: a program inlines its body.
+    IRCoreExclusion{reason: "inline_always", exported: true},
+    // It calls through, or takes, a function value, or reaches a function
+    // that does (ir_core_function_values): which function runs depends on
+    // the program.
+    IRCoreExclusion{reason: "function_value", exported: true},
+}
+
+// The IR_CORE_EXCLUSIONS row of `reason`, or None.
+ir_core_exclusion: fn(reason: String) -> IRCoreExclusion? Never! {
+    loop row in IR_CORE_EXCLUSIONS {
+        if row.reason == reason -> return Val(IRCoreExclusion{reason: row.reason, exported: row.exported})
+    }
+    None
+}
+
 // `failures` are the Core functions the builder could not build, `errors`
 // the export problems (symbol clashes); `exports` the object's function
 // globals, `data` its data globals, `rows` both, sorted by symbol.
 // `skipped` holds the failures of the roots left out of the library
 // (ir_core_library_from): a program that calls one builds it itself.
+// `facts` holds one line per Core function key (ir_core_fact_line), sorted:
+// each export's and each function left out of the exports.
 IRCoreLibrary: struct {
     program: IRModule
     failures: [IRBuildFailure]
@@ -56,6 +110,7 @@ IRCoreLibrary: struct {
     data: [X64DataExport]
     rows: [IRCoreExport]
     skipped: [IRBuildFailure]
+    facts: [String]
 }
 
 IR_CORE_FUNCTION_PREFIX: "jet_core_fn_"
@@ -158,13 +213,24 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, lowered: 
     }
     roots := [IRWaveJob]{}
     keys := [String]{}
+    // The facts lines of the keys that are not roots, each on its first row.
+    facts := [String]{}
     rooted := (loop _ in 0..<p.functions.len() -> false)
     loop row in 0..<p.functions.len() {
         function: p.functions[row]
-        if function.module_identity == entry_module || lowered.contains(ir_core_package(function.module_name)) -> next
-        if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None -> next
+        if function.module_identity == entry_module -> next
         first: ir_function_row(p, function.key) ?? row
-        if left_out[first] -> next
+        reason: if {
+            lowered.contains(ir_core_package(function.module_name)) -> "lowered"
+            function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 -> "generic"
+            p.intrinsics.get(function.key) != None -> "intrinsic"
+            left_out[first] -> "skipped"
+            else -> ""
+        }
+        if reason != "" {
+            if first == row -> facts.push(ir_core_fact_line(function.key, reason))
+            next
+        }
         roots.push(IRWaveJob{key: function.key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1})
         keys.push(function.key.copy())
         rooted[first] = true
@@ -181,14 +247,16 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, lowered: 
             }
         }
         if reached {
-            return IRCoreLibrary{program: built.program.move(), failures: built.failures.move(), errors: [String]{}, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, rows: [IRCoreExport]{}, skipped: skipped.move()}
+            return IRCoreLibrary{program: built.program.move(), failures: built.failures.move(), errors: [String]{}, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, rows: [IRCoreExport]{}, skipped: skipped.move(), facts: [String]{}}
         }
         more := skipped.move()
         compiler_transfer_rows<IRBuildFailure>(more, built.failures)
         return ir_core_library_from(kept.program.move(), entry_module, lowered, more, threads)
     }
     m := built.program.move()
-    open: ir_core_open(m)
+    callers: ir_core_callers(m)
+    open: ir_core_open(m, callers)
+    values: ir_core_function_values(m, callers)
     exports := [IRLibraryExport]{}
     rows := [IRCoreExport]{}
     errors := [String]{}
@@ -197,6 +265,13 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, lowered: 
             errors.push("Core function {key} was rooted but not built")
             next
         }
+        reason: if {
+            open[id] -> "open_dispatch"
+            m.functions[id].inline_always -> "inline_always"
+            values[id] -> "function_value"
+            else -> IR_CORE_SEALED
+        }
+        facts.push(ir_core_fact_line(key, reason))
         if open[id] -> next
         symbol: ir_core_symbol(key)
         exports.push(IRLibraryExport{function: id, symbol: symbol, init_priority: -1, fini_priority: -1, guards: [Int]{}})
@@ -213,7 +288,16 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, lowered: 
     loop at in 1..<rows.len() {
         if rows[at].symbol == rows[at - 1].symbol -> errors.push("Core symbol {rows[at].symbol} names both {rows[at - 1].key} and {rows[at].key}")
     }
-    IRCoreLibrary{program: m, failures: [IRBuildFailure]{}, errors: errors, exports: exports, data: data, rows: rows, skipped: skipped.move()}
+    // A key on two rows is rooted once per row, with one reason: one line.
+    facts.sort()
+    facts.reverse()
+    unique := [String]{}
+    loop facts.len() > 0 {
+        line: facts.pop() ?? break
+        if unique.len() > 0 && unique[unique.len() - 1] == line -> next
+        unique.push(line)
+    }
+    IRCoreLibrary{program: m, failures: [IRBuildFailure]{}, errors: errors, exports: exports, data: data, rows: rows, skipped: skipped.move(), facts: unique}
 }
 
 // The Core export list (`<prefix>.exports`, JetCli CoreLibrary.jet): one
@@ -223,26 +307,73 @@ ir_core_exports_text: fn(rows: [IRCoreExport]) -> String Never! {
     lines.join("\n")
 }
 
-// Per function of the built library module `m`: whether it holds a trait
-// value (a slot of a trait object type: its dynamic calls and drops select
-// among the implementations the library knows, BuildTraits.jet), or calls,
-// takes the address of or drops through (a type's drop glue) a function
-// that does. Such a function is not exported: a program's trait values can
-// reach it, whose implementations the library lacks.
-ir_core_open: fn(m: IRModule) -> [Bool] Never! {
+// One line of the Core facts list: the function's key and its reason.
+ir_core_fact_line: fn(key: String, reason: String) -> String Never! { "{key}\t{reason}" }
+
+// The Core facts list (`<prefix>.facts`, JetCli CoreLibrary.jet): its
+// lines (ir_core_fact_line), sorted.
+ir_core_facts_text: fn(facts: [String]) -> String Never! { facts.join("\n") }
+
+// Where the Core facts list `facts` (ir_core_facts_text) and export list
+// `exports` (ir_core_exports_text) disagree, one line each, else none:
+// every function export has a facts row whose reason the exports keep
+// (IRCoreExclusion.exported), every facts row of a function the exports
+// keep names one, and every reason is IR_CORE_SEALED or an
+// IR_CORE_EXCLUSIONS row. A pack whose lists disagree would bind a program
+// to code its facts don't describe.
+ir_core_facts_disagree: fn(facts: String, exports: String) -> [String] Never! {
+    problems := [String]{}
+    exported := [String]{}
+    loop line in exports.split("\n") {
+        columns: line.split("\t").to_list()
+        if columns.len() == 3 && columns[2] != IR_CORE_DATA -> exported.push(columns[1])
+    }
+    exported.sort()
+    listed := [String]{}
+    loop line in facts.split("\n") {
+        if line == "" -> next
+        columns: line.split("\t").to_list()
+        if columns.len() != 2 {
+            problems.push("the Core facts row `{line}` is not `key<TAB>reason`")
+            next
+        }
+        reason: columns[1]
+        if reason != IR_CORE_SEALED {
+            excluded: ir_core_exclusion(reason) ?? {
+                problems.push("the Core facts row of {columns[0]} names the unknown reason `{reason}`")
+                next
+            }
+            if !excluded.exported -> next
+        }
+        listed.push(columns[0])
+    }
+    listed.sort()
+    at := 0
+    on := 0
+    loop at < exported.len() || on < listed.len() {
+        if on >= listed.len() || (at < exported.len() && exported[at] < listed[on]) {
+            problems.push("the Core export {exported[at]} has no facts row")
+            at += 1
+            next
+        }
+        if at >= exported.len() || listed[on] < exported[at] {
+            problems.push("the Core facts row of {listed[on]} names a function the Core exports lack")
+            on += 1
+            next
+        }
+        at += 1
+        on += 1
+    }
+    problems
+}
+
+// Per function of the built library module `m`, the functions that call it,
+// take its address, or drop through it (a type's drop glue).
+ir_core_callers: fn(m: IRModule) -> [[Int]] Never! {
     count: m.functions.len()
     callers := [[Int]]{}
     loop _ in 0..<count -> callers.push([Int]{})
-    open := [Bool]{}
-    work := [Int]{}
     loop (id, f) in m.functions {
-        holds := false
-        loop row in f.slot_type {
-            if row >= 0 && row < m.types.len() && (ir_trait_row(m, row) || ir_untag(m.types[row].ty) == .TraitObject(_)) {
-                holds = true
-                break
-            }
-        }
         loop (at, op) in f.op {
             callee := -1
             if op == .Call || op == .FunctionAddress -> callee = f.a[at]
@@ -252,20 +383,65 @@ ir_core_open: fn(m: IRModule) -> [Bool] Never! {
             }
             if callee >= 0 && callee < count -> callers[callee].push(id)
         }
-        open.push(holds)
-        if holds -> work.push(id)
+    }
+    callers
+}
+
+// `seeds`, joined by every function that reaches one along `callers`
+// (ir_core_callers).
+ir_core_spread: fn(callers: [[Int]], seeds: &&[Bool]) -> [Bool] Never! {
+    reached := seeds.move()
+    work := [Int]{}
+    loop (id, seed) in reached {
+        if seed -> work.push(id)
     }
     head := 0
     loop head < work.len() {
         id: work[head]
         head += 1
         loop caller in callers[id] {
-            if open[caller] -> next
-            open[caller] = true
+            if reached[caller] -> next
+            reached[caller] = true
             work.push(caller)
         }
     }
-    open
+    reached
+}
+
+// Per function of the built library module `m`: whether it holds a trait
+// value (a slot of a trait object type: its dynamic calls and drops select
+// among the implementations the library knows, BuildTraits.jet), or calls,
+// takes the address of or drops through (a type's drop glue) a function
+// that does (`callers`, ir_core_callers). Such a function is not exported:
+// a program's trait values can reach it, whose implementations the library
+// lacks.
+ir_core_open: fn(m: IRModule, callers: [[Int]]) -> [Bool] Never! {
+    holds := [Bool]{}
+    loop f in m.functions {
+        held := false
+        loop row in f.slot_type {
+            if row >= 0 && row < m.types.len() && (ir_trait_row(m, row) || ir_untag(m.types[row].ty) == .TraitObject(_)) {
+                held = true
+                break
+            }
+        }
+        holds.push(held)
+    }
+    ir_core_spread(callers, holds)
+}
+
+// Per function of the built library module `m`: whether it calls through a
+// function value or takes a function's address, or calls, takes the
+// address of or drops through a function that does (`callers`,
+// ir_core_callers). Which code such a function runs, and which functions a
+// program's own calls through function values may reach, depend on the
+// program, so it is not sealed (IR_CORE_SEALED).
+ir_core_function_values: fn(m: IRModule, callers: [[Int]]) -> [Bool] Never! {
+    seeds := [Bool]{}
+    loop f in m.functions {
+        seeds.push(f.op.any(fn(op) { op == .CallIndirect || op == .FunctionAddress }))
+    }
+    ir_core_spread(callers, seeds)
 }
 
 // The Core exports of the runtime image a program binds to (IRChecks.core):
@@ -411,4 +587,32 @@ ir_core_cells_bind: fn(m: &IRModule, image: IRCoreImage) Never! {
     assert_eq(data.signature, IR_CORE_DATA)
     assert(ir_core_image_row(exports, ir_core_symbol("<corelib>/core.text::trim")) == None, "a key the image lacks has no row")
     assert(ir_core_image_row([U8]{}, ir_core_symbol("<corelib>/core.text::split")) == None, "an empty list has no row")
+}
+
+#Test("the Core facts list agrees with the export list only row for row") {
+    keys := [String]{"<corelib>/core.text::split", "<corelib>/core.text::join", "<corelib>/core.math::abs"}
+    rows := [IRCoreExport]{}
+    loop keys.len() > 0 {
+        key: keys.pop() ?? break
+        rows.push(IRCoreExport{symbol: ir_core_symbol(key), key: key, signature: "(8/8/Integer)->8/8/Integer"})
+    }
+    cell: "storage:<corelib>/core.log::level"
+    rows.push(IRCoreExport{symbol: ir_core_cell_symbol(cell), key: cell, signature: IR_CORE_DATA})
+    rows.sort_by(fn(left: IRCoreExport, right: IRCoreExport) { left.symbol <=> right.symbol })
+    exports: ir_core_exports_text(rows)
+    sealed: ir_core_fact_line("<corelib>/core.text::split", IR_CORE_SEALED)
+    valued: ir_core_fact_line("<corelib>/core.text::join", "function_value")
+    inlined: ir_core_fact_line("<corelib>/core.math::abs", "inline_always")
+    open: ir_core_fact_line("<corelib>/core.text::dyn_join", "open_dispatch")
+    generic: ir_core_fact_line("<corelib>/core.text::map", "generic")
+    assert_eq(ir_core_facts_disagree(ir_core_facts_text([String]{inlined, open, valued, generic, sealed}), exports).len(), 0)
+    missing: ir_core_facts_disagree(ir_core_facts_text([String]{open, valued, generic, sealed}), exports)
+    assert_eq(missing.len(), 1)
+    assert(missing[0].contains("has no facts row"), "an export without a facts row disagrees: {missing[0]}")
+    extra: ir_core_fact_line("<corelib>/core.text::trim", IR_CORE_SEALED)
+    named: ir_core_facts_disagree(ir_core_facts_text([String]{inlined, open, valued, generic, sealed, extra}), exports)
+    assert_eq(named.len(), 1)
+    assert(named[0].contains("core.text::trim"), "a sealed row the exports lack disagrees: {named[0]}")
+    unknown: ir_core_facts_disagree(ir_core_fact_line("<corelib>/core.text::split", "maybe"), exports)
+    assert(unknown.any(fn(problem) { problem.contains("unknown reason") }), "an unknown reason disagrees")
 }

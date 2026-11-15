@@ -168,7 +168,7 @@ use {
         IROutputCheck,
         IRChecks,
         IRCoreImage,
-        IR_CORE_DATA,
+        IR_CORE_SEALED,
         IR_CORE_FUNCTION_PREFIX,
         IRJob,
         IRModule,
@@ -669,6 +669,12 @@ JET_CLI_CORE_EXPORTS_FILE: "core.exports"
 // thread, one per line, or `*` (CoreLibrary.jet), read over the runtime's
 // receipt for a program bound to Core (jet_cli_single_thread).
 JET_CLI_CORE_THREADS_FILE: "core.threads"
+// Written beside them: one `key<TAB>reason` row per Core function, sorted by
+// key (JetIR BuildCore.jet ir_core_facts_text): `sealed` when a program
+// bound to the image may take the function and all it reaches as the image
+// built them, else why not; it agrees with the export list row for row
+// (RuntimeEmbed.jet).
+JET_CLI_CORE_FACTS_FILE: "core.facts"
 // The Core library's object (CoreLibrary.jet), a section per function and
 // data object, which a full link of a program bound to Core links beside
 // the pack: the link keeps only the Core code that program reaches
@@ -692,7 +698,7 @@ JET_CLI_HOT_TEXT_FILE: "hot-text.list"
 // holds the runtime's provenance to (Tools/release Gate.jet).
 JET_CLI_RUNTIME_PART_FILES: [String]{
     JET_CLI_RUNTIME_KEY_FILE, JET_CLI_RUNTIME_EXPORTS_FILE, JET_CLI_RUNTIME_THREADS_FILE,
-    JET_CLI_CORE_EXPORTS_FILE, JET_CLI_CORE_THREADS_FILE, JET_CLI_CORE_OBJECT_FILE,
+    JET_CLI_CORE_EXPORTS_FILE, JET_CLI_CORE_THREADS_FILE, JET_CLI_CORE_FACTS_FILE, JET_CLI_CORE_OBJECT_FILE,
     JET_CLI_RUNTIME_IMAGE_FILE, JET_CLI_RUNTIME_PACK_FILE, JET_CLI_RUNTIME_OBJECT_FILE,
     JET_CLI_RUNTIME_WEB_FILE, JET_CLI_RUNTIME_WEB_RECEIPT_FILE, JET_CLI_IDENTITY_FILE,
 }
@@ -730,17 +736,24 @@ jet_cli_runtime_part: fn(name: String) -[Env]> [U8] Never! {
     cli_runtime.image_part(part, 0, size) ?? panic("the runtime part `{part}` has a size but no bytes")
 }
 
-// The keys of the functions in the Core export list `exports`
-// (JET_CLI_CORE_EXPORTS_FILE: `symbol<TAB>key<TAB>signature` rows), its
-// data rows left out.
-jet_cli_core_bound_keys: fn(exports: [U8]) -> [String] Never! {
-    keys := [String]{}
-    text: String.from_bytes(exports) ?? return keys
+// The sealed keys of the Core facts list `facts` (JET_CLI_CORE_FACTS_FILE:
+// `key<TAB>reason` rows) and, apart, each other row's key and reason.
+JetCLICoreFacts: struct { sealed: [String], excluded: [String], reasons: [String] }
+
+jet_cli_core_facts: fn(facts: [U8]) -> JetCLICoreFacts Never! {
+    read := JetCLICoreFacts{sealed: [String]{}, excluded: [String]{}, reasons: [String]{}}
+    text: String.from_bytes(facts) ?? return read
     loop line in text.split("\n") {
         columns: line.split("\t").to_list()
-        if columns.len() == 3 && columns[2] != IR_CORE_DATA -> keys.push(columns[1])
+        if columns.len() != 2 -> next
+        if columns[1] == IR_CORE_SEALED {
+            read.sealed.push(columns[0])
+            next
+        }
+        read.excluded.push(columns[0])
+        read.reasons.push(columns[1])
     }
-    keys
+    read
 }
 
 // This jet's runtime image part, lent (jet_cli_runtime_part), for a bind

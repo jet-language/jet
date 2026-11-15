@@ -314,11 +314,15 @@ JetDriverCompileRequest: struct {
     // and every Core body is checked, called or not, as under JET_KEEP_GOING.
     every_core_body: Bool{false}
     // A traced run with per-function spans whose Core is the Core built
-    // into this jet: the keys of the Core functions the runtime image
-    // exports (JetCli Host.jet jet_cli_core_bound_keys), which the driver
-    // counts the Core demand's checks against (JetSema CoreDemand.jet
+    // into this jet: the keys of the Core functions the Core facts seal
+    // (JetCli Host.jet jet_cli_core_facts), and each other Core function's
+    // key with, at the same position, the reason it is not sealed (JetIR
+    // BuildCore.jet IR_CORE_EXCLUSIONS), which the driver counts the Core
+    // demand's checks against (JetSema CoreDemand.jet
     // sema_core_bound_counters). Empty otherwise.
     core_bound_keys: [String]{[String]{}}
+    core_excluded_keys: [String]{[String]{}}
+    core_excluded_reasons: [String]{[String]{}}
     // `jet check Core`: Core's `layers:` table (Core/package.jet), lowest
     // first; each loaded Core module's name of a higher layer's module is an
     // E1012 (CoreLayers.jet). Empty: no layer check.

@@ -5105,9 +5105,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         if comptime_run.functions.len() == held_functions -> break
     }
     // A traced run whose Core is the built-in one counts how its Core
-    // demand's checks split over the image's exports
+    // demand's checks split over the Core facts' sealed and excluded keys
     // (sema_core_bound_counters).
-    if request.core_bound_keys.len() > 0 -> sema_core_bound_counters(demand_graph, bodies.modules, comptime_run.functions, request.core_bound_keys, request.trace_sink)
+    if request.core_bound_keys.len() > 0 || request.core_excluded_keys.len() > 0 -> sema_core_bound_counters(demand_graph, bodies.modules, comptime_run.functions, request.core_bound_keys, request.core_excluded_keys, request.core_excluded_reasons, request.trace_sink)
     checked_graph := sema_finalize_program(demand_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
     if request.trace_sink == .Val(sink) -> sink.end("sema.finalize", checked_graph.modules.len())
     if checked_graph.modules.len() != registration_module_count {
