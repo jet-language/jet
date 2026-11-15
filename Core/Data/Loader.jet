@@ -18,7 +18,7 @@ loader_error: fn(kind: DataErrorKind, reason: String, operation: String) -> Data
 // core.data.loader — lifecycle for a typed, provider-owned DataLoader<T>.
 //
 // Payload bytes are a pending input until snapshot/stream validation commits
-// them.  `last_good` is only changed by that commit, so bind/invalidate can
+// them.  `last_good` is only changed by that commit, so bind/mark_stale can
 // retain a known snapshot without falsely reporting a fresh one.
 
 bind: fn<T>(loader: &DataLoader<T>, payload: [U8]) DataError! {
@@ -113,7 +113,7 @@ offline: fn<T>(loader: &DataLoader<T>, enabled: Bool) Never! {
     }
 }
 
-invalidate: fn<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
+mark_stale: fn<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
     loader.status.invalidated_by = cause.copy()
     loader.status.freshness = DataFreshness.Stale
     loader.status.error = ""

@@ -192,7 +192,7 @@ use {
         return Val(query.new("orders.list", WebQuerySeed{data: "count={count}", generation: 1, subscribers: 1}))
     }
 
-    invalidate_orders: fn(orders: &WebQuery) -> Int { query.invalidate(orders) }
+    invalidate_orders: fn(orders: &WebQuery) -> Int { query.mark_stale(orders) }
 
     query_report: fn(path: String) -> String {
         orders := live_orders(path) ?? return "orders unavailable"

@@ -3,6 +3,7 @@
 // no browser adapter or second state model is introduced.
 use {
     app
+    core.auth
     http: core.http
     time: core.time
     web: core.web
@@ -84,9 +85,9 @@ app_surface: fn() {
     subscriber: app.subscribe(user_count, "guest", every: time.duration_seconds(5))
     app.push(user_count, "guest", value: 3)
     _pushed_state: app.state(subscriber)
-    auth: web.auth("session")
-    _auth_routes: web.auth_routes(auth)
-    _auth_show: web.auth_show(auth)
+    gate: auth.auth("session")
+    _auth_routes: auth.auth_routes(gate)
+    _auth_show: auth.auth_show(gate)
     _sync: app.sync("SyncMap(name=jet)", over: "peer-a")
 }
 
@@ -96,7 +97,7 @@ router_surface: fn() WebRouterError! {
     coded: router.route_with_search_codec(routed, "/search", [], [], .Query, route_loader) ?? panic("codec route")
     named := router.not_found(coded, not_found) ?? panic("not found")
     _stale: router.stale(named, "rows")
-    _invalidated: router.invalidate(named, "rows")
+    _expired: router.expire(named, "rows")
     _collected: router.collect(named, "rows")
     _cache_state: router.cache_state(named, "rows")
     _cache_show: router.cache_show(named)
@@ -108,11 +109,11 @@ router_surface: fn() WebRouterError! {
 }
 
 query_surface: fn() (WebQueryError | StateError)! {
-    live: query.live("rows", "rows", "initial", fetch_rows)
-    seed: query.WebQuerySeed{data: live.data, generation: live.generation, subscribers: live.subscribers}
+    loaded: query.load("rows", "rows", "initial", fetch_rows)
+    seed: query.WebQuerySeed{data: loaded.data, generation: loaded.generation, subscribers: loaded.subscribers}
     created := query.new("rows", seed)
-    subscribed: query.subscribe("rows")
-    _generation: query.invalidate(created)
+    watched: query.watch("rows")
+    _generation: query.mark_stale(created)
     _value: query.get(created)
     _state: query.state(created)
     _state_signal: query.state_signal(created)
@@ -134,7 +135,7 @@ query_surface: fn() (WebQueryError | StateError)! {
     )
     query.set_online(created, true)
     _retry: query.retry(created, replay_mutation)
-    _subscribed_value: query.get(subscribed)
+    _watched_value: query.get(watched)
 }
 
 form_surface: fn() (WebFormActionError | WebFormError)! {
@@ -325,8 +326,8 @@ store_surface: fn() {
     _event_json: web_store.event_json(state_store)
     derived: web_store.derived(state_store, store_select)
     selector: web_store.selector(state_store, store_select)
-    subscription := web_store.subscribe(state_store, store_update)
-    selected_subscription := web_store.subscribe_selector(state_store, store_select, store_selected)
+    subscription := web_store.listen(state_store, store_update)
+    selected_subscription := web_store.listen_selector(state_store, store_select, store_selected)
     _subscription_active: web_store.subscription_active(subscription)
     _selected_active: web_store.subscription_active(selected_subscription)
     web_store.subscription_unsubscribe(subscription)

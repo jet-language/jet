@@ -1,4 +1,6 @@
-// core.web.query — typed live-query state and mutation transitions.
+// core.web.query — a client's cached query state and mutation transitions.
+// app owns live bindings, their subscriptions and invalidation; a WebQuery
+// is the browser-side cache entry for one key.
 C_MAX_QUERY_KEY: 256
 
 C_MAX_QUERY_PAYLOAD: 1048576
@@ -59,7 +61,7 @@ WebQuery: struct {
     mutation_state: fn(self) -> WebMutationState Never! { mutation_state(self) }
     mutation_signal: fn(self) -> String Never! { mutation_signal(self) }
     facts: fn(self) -> String Never! { facts(self) }
-    invalidate: fn(&self) -> Int Never! { invalidate(self) }
+    mark_stale: fn(&self) -> Int Never! { mark_stale(self) }
     refresh: fn(&self) WebQueryError! { refresh(self) }
     cancel: fn(&self) -> Bool Never! { cancel(self) }
     queue: fn(&self, data: String) -> Int WebQueryError! { queue(self, data) }
@@ -96,7 +98,9 @@ new: fn(key: String, initial: WebQuerySeed) -> WebQuery Never! {
     WebQuery{key: key.copy(), data: initial.data, status: status, error: error, generation: generation, mode: WebQueryNetworkMode.Online, online: true, subscribers: subscribers}
 }
 
-live: fn<E>(key: String, data: String, url: String, loader: fn() -> String E!) -> WebQuery E! {
+// A query entry for `key` holding `data`, or what `loader` returns when the
+// entry has a `url` to load from.
+load: fn<E>(key: String, data: String, url: String, loader: fn() -> String E!) -> WebQuery E! {
     loaded := data
     if url.len() > 0 -> loaded = loader()
     status := WebQueryStatus.Fresh
@@ -127,7 +131,8 @@ mutation_state: fn(q: WebQuery) -> WebMutationState Never! {
 
 mutation_signal: fn(q: WebQuery) -> String Never! { "{status_name(q.status)}:{q.generation}" }
 
-subscribe: fn(key: String) -> WebQuery Never! {
+// A stale entry for `key` with one watcher and no data yet.
+watch: fn(key: String) -> WebQuery Never! {
     status := WebQueryStatus.Stale
     error := ""
     if !valid_key(key) {
@@ -137,7 +142,8 @@ subscribe: fn(key: String) -> WebQuery Never! {
     WebQuery{key: key.copy(), data: "", status: status, error: error, generation: 1, mode: WebQueryNetworkMode.Online, online: true, subscribers: 1}
 }
 
-invalidate: fn(q: &WebQuery) -> Int Never! {
+// Marks the entry stale and returns its new generation.
+mark_stale: fn(q: &WebQuery) -> Int Never! {
     q.status = WebQueryStatus.Stale
     q.generation = q.generation + 1
     q.generation

@@ -232,7 +232,7 @@ history_limit: fn<T>(store: WebStore<T>) -> Int Never! { store.history_limit }
 cursor: fn<T>(store: WebStore<T>) -> Int Never! { store.cursor }
 current_generation: fn<T>(store: WebStore<T>) -> Int Never! { store.generation }
 
-subscribe: fn<T>(store: &WebStore<T>, callback: fn(T)) -> WebStoreSubscription Never! {
+listen: fn<T>(store: &WebStore<T>, callback: fn(T)) -> WebStoreSubscription Never! {
     if store.subs >= C_MAX_STORE_SUBSCRIBERS -> return WebStoreSubscription{id: store.subs, active: false, selector: ""}
     callback(value<T>(store.copy()))
     store.subs = store.subs + 1
@@ -242,7 +242,7 @@ subscribe: fn<T>(store: &WebStore<T>, callback: fn(T)) -> WebStoreSubscription N
 subscription_unsubscribe: fn(subscription: &WebStoreSubscription) Never! { subscription.active = false }
 subscription_active: fn(subscription: WebStoreSubscription) -> Bool Never! { subscription.active }
 
-subscribe_selector: fn<T, U, E>(store: &WebStore<T>, project: fn(T) -> U E!, callback: fn(U)) -> WebStoreSubscription E! {
+listen_selector: fn<T, U, E>(store: &WebStore<T>, project: fn(T) -> U E!, callback: fn(U)) -> WebStoreSubscription E! {
     if store.subs >= C_MAX_STORE_SUBSCRIBERS -> return WebStoreSubscription{id: store.subs, active: false, selector: "derived"}
     callback(project(value<T>(store.copy())))
     store.subs = store.subs + 1

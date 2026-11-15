@@ -8,7 +8,6 @@ package: {
 use {
     auth: core.auth
     text: core.text
-    app
 }
 
 run: fn() {
@@ -39,10 +38,10 @@ run: fn() {
         .Err(_) -> print("oauth:rejected")
     }
 
-    gate0: app.auth("users")
-    gate: app.auth_oauth(gate0, "google github")
-    print(app.auth_show(gate))
-    print(app.auth_routes(gate))
+    gate0: auth.auth("users")
+    gate: auth.auth_oauth(gate0, "google github")
+    print(auth.auth_show(gate))
+    print(auth.auth_routes(gate))
     verify_tokens()
 }
 

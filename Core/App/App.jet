@@ -2,7 +2,7 @@ package: {
     name: "app"
     version: "0.0.1"
     edition: "2026"
-    description: "Process-level live queries, sync, and auth configuration."
+    description: "Process-level live queries, subscriptions, invalidation and sync."
     license: "MIT"
     outputs: {
         app: .Library{ entry: app }
@@ -25,8 +25,6 @@ use {
     rt_web: jet.runtime.web
     world_rt: jet.runtime.testing
 }
-
-AUTH_MAX_PROVIDERS: 64
 
 SYNC_MAX_SESSION: 256
 
@@ -296,72 +294,6 @@ priv remote_invalid: fn(text: String) -> [FieldError] Never! {
     }
     if errors.len() == 0 -> return [FieldError]{FieldError{path: "", reason: "{text}"}}
     errors
-}
-
-Auth: struct {
-    users_table: String
-    providers: [String]
-}
-
-Session: struct {
-    id: String
-    user_id: String
-    cookie: String
-    expires_at: Int
-}
-
-auth: fn(users_table: String) -> Auth Never! {
-    Auth{users_table: canonical_table(users_table), providers: [String]{}}
-}
-
-auth_oauth: fn(auth: Auth, providers: String) -> Auth Never! {
-    configured := [String]{}
-    loop comma_group in providers.split(",") {
-        loop raw in comma_group.split(" ") {
-            provider: raw.trim()
-            if valid_provider(provider) && !contains_string(configured, provider) && configured.len() < AUTH_MAX_PROVIDERS {
-                configured.push(provider.copy())
-            }
-        }
-    }
-    Auth{users_table: canonical_table(auth.users_table), providers: configured}
-}
-
-auth_routes: fn(auth: Auth) -> String Never! {
-    table := canonical_table(auth.users_table)
-    routes := [String]{
-        "POST /login -> password ({table})",
-        "POST /logout -> revoke session",
-        "GET /magic -> begin magic link",
-        "POST /magic -> consume magic link",
-    }
-    providers := canonical_providers(auth.providers)
-    loop provider in providers {
-        routes.push("GET /oauth/{provider}/begin")
-        routes.push("GET /oauth/{provider}/callback")
-    }
-    "AuthRoutes({routes.join("; ")})"
-}
-
-auth_show: fn(auth: Auth) -> String Never! {
-    table := canonical_table(auth.users_table)
-    providers := canonical_providers(auth.providers)
-    "Auth(users={table}, providers=[{providers.join(",")}])"
-}
-
-canonical_table: fn(value: String) -> String {
-    if valid_identifier(value) -> return value.copy()
-    ""
-}
-
-canonical_providers: fn(values: [String]) -> [String] {
-    providers := [String]{}
-    loop provider in values {
-        if valid_provider(provider) && !contains_string(providers, provider) && providers.len() < AUTH_MAX_PROVIDERS {
-            providers.push(provider.copy())
-        }
-    }
-    providers
 }
 
 // A live binding: one source function applied to one argument list. The
@@ -1208,32 +1140,4 @@ sync_split_once: fn(value: String, separator: String) -> SyncPair? {
         before = "{before}{scalar}"
     }
     None
-}
-
-valid_provider: fn(value: String) -> Bool {
-    if value == "" || value.len() > 64 -> return false
-    loop byte in value.bytes() {
-        n: Int{byte}
-        allowed: (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 || n == 45
-        if !allowed -> return false
-    }
-    true
-}
-
-valid_identifier: fn(value: String) -> Bool {
-    trimmed: value.trim()
-    if trimmed == "" || trimmed.len() > 128 || value != trimmed -> return false
-    loop byte in value.bytes() {
-        n: Int{byte}
-        allowed: (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
-        if !allowed -> return false
-    }
-    true
-}
-
-contains_string: fn(values: [String], value: String) -> Bool {
-    loop item in values {
-        if item == value -> return true
-    }
-    false
 }

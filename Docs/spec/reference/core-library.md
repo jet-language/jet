@@ -2218,6 +2218,8 @@ empty, so a world and its tasks never read or change the process store.
 | `session_validate(session_id, now_ms)` | `Session Err!` | Validate the session identifier and return its session carrier (`DB`). |
 | `session_user(session)` / `session_cookie(session)` / `session_id(session)` | `String` | Project the validated session fields. |
 | `session_show(session)` | `String` | Render a redacted session summary; cookie bytes are not printed. |
+| `auth(users_table)` / `auth_oauth(auth, providers)` | `Auth` | An app's auth configuration: its users table and the comma- or space-separated OAuth providers, deduplicated and bounded. |
+| `auth_routes(auth)` / `auth_show(auth)` | `String` | Render the routes the configuration serves, or its summary. |
 
 JWT accepts only HS256 and requires a key of at least 32 bytes. PASETO accepts
 only `v4.public`, a 32-byte key, a non-empty normalized audience, and canonical
@@ -4529,7 +4531,7 @@ are terminal or revisioned lifecycle operations, not ordinary query filters.
 | `loader.source_identity(loader)` | `DataSourceIdentity` | Inspect the source identity. |
 | `loader.cancel(loader)` | `Unit` | Cancel the loader operation. |
 | `loader.offline(loader, enabled)` | `Unit` | Enable or disable offline reads from a retained last-good snapshot. |
-| `loader.invalidate(loader, cause)` | `Unit` | Invalidate a snapshot with a typed cause. |
+| `loader.mark_stale(loader, cause)` | `Unit` | Mark a snapshot stale with a typed cause. |
 | `loader.stream<T>(loader)` | `DataStream<T> DataError!` | Open a bounded stream; no payload or cancellation is an error. |
 
 The loader stream supports CSV, JSON, and JSONL payloads subject to
@@ -5609,10 +5611,6 @@ route list.
 | `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
 | `openapi(routes: App or HTTPRouter) -> String OpenAPIError!` | text | Render OpenAPI from the checked facts of the same route value that is served. |
 | `storage() -> String` | text | Select the local storage namespace. |
-| `auth(kind: String) -> Auth` | auth | Build an authentication carrier. |
-| `auth_oauth(auth: Auth, client_id: String) -> Auth` | auth | Add OAuth client identity to an auth carrier. |
-| `auth_routes(auth: Auth) -> [String]` | paths | Return authentication route paths. |
-| `auth_show(auth: Auth) -> String` | text | Render the source auth summary. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
 
 `App.serve(port?)` and `App.serve_on(port)` serve the app's route table on

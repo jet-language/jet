@@ -1895,16 +1895,6 @@ Mount: struct {
     page: String
 }
 
-Auth: struct {
-    kind: String
-    client_id: String
-}
-
-Session: struct {
-    id: String
-    user_id: String
-}
-
 // Web.form(Model, action: handler) is elaborated by sema.
 // It returns the opaque typed-model form boundary, not the source forms
 // module's explicit input/action-name record API.
@@ -2563,21 +2553,6 @@ priv openapi_route_json: fn(route: OpenAPIRoute) -> String Never! {
     }
     "{out}}}"
 }
-
-auth: fn(kind: String) -> Auth Never! { Auth{kind: kind, client_id: ""} }
-
-auth_oauth: fn(auth: Auth, client_id: String) -> Auth Never! {
-    Auth{kind: "oauth", client_id: client_id}
-}
-
-auth_routes: fn(auth: Auth) -> [String] Never! {
-    if {
-        auth.kind == "oauth" -> return [String]{"/auth/login", "/auth/callback", "/auth/logout"}
-        else -> [String]{"/login", "/logout"}
-    }
-}
-
-auth_show: fn(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
 
 #Test("an OpenAPI route contract that does not parse or match comes back as an OpenAPIError") {
     not_json: if openapi_route_input("{{", "GET", "/a") == {

@@ -160,9 +160,9 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
         .validate(.carrier, on: .Blur, with: check_carrier)
         .render()
 
-    // Query.live seeds the cache with route data and reuses its loader for
-    // refreshes. Invalidation exposes stale → fetching → fresh to the panel.
-    orders_query := query.live<OrderError>(
+    // query.load seeds the cache with route data and reuses its loader for
+    // refreshes. Marking it stale exposes stale → fetching → fresh to the panel.
+    orders_query := query.load<OrderError>(
         "orders.list",
         "orders",
         json.to_string(loaded) ?? panic("JSON encode"),
@@ -171,7 +171,7 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
             return Ok(json.to_string(refreshed) ?? return Err(OrderError{message: "orders do not encode as JSON"}))
         },
     ) ?? panic("orders query: {err.message}")
-    stale_generation: orders_query.invalidate()
+    stale_generation: orders_query.mark_stale()
     query_state: orders_query.state()
     query_text: "{orders_query.show()} status={query_state.status}"
 

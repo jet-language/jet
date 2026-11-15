@@ -131,7 +131,8 @@ stale: fn(router: WebRouter, path: String) -> Int Never! {
     0
 }
 
-invalidate: fn(router: &WebRouter, path: String) -> Int Never! {
+// Drops the cached result for `path`; 1 when the router held one.
+expire: fn(router: &WebRouter, path: String) -> Int Never! {
     idx := cache_index(router.cache, path)
     if idx < 0 -> return 0
     _: cache_path(router, path, WebRouterCacheStatus.Invalidated)

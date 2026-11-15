@@ -66,6 +66,106 @@ Session: struct {
     }
 }
 
+// ── App auth configuration ──────────────────────────────────────────────────
+//
+// An `Auth` names the users table and the OAuth providers an app accepts.
+// Every reader canonicalizes it: a table that is not a plain identifier reads
+// as "", and providers are deduplicated, bounded and limited to
+// `[A-Za-z0-9_-]`.
+
+AUTH_MAX_PROVIDERS: 64
+
+/// An app's auth configuration: its users table and OAuth providers.
+Auth: struct {
+    users_table: String
+    providers: [String]
+}
+
+/// Password and magic-link auth over `users_table`, with no OAuth provider.
+auth: fn(users_table: String) -> Auth Never! {
+    Auth{users_table: canonical_table(users_table), providers: [String]{}}
+}
+
+/// `auth` with the comma- or space-separated OAuth `providers`.
+auth_oauth: fn(auth: Auth, providers: String) -> Auth Never! {
+    configured := [String]{}
+    loop comma_group in providers.split(",") {
+        loop raw in comma_group.split(" ") {
+            provider: raw.trim()
+            if valid_provider(provider) && !contains_string(configured, provider) && configured.len() < AUTH_MAX_PROVIDERS {
+                configured.push(provider.copy())
+            }
+        }
+    }
+    Auth{users_table: canonical_table(auth.users_table), providers: configured}
+}
+
+/// The routes `auth` serves, in order.
+auth_routes: fn(auth: Auth) -> String Never! {
+    table := canonical_table(auth.users_table)
+    routes := [String]{
+        "POST /login -> password ({table})",
+        "POST /logout -> revoke session",
+        "GET /magic -> begin magic link",
+        "POST /magic -> consume magic link",
+    }
+    providers := canonical_providers(auth.providers)
+    loop provider in providers {
+        routes.push("GET /oauth/{provider}/begin")
+        routes.push("GET /oauth/{provider}/callback")
+    }
+    "AuthRoutes({routes.join("; ")})"
+}
+
+auth_show: fn(auth: Auth) -> String Never! {
+    table := canonical_table(auth.users_table)
+    providers := canonical_providers(auth.providers)
+    "Auth(users={table}, providers=[{providers.join(",")}])"
+}
+
+canonical_table: fn(value: String) -> String {
+    if valid_table(value) -> return value.copy()
+    ""
+}
+
+canonical_providers: fn(values: [String]) -> [String] {
+    providers := [String]{}
+    loop provider in values {
+        if valid_provider(provider) && !contains_string(providers, provider) && providers.len() < AUTH_MAX_PROVIDERS {
+            providers.push(provider.copy())
+        }
+    }
+    providers
+}
+
+valid_provider: fn(value: String) -> Bool {
+    if value == "" || value.len() > 64 -> return false
+    loop byte in value.bytes() {
+        n: Int{byte}
+        allowed: (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 || n == 45
+        if !allowed -> return false
+    }
+    true
+}
+
+valid_table: fn(value: String) -> Bool {
+    trimmed: value.trim()
+    if trimmed == "" || trimmed.len() > 128 || value != trimmed -> return false
+    loop byte in value.bytes() {
+        n: Int{byte}
+        allowed: (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
+        if !allowed -> return false
+    }
+    true
+}
+
+contains_string: fn(values: [String], value: String) -> Bool {
+    loop item in values {
+        if item == value -> return true
+    }
+    false
+}
+
 // ── Token verification ──────────────────────────────────────────────────────
 //
 // `issuer` is optional: omitting it skips the issuer check; any given value,

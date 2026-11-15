@@ -5097,15 +5097,17 @@ APIs. The round-trip is exercised by
 
 A `WebQuery` has one explicit cache key. The key is the record identity; the
 current Core query source does not make a separate public footprint parameter.
-`query.live(key, data, url, loader)` creates an initial fresh query and calls
+`query.load(key, data, url, loader)` creates an initial fresh query and calls
 `loader` when `url` is nonempty. `query.new(key, seed)` creates a seeded query,
-and `query.subscribe(key)` creates a stale subscription record.
+and `query.watch(key)` creates a stale entry with one watcher. Live bindings,
+their subscriptions and invalidation belong to `app` (`app.live`,
+`app.subscribe`, `app.invalidate`); a `WebQuery` is one client cache entry.
 
 The lifecycle states are `Pending`, `Fresh`, `Stale`, `Fetching`, `Error`, and
 `Offline`. Mutation states are `Idle`, `Pending`, `Success`, `Error`, and
 `Settled`; network modes are `Online`, `Always`, and `OfflineFirst`. `get`,
 `show`, `state`, `state_signal`, `mutation_state`, `mutation_signal`, and
-`facts` read values and bounded lifecycle facts. `invalidate(q)` marks a
+`facts` read values and bounded lifecycle facts. `mark_stale(q)` marks a
 query stale and advances its generation. `refresh(q)`, `queue(q, data)`, and
 `retry(q, replay)` are fallible operations; `cancel(q)` returns whether an
 in-flight operation was cancelled. `mutate` checks the key and optional
