@@ -6,11 +6,11 @@ use {
 // `inject_units_prelude`: the only catalog is the ordinary Prelude source
 // SEMA_PRELUDE_UNITS_SOURCE (Registration/PreludeUnits.jet). This stage changes
 // AST items only; it never adds a physical/loaded module. The catalog is
-// parsed (exact scales included) and its dimensions resolved while the
-// compiler builds, so a compile never parses or scans the catalog text. The
-// text ships with the compiler: one that does not parse stops the build.
-SEMA_UNITS_CATALOG: #run sema_units_catalog_read()
-
+// parsed (exact scales included) and its dimensions resolved here, and
+// SEMA_UNITS_CATALOG (PreludeRows.jet) is what this returns, written by
+// Compiler/Toolchain/PreludeRows, so neither a compile nor the compiler's
+// build parses or scans the catalog text; a text that does not parse stops
+// that tool.
 sema_units_catalog_read: fn() -> [UnitFamilyDef] {
     parsed: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 -> panic("Prelude/Units.jet does not parse: {parsed.diagnostics[0].what}")

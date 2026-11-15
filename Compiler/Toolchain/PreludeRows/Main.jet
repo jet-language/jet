@@ -1,0 +1,379 @@
+// The parsed rows of the Prelude texts the compiler carries (the marker
+// declarations and their applied-rule rows, the derive providers and the words
+// their templates spell, the original error declarations and the unit
+// catalog), written as Jet literals into JetSema/Source/Sema/PreludeRows.jet,
+// so neither a compile nor the compiler's own build parses those texts. Each
+// row is what its JetSema reader returns for the text Toolchain/PreludeSources.jet
+// copied (sema_marker_module_prelude_decls, sema_marker_module_prelude_rules,
+// sema_derive_builtin_providers, sema_registration_derive_words,
+// sema_registration_original_error_program, sema_units_catalog_read), spelled
+// field by field after the AST declarations JetFoundation/Source holds.
+// JetParser's Tests/PreludeBuildRows.jet holds each constant to its reader,
+// and this tool's --check, one of the ratchets every commit keeps
+// (Tools/agent/Land.jet RATCHETS), fails on a stale row, so an edited Prelude
+// text or AST type fails until this runs again.
+// Usage (from the checkout root): jet Compiler/Toolchain/PreludeRows/Main.jet [--check|--write]
+// --check fails when the generated file differs in any byte; --write
+// rewrites it.
+use {
+    files: core.files
+    process: core.process
+    core.encoding.[Dyn]
+    jet_foundation.[DIAGNOSTIC_ERROR, EnumDef, Item, StructDef, Type, compiler_take_rows, foundation_fixed_integers]
+    jet_parser.[jfmt_escape_str_lit, parse_source]
+    jet_sema.[
+        sema_derive_builtin_providers,
+        sema_marker_module_prelude_decls,
+        sema_marker_module_prelude_rules,
+        sema_registration_derive_words,
+        sema_registration_original_error_program,
+        sema_units_catalog_read,
+    ]
+}
+
+TARGET: "Compiler/JetSema/Source/Sema/PreludeRows.jet"
+SHAPES_ROOT: "Compiler/JetFoundation/Source"
+WRITE_COMMAND: "jet Compiler/Toolchain/PreludeRows/Main.jet --write"
+// A literal whose constructors nest deep checks slowly, so a constructor
+// nesting this deep is a constant of its own that its parent names.
+NODE_HEIGHT: 12
+
+// Whether `name` spells a fixed-width integer (`U8`, `I64`).
+fixed_int: fn(name: String) -> Bool Never! {
+    loop kind in foundation_fixed_integers() {
+        if kind.name == name -> return true
+    }
+    false
+}
+
+#Error
+PreludeRowsError: struct {
+    message: String
+}
+
+rows_fail: fn(message: String) -> PreludeRowsError Never! {
+    PreludeRowsError{message: "prelude rows: {message}"}
+}
+
+// A struct field or named variant field: whether its literal may leave it out
+// (it has a default) is `defaulted`.
+RowField: struct {
+    name: String
+    ty: Type
+    defaulted: Bool
+}
+
+// An enum variant: no payload (`unit`), one positional payload (`single`), or
+// named fields.
+RowVariant: struct {
+    name: String
+    unit: Bool
+    single: Type?
+    fields: [RowField]
+}
+
+// A declared struct or enum. A name declared more than once is `twice`, and
+// a value of it is refused; `used` marks one the generated file names.
+RowShape: struct {
+    is_enum: Bool
+    fields: [RowField]
+    variants: [RowVariant]
+    twice: Bool
+    used: Bool
+}
+
+RowsOut: struct {
+    shapes: [RowShape]
+    // Each declared name's position in `shapes`.
+    index: [String:Int]
+    nodes: [String]
+    // How deep the constructors of the literal last written nest.
+    height: Int
+}
+
+// One generated constant: its name, its declared type and its value.
+RowsConstant: struct {
+    name: String
+    ty: Type
+    value: Dyn
+}
+
+// The struct and enum declarations of every file under SHAPES_ROOT.
+read_shapes: fn(out: &RowsOut) PreludeRowsError! -[FS]> {
+    entries := files.walk_files(SHAPES_ROOT).list() ?? return Err(rows_fail("cannot list {SHAPES_ROOT}: {err}"))
+    paths := [String]{}
+    loop entry in entries.move() {
+        if entry.relative.ends_with(".jet") -> paths.push(entry.relative.move())
+    }
+    paths.sort()
+    loop relative in paths {
+        path: files.join(SHAPES_ROOT, relative)
+        text: files.read(path) ?? return Err(rows_fail("cannot read {path}: {err}"))
+        parsed := parse_source(text.bytes())
+        loop diagnostic in parsed.diagnostics {
+            if diagnostic.severity == DIAGNOSTIC_ERROR -> return Err(rows_fail("{path} does not parse: {diagnostic.what}"))
+        }
+        loop item in parsed.program.items.move() -> add_item(out, item.move())
+    }
+    Ok()
+}
+
+add_item: fn(out: &RowsOut, item: &&Item) Never! {
+    if item == .Struct(_) {
+        if item.move() == .Struct(def) -> add_struct(out, def.move())
+        return
+    }
+    if item.move() == .Enum(def) -> add_enum(out, def.move())
+}
+
+add_struct: fn(out: &RowsOut, def: &&StructDef) Never! {
+    fields := [RowField]{}
+    loop field in def.fields.move() {
+        if field.computed != None -> next
+        defaulted: field.default != None
+        fields.push(RowField{name: field.name.move(), ty: field.ty.move(), defaulted: defaulted})
+    }
+    add_shape(out, def.name.move(), RowShape{is_enum: false, fields: fields.move(), variants: [RowVariant]{}, twice: false, used: false})
+}
+
+add_enum: fn(out: &RowsOut, def: &&EnumDef) Never! {
+    variants := [RowVariant]{}
+    loop variant in def.variants.move() {
+        row := RowVariant{name: variant.name.move(), unit: false, single: None, fields: [RowField]{}}
+        if variant.payload.move() == {
+            .Unit -> row.unit = true
+            .Single(ty, _) -> row.single = Val(ty.move())
+            .Named(fields) -> loop field in fields.move() -> row.fields.push(RowField{name: field.name.move(), ty: field.ty.move(), defaulted: false})
+        }
+        variants.push(row.move())
+    }
+    add_shape(out, def.name.move(), RowShape{is_enum: true, fields: [RowField]{}, variants: variants.move(), twice: false, used: false})
+}
+
+// The first declaration of a name keeps its place; another one marks it
+// declared twice.
+add_shape: fn(out: &RowsOut, name: &&String, shape: &&RowShape) Never! {
+    if out.index.get(name) == .Val(at) {
+        out.shapes[at].twice = true
+        return
+    }
+    out.index[name.move()] = out.shapes.len()
+    out.shapes.push(shape.move())
+}
+
+mismatch: fn(at: String, wanted: String) -> PreludeRowsError Never! {
+    rows_fail("{at}: the encoded value is not {wanted}")
+}
+
+// The Jet spelling of a field or element type.
+type_text: fn(out: &RowsOut, ty: Type, at: String) -> String PreludeRowsError! {
+    if ty == .Int -> return Ok("Int")
+    if ty == .Float -> return Ok("Float")
+    if ty == .Bool -> return Ok("Bool")
+    if ty == .String -> return Ok("String")
+    if ty == .IntN(signed, bits) -> return Ok("{if signed -> "I" else -> "U"}{bits}")
+    if ty == .List(element) -> return Ok("[{type_text(out, element, at) ?? return Err(err)}]")
+    if ty == .Option(inner) -> return Ok("{type_text(out, inner, at) ?? return Err(err)}?")
+    if ty == .Named(name) {
+        if !fixed_int(name) {
+            shape: out.index.get(name) ?? return Err(rows_fail("{at}: no struct or enum {name} under {SHAPES_ROOT}"))
+            out.shapes[shape].used = true
+        }
+        return Ok("{name}")
+    }
+    Err(rows_fail("{at}: its declared type has no literal spelling here"))
+}
+
+// The literal of `value`, a `ty`, in the constant `prefix`; `out.height`
+// becomes how deep the constructors written in it nest. The outermost one
+// (`top`) lists its elements or fields one per line.
+literal: fn(out: &RowsOut, ty: Type, value: Dyn, top: Bool, at: String, prefix: String) -> String PreludeRowsError! {
+    out.height = 0
+    if ty == .Option(inner) {
+        if value == .Null -> return Ok("None")
+        text: literal(out, inner, value, false, at, prefix) ?? return Err(err)
+        out.height += 1
+        return Ok("Val({text})")
+    }
+    if ty == .List(element) {
+        parts := [String]{}
+        height := 0
+        if value == .Array(items) {
+            loop (index, item) in items {
+                parts.push(literal(out, element, item, false, "{at}[{index}]", prefix) ?? return Err(err))
+                if out.height > height -> height = out.height
+            }
+        } else if value == .Bytes(bytes) {
+            loop byte in bytes -> parts.push("U8{{{byte}}}")
+        } else {
+            return Err(mismatch(at, "a list"))
+        }
+        out.height = height + 1
+        return Ok("{type_text(out, ty, at) ?? return Err(err)}{{{joined(parts, top)}}}")
+    }
+    if ty == .Int -> return if value == .Int(n) -> Ok("{n}") else -> Err(mismatch(at, "an Int"))
+    if ty == .Bool -> return if value == .Bool(b) -> Ok("{b}") else -> Err(mismatch(at, "a Bool"))
+    if ty == .String -> return if value == .Text(text) -> Ok("\"{jfmt_escape_str_lit(text)}\"") else -> Err(mismatch(at, "a String"))
+    if ty == .Float {
+        if value == .Float(number) {
+            text: "{number}"
+            return Ok(if text.contains(".") || text.contains("e") -> text else -> "{text}.0")
+        }
+        return Err(mismatch(at, "a Float"))
+    }
+    if ty == .IntN(signed, bits) -> return if value == .Int(n) -> Ok("{if signed -> "I" else -> "U"}{bits}{{{n}}}") else -> Err(mismatch(at, "an integer"))
+    if ty == .Named(name) -> return named_literal(out, name, value, top, at, prefix)
+    Err(rows_fail("{at}: its declared type has no literal spelling here"))
+}
+
+joined: fn(parts: [String], top: Bool) -> String Never! {
+    if top && parts.len() > 0 -> return "\n    {parts.join(",\n    ")},\n"
+    parts.join(", ")
+}
+
+named_literal: fn(out: &RowsOut, name: String, value: Dyn, top: Bool, at: String, prefix: String) -> String PreludeRowsError! {
+    if fixed_int(name) {
+        if value == .Int(n) -> return Ok("{name}{{{n}}}")
+        return Err(mismatch(at, "an integer"))
+    }
+    position: out.index.get(name) ?? return Err(rows_fail("{at}: no struct or enum {name} under {SHAPES_ROOT}"))
+    if out.shapes[position].twice -> return Err(rows_fail("{at}: {name} is declared more than once under {SHAPES_ROOT}"))
+    out.shapes[position].used = true
+    shape: out.shapes[position]
+    if !shape.is_enum {
+        fields: fields_literal(out, name, shape.fields, value, top, at, prefix) ?? return Err(err)
+        return Ok(node(out, "{name}{{{fields}}}", top, prefix))
+    }
+    if value == .Text(variant_name) {
+        loop variant in shape.variants {
+            if variant.name == variant_name && variant.unit -> return Ok("{name}.{variant_name}")
+        }
+        return Err(rows_fail("{at}: {name} has no variant {variant_name} without a payload"))
+    }
+    if value == .Object(entries) {
+        if entries.len() != 1 -> return Err(mismatch(at, "one {name} variant"))
+        loop variant in shape.variants {
+            if variant.name != entries[0].key || variant.unit -> next
+            payload: entries[0].value
+            where: "{at}.{variant.name}"
+            if variant.single == .Val(single) {
+                text: literal(out, single, payload, false, where, prefix) ?? return Err(err)
+                return Ok(node(out, "{name}.{variant.name}({text})", top, prefix))
+            }
+            // A variant with one named field may encode as that field's value.
+            fields := ""
+            if !is_object(payload) && variant.fields.len() == 1 {
+                field: variant.fields[0]
+                fields = "{field.name}: {literal(out, field.ty, payload, false, "{where}.{field.name}", prefix) ?? return Err(err)}"
+            } else {
+                fields = fields_literal(out, name, variant.fields, payload, top, where, prefix) ?? return Err(err)
+            }
+            return Ok(node(out, "{name}.{variant.name}{{{fields}}}", top, prefix))
+        }
+        return Err(rows_fail("{at}: {name} has no variant {entries[0].key} with a payload"))
+    }
+    Err(mismatch(at, "a {name}"))
+}
+
+// The `field: value` list of a struct or a variant's named fields, with
+// `out.height` the deepest of theirs. A field the encoding left out is None
+// when optional, left out of the literal when it has a default, and refused
+// otherwise.
+fields_literal: fn(out: &RowsOut, name: String, fields: [RowField], value: Dyn, top: Bool, at: String, prefix: String) -> String PreludeRowsError! {
+    if value == .Object(entries) {
+        loop entry in entries {
+            known := false
+            loop field in fields {
+                if field.name == entry.key -> known = true
+            }
+            if !known -> return Err(rows_fail("{at}: {name} declares no field {entry.key}"))
+        }
+        parts := [String]{}
+        height := 0
+        loop field in fields {
+            found := false
+            loop entry in entries {
+                if entry.key != field.name -> next
+                found = true
+                parts.push("{field.name}: {literal(out, field.ty, entry.value, false, "{at}.{field.name}", prefix) ?? return Err(err)}")
+                if out.height > height -> height = out.height
+            }
+            if found || field.defaulted -> next
+            if !is_optional(field.ty) -> return Err(rows_fail("{at}: the encoding leaves out {name}.{field.name}, which has no default"))
+            parts.push("{field.name}: None")
+        }
+        out.height = height
+        return Ok(joined(parts, top))
+    }
+    Err(mismatch(at, "a {name}"))
+}
+
+is_object: fn(value: Dyn) -> Bool Never! {
+    if value == .Object(_) -> return true
+    false
+}
+
+is_optional: fn(ty: Type) -> Bool Never! {
+    if ty == .Option(_) -> return true
+    false
+}
+
+// A constructor literal whose fields nest `out.height` deep, or the name of
+// the node constant of the constant `prefix` that holds it once it nests
+// NODE_HEIGHT deep.
+node: fn(out: &RowsOut, text: &&String, top: Bool, prefix: String) -> String Never! {
+    out.height += 1
+    if top || out.height < NODE_HEIGHT -> return text
+    name: "{prefix}_NODE_{out.nodes.len()}"
+    out.nodes.push("{name}: {text}")
+    out.height = 0
+    name
+}
+
+named_type: fn(name: String) -> Type Never! { Type.Named{name: name} }
+
+list_type: fn(name: String) -> Type Never! { Type.List{element: named_type(name)} }
+
+rows_constants: fn() -> [RowsConstant] Never! {
+    marker_decls: sema_marker_module_prelude_decls()
+    [RowsConstant]{
+        RowsConstant{name: "SEMA_PRELUDE_MARKER_DECLS", ty: list_type("MarkerDecl"), value: marker_decls.encode()},
+        RowsConstant{name: "SEMA_PRELUDE_MARKER_RULES", ty: list_type("TAppliedRule"), value: sema_marker_module_prelude_rules(marker_decls).encode()},
+        RowsConstant{name: "SEMA_PRELUDE_DERIVE_PROVIDERS", ty: list_type("MarkerDecl"), value: sema_derive_builtin_providers().encode()},
+        RowsConstant{name: "SEMA_PRELUDE_DERIVE_WORDS", ty: Type.List{element: Type.String}, value: sema_registration_derive_words().encode()},
+        RowsConstant{name: "SEMA_PRELUDE_ERROR_PROGRAM", ty: named_type("Program"), value: sema_registration_original_error_program().encode()},
+        RowsConstant{name: "SEMA_UNITS_CATALOG", ty: list_type("UnitFamilyDef"), value: sema_units_catalog_read().encode()},
+    }
+}
+
+HEADER: "// The parsed rows of the Prelude texts the compiler carries, generated by\n// Compiler/Toolchain/PreludeRows; do not edit. Regenerate them from the\n// checkout root with `{WRITE_COMMAND}`. Each constant is what its reader\n// returns for its text (JetParser Tests/PreludeBuildRows.jet holds them to\n// it). A constructor nested deep is a `_NODE_` constant of its own, which\n// its parent names."
+
+render_rows: fn() -[FS]> String PreludeRowsError! {
+    out := RowsOut{shapes: [RowShape]{}, index: [String:Int]{}, nodes: [String]{}, height: 0}
+    read_shapes(out) ?? return Err(err)
+    blocks := [String]{}
+    loop constant in rows_constants() {
+        text: literal(out, constant.ty, constant.value, true, constant.name, constant.name) ?? return Err(err)
+        lines := [String]{"{constant.name}: {text}"}
+        loop line in compiler_take_rows<String>(out.nodes) -> lines.push(line)
+        blocks.push(lines.join("\n"))
+    }
+    names := loop (name, position) in out.index if out.shapes[position].used -> "{name}"
+    names.sort()
+    Ok("{HEADER}\nuse {{\n    jet_foundation.[{names.join(", ")}]\n}}\n\n{blocks.join("\n\n")}\n")
+}
+
+prelude_rows_main: fn(args: [String]) -[FS]> String PreludeRowsError! {
+    mode: if args.len() == 0 -> "--check" else -> args[0]
+    if args.len() > 1 || (mode != "--check" && mode != "--write") -> return Err(rows_fail("usage: jet Compiler/Toolchain/PreludeRows/Main.jet [--check|--write]"))
+    generated: render_rows() ?? return Err(err)
+    current: if files.exists(TARGET) -> files.read(TARGET) ?? return Err(rows_fail("cannot read {TARGET}: {err}")) else -> ""
+    if current == generated -> return Ok("prelude rows match: {TARGET}")
+    if mode == "--write" {
+        files.write(TARGET, generated) ?? return Err(rows_fail("cannot write {TARGET}: {err}"))
+        return Ok("prelude rows written: {TARGET}")
+    }
+    Err(rows_fail("{TARGET} differs from what the Prelude texts parse to; run {WRITE_COMMAND} from the checkout root"))
+}
+
+run: fn() { print(prelude_rows_main(process.args()) ?? process.fail(1, err.message)) }

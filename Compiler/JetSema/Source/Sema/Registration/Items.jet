@@ -2150,16 +2150,15 @@ sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: 
     }
 }
 
-// The original Prelude error declarations, parsed while the compiler builds:
-// only this embedded original parse can mint the DefaultErr marker. The
-// text ships with the compiler, so one that does not parse, or that does not
-// hold seven declarations with exactly one marked default error, stops the
-// build.
-SEMA_PRELUDE_ERROR_PROGRAM: #run sema_registration_original_error_program()
-
 // The byte offset of each line of SEMA_PRELUDE_ERROR_SOURCE.
 SEMA_PRELUDE_ERROR_LINE_STARTS: #run parser_line_starts(SEMA_PRELUDE_ERROR_SOURCE.bytes())
 
+// The original Prelude error declarations: only this embedded original parse
+// can mint the DefaultErr marker. SEMA_PRELUDE_ERROR_PROGRAM (PreludeRows.jet)
+// is what this returns, written by Compiler/Toolchain/PreludeRows, so neither
+// a compile nor the compiler's build parses the error text; a text that does
+// not parse, or that does not hold seven declarations with exactly one marked
+// default error, stops that tool.
 sema_registration_original_error_program: fn() -> Program {
     parsed := parse_generated_source(SEMA_PRELUDE_ERROR_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 -> panic("Prelude/Errors.jet does not parse: {parsed.diagnostics[0].what}")
@@ -5419,10 +5418,9 @@ sema_registration_namespace_owner_at: fn(graph: SemaRegistrationGraph, module_in
 }
 
 // The words the Prelude derive templates spell (sema_source_words of
-// SEMA_PRELUDE_DERIVE_SOURCE), read while the compiler builds, so a compile
+// SEMA_PRELUDE_DERIVE_SOURCE). SEMA_PRELUDE_DERIVE_WORDS (PreludeRows.jet) is
+// what this returns, written by Compiler/Toolchain/PreludeRows, so a compile
 // never scans the derive text.
-SEMA_PRELUDE_DERIVE_WORDS: #run sema_registration_derive_words()
-
 sema_registration_derive_words: fn() -> [String] Never! {
     seen := [String:Bool]{}
     words := [String]{}

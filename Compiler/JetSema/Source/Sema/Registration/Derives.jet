@@ -2075,11 +2075,11 @@ sema_author_facing_diagnostics: fn(anchor: Span, generated: [Diagnostic], diagno
 // ---------------------------------------------------------------------------
 // Built-in providers.
 
-// The Prelude derive markers that carry an `expand` template, parsed while
-// the compiler builds, so a compile never parses the derive text. The text
-// ships with the compiler: one that does not parse stops the build.
-SEMA_PRELUDE_DERIVE_PROVIDERS: #run sema_derive_builtin_providers()
-
+// The Prelude derive markers that carry an `expand` template.
+// SEMA_PRELUDE_DERIVE_PROVIDERS (PreludeRows.jet) is what this returns,
+// written by Compiler/Toolchain/PreludeRows, so neither a compile nor the
+// compiler's build parses the derive text; a text that does not parse stops
+// that tool.
 sema_derive_builtin_providers: fn() -> [MarkerDecl] {
     parsed: parse_source(SEMA_PRELUDE_DERIVE_SOURCE.bytes())
     if parsed.diagnostics.len() != 0 -> panic("Prelude/Derives.jet does not parse: {parsed.diagnostics[0].what}")

@@ -7,9 +7,10 @@
 // generated file in git (`kept: true`), so the build rewrites a stale one and
 // refuses a hand edit of it. Prelude/Effects.jet is read at build time
 // instead (JetFoundation EffectVocabulary.jet, JET_CLI_EFFECT_MODULE). The
-// compiler parses each copied text while it builds, into `#run` constants
-// beside its reader, so no compile parses or scans one; JetParser's
-// Tests/PreludeBuildRows.jet holds each constant to its text.
+// rows parsed from the copied texts are generated ahead of time into
+// JetSema's PreludeRows.jet by Toolchain/PreludeRows/Main.jet, which is not a
+// build step, so no compile parses or scans one; its --check and JetParser's
+// Tests/PreludeBuildRows.jet hold those rows to the texts.
 // Usage (from Compiler/): jet Toolchain/PreludeSources.jet [--check|--write]
 // Paths are relative to the Compiler package, the step's working folder.
 // --check fails when a generated file differs in any byte, inside its raw
@@ -32,10 +33,10 @@ PreludeCopy: struct {
 }
 
 COPIES: [PreludeCopy]{
-    PreludeCopy{source: "Prelude/Markers.jet", target: "JetFoundation/Source/Policy/PreludeMarkers.jet", constant: "MARKER_SOURCE", comment: "The marker vocabulary: one struct with an `impl Marker` block per rule. A\nmarker exists exactly when it is written here; every reader of the rule rows\n(parser, sema, `jet inspect`, `jet explain`) reads this one text, parsed\nwhile the compiler builds. The text is Compiler/Prelude/Markers.jet, copied\nby `jet build Compiler` (Compiler/Toolchain/PreludeSources.jet): edit the\nPrelude file, not this copy.", path: ""},
-    PreludeCopy{source: "Prelude/Derives.jet", target: "JetSema/Source/Sema/Registration/PreludeDerives.jet", constant: "SEMA_PRELUDE_DERIVE_SOURCE", comment: "The built-in derive providers: Prelude markers whose typed `expand` bodies\nJetSema expands for each selected capability (Registration/Derives.jet),\nparsed while the compiler builds. The text is Compiler/Prelude/Derives.jet,\ncopied by `jet build Compiler` (Compiler/Toolchain/PreludeSources.jet): edit\nthe Prelude file, not this copy.", path: "jet:canonical-prelude/Prelude/Derives.jet"},
-    PreludeCopy{source: "Prelude/Errors.jet", target: "JetSema/Source/Sema/Registration/PreludeDerives.jet", constant: "SEMA_PRELUDE_ERROR_SOURCE", comment: "The standard library's own error family and its conversions into the\ndefault `Err`: ordinary Prelude source JetSema injects where a module needs it,\nparsed while the compiler builds. The text is Compiler/Prelude/Errors.jet,\ncopied by `jet build Compiler` (Compiler/Toolchain/PreludeSources.jet): edit\nthe Prelude file, not this copy.", path: "jet:canonical-prelude/Prelude/Errors.jet"},
-    PreludeCopy{source: "Prelude/Units.jet", target: "JetSema/Source/Sema/Registration/PreludeUnits.jet", constant: "SEMA_PRELUDE_UNITS_SOURCE", comment: "The standard unit catalog: ordinary Jet source that JetSema parses and\nresolves while the compiler builds, then injects into each program that\nmentions a unit. Base families mint nominal axes; derived families claim\nstructural products. The text is Compiler/Prelude/Units.jet, copied by\n`jet build Compiler` (Compiler/Toolchain/PreludeSources.jet): edit the\nPrelude file, not this copy.", path: ""},
+    PreludeCopy{source: "Prelude/Markers.jet", target: "JetFoundation/Source/Policy/PreludeMarkers.jet", constant: "MARKER_SOURCE", comment: "The marker vocabulary: one struct with an `impl Marker` block per rule. A\nmarker exists exactly when it is written here; every reader of the rule rows\n(parser, sema, `jet inspect`, `jet explain`) reads this one text or the rows\nparsed from it ahead of time (JetSema PreludeRows.jet). The text is\nCompiler/Prelude/Markers.jet, copied by `jet build Compiler`\n(Compiler/Toolchain/PreludeSources.jet): edit the Prelude file, not this copy.", path: ""},
+    PreludeCopy{source: "Prelude/Derives.jet", target: "JetSema/Source/Sema/Registration/PreludeDerives.jet", constant: "SEMA_PRELUDE_DERIVE_SOURCE", comment: "The built-in derive providers: Prelude markers whose typed `expand` bodies\nJetSema expands for each selected capability (Registration/Derives.jet),\nparsed ahead of time into JetSema's PreludeRows.jet. The text is\nCompiler/Prelude/Derives.jet, copied by `jet build Compiler`\n(Compiler/Toolchain/PreludeSources.jet): edit the Prelude file, not this copy.", path: "jet:canonical-prelude/Prelude/Derives.jet"},
+    PreludeCopy{source: "Prelude/Errors.jet", target: "JetSema/Source/Sema/Registration/PreludeDerives.jet", constant: "SEMA_PRELUDE_ERROR_SOURCE", comment: "The standard library's own error family and its conversions into the\ndefault `Err`: ordinary Prelude source JetSema injects where a module needs it,\nparsed ahead of time into JetSema's PreludeRows.jet. The text is\nCompiler/Prelude/Errors.jet, copied by `jet build Compiler`\n(Compiler/Toolchain/PreludeSources.jet): edit the Prelude file, not this copy.", path: "jet:canonical-prelude/Prelude/Errors.jet"},
+    PreludeCopy{source: "Prelude/Units.jet", target: "JetSema/Source/Sema/Registration/PreludeUnits.jet", constant: "SEMA_PRELUDE_UNITS_SOURCE", comment: "The standard unit catalog: ordinary Jet source whose families, parsed and\nresolved ahead of time into JetSema's PreludeRows.jet, JetSema injects into\neach program that mentions a unit. Base families mint nominal axes; derived\nfamilies claim structural products. The text is Compiler/Prelude/Units.jet,\ncopied by `jet build Compiler` (Compiler/Toolchain/PreludeSources.jet): edit\nthe Prelude file, not this copy.", path: ""},
 }
 
 FENCE: "```"
