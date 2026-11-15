@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106425,
+    "rev": 106429,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41118,6 +41118,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c8 (Main, 2026-11-15): ffab722e30 landed and the grep prints nothing on 9003020128, but web_app/ is 25 of 33 on p182. Six cases fail with a spurious E0114 at Core/Log/Log.jet:592 on the inspect/explain routes, a regression that entered between p177 and p178 (0adaddcd5e..755c998a40). It is owned by MemKernel-6 (suspects 942c2c9a3d and bd306d1241); two other cases are known-failing. c8 is met when web_app/ passes."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c27 and c28 are blocked (GoalsB-5-2, 2026-11-15): c28 needs an app test host with network control, and none exists; c27 needs screens (the #6445/#6447 screen layer) and a sync client. Neither is built yet; they move once those land."
         },
         {
@@ -41238,11 +41243,11 @@
         {
           "n": 7,
           "text": "`app.live` takes a `-[DB.Read]>` query and returns a typed value, and invalidation of overlapping reads follows D-INVALIDATE1=A; a DB.Write query is a compile error, and no supported call returns AppError.Unsupported. Proof: `jet test Compiler --profile cases --filter web_app/app_live_` and `jet test Compiler --profile ui --filter app_live_write_query`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:54:13.806Z"
+          "evidence": "7141a40239: jet test Compiler --profile cases --filter web_app/app_live_ passes (1 of 1) and jet test Compiler --profile ui --filter app_live_write_query passes (1 of 1) on batch compiler p182 (dev 9003020128).",
+          "at": "2026-11-15T13:43:24.377Z"
         },
         {
           "n": 8,
@@ -41463,7 +41468,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-15T13:01:36.051Z",
+      "updated": "2026-11-15T13:43:25.351Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -42542,6 +42547,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "Proof batch on p182 (dev 9003020128, Main 2026-11-15): c1-c4, c7, c10, c11, c15, c18 and c20-c26 re-proven. c5 met. c16 (failures_explicit_policy_function shows a second E0434 at line 14; fmt_inserts_failure_marks leaves rows: parse(path) without ?), c17 (review_flags_new_failure_point REFUSED: a partial assertion without a reason) and c19 (fix_pin_failures exits 1 with E2105) fail after 8ba6fd9fc3, 02087a6f98 and 85282c9d8a landed; all four went back to GoalsA-1-4 as one list."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c9 (err.as<T>()) needs Err to carry an erased typed payload. That carrier is the one the open owner ballot D-PRIM-ANY1 defines (identity, cleanup, loans, secrecy), so c9 waits on that ballot. Decision (Main, operational): no separate ballot and no private stand-in box; c9 is built on D-PRIM-ANY1's carrier once it is ratified. The other #3838 criteria proceed."
         },
         {
@@ -42830,7 +42840,7 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-15T13:43:20.127Z",
+      "updated": "2026-11-15T13:43:26.289Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -104137,11 +104147,11 @@
         {
           "n": 3,
           "text": "Each server caps live subscriptions and re-runs per second and coalesces bursts of writes into one re-run. Proof: `jet test Compiler --profile cases --filter web_app/live_query_caps_and_coalescing` (a load case).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:54:10.299Z"
+          "evidence": "96f6bd2767: jet test Compiler --profile cases --filter web_app/live_query_caps_and_coalescing passes (1 of 1) on batch compiler p182 (dev 9003020128).",
+          "at": "2026-11-15T13:43:23.350Z"
         },
         {
           "n": 4,
@@ -104228,7 +104238,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-15T13:43:22.147Z",
+      "updated": "2026-11-15T13:43:23.350Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -217992,6 +218002,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T13:43:26.289Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0flvd7x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T13:43:25.351Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ttcd0k",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T13:43:24.377Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T13:43:23.350Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00cqn1l",
+      "note": "#3"
+    },
     {
       "at": "2026-11-15T13:43:22.147Z",
       "by": "Main",
