@@ -222,6 +222,13 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
         row: g.data_ids[group]
         if row >= 0 -> name_rows_set(out.data_rows, g.data_keys[group], row)
     }
+    // A constant's static object (and a storage, memo or Shared site cell)
+    // keeps its key: the runtime library finds its lifecycle guards and the
+    // Core library its cells by it (m.constant_rows).
+    loop group in g.data_texts..<g.data_keys.len() {
+        row: g.data_ids[group]
+        if row >= 0 -> name_rows_set(out.constant_rows, g.data_keys[group], row)
+    }
     given := [Int:String]{}
     loop part in 0..<parts.len() {
         table: parts[part].trait_keys
@@ -749,4 +756,31 @@ ir_merge_rewrite_part: fn(functions: &&[IRFunction], side: IRMergeSide, ids: &&[
         taken.push(IRMergeTaken{id: id, function: row.move()})
     }
     taken
+}
+
+#Test("a merge keeps the constant keys of the data rows it merges") {
+    parts := [IRModule]{}
+    loop part in 0..<2 {
+        m := ir_module_new()
+        f := ir_function_new("f{part}", "test:merge.jet::f{part}", "f{part}", "merge.jet", 1)
+        keys: [String]{"storage:shared", "storage:own{part}"}
+        loop key in keys {
+            row: m.data.len()
+            m.data.push([U8]{U8{0}})
+            name_rows_set(m.constant_rows, key, row)
+            _: ir_emit(f, IROp.DataAddress, -1, row, -1, -1, 1)
+        }
+        m.functions.push(f)
+        parts.push(m)
+    }
+    preps := [IRMergePrep]{}
+    loop m in parts -> preps.push(ir_merge_prepare(m))
+    merged: ir_merge(parts, preps, [IRMergeRoot]{IRMergeRoot{part: 0, local: 0}, IRMergeRoot{part: 1, local: 0}}, -1)
+    assert_eq(merged.data.len(), 3)
+    shared: name_rows_value(merged.constant_rows, "storage:shared") ?? -1
+    own0: name_rows_value(merged.constant_rows, "storage:own0") ?? -1
+    own1: name_rows_value(merged.constant_rows, "storage:own1") ?? -1
+    assert(shared >= 0 && own0 >= 0 && own1 >= 0, "every keyed data row keeps its key")
+    assert(shared != own0 && shared != own1 && own0 != own1, "each key names its own merged row")
+    assert_eq(merged.functions[0].a[0], shared)
 }

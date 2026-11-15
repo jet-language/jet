@@ -60,6 +60,7 @@ use {
     json: core.encoding.json
     process: core.process
     re: core.regex
+    term: core.term
 }
 
 USAGE: "usage: jet Toolchain/RuntimePack.jet pack --jet=JET --tree=DIR... --out=DIR --identity=FILE\n       jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...|--check"
@@ -389,18 +390,30 @@ output_of: fn(spec: ProcessSpec, what: String) -> String {
     receipt.output
 }
 
-// The runtime build's issue reports, kept in OUT when it fails.
+// The runtime build's issue reports and Core's skipped list, kept in OUT
+// when it fails; the issue reports are printed to stderr too, so the failed
+// build's log names the issues.
 keep_issues: fn(work: String, out: String) {
     suffixes: [String]{".issues", ".pack-issues"}
     loop suffix in suffixes {
         path: files.join(work, "jet_runtime_jet{suffix}")
-        if files.exists(path) -> files.copy(path, files.join(out, "runtime{suffix}")) ?? ()
+        if !files.exists(path) -> next
+        files.copy(path, files.join(out, "runtime{suffix}")) ?? ()
+        print_issues(path)
     }
     core_names: [String]{"issues", "skipped"}
     loop name in core_names {
         core_file: files.join(work, "jet_core.{name}")
-        if files.exists(core_file) -> files.copy(core_file, files.join(out, "core.{name}")) ?? ()
+        if !files.exists(core_file) -> next
+        files.copy(core_file, files.join(out, "core.{name}")) ?? ()
+        if name == "issues" -> print_issues(core_file)
     }
+}
+
+// Prints the issue report at `path` to stderr.
+print_issues: fn(path: String) {
+    text: files.read(path) ?? return
+    term.eprint("runtime-pack: {path}:\n{text.trim()}")
 }
 
 // Builds the pack in `work` and publishes it in `tool.out`.

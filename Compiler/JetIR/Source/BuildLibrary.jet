@@ -11,7 +11,7 @@
 
 use {
     jet_backend.[LINK_FAULT_REPORT, X64DataExport]
-    jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, SymbolTable, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_value]
+    jet_foundation.[AccessConvention, CompilerThreads, DeclTable, Span, BodyCallArg, SymbolTable, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_get_text, name_rows_value]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -182,17 +182,18 @@ ir_runtime_intrinsic: fn(name: String) -> Bool Never! {
 }
 
 // Builds the library of `rows` (the entry module's `#Export(c)` rows, in
-// declaration order) and every function they reach; the other inputs as
-// ir_build_program's. A row whose function does not satisfy the C export
-// law is not an export. `lifecycle_rows` are the lines of the lifecycle
-// list (ir_lifecycle_rows).
-ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String]) -> IRLibraryResult Never! {
+// declaration order) and every function they reach, on up to `threads`
+// threads (ir_build_waves); the other inputs as ir_build_program's. A row
+// whose function does not satisfy the C export law is not an export.
+// `lifecycle_rows` are the lines of the lifecycle list (ir_lifecycle_rows).
+ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String], threads: CompilerThreads) -> IRLibraryResult Never! {
     p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     ir_foreign_index(p, foreign, decls)
     p.stop_points = false
-    m := ir_module_for(p)
     exports := [IRLibraryExportRow]{}
     export_rows := [Int]{}
+    // The wave build's roots: each export's checked function, in row order.
+    jobs := [IRWaveJob]{}
     unchecked := 0
     outside := 0
     loop row in rows {
@@ -206,6 +207,7 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
         }
         exports.push(IRLibraryExportRow{key: row.key, symbol: row.symbol})
         export_rows.push(index)
+        jobs.push(IRWaveJob{key: row.key, row: index, args: [Type]{}, lambda: -1, part: -1, local: -1})
     }
     if exports.len() == 0 -> return ir_library_failed([String]{"the checked NativeLibrary artifact has no #Export(c) functions ({rows.len()} export rows: {unchecked} without a checked function, {outside} outside the C export law)"})
     // Every export problem is collected, so one run lists them all.
@@ -284,14 +286,17 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     if bits != from_bits -> return ir_library_failed([String]{"runtime bitcast definitions must be present as one validated pair"})
     p.intrinsics = intrinsics.move()
     p.asm_rails = rails
-    failures := [IRBuildFailure]{}
+    kept: ir_build_waves_kept(p, jobs, false, threads)
+    built: kept.result.move()
+    m := built.program.move()
+    if built.failures.len() > 0 -> return IRLibraryResult{program: m, failures: built.failures.move(), errors: [String]{}, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, abis: [IRExportABI]{}}
+    p = kept.program.move()
+    // Each export's function in the merged module.
     roots := [Int]{}
     loop row in exports {
-        id: ir_function_id(m, p, row.key, [Type]{}) ?? return ir_library_failed([String]{"export {row.symbol} names a missing checked function"})
+        id: name_rows_get_text(m.function_rows, row.key) ?? return ir_library_failed([String]{"export {row.symbol} names a missing checked function"})
         roots.push(id)
     }
-    _: ir_build_queue(m, p, failures, 0)
-    ir_drop_glues(m, p)
     // No export reaches its own runtime route: that would be a construct in
     // its body lowered to a call of the routine it defines, which recurses
     // without end (a sized literal that missed the fold once made
@@ -331,7 +336,7 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     if ending >= 0 -> data.push(X64DataExport{data: ending, symbol: IR_X64_PROCESS_ENDING_SYMBOL})
     armed: ir_lifecycle_guard(m, p, IR_X64_CHECKS_ARMED_STORAGE)
     if armed >= 0 -> data.push(X64DataExport{data: armed, symbol: IR_X64_CHECKS_ARMED_SYMBOL})
-    IRLibraryResult{program: m, failures: failures, errors: [String]{}, exports: globals, data: data, abis: abis}
+    IRLibraryResult{program: m, failures: [IRBuildFailure]{}, errors: [String]{}, exports: globals, data: data, abis: abis}
 }
 
 ir_library_failed: fn(errors: [String]) -> IRLibraryResult Never! {
