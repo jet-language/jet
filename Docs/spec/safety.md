@@ -237,7 +237,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1471,
+  "total": 1473,
   "counts": {
     "Compiler": 656,
     "Core": 178,
@@ -245,7 +245,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     "Examples": 45,
     "Jetpack": 8,
     "Tools": 28,
-    "tests": 546
+    "tests": 548
   },
   "regions": [
     {
@@ -1357,7 +1357,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 2124,
+      "line": 2125,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -9987,6 +9987,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/run/Dyn/NumberInUnsafe.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "the literal below is a valid JSON number lexeme"
+    },
+    {
+      "package": "tests",
       "file": "tests/run/FailureFoundation/TransactOSStop.jet",
       "line": 33,
       "column": 5,
@@ -10456,6 +10463,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/ui/secret_read_requires_unsafe.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "the length leaves this function, never the key bytes"
+    },
+    {
+      "package": "tests",
       "file": "tests/ui/secrets_expiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet",
       "line": 13,
       "column": 9,
@@ -10559,8 +10573,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Examples | 45 |
 | Jetpack | 8 |
 | Tools | 28 |
-| tests | 546 |
-| **total** | **1471** |
+| tests | 548 |
+| **total** | **1473** |
 
 ### Regions
 
@@ -10724,7 +10738,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2438:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2448:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2550:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2124:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2125:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 166:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 174:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 200:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -11957,6 +11971,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/run/CoreCryptoFoundations/PrimitiveMatrix.jet | 166:5 | "expert known-answer vectors need raw key bytes" |
 | tests | tests/run/CoreIO/CleanupMatrix.jet | 35:5 | "the stop runs the shared cleanup boundary" |
 | tests | tests/run/CoreIO/CleanupMatrix.jet | 85:5 | "the exit callbacks have no captured state" |
+| tests | tests/run/Dyn/NumberInUnsafe.jet | 7:5 | "the literal below is a valid JSON number lexeme" |
 | tests | tests/run/FailureFoundation/TransactOSStop.jet | 33:5 | "the stop runs the shared cleanup boundary" |
 | tests | tests/run/PatternsAndFields/FixedSizeListWidensAtCoreCall.jet | 5:5 | "fixed signature vector" |
 | tests | tests/run/UnsafeAndRuntime/MemFromAddrDirect.jet | 11:5 | "the borrowed value is live in the caller and the pointer never escapes" |
@@ -12024,6 +12039,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/ui/ownership/raw_window_read_after_its_owner_is_released.jet | 11:5 | "the cells hold no resource, so spending them frees nothing" |
 | tests | tests/ui/ownership/raw_window_read_after_its_owner_is_released.jet | 18:5 | "the window covers exactly the two Int fields, which `cells` keeps" |
 | tests | tests/ui/ownership/single_use_holder_dropped_owes_consume.jet | 33:5 | "the lease's job is done by hand here" |
+| tests | tests/ui/secret_read_requires_unsafe.jet | 8:5 | "the length leaves this function, never the key bytes" |
 | tests | tests/ui/secrets_expiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet | 13:9 | "attempt to discard a loan" |
 | tests | tests/ui/unsafe_and_runtime/volatile_write_emit_is_byte_exact/run.jet | 2:1 | "UART TX register is mapped by the target machine" |
 | tests | tests/ui/unsafe_block_after_statement_parse_error.jet | 8:5 | "target outlives the read in this frame" |
