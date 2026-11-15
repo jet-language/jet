@@ -365,6 +365,11 @@ __decode_dyn: fn(tree: Dyn) -> Dyn [FieldError]! {
 __DecodeSource: trait {
     // Enters the Object at the cursor; false (nothing read) for any other value.
     begin_object: fn(&self) -> Bool Never!
+    // How many members the Object at the cursor has, read without moving the
+    // cursor; -1 for any other value, and for every value of a source that
+    // can't count them before reading them. A generated enum `__read` reads a
+    // one-member Object in place and captures any other value.
+    object_members: fn(self) -> Int Never!
     // Moves to the open Object's next member, its value at the cursor; false,
     // and the Object closed, after the last one.
     next_key: fn(&self) -> Bool Never!
@@ -495,6 +500,11 @@ __DecodeTree: struct {
             if object -> self.enter()
             object
         }
+
+        // Uncounted: entering a container copies its tree, so an enum read
+        // through this reader would copy each level of it; its capture copies
+        // the value once.
+        object_members: fn(self) -> Int Never! { -1 }
 
         next_key: fn(&self) -> Bool Never! {
             top: self.open.len() - 1

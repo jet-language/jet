@@ -19,9 +19,7 @@ use jet_foundation.[
     module_is_core,
 ]
 
-// A seeded module was canonicalized when it was finalized: its declarations
-// and its import bindings' symbols already carry canonical keys, so it takes
-// no keys and no pass. Every other module's keys, then its rewritten types,
+// Every module's keys, then its rewritten types,
 // are read off the graph alone, each module's by itself, so both run as graph
 // scans (sema_graph_scan), claimed largest source first; each module's
 // rewritten types then move into its rows, the same for any thread count.
@@ -31,7 +29,7 @@ sema_registration_canonicalize_qualified_types: fn(graph: &&SemaRegistrationGrap
     rows := [Int]{}
     weights := [Int]{}
     work := 0
-    loop module_index in owned.seeded..<count {
+    loop module_index in 0..<count {
         bytes: owned.modules[module_index].source.count_bytes()
         rows.push(module_index)
         weights.push(bytes)
@@ -63,7 +61,7 @@ sema_registration_canonicalize_qualified_types: fn(graph: &&SemaRegistrationGrap
 SEMA_QUALIFIED_MIN_BYTES_PER_THREAD: 262144
 
 // What a module's qualified scan reads besides the graph: every graph
-// module's keys, empty for a seeded one.
+// module's keys.
 SemaQualifiedJobs: struct {
     keys: [[String:Type]]
 }

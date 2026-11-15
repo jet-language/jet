@@ -146,7 +146,7 @@ identity_sha: fn(identity: String) -> String Never! {
 
 // The executable part that holds a jet's identity, and the one that holds
 // the identity of the jet that lowered its runtime (Compiler/JetCli
-// CoreRecordCheck.jet `--embed`).
+// RuntimeEmbed.jet).
 IDENTITY_PART: "jet.identity"
 RUNTIME_PACKER_PART: "jet.runtime/IDENTITY"
 // The note type of an executable part (Compiler/JetBackend ELF.jet
@@ -200,7 +200,7 @@ image_part_text: fn(image: [U8], name: String) -> String Never! {
 // The digest a jet's identity names (`jet@VERSION#<digest>`): the sha256 of
 // its bytes with the bytes of its IDENTITY_PART zeroed, so the jet can carry
 // its own identity, which is the sha256 of the file for a jet without that
-// part (Compiler/JetCli CoreRecordCheck.jet `--embed` takes it the same way).
+// part (Compiler/JetCli RuntimeEmbed.jet takes it the same way).
 identity_digest: fn(image: [U8]) -> String Never! {
     found: image_part(image, IDENTITY_PART) ?? return sha256_hex(image)
     zeros := [U8]{}

@@ -8,25 +8,24 @@
 // (Toolchain/RuntimePack.jet), with IDENTITY, jet-bare's identity: its
 // bytes name the compiler, and no C compiler runs. It also fails when the
 // jet.runtime interface jet embeds (JetFoundation Registry/RuntimeInterface.jet)
-// disagrees with the one the runtime source renders. The `core-record` step
-// then runs jet-bare to check Core and the Prelude and writes `jet`, the same
-// executable with their precompiled record, each runtime file and jet's own
-// identity added as parts it maps at load (JetCli CoreRecordCheck.jet
-// `--embed`), and that identity to IDENTITY beside it for the tools that
-// name a jet without running it. So the record is the Core of that very
-// compiler, a compile outside a toolchain tree takes its Core modules from
-// the record, not from Core's sources, and jet reads no runtime or identity
-// file: only jet-bare reads jet-runtime/. jet-bare has no
-// runtime image, so neither step can run Core code at compile time: every
+// disagrees with the one the runtime source renders. The same step checks
+// Core and the Prelude once, with jet-bare, and builds the Core library
+// below from that check (JetCli CoreLibrary.jet). The `core-embed` step then
+// writes `jet`, the same executable with each runtime file and jet's own
+// identity added as parts it maps at load (JetCli RuntimeEmbed.jet), and
+// that identity to IDENTITY beside it for the tools that name a jet without
+// running it. So jet reads no runtime or identity file: only jet-bare reads
+// jet-runtime/. jet-bare has no runtime image, so the runtime step can't run
+// Core code at compile time: every
 // Core module value must be a constant the compiler folds, and one that
 // calls Core code is E0643 here (Core/Ui Draw.jet's built-in face is a
 // `#Memo` function for this). The pack carries no C or libc: a program's C
 // closure links the musl sysroot of jet's C toolchain pack (JetCli
 // ForeignLink.jet). The Core library (jet_core.o, core.exports,
 // core.threads: jet's embedded Core as global symbols) lands here too: the
-// image links its object beside the runtime, and jet carries its two lists
-// as parts, by which a `jet run` binds its Core calls to the image's Core
-// code (JetCli Host.jet).
+// image links its object beside the runtime, and jet carries the object and
+// its two lists as parts, by which a `jet run` binds its Core calls to the
+// image's Core code, or to the object's in a full link (JetCli Host.jet).
 RUNTIME_DIR: "JetCli/.jet/build/jet-runtime"
 RUNTIME_FILES: [String]{
     "jet_runtime_jet.o", "runtime.abi.json", "runtime.exports", "runtime.threads",
@@ -50,7 +49,7 @@ PRELUDE_COPIES: [String]{
 KEYWORD_SOURCES: [String]{"JetLexer/Data/Lexer/Keywords.jet", "JetLexer/Source/Lexer/Tokens.jet", "JetLexer/Source/Lexer/Terminators.jet"}
 
 build: fn(b: Build) -[Exec, FS]> {
-    #Impure("run the source generators, the Core record step and the runtime pack step") {
+    #Impure("run the source generators, the runtime pack step and the Core embed step") {
         prelude: b.run("prelude-sources", b.jet(), ["Exec", "FS"])
         prelude.arg("run")
         prelude.arg("--allow=FS")
@@ -81,22 +80,22 @@ build: fn(b: Build) -[Exec, FS]> {
         runtime.arg("--out={RUNTIME_DIR}")
         loop file in RUNTIME_FILES -> runtime.writes("{RUNTIME_DIR}/{file}")
         runtime.output("{RUNTIME_DIR}/IDENTITY", flag: "--identity=")
-        runtime.timeout(10min)
-        core: b.run("core-record", b.host(bare), ["Exec", "FS"])
-        core.arg("self")
-        core.arg("devtools")
-        core.arg("core-record")
-        core.arg("--embed")
-        core.file(b.host(bare))
+        // Lowering the runtime, checking every Core body and building the
+        // Core library.
+        runtime.timeout(30min)
+        embed: b.run("core-embed", b.host(bare), ["Exec", "FS"])
+        embed.arg("self")
+        embed.arg("devtools")
+        embed.arg("embed")
+        embed.file(b.host(bare))
         // The runtime step's folder: the step reads each file it embeds.
-        core.arg(RUNTIME_DIR)
-        loop file in RUNTIME_FILES -> core.reads("{RUNTIME_DIR}/{file}")
-        core.reads("{RUNTIME_DIR}/IDENTITY")
-        core.output("JetCli/.jet/build/jet")
-        core.output("JetCli/.jet/build/IDENTITY")
-        // Checking every Core body takes most of it (a v5 write took 14 min).
-        core.timeout(30min)
-        toolchain: b.add_install("toolchain", [], [runtime, core], [bare])
+        embed.arg(RUNTIME_DIR)
+        loop file in RUNTIME_FILES -> embed.reads("{RUNTIME_DIR}/{file}")
+        embed.reads("{RUNTIME_DIR}/IDENTITY")
+        embed.output("JetCli/.jet/build/jet")
+        embed.output("JetCli/.jet/build/IDENTITY")
+        embed.timeout(10min)
+        toolchain: b.add_install("toolchain", [], [runtime, embed], [bare])
         b.default(toolchain)
     }
 }

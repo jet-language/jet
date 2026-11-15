@@ -580,21 +580,6 @@ SemaGraphResult: struct {
     outputs: [ResolvedOutput]{[ResolvedOutput]{}}
     memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
     memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
-    // Each fact finalization would have changed on the taken seeded modules'
-    // final slots, listed instead of written (sema_finalize_seeded_taken);
-    // empty when their record matches the Core this program checks against.
-    seeded_writes: [SemaSeededWrite]{[SemaSeededWrite]{}}
-}
-
-// One fact of a taken seeded module (sema_finalize_seeded_taken) that this
-// program's finalization solved differently from the record: what kind of
-// fact, its module and function key, and the two values as text.
-SemaSeededWrite: struct {
-    kind: String
-    module_name: String
-    key: String
-    recorded: String
-    finalized: String
 }
 
 sema_name_facts_empty: fn() -> NameFacts Never! {
@@ -3137,14 +3122,6 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         unresolved.complete = true
         return unresolved
     }
-    // A taken Core module's function is served from the Core record: its
-    // packet holds the body and facts the record's check of Core gave it,
-    // which checking its source here gives again.
-    served := sema_core_body_comptime_packets(graph, module_identity, function_key) ?? {
-        unresolved.incomplete_reasons = [String]{"{err}"}
-        return unresolved
-    }
-    if served.packet != None -> return sema_comptime_packet_result(environment, program, available, values, served)
     // Any function a compile-time body reaches runs while building; the
     // native run's effect gate (E3401) rejects an effectful call. No
     // `#run fn` or `pure` marker is required.
@@ -3300,45 +3277,6 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         derive_demand: demand.derived.move(),
         conversions: conversions,
     }
-}
-
-// The comptime check result of a taken Core function from its record
-// packets (sema_core_body_comptime_packets): the packet's body and facts,
-// complete and clean as the record holds only a clean check, with the
-// constants it waits on and the functions it reaches derived from its facts
-// as sema_check_comptime_function derives them, its conversions' calls
-// included. A taken body's codec and derive demand names Core types, whose
-// generated bodies the taken modules hold already, so it records none, as
-// a body taken at finalization records none.
-sema_comptime_packet_result: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, available: SemaComptimeAvailableConstants, values: [SemaComptimeItemValue], served: &&SemaCoreComptimePackets) -> SemaComptimeFunctionResult {
-    owned := served.move()
-    held := owned.packet.move()
-    result := held.move() ?? panic("a served Core packet was lost")
-    reachable := sema_comptime_environment_reachable_function_keys(environment, program, result.call_facts)
-    loop conversion in owned.conversions {
-        loop key in sema_comptime_environment_reachable_function_keys(environment, program, conversion.call_facts) {
-            if !reachable.contains(key) -> reachable.push(key)
-        }
-    }
-    conversions := [FnBody]{}
-    loop owned.conversions.len() > 0 {
-        conversion := owned.conversions.pop() ?? break
-        conversions.push(conversion.function.move() ?? panic("a served conversion packet holds no body"))
-    }
-    conversions.reverse()
-    dependencies := sema_comptime_environment_dependencies(environment, program, result.name_references, values) ?? {
-        result.complete = false
-        result.incomplete_reasons.push("the comptime environment carries no registration graph")
-        return result
-    }
-    result.waiting_dependencies = sema_comptime_waiting_dependencies(available, dependencies)
-    if result.waiting_dependencies.len() > 0 -> result.complete = false
-    if result.function == .Val(body) {
-        if program.registration_graph == .Val(resolved_graph) -> sema_comptime_drop_close_keys(resolved_graph, body.tree, result.module_identity, reachable)
-    }
-    result.reachable_function_keys = reachable
-    result.conversions = conversions
-    result
 }
 
 // Read-only graph reads of a comptime function check: the environment is
@@ -10068,12 +10006,8 @@ sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_mo
 // host callbacks. `graph` moves into the pass's program tables, which no
 // check changes, and leaves unchanged with the stage as the comptime run's
 // graph: the pass never copies it. The modules' declaration checks and the
-// name facts run on up to `threads` compiler threads. A taken seeded module
-// (sema_finalize_seeded_taken) comes with the values its own check landed,
-// which the driver hands the comptime run from the Core record
-// (jet_driver_core_record_take), so none of its sources is collected.
+// name facts run on up to `threads` compiler threads.
 sema_collect_comptime_declarations: fn(graph: &&SemaRegistrationGraph, package_policies: [SemaRegistrationPackagePolicy], threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaComptimeDeclarationStage {
-    seeded_taken: sema_finalize_seeded_taken(graph)
     diagnostics := [Diagnostic]{}
     loop diagnostic in graph.diagnostics -> diagnostics.push(diagnostic)
     complete := graph.complete
@@ -10126,7 +10060,7 @@ sema_collect_comptime_declarations: fn(graph: &&SemaRegistrationGraph, package_p
     }
     sources := [SemaComptimeItemSource]{}
     source_keys := [String:Bool]{}
-    loop source_module_index in seeded_taken..<module_count {
+    loop source_module_index in 0..<module_count {
         module_sources := sema_comptime_module_sources(pass_program, source_module_index)
         // Moved onto `sources` in order, without a copy.
         reversed_sources := [SemaComptimeItemSource]{}
@@ -10140,7 +10074,7 @@ sema_collect_comptime_declarations: fn(graph: &&SemaRegistrationGraph, package_p
             sources.push(source)
         }
     }
-    loop checked_module_index in seeded_taken..<modules.len() {
+    loop checked_module_index in 0..<modules.len() {
         checked_module: modules[checked_module_index]
         loop request in checked_module.comptime_requests {
             evaluation: request.checked_text ?? next
@@ -10686,27 +10620,15 @@ sema_comptime_dependency_cycle_diagnostic: fn(chain: [String], span: Span) -> Di
 // to each of its methods, trait impls written apart from its body included.
 // Each trait impl method also takes the trait it implements, resolved in
 // `graph` where its `impl` block is written, which binds the trait's cap
-// and its trait-value calls to it. A function whose body the graph took from
-// its Core record takes its body facts from the record's effect rows
-// (sema_core_effect_read), and its body isn't walked.
+// and its trait-value calls to it.
 sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, type_caps: [U32:SemaEffectTypeCap]) -> [SemaEffectFunctionSource] Never! {
     sources := [SemaEffectFunctionSource]{}
     compute_aliases: sema_kernel_compute_aliases(source_module, graph.module_table)
-    rows := [String:SemaEffectBodyFacts]{}
-    read := sema_core_effect_read(graph, source_module.module_identity)
-    if read != None {
-        held := read.move() ?? panic("a taken module's effect rows were lost")
-        loop held.rows.len() > 0 {
-            row := held.rows.pop() ?? break
-            key := row.key.move()
-            rows[key] = row.facts.move()
-        }
-    }
-    loop function in source_module.functions -> sources.push(sema_comptime_effect_source(graph, function.declaration, function.symbol.id, rows, compute_aliases, true))
+    loop function in source_module.functions -> sources.push(sema_comptime_effect_source(graph, function.declaration, function.symbol.id, compute_aliases, true))
     loop nominal in source_module.nominals {
         block_traits: sema_effect_body_block_traits(graph, source_module.module_identity, nominal)
         loop (index, function) in nominal.methods {
-            source := sema_comptime_effect_source(graph, function.declaration, function.symbol.id, rows, compute_aliases, false)
+            source := sema_comptime_effect_source(graph, function.declaration, function.symbol.id, compute_aliases, false)
             sema_effect_bind_type_cap(source, type_caps, Val(nominal.symbol.id), source_module.module_identity)
             if index < block_traits.len() -> source.trait_symbol = block_traits[index].copy()
             sources.push(source)
@@ -10718,7 +10640,7 @@ sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: Se
             trait_id = if implementation.trait_symbol == .Val(symbol) -> Val(symbol.id) else -> sema_effect_impl_trait(graph, source_module.module_identity, trait_name)
         }
         loop function in implementation.methods {
-            source := sema_comptime_effect_source(graph, function.declaration, function.symbol.id, rows, compute_aliases, false)
+            source := sema_comptime_effect_source(graph, function.declaration, function.symbol.id, compute_aliases, false)
             sema_effect_bind_type_cap(source, type_caps, implementation.target_nominal, source_module.module_identity)
             source.trait_symbol = trait_id.copy()
             sources.push(source)
@@ -10728,53 +10650,12 @@ sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: Se
 }
 
 // The effect source of the function `symbol` declared by `func`: its body
-// facts and, for a `top_level` function, its pending kernel
-// (`compute_aliases`: its module's aliases of `core.compute`). A body the
-// graph took from its Core record (sema_core_body_recorded) gives them by its
-// row of `rows`, none without one; any other body is walked for them.
-sema_comptime_effect_source: fn(graph: SemaRegistrationGraph, func: Func, symbol: SymbolID, rows: &[String:SemaEffectBodyFacts], compute_aliases: [String], top_level: Bool) -> SemaEffectFunctionSource Never! {
-    key: symbol_table_key(graph.symbols, symbol)
-    recorded: sema_core_body_recorded(graph, symbol)
-    facts := if recorded -> rows.remove(key) ?? SemaEffectBodyFacts{} else -> sema_effect_body_facts(func)
-    if top_level && !recorded -> facts.kernel = sema_kernel_pending(func, compute_aliases)
-    sema_effect_source_from_header(func, key, facts)
-}
-
-// The body facts of one function of a Core module (its effect source's,
-// sema_comptime_effect_sources), by its symbol key, for the Core record. A
-// function with none has no row.
-SemaCoreEffectRow: struct {
-    key: String
-    facts: SemaEffectBodyFacts
-}
-
-// A Core module's effect rows (Core record section 18).
-SemaCoreEffectResult: struct {
-    module_identity: ModuleID
-    rows: [SemaCoreEffectRow]
-}
-
-// The effect rows of each module of `graph`, a graph that walked every body,
-// as its effect sources give them. Every module has its row, an empty one
-// when no function of it has body facts, as sema_taint_core_crossings gives
-// every module its crossing row: the Core record holds the Prelude's modules
-// with Core's, and a Prelude module's identity has no Core bit
-// (module_is_core), so the record takes the rows of the modules it holds.
-sema_core_effect_rows: fn(graph: SemaRegistrationGraph) -> [SemaCoreEffectResult] Never! {
-    results := [SemaCoreEffectResult]{}
-    loop source_module in graph.modules {
-        sources := sema_comptime_effect_sources(graph, source_module, [U32:SemaEffectTypeCap]{})
-        rows := [SemaCoreEffectRow]{}
-        sources.reverse()
-        loop sources.len() > 0 {
-            source := sources.pop() ?? break
-            if source.fx_regions.len() == 0 && source.loop_spans.len() == 0 && source.assume_det_spans.len() == 0 && source.kernel == None -> next
-            facts: SemaEffectBodyFacts{fx_regions: source.fx_regions.move(), loop_spans: source.loop_spans.move(), assume_det_spans: source.assume_det_spans.move(), kernel: source.kernel.move()}
-            rows.push(SemaCoreEffectRow{key: source.key.move(), facts: facts})
-        }
-        results.push(SemaCoreEffectResult{module_identity: source_module.module_identity, rows: rows.move()})
-    }
-    results
+// facts, walked from its body, and, for a `top_level` function, its pending
+// kernel (`compute_aliases`: its module's aliases of `core.compute`).
+sema_comptime_effect_source: fn(graph: SemaRegistrationGraph, func: Func, symbol: SymbolID, compute_aliases: [String], top_level: Bool) -> SemaEffectFunctionSource Never! {
+    facts := sema_effect_body_facts(func)
+    if top_level -> facts.kernel = sema_kernel_pending(func, compute_aliases)
+    sema_effect_source_from_header(func, symbol_table_key(graph.symbols, symbol), facts)
 }
 
 // The trait each of `nominal`'s methods implements, by method row: None for
@@ -11862,11 +11743,8 @@ sema_failure_recheck_modules: fn(graph: SemaRegistrationGraph, modules: [SemaGra
 // projected `projected` takes it here: each projected function's checked signature
 // names the `T Never!` carrier, and a dropped call to one is a discarded result
 // (E0433). Its call sites keep the carrier they were checked against; lowering hands
-// a plain-return callee's value to any `Result` carrier a call site names. The
-// first `taken` modules are taken seeded ones (sema_finalize_seeded_taken),
-// final already: what the projection would change on one is listed in
-// `seeded_writes`, not written.
-sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], projected: [String], symbols: SymbolTable, taken: Int, seeded_writes: &[SemaSeededWrite]) Never! {
+// a plain-return callee's value to any `Result` carrier a call site names.
+sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], projected: [String], symbols: SymbolTable) Never! {
     if projected.len() == 0 -> return
     keys := [String:Bool]{}
     ids := [U32:Bool]{}
@@ -11876,25 +11754,11 @@ sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], project
     }
     loop module_index in 0..<modules.len() {
         loop function_index in 0..<modules[module_index].functions.len() {
-            if keys.get(modules[module_index].functions[function_index].key) == None -> next
-            if module_index >= taken {
-                sema_failure_reconcile_function(modules[module_index].functions[function_index])
-                next
-            }
-            if modules[module_index].functions[function_index].ret == .Val(.Result(_, err)) {
-                if err != (Type.Named{name: "Never"}) -> seeded_writes.push(SemaSeededWrite{kind: "failure projection", module_name: "{modules[module_index].module_name}", key: "{modules[module_index].functions[function_index].key}", recorded: "{err:Debug}", finalized: "Never"})
-            }
+            if keys.get(modules[module_index].functions[function_index].key) != None -> sema_failure_reconcile_function(modules[module_index].functions[function_index])
         }
-        if module_index >= taken {
-            loop fact_index in 0..<modules[module_index].call_facts.len() {
-                if !modules[module_index].call_facts[fact_index].discarded_if_infallible || modules[module_index].call_facts[fact_index].discarded -> next
-                if modules[module_index].call_facts[fact_index].callee == .Val(callee) && ids.get(callee.id) != None -> modules[module_index].call_facts[fact_index].discarded = true
-            }
-            next
-        }
-        loop fact in modules[module_index].call_facts {
-            if !fact.discarded_if_infallible || fact.discarded -> next
-            if fact.callee == .Val(callee) && ids.get(callee.id) != None -> seeded_writes.push(SemaSeededWrite{kind: "discarded call", module_name: "{modules[module_index].module_name}", key: "{fact.caller_key} at {fact.span.start}", recorded: "kept", finalized: "discarded"})
+        loop fact_index in 0..<modules[module_index].call_facts.len() {
+            if !modules[module_index].call_facts[fact_index].discarded_if_infallible || modules[module_index].call_facts[fact_index].discarded -> next
+            if modules[module_index].call_facts[fact_index].callee == .Val(callee) && ids.get(callee.id) != None -> modules[module_index].call_facts[fact_index].discarded = true
         }
     }
 }
@@ -11971,8 +11835,7 @@ sema_comptime_function_diagnostics: fn(comptime_functions: [SemaComptimeFunction
 // declaration.
 sema_check_script_entries: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     found := false
-    // A seeded module's script body was refused when it was finalized.
-    loop source_module_index in graph.seeded..<graph.modules.len() {
+    loop source_module_index in 0..<graph.modules.len() {
         statements: graph.modules[source_module_index].program.script_body
         if statements.len() == 0 -> next
         span: Span{start: sema_compiler_index_stmt_span(statements[0]).start, end: sema_compiler_index_stmt_span(statements[statements.len() - 1]).end}
@@ -12114,9 +11977,6 @@ sema_codec_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, val
 // wave follows. A program that compares no compiler-owned type runs none.
 sema_derive_waves: fn(owned: &&SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     graph := owned.move()
-    // A taken seeded module's result holds every derived method of its own:
-    // it was finalized checking each one (`every_core_body`).
-    taken: sema_finalize_seeded_taken(graph)
     checked := 0
     waves := 0
     loop {
@@ -12127,7 +11987,6 @@ sema_derive_waves: fn(owned: &&SemaRegistrationGraph, values: [SemaComptimeItemV
             id: symbol_find(graph.symbols, key) ?? next
             row: graph.derive_method_rows.get(id.id) ?? next
             graph.derive_checked[key] = true
-            if row.module_index < taken -> next
             wave[key] = true
             if !affected.contains(row.module_index) -> affected.push(row.module_index)
         }
@@ -12187,28 +12046,7 @@ sema_finalize_bodies_empty: fn() -> SemaFinalizeBodies {
     SemaFinalizeBodies{modules: [SemaGraphModuleResult]{}, carried: [SemaPassFacts]{}, core_tally: sema_core_demand_tally_new(), checked_types: [TTypeDef]{}, complete: false, build_names: false}
 }
 
-// How many leading modules of `graph` a finalization takes as they are: the
-// seeded modules, when the seeds came with their finalized results
-// (SemaRegistrationGraph.seeded_results), and none otherwise. A taken
-// module's result is final: no body pass, wave or demand checks a body of it
-// again, and no whole-program pass writes its slot (sema_finalize_program
-// counts any it would have changed as `seeded_writes`).
-sema_finalize_seeded_taken: fn(graph: SemaRegistrationGraph) -> Int Never! {
-    if graph.seeded > 0 && graph.seeded_results.len() == graph.seeded -> return graph.seeded
-    0
-}
-
-// How many leading modules of `graph` the finalization walks take the Core
-// usage of as given (SemaRegistrationGraph.seeded_core_usage): the taken
-// modules (sema_finalize_seeded_taken), when their usage came with them, and
-// none otherwise, when every module's bodies are walked for it.
-sema_finalize_seeded_usage: fn(graph: SemaRegistrationGraph, taken: Int) -> Int Never! {
-    if taken > 0 && graph.seeded_core_usage.len() == taken -> return taken
-    0
-}
-
-// The body half of sema_finalize_graph: the body pass over every module but
-// the taken ones (sema_finalize_seeded_taken), whose results it takes, and the
+// The body half of sema_finalize_graph: the body pass over every module, and the
 // codec and derive waves it demands, into `bodies`. The graph moves in and
 // comes back with its edits on `trail`.
 sema_finalize_bodies: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, session: SemaIncrementalCache?, trace_sink: CompilerTraceSink?, bodies: &SemaFinalizeBodies) -> SemaRegistrationGraph {
@@ -12235,13 +12073,7 @@ sema_finalize_bodies: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTra
     incremental: if session == .Val(_) -> true else -> false
     web_checks: sema_web_partition_active(resolved_graph)
     sema_core_demand_index(resolved_graph, (resolved_graph.check_tests || resolved_graph.core_lowering_roots != None || resolved_graph.retained_core_demand) && (!resolved_graph.retain_programs || resolved_graph.retained_core_demand) && !resolved_graph.every_core_body && !incremental && !web_checks)
-    // A taken seeded module's result is a copy of its finalized one: the
-    // graph keeps its own for a later finalization over it.
-    taken: sema_finalize_seeded_taken(resolved_graph)
-    loop module_index in 0..<taken {
-        bodies.modules.push(resolved_graph.seeded_results[module_index].copy())
-    }
-    checked_modules: loop module_index in taken..<resolved_graph.modules.len() -> module_index
+    checked_modules: loop module_index in 0..<resolved_graph.modules.len() -> module_index
     // The body pass's facts serve the codec and derive waves after it while
     // the graph rows they read stay unchanged (sema_finalize_check_modules).
     body_graph := sema_finalize_check_modules(resolved_graph, values, comptime_functions, bodies.checked_types, checked_modules, true, hook_access, threads, session, "sema.bodies", trace_sink, bodies.carried, bodies.modules)
@@ -12285,11 +12117,6 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     modules := held.modules.move()
     checked_types: held.checked_types.move()
     complete := held.complete
-    // The taken seeded modules' slots are final (sema_finalize_seeded_taken):
-    // a pass that would change one lists it here instead, so a finalization
-    // over a record that matches its Core leaves `seeded_writes` empty.
-    taken: sema_finalize_seeded_taken(after_body_graph)
-    seeded_writes := [SemaSeededWrite]{}
     hook_access: sema_host_hook_access(host_hooks)
     diagnostics := stage.diagnostics
     if !sema_comptime_function_diagnostics(comptime_functions, diagnostics) -> complete = false
@@ -12313,16 +12140,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // One body pass: only the modules a union contract changes, or whose
     // failure obligations name a callee the solve left fallible, are checked
     // again; the `T Never!` projections are reconciled onto the checked bodies.
-    // A taken seeded module's bodies were checked against the contracts its
-    // own finalization solved: one this solve would recheck is listed.
-    recheck := [Int]{}
-    loop module_index in sema_failure_recheck_modules(after_body_graph, modules, unions, infallible) {
-        if module_index < taken {
-            seeded_writes.push(SemaSeededWrite{kind: "failure recheck", module_name: "{modules[module_index].module_name}", key: "", recorded: "checked", finalized: "rechecked"})
-            next
-        }
-        recheck.push(module_index)
-    }
+    recheck: sema_failure_recheck_modules(after_body_graph, modules, unions, infallible)
     final_graph := if {
         recheck.len() > 0 -> {
             rechecked := [SemaGraphModuleResult]{}
@@ -12345,10 +12163,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         }
         else -> after_body_graph.move()
     }
-    sema_failure_reconcile_infallible(modules, infallible, final_graph.symbols, taken, seeded_writes)
-    // The export and import rows read the projected declarations; a taken
-    // seeded module's were final in its result.
-    loop module_index in taken..<modules.len() {
+    sema_failure_reconcile_infallible(modules, infallible, final_graph.symbols)
+    // The export and import rows read the projected declarations.
+    loop module_index in 0..<modules.len() {
         modules[module_index].exports = final_graph.modules[module_index].exports
         modules[module_index].imports = final_graph.modules[module_index].imports
     }
@@ -12406,11 +12223,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // Each `#FX(…)` module cap names known effects, checked once where it is
     // written; a file module's caps reach its file through the module graph,
     // and an erased generic-module template leaves its cap behind. A capped
-    // type's function-typed fields fit its cap where they are declared. A
-    // seeded module's caps and fields were checked when it was finalized;
-    // its capped types still bound the fields that name them.
+    // type's function-typed fields fit its cap where they are declared.
     field_caps: sema_effect_type_caps(final_graph.modules)
-    loop module_index in final_graph.seeded..<final_graph.modules.len() {
+    loop module_index in 0..<final_graph.modules.len() {
         graph_module: final_graph.modules[module_index]
         cap_diagnostics := [Diagnostic]{}
         if graph_module.program.file_cap == .Val(head) {
@@ -12442,9 +12257,8 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // solved row onto `modules`.
     // The effect check borrows the run's symbol table and hands it back.
     effect_symbols := final_graph.symbols.move()
-    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effect_symbols, final_graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, taken)
+    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effect_symbols, final_graph.module_table, prep_functions, threads, closed, organization_denials, organization_source)
     final_graph.symbols = effects.symbols.move()
-    seeded_writes.extend(effects.seeded_writes.move())
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
@@ -12516,7 +12330,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     taint_diagnostics := [Diagnostic]{}
     taint_catalog := taint_prepared.pop() ?? panic("the side checks left no taint catalog")
     core_modules := [SemaCoreModuleUsageResult]{}
-    final_graph = sema_finalize_walks(final_graph, taint_catalog, diagnostics, modules, threads, taint_diagnostics, core_modules, seeded_writes)
+    final_graph = sema_finalize_walks(final_graph, taint_catalog, diagnostics, modules, threads, taint_diagnostics, core_modules)
     core_usage := sema_core_combine_module_usage(core_modules)
     if trace_sink == .Val(sink) -> sink.end("sema.walks", core_modules.len())
     loop diagnostic in taint_diagnostics {
@@ -12532,11 +12346,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     }
     if !sema_target_capability_check(final_graph, core_usage, diagnostics) -> complete = false
     // A Core import above the package's runtime ceiling is reported on the
-    // import; a module whose imports already fail is not reported again for
-    // the helpers those imports reach. A seeded module's imports were held
-    // to its package's ceiling when it was finalized.
+    // the helpers those imports reach.
     import_blocked := [U32:Bool]{}
-    loop module_index in final_graph.seeded..<final_graph.modules.len() {
+    loop module_index in 0..<final_graph.modules.len() {
         source_module: final_graph.modules[module_index]
         policy: sema_comptime_policy_for_package(stage.package_policies, source_module.package_identity) ?? next
         ceiling: policy.runtime_ceiling ?? next
@@ -12644,10 +12456,8 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // program honest, but Core is library source: its lints are not the
     // user's to act on and never reach user output. A lint inside a site
     // `#Allow` for it is the author's recorded decision (LintAllowances.jet).
-    // A seeded module is Core, whose lints never reach output, so its
-    // allowances would cover nothing.
     allowances := [SemaLintAllowance]{}
-    loop module_index in final_graph.seeded..<final_graph.modules.len() {
+    loop module_index in 0..<final_graph.modules.len() {
         sema_lint_allowances(final_graph.modules[module_index].program, final_graph.modules[module_index].source_segments, allowances)
     }
     reported := [Diagnostic]{}
@@ -12663,7 +12473,6 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     if final_graph.retain_programs {
         loop source_module in final_graph.modules -> programs.push(source_module.program)
     }
-    if trace_sink == .Val(sink) -> sink.progress("counters.sema.seeded_writes", seeded_writes.len(), -1)
     result := SemaGraphResult{
         package_identity: final_graph.package_identity,
         entry_module_identity: final_graph.entry_module_identity,
@@ -12684,7 +12493,6 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         outputs: outputs.move(),
         memory_declarations: effects.memory_declarations.move(),
         memory_projections: effects.memory_projections.move(),
-        seeded_writes: seeded_writes,
     }
     result.registration_graph = Val(final_graph.move())
     result.move()
@@ -12733,26 +12541,14 @@ SEMA_CORE_JOBS_PER_THREAD: 8
 // script-body usages and the reachable closure); a module's first job
 // otherwise hands back its context, and the caller joins the module's rows in
 // job order (sema_core_collected_append) and assembles it.
-// A taken seeded module whose Core usage came with it (the Core record's
-// row, sema_finalize_seeded_usage) is given that row and has no Core walk.
 //
 // So the reports, the usage sets, the first span of each usage and the
 // callback keys read exactly as one thread's taint walk and then Core walk of
 // every module in order. The graph and the modules move into the threads'
 // shared state and back; the graph is returned. A program whose work admits
 // one thread walks on the calling thread.
-sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], modules: &[SemaGraphModuleResult], threads: CompilerThreads, reports: &[Diagnostic], cores: &[SemaCoreModuleUsageResult], seeded_writes: &[SemaSeededWrite]) -> SemaRegistrationGraph {
+sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], modules: &[SemaGraphModuleResult], threads: CompilerThreads, reports: &[Diagnostic], cores: &[SemaCoreModuleUsageResult]) -> SemaRegistrationGraph {
     owned := graph.move()
-    // A taken seeded module's bodies are final: the branches the walk would
-    // mask on one are listed in `seeded_writes`, not marked. Its Core usage,
-    // when it came with it, is not walked again.
-    seeded_taken: sema_finalize_seeded_taken(owned)
-    seeded_usage: sema_finalize_seeded_usage(owned, seeded_taken)
-    // The walks are the rows' one reader, so they leave the graph. Reversed,
-    // so each module's row pops in module order.
-    seeded_rows := owned.seeded_core_usage.move()
-    owned.seeded_core_usage = [SemaCoreModuleUsageResult]{}
-    seeded_rows.reverse()
     taken := prepared.move()
     catalog := taken.catalog.move()
     reports.extend(taken.reports.move())
@@ -12762,7 +12558,7 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
     owners := [Int]{}
     work := 0
     loop weight in taint_weights -> work += weight
-    loop module_index in seeded_usage..<owned.modules.len() {
+    loop module_index in 0..<owned.modules.len() {
         loop item_index in 0..<owned.modules[module_index].program.items.len() {
             span: sema_compiler_index_item_span(owned.modules[module_index].program.items[item_index])
             weight: span.end - span.start
@@ -12778,12 +12574,9 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
             found := [Diagnostic]{}
             sema_taint_check_module(owned, state, module_index, found)
             sema_taint_join_reports(reports, existing_diagnostics, found)
-            sema_finalize_mask(modules, module_index, state.masked, state.fixed_tags, seeded_taken, seeded_writes)
+            sema_mark_masked_branches(modules[module_index].functions, state.masked, state.fixed_tags)
         }
-        loop _ in 0..<seeded_usage {
-            cores.push(seeded_rows.pop() ?? panic("a taken module left no Core usage row"))
-        }
-        loop module_index in seeded_usage..<owned.modules.len() {
+        loop module_index in 0..<owned.modules.len() {
             context: sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts)
             collected := sema_core_collected_empty()
             sema_core_collect_item_range(owned.modules[module_index].program.items, 0, owned.modules[module_index].program.items.len(), context, collected)
@@ -12817,7 +12610,7 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
     returned := sema_finalize_walk_take(shared_state, modules)
     loop found in walked -> sema_taint_join_reports(reports, existing_diagnostics, found)
     loop module_index in 0..<masked.len() {
-        sema_finalize_mask(modules, module_index, masked[module_index], fixed[module_index], seeded_taken, seeded_writes)
+        sema_mark_masked_branches(modules[module_index].functions, masked[module_index], fixed[module_index])
     }
     // Each module in order: a module walked whole by one job was assembled
     // on its thread; any other module's item ranges are joined in job order
@@ -12829,10 +12622,6 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
     contexts.reverse()
     job := 0
     loop module_index in 0..<returned.modules.len() {
-        if module_index < seeded_usage {
-            cores.push(seeded_rows.pop() ?? panic("a taken module left no Core usage row"))
-            next
-        }
         collected := sema_core_collected_empty()
         whole := SemaCoreModuleUsageResult?{None}
         context := SemaCoreModuleContext?{None}
@@ -12872,22 +12661,6 @@ sema_mark_masked_branches: fn(functions: &[FnBody], masked: [Span], fixed_tags: 
         if sema_fixed_types(functions[index].tree.types.types, fixed_tags) {
             functions[index].fixed_tags = fixed_tags.copy()
         }
-    }
-}
-
-// sema_mark_masked_branches on the bodies of module `module_index`, or, when
-// it is one of the first `taken` (a taken seeded module's, final already,
-// sema_finalize_seeded_taken), what it would change on them listed in
-// `seeded_writes` instead.
-sema_finalize_mask: fn(modules: &[SemaGraphModuleResult], module_index: Int, masked: [Span], fixed_tags: [String], taken: Int, seeded_writes: &[SemaSeededWrite]) Never! {
-    if module_index >= taken -> return sema_mark_masked_branches(modules[module_index].functions, masked, fixed_tags)
-    loop span in masked {
-        loop function in modules[module_index].functions {
-            if span.start >= function.source_span.start && span.end <= function.source_span.end && !function.masked.contains(span) -> seeded_writes.push(SemaSeededWrite{kind: "taint mask", module_name: "{modules[module_index].module_name}", key: "{function.key}", recorded: "unmasked {span.start}..{span.end}", finalized: "masked"})
-        }
-    }
-    loop function in modules[module_index].functions {
-        if function.fixed_tags != fixed_tags && sema_fixed_types(function.tree.types.types, fixed_tags) -> seeded_writes.push(SemaSeededWrite{kind: "fixed tags", module_name: "{modules[module_index].module_name}", key: "{function.key}", recorded: "{function.fixed_tags:Debug}", finalized: "{fixed_tags:Debug}"})
     }
 }
 
@@ -13187,12 +12960,11 @@ sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [Sem
             last: (part + 1) * modules.len() /% SEMA_FINALIZE_SIDE_EFFECT_PARTS
             type_caps: sema_effect_type_caps(graph.modules)
             library: sema_library_effects(graph)
-            taken: sema_finalize_seeded_taken(graph)
             loop module_index in first..<last {
                 source_index: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
                 input := sema_effect_module_input(graph, source_index, module_index, type_caps, library)
                 // Input positions count from the part's first input; the join shifts them.
-                sema_effect_prepare_module(side.effect_prepared, modules[module_index].functions, modules[module_index].call_facts, input, side.effect_inputs.len(), graph.decls, graph.symbols, module_index < taken)
+                sema_effect_prepare_module(side.effect_prepared, modules[module_index].functions, modules[module_index].call_facts, input, side.effect_inputs.len(), graph.decls, graph.symbols)
                 side.effect_inputs.push(input)
             }
         }

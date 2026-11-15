@@ -62,14 +62,14 @@ splice_test_child: fn(name: String, uptime: Int?) -> String Never! {
 #Test("each spliced trace is its own named process, and one with no clock origin adds nothing") {
     path: "{splice_sys.temp_dir()}/jet-trace-splice-{splice_process.current_pid()}.json"
     sink: splice_test_sink(path)
-    jet_cli_trace_splice(sink, "core-record", splice_test_child("jet-bare", Val(3500)))
+    jet_cli_trace_splice(sink, "core-embed", splice_test_child("jet-bare", Val(3500)))
     jet_cli_trace_splice(sink, "prelude-sources", splice_test_child("jet", None))
     jet_cli_trace_splice(sink, "runtime", splice_test_child("jet", Val(1200)))
     written: splice_files.read(path) ?? panic("read the trace: {err}")
     splice_files.remove(path).drop("the test's trace file")
     expected: [String]{
         "[",
-        "{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":501,\"tid\":0,\"args\":{{\"name\":\"core-record: jet-bare\"}}}},",
+        "{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":501,\"tid\":0,\"args\":{{\"name\":\"core-embed: jet-bare\"}}}},",
         "{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":501,\"tid\":1000001,\"args\":{{\"name\":\"task 1\"}}}},",
         "{{\"name\":\"sema.check\",\"cat\":\"sema.check\",\"ph\":\"B\",\"ts\":2750000,\"pid\":501,\"tid\":1000001}},",
         "{{\"name\":\"sema.check\",\"cat\":\"sema.check\",\"ph\":\"E\",\"ts\":3400000,\"pid\":501,\"tid\":1000001,\"args\":{{\"items\":7}}}},",

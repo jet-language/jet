@@ -1,15 +1,19 @@
 // The Core code library (#6328 c22 S7a): every non-generic function of the
-// Core and Prelude modules, built once when the runtime pack is made
-// (JetCli CoreLibrary.jet) into an object of its own that the runtime image
-// links beside the runtime. Each such function is a global symbol named
-// after its checked key (ir_core_symbol), so a program bound to the image
-// can call a Core function by symbol instead of building its body. The
-// build is ir_build_program's under `dead_code: keep`, with no entry: the
-// same roots (no generic function, none with owner binders, no intrinsic)
-// and the stock checks, runtime sentries and stop points of a program's
-// code, so each function's code is the code a program builds for it. With
-// no entry the optimizer keeps every function's convention (OptReturnSlot),
-// so a call by symbol passes its slots as the IR signature names them.
+// Prelude and of each Core package the toolchain ships, built once when the
+// runtime pack is made (JetCli CoreLibrary.jet) into an object of its own
+// that the runtime image links beside the runtime. A Core package ships
+// unless JetCli CoreLibrary.jet JET_CLI_CORE_LOWERED lists it: the rule
+// (tests/guards/core_shipped.jet) lists each package fewer than one in a
+// hundred program files name, and a program that calls one of its functions
+// lowers it itself. Each shipped function is a global symbol named after its
+// checked key (ir_core_symbol), so a program bound to the image can call it
+// by symbol instead of building its body. The build is ir_build_program's
+// under `dead_code: keep`, with no entry: the same roots (no generic
+// function, none with owner binders, no intrinsic) and the stock checks,
+// runtime sentries and stop points of a program's code, so each function's
+// code is the code a program builds for it. With no entry the optimizer
+// keeps every function's convention (OptReturnSlot) at every level, so a
+// call by symbol passes its slots as the IR signature names them.
 //
 // A Core function's process-wide writable cells (module storage, a memo
 // store, a Shared site) are global data symbols too (ir_core_cell), so a
@@ -21,14 +25,15 @@
 // the implementations the library knows, which a program's own types are
 // not among, so a program builds it itself.
 //
-// A program bound to the image (#6328 c22 S7b-1, IRChecks.core) calls each
+// A program bound to Core (IRChecks.core) calls each
 // exported Core function its code calls directly by that symbol, at the
 // call's own layouts, and builds no body for it (ir_core_bound); its Core
-// cells are the image's (ir_core_cells_bind).
+// cells are Core's (ir_core_cells_bind). The symbols are the runtime
+// image's, or jet_core.o's in a full link (JetCli Host.jet).
 
 use {
     jet_backend.[X64DataExport]
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, name_rows_get_text, name_rows_sorted, name_rows_value, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, name_rows_get_text, name_rows_sorted, name_rows_value, sha256_bytes, sha256_hex_bytes]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -107,17 +112,35 @@ ir_core_signature: fn(m: IRModule, id: Int) -> String Never! {
 ir_core_layout: fn(layout: IRExportLayout) -> String Never! { "{layout.size}/{layout.align}/{layout.class}" }
 
 // Builds every non-generic function outside the module `entry_module` (the
-// Core check's entry, JetCli CoreRecordCheck.jet: every other checked module
-// is Core's or the Prelude's) and every function they reach, on up to
-// `threads` threads; the other inputs as ir_build_program's.
-ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: ModuleID, threads: CompilerThreads) -> IRCoreLibrary Never! {
+// Core check's entry, JetCli CoreLibrary.jet: every other checked module
+// is Core's or the Prelude's) and outside the Core packages `lowered` names
+// (ir_core_package), and every function they reach, on up to `threads`
+// threads; the other inputs as ir_build_program's.
+ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: ModuleID, lowered: [String], threads: CompilerThreads) -> IRCoreLibrary Never! {
     p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     p.sentries = true
     ir_foreign_index(p, foreign, decls)
-    ir_core_library_from(p, entry_module, [IRBuildFailure]{}, threads)
+    skipped: [IRBuildFailure]{}
+    ir_core_library_from(p, entry_module, lowered, skipped, threads)
 }
 
-// Builds the library's roots in `program` but the `skipped` ones. A root
+// The Core package of module `module_name`: a public module
+// `core.<package>` or `core.<package>.<part>` and a private part
+// `__core_<package>_<part>` name it after their prefix, up to the first `.`
+// or `_`. Any other module (Core/App's `app`, the root `core`, a Prelude
+// module) is named up to its first `.` or `_` as well.
+ir_core_package: fn(module_name: String) -> String Never! {
+    start := 0
+    if module_name.starts_with("core.") -> start = 5
+    if module_name.starts_with("__core_") -> start = 7
+    bytes: module_name.bytes()
+    end := start
+    loop end < bytes.len() && bytes[end] != (U8{46}) && bytes[end] != (U8{95}) -> end += 1
+    module_name.slice(start..<end)
+}
+
+// Builds the library's roots in `program` but the `skipped` ones and those
+// of the `lowered` packages (ir_build_core_library). A root
 // whose own body the builder cannot build stays out of the library, and the
 // build runs again over the same program without it: a body a program never
 // builds by itself, such as the derived Equatable of a runtime-handle type,
@@ -125,7 +148,7 @@ ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&Sy
 // call stands in for. Each round skips at least one more root, so the
 // rounds end. A failure in a function no root is (one a root reaches)
 // fails the library.
-ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, skipped: [IRBuildFailure], threads: CompilerThreads) -> IRCoreLibrary Never! {
+ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, lowered: [String], skipped: &&[IRBuildFailure], threads: CompilerThreads) -> IRCoreLibrary Never! {
     p := program.move()
     // By the first row of each key (ir_function_row): the skipped roots,
     // then the ones this round builds.
@@ -138,7 +161,7 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, skipped: 
     rooted := (loop _ in 0..<p.functions.len() -> false)
     loop row in 0..<p.functions.len() {
         function: p.functions[row]
-        if function.module_identity == entry_module -> next
+        if function.module_identity == entry_module || lowered.contains(ir_core_package(function.module_name)) -> next
         if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None -> next
         first: ir_function_row(p, function.key) ?? row
         if left_out[first] -> next
@@ -158,11 +181,11 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, skipped: 
             }
         }
         if reached {
-            return IRCoreLibrary{program: built.program.move(), failures: built.failures.move(), errors: [String]{}, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, rows: [IRCoreExport]{}, skipped: skipped}
+            return IRCoreLibrary{program: built.program.move(), failures: built.failures.move(), errors: [String]{}, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, rows: [IRCoreExport]{}, skipped: skipped.move()}
         }
-        more := skipped.copy()
-        loop failure in built.failures -> more.push(failure.copy())
-        return ir_core_library_from(kept.program.move(), entry_module, more, threads)
+        more := skipped.move()
+        compiler_transfer_rows<IRBuildFailure>(more, built.failures)
+        return ir_core_library_from(kept.program.move(), entry_module, lowered, more, threads)
     }
     m := built.program.move()
     open: ir_core_open(m)
@@ -190,7 +213,7 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, skipped: 
     loop at in 1..<rows.len() {
         if rows[at].symbol == rows[at - 1].symbol -> errors.push("Core symbol {rows[at].symbol} names both {rows[at - 1].key} and {rows[at].key}")
     }
-    IRCoreLibrary{program: m, failures: [IRBuildFailure]{}, errors: errors, exports: exports, data: data, rows: rows, skipped: skipped}
+    IRCoreLibrary{program: m, failures: [IRBuildFailure]{}, errors: errors, exports: exports, data: data, rows: rows, skipped: skipped.move()}
 }
 
 // The Core export list (`<prefix>.exports`, JetCli CoreLibrary.jet): one
@@ -353,6 +376,14 @@ ir_core_cells_bind: fn(m: &IRModule, image: IRCoreImage) Never! {
         found: ir_core_image_row(image.exports, symbol) ?? next
         if found.key == cell.key && found.signature == IR_CORE_DATA -> m.core_cells[cell.local] = symbol
     }
+}
+
+#Test("a Core module's package is its name after the Core prefix, up to the first dot or underscore") {
+    assert_eq(ir_core_package("core.db"), "db")
+    assert_eq(ir_core_package("core.encoding.base64"), "encoding")
+    assert_eq(ir_core_package("__core_net_ssl_tls"), "net")
+    assert_eq(ir_core_package("app"), "app")
+    assert_eq(ir_core_package("core"), "core")
 }
 
 #Test("a Core symbol is a C identifier of its key that the key's hash tells apart") {

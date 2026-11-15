@@ -53,7 +53,6 @@ use {
         SemaLayoutProjectionRow,
         SemaComptimeItemValue,
         SemaRegistrationImportEdge,
-        SemaRegistrationModule,
         SemaSourceOrigin,
         SemaSourceSegment,
         SchemaSnapshot,
@@ -272,12 +271,6 @@ JetDriverCompileRequest: struct {
     authorized_sources: JetDriverAuthorizedSourceSnapshot
     canonical_effect_source: String
     core_sources: [JetDriverCoreSource]
-    // The precompiled Core record the running jet carries (CoreRecord.jet):
-    // a Core module it holds loads that module's finalized registration row,
-    // never its source (Loader.jet JetDriverParseJob.Record). None, and in a
-    // compile of every Core body (`every_core_body`, `core_tests`), each
-    // Core module parses its source.
-    core_record: JetDriverCoreRecord?{None}
     host_facts: JetDriverHostFacts
     eval_config: JetEvalConfig
     record_store: JetDriverRecordStore?
@@ -745,13 +738,6 @@ JetDriverLoadedModule: struct {
     namespace_names: [String]{[String]{}}
     namespace_private: [String]{[String]{}}
     namespace_refs: [String]{[String]{}}
-    // A Core module the Core record holds: its module key position there
-    // (-1 for a parsed module) and its finalized registration row, whose
-    // tree is `program`, held without it until the graph seeds the row. The
-    // row sits in a list of one, so the seed pops it out of the loaded
-    // module (Collections.jet compiler_transfer_rows) and never copies it.
-    core_record_index: Int{-1}
-    core_registration: [SemaRegistrationModule]{[SemaRegistrationModule]{}}
 }
 
 JetDriverCompileTrace: struct {
@@ -797,9 +783,6 @@ JetDriverLoadResult: struct {
     run_member_paths: [String]{[String]{}}
     // `JetDriverCompileMode.Check`: a checked body holds a `#Todo` goal.
     typed_goals: Bool{false}
-    // `every_core_body` (the Core record's check): each loaded Core
-    // module's reach, which the record writes (CoreRecord.jet section 16).
-    core_reach: [JetDriverCoreModuleReachRow]{[JetDriverCoreModuleReachRow]{}}
 }
 
 // The entry package's written authority policy, for the host's application
@@ -897,11 +880,12 @@ JetDriverCompileResult: struct {
     // The check's compile state under `hold_check_state`
     // (Pipeline.jet JetDriverHeldState); None otherwise. Nothing reads it.
     held: JetDriverHeldState?{None}
-    // Whether the compile took Core from this jet's Core record, not from
-    // Core source (JetCli Request.jet jet_cli_compile_executable): only then
-    // is its Core the code the runtime image carries, so only then does the
-    // native route bind its Core calls there (JetCli Host.jet).
-    core_record: Bool{false}
+    // Whether the compile's Core is the Core this jet was built with: the
+    // jet carries its runtime image and no toolchain tree's Core differs
+    // (JetCli Request.jet jet_cli_compile_executable). Only then is its Core
+    // the code the runtime image carries, so only then does the native route
+    // bind its Core calls there (JetCli Host.jet).
+    core_built_in: Bool{false}
 }
 
 // The `allocator:` policy of the entry package of `load`

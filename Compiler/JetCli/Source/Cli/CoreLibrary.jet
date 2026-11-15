@@ -1,38 +1,54 @@
-// The Core code library (#6328 c22 S7a), made under `jet doc`'s
+// The Core code library, made from one Core check under `jet doc`'s
 // runtime-library seam (Request.jet jet_cli_runtime_library) when
-// JET_FRONT_CORE_OBJECT_OUTPUT names a prefix: the Core check of the record
-// (CoreRecordCheck.jet jet_cli_core_checked) built as IR over every Core and
-// Prelude module (JetIR BuildCore.jet ir_build_core_library), checked by IR
-// Lint after the build and after the O1 optimizer as the runtime library
-// is, and written as `{prefix}.o`, `{prefix}.exports` (ir_core_exports_text:
-// each global's symbol, key and IR signature) and `{prefix}.threads`, the
-// exports whose call can start a second thread (ir_thread_exports over the
-// runtime's own receipt, since Core starts threads through the runtime). The
-// runtime image links the object beside the runtime (jet_cli_runtime_pack).
+// JET_FRONT_CORE_OBJECT_OUTPUT names a prefix. The Core check
+// (jet_cli_core_checked) is built as IR over the Prelude and every Core
+// package but those JET_CLI_CORE_LOWERED lists (JetIR BuildCore.jet
+// ir_build_core_library), checked by IR Lint after the build and after the
+// O2 optimizer, and written as `{prefix}.o`, `{prefix}.exports`
+// (ir_core_exports_text: each global's symbol, key and IR signature) and
+// `{prefix}.threads`, the exports whose call can start a second thread
+// (ir_thread_exports over the runtime's own receipt, since Core starts
+// threads through the runtime). The runtime image links the object beside
+// the runtime (jet_cli_runtime_pack).
 use {
     core_library_files: core.files
-    jet_driver.[jet_driver_checked_declarations]
+    core_library_sys: core.sys
+    jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, jet_driver_check_outcome, jet_driver_checked_declarations, jet_driver_lowering_inputs, jet_driver_present_diagnostics]
     jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_transfer_rows, symbol_table]
     jet_ir.[ir_build_core_library, ir_core_exports_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
+    jet_pkg_model.[JET_VERSION]
+}
+
+// The Core packages the toolchain does not ship as machine code: each one
+// fewer than one in a hundred program files under Examples/ and
+// Tools/gauntlet/entries/ name (`core.<package>`). The Core library leaves
+// their functions out, so a program that calls one lowers it itself at its
+// own level. tests/guards/core_shipped.jet recounts the files and holds
+// this list to that rule: a package that crosses the share either way fails
+// it until it moves.
+JET_CLI_CORE_LOWERED: [String]{
+    "app", "archive", "args", "auth", "build", "collections", "color", "compiler", "compute", "data", "db", "debug",
+    "devtools", "effects", "event", "game", "git", "image", "jobs", "log", "meta", "mod", "perf", "plugin",
+    "reactive", "reflect", "regex", "rt", "service", "sync", "target", "tasks", "tui", "units", "watcher",
 }
 
 // The Core object's bytes, else the problem that stopped it; each build,
 // lint or object finding is a row of `{prefix}.issues`. The roots left out
 // of the library (JetIR BuildCore.jet ir_core_library_from) are the rows of
 // `{prefix}.skipped`, one per failure that left its root out. The Core
-// check's phases and the library's `ir.build`, `ir.lint`, `ir.opt`,
-// `ir.x64` and `ir.object` go to `trace_sink`, as the runtime library's do.
+// check's phases and the library's `ir.build`, `ir.lint`, `ir.opt`, `ir.x64`
+// and `ir.object` go to `trace_sink`, as the runtime library's do.
 JetCLICoreLibrary: struct { bytes: [U8], problem: String }
 
 jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
-    checked := jet_cli_core_checked(false, false, trace_sink)
+    checked := jet_cli_core_checked(trace_sink)
     inputs := if checked.move() == {
         .Stopped(output) -> return JetCLICoreLibrary{bytes: [U8]{}, problem: "the Core check of the Core library stopped:\n{output.stderr}{output.stdout}"}
-        .Checked(found, _, _) -> found
+        .Checked(found) -> found.move()
     }
     declarations := jet_driver_checked_declarations(inputs)
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    library := ir_build_core_library(inputs.functions.move(), inputs.decls, inputs.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, compiler_threads)
+    library := ir_build_core_library(inputs.functions.move(), inputs.decls, inputs.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, JET_CLI_CORE_LOWERED, compiler_threads)
     if trace_sink == .Val(sink) -> sink.end("ir.build", library.program.functions.len())
     issues := compiler_take_rows<String>(library.errors)
     loop failure in library.failures -> issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
@@ -57,7 +73,7 @@ jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_thr
     }
     if issues.len() == 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
-        _ := ir_optimize_module(library.program, ir_opt_options(1), threads)
+        _ := ir_optimize_module(library.program, ir_opt_options(2), threads)
         if trace_sink == .Val(sink) -> sink.end("ir.opt", library.program.functions.len())
         if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
         loop finding in ir_lint_module(library.program, "ir.opt", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
@@ -69,10 +85,11 @@ jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_thr
         compiled := ir_x64_compile_module(library.program.move(), threads)
         if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
         if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
-        // One shared section per kind: Core's functions outnumber the section
-        // indices an object without extended numbering has, and the image
-        // links the object whole.
-        object := ir_x64_library_object(compiled, library.exports, library.data, true, false)
+        // A section per function and data object, numbered past ELF's 16-bit
+        // indices through section 0 and `.symtab_shndx`: the image keeps every
+        // global of it, and a full link of a program bound to Core keeps only
+        // the sections that program reaches (JetCli Host.jet).
+        object := ir_x64_library_object(compiled, library.exports, library.data, true, true)
         if trace_sink == .Val(sink) -> sink.end("ir.object", object.bytes.len())
         if object.errors.len() == 0 {
             core_library_files.write_bytes("{prefix}.o", object.bytes) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core object: {err}"}
@@ -86,4 +103,59 @@ jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_thr
     }
     core_library_files.write("{prefix}.issues", issues.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core library findings: {err}"}
     JetCLICoreLibrary{bytes: [U8]{}, problem: "Core library lowering failed; see {prefix}.issues"}
+}
+
+// The Core check the library is built from: the `jet check Core` compile
+// (one import of each public Core module, jet_cli_core_check_source) over the
+// Core sources built into this jet, written to a scratch directory and
+// compiled with every Core body checked, whether a program calls it or not,
+// stopped right before lowering, its phases traced to `trace_sink`; else the
+// output that ends the build (the diagnostics that keep Core from checking
+// clean, a refusal, an internal problem).
+JetCLICoreChecked: enum {
+    Checked(inputs: JetDriverLoweringInputs)
+    Stopped(output: JetDriverVerbOutput)
+}
+
+jet_cli_core_checked: fn(trace_sink: JetCLITraceSink?) -> JetCLICoreChecked {
+    // The compiler build's `runtime` step gives the `jet-bare` it just
+    // linked `JET_COMPILER_IDENTITY`, that jet-bare's identity
+    // (RuntimePack.jet IDENTITY). Unset, as for a run by hand, this jet is
+    // named the same way: by its identity part, else (jet-bare has none) by
+    // its own bytes, as BuildExecute names a `b.jet()` without an identity.
+    // The identity file is never read here: one an earlier build left behind
+    // would name another compiler.
+    if core_library_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) == None {
+        identity := jet_cli_identity_part() ?? ""
+        if identity == "" {
+            executable: core_library_sys.executable()
+            image: core_library_files.read_bytes(executable) ?? return JetCLICoreChecked.Stopped{output: jet_cli_maintenance_error("E2105", "couldn't read this jet `{executable}` to name the compiler: {jet_cli_io_error_text(err)}", None, false, false)}
+            identity = "jet@{JET_VERSION}#{jet_cli_image_digest(image)}"
+        }
+        core_library_sys.set(JET_CLI_COMPILER_IDENTITY_ENV, identity)
+    }
+    scratch: core_library_files.temp_dir("jet-core-library") ?? return JetCLICoreChecked.Stopped{output: jet_cli_maintenance_error("E2105", "couldn't create a scratch directory for the Core entry: {jet_cli_io_error_text(err)}", None, false, false)}
+    entry: "{scratch.path}/core.jet"
+    source: jet_cli_core_check_source()
+    core_library_files.write(entry, source) ?? return JetCLICoreChecked.Stopped{output: jet_cli_maintenance_error("E2105", "couldn't write the Core entry `{entry}`: {jet_cli_io_error_text(err)}", None, false, false)}
+    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, false, true) == {
+        .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, false, None, JetDriverCompileMode.Check)
+    }
+    if prepared.move() == {
+        .Refused(output) -> JetCLICoreChecked.Stopped{output: output}
+        .Prepared(request, snapshot) -> {
+            selected := request
+            selected.every_core_body = true
+            selected.trace_sink = jet_cli_trace_boxed(trace_sink)
+            front := jet_driver_lowering_inputs(selected, None)
+            if trace_sink == .Val(sink) -> sink.begin("core_check.diagnostics", "", -1, -1)
+            diagnostics: jet_driver_present_diagnostics(front.compile.diagnostics, snapshot, front.compile.generated_source_files)
+            if trace_sink == .Val(sink) -> sink.end("core_check.diagnostics", diagnostics.len())
+            if jet_cli_errors(diagnostics).len() > 0 -> return JetCLICoreChecked.Stopped{output: jet_driver_check_outcome("Core", source, diagnostics, false, false)}
+            if front.compile.internal_problem == .Val(problem) -> return JetCLICoreChecked.Stopped{output: jet_cli_ice(problem)}
+            inputs: front.inputs.move() ?? return JetCLICoreChecked.Stopped{output: jet_cli_ice("the Core check stopped before lowering without a diagnostic")}
+            JetCLICoreChecked.Checked{inputs: inputs}
+        }
+    }
 }

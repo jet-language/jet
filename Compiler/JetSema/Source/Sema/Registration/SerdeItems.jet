@@ -385,7 +385,27 @@ sema_serde_items_enum_decode: fn(definition: EnumDef, encode: Bool, decode: Bool
     params: sema_serde_items_codec_params(definition.type_params, sema_serde_items_enum_wire(definition), encode, decode)
     target: sema_serde_items_target_type(definition.name, definition.type_params)
     method: sema_serde_items_method("decode", params, [Param]{sema_serde_items_param("tree", sema_dyn_type(), span)}, sema_data_result(target, sema_data_decode_error()), sema_serde_items_decode_span(span))
-    sema_serde_items_impl(definition.name, "Decode", [Func]{method}, definition.is_pub, definition.is_package_pub, span)
+    methods := [Func]{method}
+    if sema_serde_items_enum_streams(definition) -> methods.push(sema_serde_items_read_method(params, target, span))
+    sema_serde_items_impl(definition.name, "Decode", methods, definition.is_pub, definition.is_package_pub, span)
+}
+
+// An externally tagged enum (no `#Tag`, not `#Untagged`) whose variants with
+// a payload have distinct wire keys reads from a `__DecodeSource` (`__read`,
+// sema_serde_items_enum_read_body); its `decode(tree)` keeps the tree body.
+sema_serde_items_enum_streams: fn(definition: EnumDef) -> Bool Never! {
+    if sema_serde_items_enum_tag(definition.serde_markers) != None || sema_serde_items_has_marker(definition.serde_markers, "Untagged") -> return false
+    style: sema_checked_rename_case(definition.serde_markers)
+    keys := [String]{}
+    loop variant in definition.variants {
+        if variant.payload != .Unit -> keys.push(sema_serde_items_variant_key(variant, style))
+    }
+    // Sorted, a repeated key sits beside itself.
+    keys.sort()
+    loop position in 1..<keys.len() {
+        if keys[position - 1] == keys[position] -> return false
+    }
+    true
 }
 
 // A `#CodableAsBase` distinct type's codec header: `encode` codes `self.raw()`,
@@ -478,8 +498,9 @@ sema_serde_items_codec_body: fn(items: [Item], position: Int, trait_name: String
             return Val(SemaSerdeCodecBody{body: body, read: [Stmt]{}, wire: wire})
         }
         .Enum(definition) -> {
-            body: if encode -> sema_serde_items_enum_encode_body(definition, span) else -> sema_serde_items_enum_decode_body(definition, span)
-            return Val(SemaSerdeCodecBody{body: body, read: [Stmt]{}, wire: sema_serde_items_enum_wire(definition)})
+            if encode -> return Val(SemaSerdeCodecBody{body: sema_serde_items_enum_encode_body(definition, span), read: [Stmt]{}, wire: sema_serde_items_enum_wire(definition)})
+            read: if sema_serde_items_enum_streams(definition) -> sema_serde_items_enum_read_body(definition, span) else -> [Stmt]{}
+            return Val(SemaSerdeCodecBody{body: sema_serde_items_enum_decode_body(definition, span), read: read, wire: sema_serde_items_enum_wire(definition)})
         }
         .Distinct(definition) -> {
             wire: [Type]{definition.base.copy()}
@@ -817,8 +838,7 @@ sema_serde_items_struct_decode_body: fn(definition: StructDef, items: [Item], sp
             value_name: "jet_serde_decoded_value_{index}"
             ok_value: "jet_serde_ok_value_{index}"
             error_name: "jet_serde_field_errors_{index}"
-            slot_type: if optional -> field.ty.copy() else -> Type.Option{inner: field.ty.copy()}
-            body.push(sema_serde_items_binding(slot, Val(slot_type), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span))
+            body.push(sema_serde_items_binding(slot, Val(sema_serde_items_slot_type(field.ty)), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span))
             body.push(sema_serde_items_binding(result, None, sema_serde_items_under(key, sema_serde_items_decode_call(subtree, field.ty, span), span), false, span))
             stored: if optional -> sema_serde_items_take(ok_value, span) else -> Expr.Present{value: sema_serde_items_take(ok_value, span), span: span, id: AST_NODE_GENERATED}
             body.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, [Stmt]{sema_serde_items_assign_local(slot, stored, span)}, error_name, sema_serde_items_decode_error_body(error_name, missing, Val(key), span), span))
@@ -900,7 +920,7 @@ sema_serde_items_struct_read_body: fn(definition: StructDef, span: Span) -> [Stm
             // variable of that type, with a flag for "decoded", instead of an
             // Option that boxes every value it holds.
             plain: !optional && sema_serde_items_plain_slot(field.ty)
-            slot_type: if optional || plain -> field.ty.copy() else -> Type.Option{inner: field.ty.copy()}
+            slot_type: if plain -> field.ty.copy() else -> sema_serde_items_slot_type(field.ty)
             slot_init: if plain -> sema_serde_items_zero_expr(field.ty, span) else -> Expr.Absent{span: span, id: AST_NODE_GENERATED}
             body.push(sema_serde_items_binding(slot, Val(slot_type), slot_init, true, span))
             if plain -> body.push(sema_serde_items_binding(set, Val(Type.Bool), Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}, true, span))
@@ -1473,6 +1493,130 @@ sema_serde_items_enum_from_binding: fn(variant: Variant, binding: String, type_n
     sema_serde_items_enum_unit(type_name, variant, span)
 }
 
+// A streaming enum's `__read` (sema_serde_items_enum_streams): the result
+// of the tree decode above for the value at the cursor. A value that is not
+// a one-member Object is captured and decoded as a tree, as is every value
+// of a source that can't count an Object's members before reading them
+// (`object_members` is -1). A one-member Object's key names at most one
+// variant with a payload, which reads in place; a payload that fails to
+// read, or a key no such variant has, is "no matching enum variant", as the
+// tree decode then tries no other variant.
+sema_serde_items_enum_read_body: fn(definition: EnumDef, span: Span) -> [Stmt] Never! {
+    target: sema_serde_items_target_type(definition.name, definition.type_params)
+    style: sema_checked_rename_case(definition.serde_markers)
+    found: "jet_serde_enum_read"
+    whole: "jet_serde_enum_whole"
+    captured: sema_serde_items_decode_call(sema_serde_items_reader_call("capture", [Expr]{}, span), target, span)
+    counted: Expr.Binary{op: BinOp.Ne, left: sema_serde_items_reader_call("object_members", [Expr]{}, span), right: Expr.Int{value: 1, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}
+    body := [Stmt]{
+        sema_serde_items_if(counted, [Stmt]{
+            sema_serde_items_binding(whole, Val(sema_data_result(target, sema_data_decode_error())), captured, false, span),
+            sema_serde_items_return(sema_serde_items_ident(whole, span), span),
+        }, span),
+        sema_serde_items_binding(found, Val(Type.Option{inner: target}), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span),
+    }
+    arms := [SwitchArm]{}
+    loop variant in definition.variants {
+        if variant.payload == .Unit -> next
+        key: sema_serde_items_variant_key(variant, style)
+        arms.push(SwitchArm{cond: sema_serde_items_reader_call("key_is", [Expr]{sema_serde_items_string(key, span)}, span), body: sema_serde_items_enum_read_variant(variant, found, definition.name, span), span: span})
+    }
+    body.push(sema_serde_items_if(sema_serde_items_reader_call("begin_object", [Expr]{}, span), [Stmt]{sema_serde_items_read_members(arms, span)}, span))
+    body.push(sema_serde_items_pattern_switch(sema_serde_items_ident(found, span), "Val", [String]{"jet_serde_enum_value"}, [Stmt]{sema_serde_items_return(Expr.Ok{value: sema_serde_items_take("jet_serde_enum_value", span), span: span, id: AST_NODE_GENERATED}, span)}, Val([Stmt]{}), span))
+    body.push(sema_serde_items_no_matching_enum(span))
+    body
+}
+
+// `while reader.next_key() { if key_is(…) { arm } … else { reader.skip() } }`:
+// the open Object's members, each read by the arm its key names and any
+// other skipped.
+sema_serde_items_read_members: fn(arms: &&[SwitchArm], span: Span) -> Stmt Never! {
+    member: if arms.len() == 0 -> [Stmt]{sema_serde_items_reader_skip(span)} else -> [Stmt]{Stmt.Switch{subject: Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, arms: arms.move(), else_body: Val([Stmt]{sema_serde_items_reader_skip(span)}), span: span}}
+    Stmt.While{cond: sema_serde_items_reader_call("next_key", [Expr]{}, span), body: member, span: span, arrow_body: false, label: None}
+}
+
+// `jet_serde_reader.skip()`.
+sema_serde_items_reader_skip: fn(span: Span) -> Stmt Never! {
+    Stmt.Expr{expr: sema_serde_items_reader_call("skip", [Expr]{}, span)}
+}
+
+// The `__read` of `variant`'s payload at the cursor: its value, built into
+// `found` when the payload reads.
+sema_serde_items_enum_read_variant: fn(variant: Variant, found: String, type_name: String, span: Span) -> [Stmt] Never! {
+    stem: sema_serde_items_stem(variant)
+    value: "jet_serde_enum_{stem}_value"
+    if variant.payload == .Named(fields) -> return sema_serde_items_enum_read_named(variant.name, stem, fields, found, type_name, span)
+    if variant.payload == .Single(ty, _) {
+        built: Expr.EnumLit{type_name: type_name, variant: variant.name, variant_span: None, args: [EnumLitArg]{EnumLitArg.Positional{value: sema_serde_items_take(value, span)}}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
+        return [Stmt]{sema_serde_items_pattern_switch(sema_serde_items_reader_read(ty, span), "Ok", [String]{value}, [Stmt]{sema_serde_items_assign_local(found, Expr.Present{value: built, span: span, id: AST_NODE_GENERATED}, span)}, Val([Stmt]{}), span)}
+    }
+    [Stmt]{}
+}
+
+// A named payload's `__read`, as the tree decode's `tree.get(name) ?? Null`
+// reads each field: an Object's first member of the field's name, and Null
+// for an absent one or a payload that is not an Object. Every field reads;
+// the variant is built into `found` when none failed.
+sema_serde_items_enum_read_named: fn(variant: String, stem: String, fields: [VariantField], found: String, type_name: String, span: Span) -> [Stmt] Never! {
+    failed: "jet_serde_enum_{stem}_failed"
+    body := [Stmt]{sema_serde_items_binding(failed, Val(Type.Bool), Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}, true, span)}
+    members := [SwitchArm]{}
+    after := [Stmt]{}
+    args := [EnumLitArg]{}
+    slots := [String]{}
+    values := [String]{}
+    loop (index, field) in fields {
+        slot: "jet_serde_enum_{stem}_slot_{index}"
+        seen: "jet_serde_enum_{stem}_seen_{index}"
+        ok_value: "jet_serde_enum_{stem}_ok_{index}"
+        optional: field.ty == .Option(_)
+        body.push(sema_serde_items_binding(slot, Val(sema_serde_items_slot_type(field.ty)), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span))
+        body.push(sema_serde_items_binding(seen, Val(Type.Bool), Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}, true, span))
+        stored: if optional -> sema_serde_items_take(ok_value, span) else -> Expr.Present{value: sema_serde_items_take(ok_value, span), span: span, id: AST_NODE_GENERATED}
+        read: [Stmt]{
+            sema_serde_items_assign_local(seen, Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, span),
+            sema_serde_items_pattern_switch(sema_serde_items_reader_read(field.ty, span), "Ok", [String]{ok_value}, [Stmt]{sema_serde_items_assign_local(slot, stored, span)}, Val([Stmt]{sema_serde_items_enum_read_failed(failed, span)}), span),
+        }
+        members.push(SwitchArm{cond: sema_serde_items_reader_call("key_is", [Expr]{sema_serde_items_string(field.name, span)}, span), body: [Stmt]{sema_serde_items_if_else(sema_serde_items_ident(seen, span), [Stmt]{sema_serde_items_reader_skip(span)}, read, span)}, span: span})
+        if {
+            optional -> args.push(EnumLitArg.Named{label: field.name, expr: sema_serde_items_ident(slot, span)})
+            else -> {
+                value_name: "jet_serde_enum_{stem}_value_{index}"
+                null: sema_serde_items_decode_call(sema_serde_items_dyn_variant("Null", [Expr]{}, span), field.ty, span)
+                absent: sema_serde_items_pattern_switch(null, "Ok", [String]{ok_value}, [Stmt]{sema_serde_items_assign_local(slot, Expr.Present{value: sema_serde_items_take(ok_value, span), span: span, id: AST_NODE_GENERATED}, span)}, Val([Stmt]{sema_serde_items_enum_read_failed(failed, span)}), span)
+                after.push(sema_serde_items_if(sema_serde_items_not(sema_serde_items_ident(seen, span), span), [Stmt]{absent}, span))
+                args.push(EnumLitArg.Named{label: field.name, expr: sema_serde_items_take(value_name, span)})
+                slots.push(slot)
+                values.push(value_name)
+            }
+        }
+    }
+    body.push(sema_serde_items_if_else(sema_serde_items_reader_call("begin_object", [Expr]{}, span), [Stmt]{sema_serde_items_read_members(members, span)}, [Stmt]{sema_serde_items_reader_skip(span)}, span))
+    loop statement in after -> body.push(statement)
+    built: Expr.EnumLit{type_name: type_name, variant: variant, variant_span: None, args: args, leading_dot: false, span: span, id: AST_NODE_GENERATED}
+    success := [Stmt]{sema_serde_items_assign_local(found, Expr.Present{value: built, span: span, id: AST_NODE_GENERATED}, span)}
+    position := slots.len() - 1
+    loop position >= 0 {
+        success = [Stmt]{sema_serde_items_pattern_switch(sema_serde_items_ident(slots[position], span), "Val", [String]{values[position]}, success, Val([Stmt]{}), span)}
+        position -= 1
+    }
+    body.push(sema_serde_items_if(sema_serde_items_not(sema_serde_items_ident(failed, span), span), success, span))
+    body
+}
+
+// `failed = true`: a field of a named payload failed to read.
+sema_serde_items_enum_read_failed: fn(failed: String, span: Span) -> Stmt Never! {
+    sema_serde_items_assign_local(failed, Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, span)
+}
+
+// The type of a decoded field's slot: an optional field's own type, else
+// that type made optional (Absent until the field decodes).
+sema_serde_items_slot_type: fn(ty: Type) -> Type Never! {
+    owned: ty.copy()
+    if owned == .Option(_) -> return owned
+    Type.Option{inner: owned}
+}
+
 // ---------------------------------------------------------------------------
 // AST builders.
 
@@ -1777,9 +1921,6 @@ sema_codec_fill_demanded: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTra
     modules := [Int]{}
     positions := [String:Int]{}
     indexed := [Int:Bool]{}
-    // A taken seeded module's codecs were filled and checked when it was
-    // finalized; its result holds them (sema_finalize_seeded_taken).
-    taken: sema_finalize_seeded_taken(graph)
     loop {
         keys: sema_codec_demand_take(graph.codec_demand)
         if keys.len() == 0 -> break
@@ -1790,7 +1931,6 @@ sema_codec_fill_demanded: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTra
             rows: sema_registration_impl_rows_named(graph, parts[1])
             loop row_ref in rows {
                 module_index: row_ref.module_index
-                if module_index < taken -> next
                 row: row_ref.row
                 if graph.modules[module_index].impls[row].trait_name != (Val(trait_name)) -> next
                 if !sema_codec_impl_pending(graph.modules[module_index].impls[row]) -> next

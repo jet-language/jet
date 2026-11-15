@@ -244,10 +244,11 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
             cli_files.write("{prefix}.abi.json", ir_export_abi_json(library.abis)) ?? return jet_driver_compile_escaped_failure("cannot write runtime ABI: {err}")
             cli_files.write("{prefix}.threads", thread_exports.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime thread receipt: {err}")
             cli_files.write("{prefix}.interface.jet", interface_text) ?? return jet_driver_compile_escaped_failure("cannot write the runtime interface: {err}")
-            // JET_FRONT_CORE_OBJECT_OUTPUT: the Core code library
-            // (CoreLibrary.jet), which the runtime image links beside the
-            // runtime; Core starts threads through the runtime, so the
-            // runtime's receipt is what its own receipt reaches.
+            // JET_FRONT_CORE_OBJECT_OUTPUT: the Core code library, from its
+            // own Core check (CoreLibrary.jet); the
+            // runtime image links the library beside the runtime. Core starts
+            // threads through the runtime, so the runtime's receipt is what
+            // its own receipt reaches.
             core := [U8]?{None}
             if cli_sys.get(ENV_JET_FRONT_CORE_OBJECT_OUTPUT) == .Val(core_prefix) {
                 if trace_sink == .Val(sink) -> sink.begin("runtime.core", "", -1, -1)
@@ -1831,11 +1832,12 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             if compiled_request.selected_entry == None -> compiled_request.output_intent = SemaOutputIntent.Run
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: compiled_request.compiler_threads.copy()
-            // Core comes from this jet's record, which the runtime image's
-            // Core code was built from (Host.jet jet_cli_native_executable).
-            recorded: compiled_request.core_record != None
+            // A run binds its Core calls to the Core library's code this jet
+            // carries only when its Core is the Core built into this jet, and
+            // no Core source is under test (Host.jet jet_cli_native_executable).
+            built_in: compiled_request.core_tests == "" && jet_cli_core_built_in(snapshot.entry_path)
             front := jet_cli_lowering_inputs(compiled_request, trace_sink)
-            front.compile.core_record = recorded
+            front.compile.core_built_in = built_in
             // The native route traces through the same sink and builds on the
             // request's threads (Host.jet jet_cli_native_executable).
             front.compile.trace_sink = jet_cli_trace_boxed(trace_sink)
@@ -1872,9 +1874,7 @@ jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOve
 }
 
 // The request that compiles `snapshot` against the Core sources of the
-// toolchain of `core_input` (the snapshot's entry when `None`), or against
-// this jet's Core record when those are the sources built in
-// (jet_cli_core_record); `core_tests`
+// toolchain of `core_input` (the snapshot's entry when `None`); `core_tests`
 // as JetDriverCompileRequest.core_tests, its row compiled from
 // `core_tested_source` when given (the file with its doctest claims,
 // Doctests.jet). The organization's gate policy (`JET_ORG_UNSAFE_POLICY`) is
@@ -1896,7 +1896,6 @@ jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: 
         .Err(error) -> return JetCLIPrepared.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", error.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     }
     request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
-    request.core_record = jet_cli_core_record(core_input ?? snapshot.entry_path)
     request.organization_policy = organization.declarations.move()
     request.organization_deny = organization.deny.move()
     request.organization_source = organization.source.move()

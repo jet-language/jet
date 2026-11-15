@@ -929,6 +929,10 @@ Parser: struct {
             self.__cursor_open(true)
         }
 
+        // Uncounted: the text holds no count, and scanning ahead for one
+        // would read each member twice.
+        object_members: fn(self) -> Int Never! { -1 }
+
         next_key: fn(&self) -> Bool Never! {
             if !self.__cursor_ws() -> return false
             top: self.open.len() - 1

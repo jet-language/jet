@@ -863,7 +863,7 @@ millisecond resolution. Each `%p` in FILE is the jet process's id, so every
 jet that a traced process starts with the same variable writes its own file.
 `--trace=off` traces nothing. `--trace` is a compiler
 control: `JET_TRACE_FILE=FILE` is its environment form for the same five
-commands and for `jet self devtools core-record` (`-` or `stderr` selects
+commands and for `jet self devtools embed` (`-` or `stderr` selects
 the readable stream), and the flag takes
 precedence over it, as for every control (`jet env vars` shows which one
 won); `--phase-counters` also prints each counter as a `JET_PHASE_COUNTERS`
@@ -900,8 +900,8 @@ own processes are not jet's, so the span's `proc_cpu_ns` is jet's alone;
 with `--trace=FILE` each step runs with `JET_TRACE_FILE` naming `%p.json`
 in its sandbox, and when its batch ends the trace of every jet process it
 started (a `jet run` of a script and the jets that script runs, the
-compiler build's `core-record` with its Core check, record write, read-back
-and embed) is added to FILE as its own process, named by the step, on
+compiler build's `runtime` step with its Core check and Core library, and
+its `core-embed`) is added to FILE as its own process, named by the step, on
 FILE's clock. The readable stream shows only jet's own events. The
 readable stream is written through `/dev/stderr`, so redirect stderr to a
 file with `2>>`, or use `--trace=FILE`. A trace that cannot be written
@@ -1480,59 +1480,28 @@ source project. Frontend errors prevent publication. Files are published
 sequentially, so an I/O failure can leave a partial bundle. These maintainer
 commands own their raw arguments: `reduce` accepts the two-word `--code` form.
 
-`jet self devtools core-record --check` checks Core and the Prelude alone,
-the closed program the precompiled Core record is written from, with every
-Core body checked, and prints its module, function, constant, type and impl
-counts, or the diagnostics that keep Core from checking clean. `--write <file>`
-also writes the `jet.core/v15` record of that check to the file and prints one
-line per record section at once: its element count, the bytes its elements
-take and the bytes of its largest element. It then reads the file back and
-encodes every row again, which must give the tree it was read from. The record
-leaves out what a load gets back without it: a module's source text when the
-jet embeds that Core source, the bodies of an export's declaration, in its
-registration row and its checked module row alike (a check
-reads another module's export for its header), the lookup columns of a
-body's symbol-key and type tables, which follow from their rows, the ids
-of a body's expression-type rows, which are its nodes', and the body's key in
-each of its name references and call facts, which is its packet's. It writes
-each body node's id as its step from the node before, and each node's and name
-reference's span as an offset from the body's start and a length. It writes
-each symbol key as its parts (kind, module, owner and name), with an owner
-that is an earlier key of the same range named by that key's row. Each tree
-object is its shape and its values' payloads, the shape naming each value's
-tag. Each Core module's Core usage (the Core names its bodies reach) is a row
-of its own, so a compile that takes the record walks no Core body for it. So
-are its taint crossings: for each parameter of each Core function, the path on
-which its body steers on a `timing: .Fixed` value passed there, so a compile
-that takes the record walks no Core body to check a call that carries such a
-value into Core. So are its effect facts: each Core function's `#FX(…)`
-regions, loop spans, `assume_deterministic` spans and pending
-`#Kernel(.parallel)` obligations, so a compile that takes the record walks no
-Core body for the effect check either. So is its reach: what its source
-spells, so a compile that takes the record loads the Core modules a module
-imports or names only once reached code of it spells them, as a compile of
-Core's sources does.
-`--embed <image> <runtime-dir> <out> <identity>` writes the executable
-`image` to `out` with the record added as its `jet.core` part and, in the
-same pass, each runtime file of `runtime-dir` (the key, export and thread
-lists, the prelinked image, the pack, the Jet-only object, the web partition
-and its receipt, and `IDENTITY`, the identity of the jet that lowered the
-runtime) as its `jet.runtime/<file>` part, and last its own identity as its
-`jet.identity` part, which it also writes to `identity`. A jet's identity is
-`jet@<release>#<digest>`, the digest the sha256 of the jet's bytes with its
-`jet.identity` part's bytes zeroed: the sha256 of the file for a jet without
-that part. The compiler build runs it with the `jet-bare` it just linked and
-the `jet-runtime/` folder its `runtime` step built with that `jet-bare`, so
-the `jet` it ships reads no runtime or identity file: it maps its runtime
+`jet self devtools embed <image> <runtime-dir> <out> <identity>` checks
+nothing: it writes the executable `image` to `out` with each runtime file of
+`runtime-dir` (the key, export and thread lists, the prelinked image, the
+pack, the Jet-only object, the Core library and its export and thread lists,
+the web partition and its receipt, and `IDENTITY`, the identity of the jet
+that lowered the runtime) added as its `jet.runtime/<file>` part, and last
+its own identity as its `jet.identity` part, in one pass, and writes that
+identity to `identity`. The runtime's `IDENTITY` must name `image`. A jet's
+identity is `jet@<release>#<digest>`, the digest the sha256 of the jet's
+bytes with its `jet.identity` part's bytes zeroed: the sha256 of the file
+for a jet without that part. The compiler build's `runtime` step checks Core
+once with the `jet-bare` it just linked and builds from that check the Core
+library its runtime image links; its `core-embed` step then runs `embed`
+with that `jet-bare` and the `jet-runtime/` folder the `runtime` step built,
+so the `jet` it ships reads no runtime or identity file: it maps its runtime
 image from its own executable and lends the other parts from its mapped
 image. Only `jet-bare`, which carries no part, reads `jet-runtime/` and the
-`IDENTITY` file beside it; a jet that carries the record but lacks a runtime
-or identity part stops with an internal error. The record names the compiler
-`JET_COMPILER_IDENTITY` names; unset, it names this jet by its identity part,
-else by the sha256 of its own executable, never by an `IDENTITY` file, and
-the runtime's `IDENTITY` must name that same compiler. `--embedded` reads the
-record part from the running jet's mapped image, with no file read, and
-checks it as `--write` does.
+`IDENTITY` file beside it; a jet that carries its identity part but lacks a
+runtime part stops with an internal error. A `jet run` whose Core is the
+Core built into jet (no toolchain tree, or one whose Core files and assets
+match the built-in ones byte for byte) binds its Core calls to the Core
+library jet carries; any other run builds every Core function it calls.
 
 `jet inspect gates [<entry.jet>] [--kind <kind>] [--scope <scope>]`
 uses the canonical load-only gate query, not semantic body checking or emission.

@@ -16,9 +16,10 @@
 // object with JET, the jet-bare this build made: its native library hook writes
 // the object, the prelinked pack and image, the web partition and the Core
 // library (jet_core.o, core.exports, core.threads: every non-generic function
-// of JET's embedded Core as a global symbol), which the image links beside
-// the runtime and the pack does not. A `jet run` whose Core is jet's record
-// binds its Core calls to the image's Core code (JetCli Host.jet). Jet's
+// of a shipped package of JET's embedded Core as a global symbol), which the
+// image links beside the runtime and the pack does not. A `jet run` whose
+// Core is the Core built into jet binds its Core calls to the image's Core
+// code, or to jet_core.o's in a full link (JetCli Host.jet). Jet's
 // linker binds those objects alone; the pack links no C (#6693). No Rust
 // compiler, Rust runtime or system linker runs, and no `nm`: the step reads
 // the symbol tables of every object it makes itself and refuses
@@ -36,10 +37,10 @@
 // the version JET names in `jet --version --json` (its `release`) and the
 // bytes JET lowers the runtime under. The step declares each file, so the
 // build publishes the pack and IDENTITY in jet-runtime/, where jet-bare reads
-// the pack, and the `core-record` step adds them to jet as parts (JetCli
-// CoreRecordCheck.jet `--embed`), which checks that IDENTITY names the jet
-// that writes the Core record. The release gate holds provenance.json's
-// compilerSha256 to that part (Tools/release Gate.jet).
+// the pack, and the `core-embed` step adds them to jet as parts (JetCli
+// RuntimeEmbed.jet), which checks that IDENTITY names the jet that lowered
+// the runtime. The release gate holds provenance.json's compilerSha256 to
+// that part (Tools/release Gate.jet).
 //
 // `unit` writes the runtime's one-namespace unit, OUT/unit.jet, and its
 // OUT/package.jet, then prints OUT/unit.jet: each sources.list source after a

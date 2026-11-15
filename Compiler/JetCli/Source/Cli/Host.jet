@@ -668,6 +668,11 @@ JET_CLI_CORE_EXPORTS_FILE: "core.exports"
 // thread, one per line, or `*` (CoreLibrary.jet), read over the runtime's
 // receipt for a program bound to Core (jet_cli_single_thread).
 JET_CLI_CORE_THREADS_FILE: "core.threads"
+// The Core library's object (CoreLibrary.jet), a section per function and
+// data object, which a full link of a program bound to Core links beside
+// the pack: the link keeps only the Core code that program reaches
+// (jet_cli_native_executable).
+JET_CLI_CORE_OBJECT_FILE: "jet_core.o"
 // The C library functions a program's foreign calls may name and still run
 // on one thread only (jet_cli_single_thread): leaves that start no thread,
 // install no handler and call nothing back.
@@ -680,19 +685,19 @@ JET_CLI_MAIN_ROUTES: [String]{"jet_rt_host_main_arguments", "jet_rt_host_program
 JET_CLI_HOT_TEXT_FILE: "hot-text.list"
 
 // The runtime files the compiler build adds to jet as image parts
-// (CoreRecordCheck.jet `--embed`), each named JET_CLI_RUNTIME_PART_PREFIX
+// (RuntimeEmbed.jet), each named JET_CLI_RUNTIME_PART_PREFIX
 // then the file's name: every runtime file jet reads, and IDENTITY, the
 // identity of the jet-bare that lowered the runtime, which the release gate
 // holds the runtime's provenance to (Tools/release Gate.jet).
 JET_CLI_RUNTIME_PART_FILES: [String]{
     JET_CLI_RUNTIME_KEY_FILE, JET_CLI_RUNTIME_EXPORTS_FILE, JET_CLI_RUNTIME_THREADS_FILE,
-    JET_CLI_CORE_EXPORTS_FILE, JET_CLI_CORE_THREADS_FILE,
+    JET_CLI_CORE_EXPORTS_FILE, JET_CLI_CORE_THREADS_FILE, JET_CLI_CORE_OBJECT_FILE,
     JET_CLI_RUNTIME_IMAGE_FILE, JET_CLI_RUNTIME_PACK_FILE, JET_CLI_RUNTIME_OBJECT_FILE,
     JET_CLI_RUNTIME_WEB_FILE, JET_CLI_RUNTIME_WEB_RECEIPT_FILE, JET_CLI_IDENTITY_FILE,
 }
 JET_CLI_RUNTIME_PART_PREFIX: "jet.runtime/"
 // The part holding the identity of the jet that carries it, the file's last
-// bytes (CoreRecordCheck.jet `--embed`).
+// bytes (RuntimeEmbed.jet).
 JET_CLI_IDENTITY_PART: "jet.identity"
 // The path a jet opens its own file at, to map its runtime image part
 // (JetBackend Image/Loader.jet x64_image_part_file): the kernel's link to
@@ -708,11 +713,11 @@ jet_cli_runtime_dir: fn() -[Env]> String Never! {
 }
 
 // Whether this jet carries its runtime as image parts: every jet the
-// compiler build ships does, as it carries its Core record part
-// (CoreRecordCheck.jet `--embed` adds both); jet-bare, which has neither,
-// reads the files in jet-runtime/ beside it.
+// compiler build ships does, with its identity part last (RuntimeEmbed.jet
+// adds them in one pass); jet-bare, which has neither, reads the files in
+// jet-runtime/ beside it.
 jet_cli_runtime_embedded: fn() -[Env]> Bool Never! {
-    cli_runtime.image_part_size(JET_CLI_CORE_RECORD_PART) != None
+    cli_runtime.image_part_size(JET_CLI_IDENTITY_PART) != None
 }
 
 // The runtime file `name` as this jet's image part, lent from its mapped
@@ -720,7 +725,7 @@ jet_cli_runtime_embedded: fn() -[Env]> Bool Never! {
 // part was not built by the compiler build: an internal error.
 jet_cli_runtime_part: fn(name: String) -[Env]> [U8] Never! {
     part: "{JET_CLI_RUNTIME_PART_PREFIX}{name}"
-    size: cli_runtime.image_part_size(part) ?? panic("this jet carries its Core record but not its runtime part `{part}`; the compiler build adds both")
+    size: cli_runtime.image_part_size(part) ?? panic("this jet carries its identity but not its runtime part `{part}`; the compiler build adds both")
     cli_runtime.image_part(part, 0, size) ?? panic("the runtime part `{part}` has a size but no bytes")
 }
 
@@ -738,11 +743,9 @@ jet_cli_runtime_image_lent: fn() -[FS.Read, Env]> X64ImageFile Never! {
 }
 
 // This jet's identity, its JET_CLI_IDENTITY_PART part, lent from its mapped
-// image with no file read; None for jet-bare, which carries no part. A jet
-// that carries its runtime but lacks the part is an internal error.
+// image with no file read; None for jet-bare, which carries no part.
 jet_cli_identity_part: fn() -[Env]> String? Never! {
-    if !jet_cli_runtime_embedded() -> return None
-    size: cli_runtime.image_part_size(JET_CLI_IDENTITY_PART) ?? panic("this jet carries its Core record but not its identity part `{JET_CLI_IDENTITY_PART}`; the compiler build adds both")
+    size: cli_runtime.image_part_size(JET_CLI_IDENTITY_PART) ?? return None
     bytes: cli_runtime.image_part(JET_CLI_IDENTITY_PART, 0, size) ?? panic("the identity part `{JET_CLI_IDENTITY_PART}` has a size but no bytes")
     identity: String.from_bytes(bytes) ?? panic("the identity part `{JET_CLI_IDENTITY_PART}` is not UTF-8")
     Val(identity)
@@ -919,6 +922,15 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     decided: rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 && (jet_cli_native_c_linked(foreign_link) || foreign_link.inline_c.len() > 0)
     first_facts: if decided -> jet_driver_foreign_link_empty() else -> foreign_link.copy()
     bind: base == LINK_RUN_BASE && !decided
+    // A run whose Core is the Core built into this jet binds its Core calls
+    // to the Core library's code, which was built from that Core: the
+    // image's when the program binds to the image, else jet_core.o's, which
+    // the full link takes beside the pack. Any other run builds every Core
+    // function it calls.
+    if result.core_built_in && base == LINK_RUN_BASE {
+        runtime_exports.core = Val(IRCoreImage{exports: jet_cli_runtime_part(JET_CLI_CORE_EXPORTS_FILE)})
+        runtime_exports.core_threads = Val(jet_cli_runtime_part(JET_CLI_CORE_THREADS_FILE))
+    }
     // With no C closure to build and the prelinked runtime image to bind (a
     // Jet-only `jet run`), the realize is one read of the image's few hundred
     // KB (jet_cli_native_c_inputs returns at once), cheaper than a thread's
@@ -927,14 +939,6 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     if {
         bind && !jet_cli_native_c_linked(first_facts) && first_facts.inline_c.len() == 0 && rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 -> {
             realizing: jet_cli_native_foreign_realize(first_facts, rust_helper, sources, runtime_dir, runtime_key, bind)
-            // A program whose Core is this jet's record binds its Core calls
-            // to the image's Core code, which was built from that record's
-            // Core; one built from Core source builds every Core function it
-            // calls.
-            if result.core_record && realizing.bound {
-                runtime_exports.core = Val(IRCoreImage{exports: jet_cli_runtime_part(JET_CLI_CORE_EXPORTS_FILE)})
-                runtime_exports.core_threads = Val(jet_cli_runtime_part(JET_CLI_CORE_THREADS_FILE))
-            }
             closures.push(realizing)
             object := jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot)
             if object.failure == None && trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
@@ -978,11 +982,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     if realized.bound {
         // A program with no C closure binds to the prelinked runtime image
         // (Image/MemoryLink.jet); one it can't bind (thread-local data,
-        // init/fini arrays, an import the image lacks) links the pack in full,
-        // unless its Core calls name the image's Core code, which the pack
-        // lacks: the program object makes no thread-local data or init/fini
-        // arrays, so that refusal is a compiler fault.
-        core_bound: runtime_exports.core != None
+        // init/fini arrays, an import the image lacks) links the pack in full.
         if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
         // copy: the full link needs the object again when the bind refuses it.
         bound := x64_bind_runtime_image(executable_path, object.copy(), runtime, runtime_path, realized.runtime_stamp, realized.runtime_at, realized.runtime_gap_at, realized.runtime_gap, debug_info)
@@ -990,10 +990,6 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
         if bound.errors.len() == 0 {
             if trace_sink == .Val(sink) -> sink.progress("counters.native.link.bytes", bound.executable.tail_at + bound.executable.tail.len(), -1)
             return JetCLINativeLinked.Image{executable: jet_cli_native_with_command(bound.executable, result.command_record)}
-        }
-        if core_bound {
-            loop error in bound.errors -> jet_driver_ice_record(census, "-", "native.link", "core-bind", error)
-            return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Faulted}
         }
         // The image moved into the bind; the full link reads the pack.
         runtime_path = jet_cli_runtime_label(runtime_dir, JET_CLI_RUNTIME_PACK_FILE)
@@ -1004,6 +1000,12 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     // object never touches the disk.
     names := [String]{"{executable_path} (program object)", runtime_path}
     bytes := [[U8]]{object.move(), runtime.move()}
+    // A program bound to Core links the Core library's object, of which the
+    // link keeps the sections the program reaches; the pack lacks Core.
+    if runtime_exports.core != None {
+        names.push(jet_cli_runtime_label(runtime_dir, JET_CLI_CORE_OBJECT_FILE))
+        bytes.push(jet_cli_runtime_bytes(runtime_dir, JET_CLI_CORE_OBJECT_FILE) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: "couldn't read the Core library object: {err.message}"}})
+    }
     loop name in closure.names -> names.push(name.copy())
     loop input in closure.bytes -> bytes.push(input.copy())
     input_count: names.len()
@@ -1206,8 +1208,8 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
 // The runtime's key, its exports file's bytes (one exported symbol per
 // line) and its thread receipt's (JET_CLI_RUNTIME_THREADS_FILE; None when
 // it can't be read), else the failure jet_cli_native_object reports where
-// it reads them. When the program binds its Core calls to the runtime
-// image (jet_cli_native_executable), `core` holds the Core exports
+// it reads them. When the program binds its Core calls to the Core
+// library's code (jet_cli_native_executable), `core` holds the Core exports
 // (JET_CLI_CORE_EXPORTS_FILE) and `core_threads` the Core thread receipt.
 JetCLIRuntimeExports: struct {
     key: String
@@ -3669,7 +3671,7 @@ jet_cli_maintenance_host: fn(action: String, args: [String], color: Bool, json: 
         "new-ui" -> return jet_cli_devtools_new_ui(args, color, json)
         "check-fixture-paths" -> return jet_cli_devtools_fixture_paths(color, json)
         "reduce" -> return jet_cli_devtools_reduce(args, color, json)
-        "core-record" -> return jet_cli_devtools_core_record(args, color, json)
+        "embed" -> return jet_cli_devtools_embed(args, color, json)
         else -> return jet_cli_devtools_ice_report(args, color, json)
     }
 }

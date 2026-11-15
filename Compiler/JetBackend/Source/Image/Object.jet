@@ -32,9 +32,12 @@
 // symbols: a link that keeps only the sections its roots reach
 // (Image/StaticLink.jet, Image/RuntimePack.jet) then keeps only the
 // functions and data a program reaches. Its data exports (X64DataExport)
-// are global symbols of their data objects.
+// are global symbols of their data objects. A library with more sections
+// than ELF's 16-bit indices reach (the Core library's) uses extended
+// section numbering: the header's count and each symbol's section index at
+// SHN_LORESERVE or above move to section 0 and `.symtab_shndx`.
 
-use jet_foundation.[CompilerThreads, NameTable, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, name_find, name_index, name_intern, name_table_sized]
+use jet_foundation.[CompilerThreads, NameTable, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
 
 ELF64_SECTION_HEADER_SIZE: 64
 ELF64_SYMBOL_SIZE: 24
@@ -62,9 +65,14 @@ ELF64_OBJECT_RODATA: 19
 // that section's relocations, then the same per data object.
 ELF64_OBJECT_DEBUG_LOCLISTS_RELA: 20
 ELF64_OBJECT_FIRST_OWN: 21
-// The first index ELF reserves (SHN_LORESERVE): the object writes no
-// extended section numbering, so its sections stay below it.
+// The first index ELF reserves (SHN_LORESERVE): a header count or a
+// symbol's section index from it on is written through extended section
+// numbering (x64_object_file).
 ELF64_OBJECT_SECTION_LIMIT: 0xff00
+// A symbol's section index in `.symtab_shndx` (SHN_XINDEX).
+ELF64_OBJECT_SECTION_XINDEX: 0xffff
+// SHT_SYMTAB_SHNDX: the symbols' extended section indices.
+ELF64_SHT_SYMTAB_SHNDX: 18
 // Local symbols before the functions: null, then the section symbols
 // relocations name (with own sections, theirs follow).
 ELF64_OBJECT_SYMBOL_TEXT: 1
@@ -416,6 +424,46 @@ x64_object_data_place: fn(data: [X64Data], row: Int, placed: &[Bool], order: &[I
     assert_eq(order, [Int]{2, 1, 4, 0, 3})
 }
 
+// The little-endian field of `width` bytes at `at`.
+x64_object_test_field: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
+    value := 0
+    loop k in 0..<width -> value = value.bit_or(Int{bytes[at + k]} << (8 * k))
+    value
+}
+
+#Test("A library object with more sections than 16-bit indices reach numbers them through section 0 and .symtab_shndx") {
+    // 21 fixed headers and two per function: the last function's section is
+    // past SHN_LORESERVE.
+    count: 32700
+    functions := [X64CompiledFunction]{}
+    debug := [X64FunctionDebug]{}
+    sources := [X64FunctionSource]{}
+    loop id in 0..<count {
+        functions.push(X64CompiledFunction{id: X64FunctionID{value: id}, name: "f{id}", code: [U8]{U8{0xc3}}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
+        debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
+        sources.push(x64_function_source_none())
+    }
+    program: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: sources.move()}
+    exports: [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: count - 1}, symbol: "last", guards: [Int]{}}}
+    object: x64_object_functions_threads(program, functions, debug, exports, [X64DataExport]{}, compiler_threads_single(), false, true)
+    assert_eq(object.errors, [String]{})
+    bytes: object.bytes
+    headers: ELF64_OBJECT_FIRST_OWN + 2 * count + 1
+    shoff: x64_object_test_field(bytes, 40, 8)
+    assert_eq(x64_object_test_field(bytes, 60, 2), 0)
+    assert_eq(x64_object_test_field(bytes, shoff + 32, 8), headers)
+    last: shoff + ELF64_SECTION_HEADER_SIZE * (headers - 1)
+    assert_eq(x64_object_test_field(bytes, last + 4, 4), ELF64_SHT_SYMTAB_SHNDX)
+    assert_eq(x64_object_test_field(bytes, last + 40, 4), ELF64_OBJECT_SYMTAB)
+    // `last` is the first global: after the fixed and section symbols and
+    // the other functions.
+    symbol: ELF64_OBJECT_SYMBOL_FIRST_OWN + count + count - 1
+    symtab: x64_object_test_field(bytes, shoff + ELF64_SECTION_HEADER_SIZE * ELF64_OBJECT_SYMTAB + 24, 8)
+    assert_eq(x64_object_test_field(bytes, symtab + ELF64_SYMBOL_SIZE * symbol + 6, 2), ELF64_OBJECT_SECTION_XINDEX)
+    xindex: x64_object_test_field(bytes, last + 24, 8)
+    assert_eq(x64_object_test_field(bytes, xindex + 4 * symbol, 4), ELF64_OBJECT_FIRST_OWN + 2 * (count - 1))
+}
+
 // x64_object_functions with the `.debug_info` subprograms built on the
 // threads `threads` admits (Dwarf.jet dwarf_info); the bytes are the same
 // for any thread count. With `debug_info` false the DWARF sections are empty
@@ -478,6 +526,8 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
         _ := name_intern(export_names, entry_row.symbol)
         data_rows.push(at)
     }
+    // Whether a section index reaches SHN_LORESERVE (extended numbering).
+    extended := false
     if own_sections {
         hooks := 0
         loop (index, entry_row) in exports {
@@ -485,8 +535,7 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
             if entry_row.init_priority >= 0 -> hooks += arrays
             if entry_row.fini_priority >= 0 -> hooks += arrays
         }
-        count: ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + program.data.len() + hooks)
-        if count >= ELF64_OBJECT_SECTION_LIMIT -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"a section per function and data object makes {count} sections; ELF reserves the indices from {ELF64_OBJECT_SECTION_LIMIT}, and the object writer writes no extended section numbering"}}
+        extended = ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + program.data.len() + hooks) + 1 >= ELF64_OBJECT_SECTION_LIMIT
     }
     // Each function's place in `.text`: on its alignment, in function order;
     // with own sections the start of its own. `.text` takes the largest.
@@ -714,12 +763,17 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
 
     strtab := [U8]{U8{0}}
     symtab := [U8]{}
+    // With extended numbering: per symbol its section index, which the
+    // symbol then names as SHN_XINDEX when the index is reserved.
+    xindex := [U8]{}
     loop symbol in symbols {
         name_at: if symbol.name == "" -> 0 else -> elf64_string(strtab, symbol.name)
         elf64_u32(symtab, name_at)
         symtab.push(U8{symbol.info})
         symtab.push(U8{0})
-        elf64_u16(symtab, symbol.section)
+        reserved: symbol.section >= ELF64_OBJECT_SECTION_LIMIT
+        elf64_u16(symtab, if reserved -> ELF64_OBJECT_SECTION_XINDEX else -> symbol.section)
+        if extended -> elf64_u32(xindex, if reserved -> symbol.section else -> 0)
         elf64_u64(symtab, symbol.value)
         elf64_u64(symtab, symbol.size)
     }
@@ -731,13 +785,13 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     // their own while the file is assembled; a smaller object assembles its
     // file first and they drop as this returns.
     x64_object_text_release(inputs)
-    if workers <= 1 -> return X64ExecutableResult{bytes: x64_object_file(dwarf, text, text_align, data, data_align, rodata, rodata_align, rela_text, symtab, strtab, first_global, data_relas, exports, guard_sections, own), errors: [String]{}}
+    if workers <= 1 -> return X64ExecutableResult{bytes: x64_object_file(dwarf, text, text_align, data, data_align, rodata, rodata_align, rela_text, symtab, xindex, strtab, first_global, data_relas, exports, guard_sections, own), errors: [String]{}}
     released: Shared{X64ObjectReleased{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, programs: [X64ObjectModule]{}}}
     x64_object_release_fill(released, program, functions, debug)
     files := [[U8]]{}
     task.group x64_object_release_group {
         dropped: task x64_object_release(released)
-        files.push(x64_object_file(dwarf, text, text_align, data, data_align, rodata, rodata_align, rela_text, symtab, strtab, first_global, data_relas, exports, guard_sections, own))
+        files.push(x64_object_file(dwarf, text, text_align, data, data_align, rodata, rodata_align, rela_text, symtab, xindex, strtab, first_global, data_relas, exports, guard_sections, own))
         _: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
     X64ExecutableResult{bytes: files.pop() ?? panic("the object writer lost its file"), errors: [String]{}}
@@ -793,7 +847,10 @@ x64_object_release_programs: fn(released: Shared<X64ObjectReleased>) -> [X64Obje
 // ELF header, the section contents and the section header table. `own`
 // holds the sections from ELF64_OBJECT_FIRST_OWN (empty: none);
 // `guard_sections` per export the header indices of its hook's guards.
-x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: &&[U8], symtab: [U8], strtab: [U8], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection]) -> [U8] Never! {
+// `xindex` holds the symbols' extended section indices, empty when no
+// index reaches ELF64_OBJECT_SECTION_LIMIT; with them the object ends in
+// `.symtab_shndx`, and with that many headers section 0 holds their count.
+x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: &&[U8], symtab: [U8], xindex: [U8], strtab: [U8], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection]) -> [U8] Never! {
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{
         // .text: PROGBITS, ALLOC | EXECINSTR
@@ -859,6 +916,8 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: 
             }
         }
     }
+    if xindex.len() > 0 -> sections.push(X64ObjectSection{name: ".symtab_shndx", kind: ELF64_SHT_SYMTAB_SHNDX, flags: 0, bytes: xindex, link: ELF64_OBJECT_SYMTAB, info: 0, align: 4, entry_size: 4})
+    count: sections.len() + 1
     // Section names, each written once (own sections share theirs).
     shstrtab := [U8]{U8{0}}
     // Each name's offset by its id in `names` (-1: not written yet).
@@ -889,7 +948,7 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: 
     elf64_u16(bytes, 0)
     elf64_u16(bytes, 0)
     elf64_u16(bytes, ELF64_SECTION_HEADER_SIZE)
-    elf64_u16(bytes, sections.len() + 1)
+    elf64_u16(bytes, if count >= ELF64_OBJECT_SECTION_LIMIT -> 0 else -> count)
     elf64_u16(bytes, ELF64_OBJECT_SHSTRTAB)
     section_offsets := [Int]{}
     section_sizes := [Int]{}
@@ -903,7 +962,7 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: 
     elf64_pad(bytes, 8)
     shoff: bytes.len()
     loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{((shoff >> (8 * shift))).bit_and(255)}
-    elf64_section_header(bytes, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    elf64_section_header(bytes, 0, 0, 0, 0, if count >= ELF64_OBJECT_SECTION_LIMIT -> count else -> 0, 0, 0, 0, 0)
     loop (index, section) in sections {
         elf64_section_header(bytes, name_offsets[index], section.kind, section.flags, section_offsets[index], section_sizes[index], section.link, section.info, section.align, section.entry_size)
     }

@@ -192,10 +192,17 @@ runtime thread of such a program is a musl thread that the linked C can run
 on; a program without C starts its threads as raw clones. Only that
 synthesized startup names musl's thread functions: the runtime object asks
 libc for none. The same `jet doc` run also builds the Core library
-(`JetCli/Cli/CoreLibrary.jet`, `JetIR/BuildCore.jet`): the Core check the
-Core record is made from, every non-generic Core and Prelude function built
-as a program's code is (stock checks, runtime sentries and stop points, O1,
-IR Lint after the build and after the optimizer), with each function a
+(`JetCli/Cli/CoreLibrary.jet`, `JetIR/BuildCore.jet`) from its own Core
+check. Every non-generic Core and Prelude function of a
+shipped package is built as a program's code is (stock checks, runtime
+sentries and stop points, O2, IR Lint after the build and after the
+optimizer). A Core package ships as machine code when at least one in a
+hundred of the program files under `Examples/` and the gauntlet's entries
+names it, and the Prelude always ships. `CoreLibrary.jet`
+`JET_CLI_CORE_LOWERED` lists the other packages, and
+`tests/guards/core_shipped.jet` recounts and holds that list to the rule. A
+program that calls a function of a package left out lowers it itself, as it
+does a generic instance. Each shipped function is a
 global `jet_core_fn_*` symbol named after its checked key and each writable
 process cell it builds (module storage, a memo store, a Shared site) a
 global `jet_core_cell_*` data symbol, so the program and Core share one copy
@@ -203,21 +210,26 @@ of each. `core.exports` lists each symbol with its key and IR signature (the
 slot layouts of its parameters and result); `core.threads` is its thread
 receipt, read over the runtime's receipt, since Core starts threads through
 the runtime. A Core build failure fails the step with `core.issues`. The
+Core object puts each function and data object in a section of its own,
+past the 16-bit section indices through section 0 and `.symtab_shndx`. The
 step installs `jet-runtime/` beside the compiler: `native.key`,
 `jet_runtime.pack.o`, the library `jet_core.o` and its two lists, and
 `jet_runtime.image`, the runtime object and the Core object linked
 once at the run base (`LINK_RUN_BASE`), with its symbol table, a
 `.jet.bind` section naming where it calls `main`, and a `.jet.exports` hash
-index of its defined global symbols. jet carries the two lists as parts. A
-`jet run` whose Core is jet's record (a compile outside a toolchain tree)
-and that binds to the image (no C closure) binds its Core calls there
+index of its defined global symbols. jet carries `jet_core.o` and the two
+lists as parts. A `jet run` whose Core is jet's built-in Core sources (a
+compile outside a toolchain tree) binds its Core calls to that Core code
 (`JetCli/Cli/Host.jet` `jet_cli_native_executable`, `IRChecks.core`): a
 call of a non-generic Core function whose bounds checks are the stock ones
-calls the image's `jet_core_fn_*` symbol when the export list's signature
-is the call's, and the program's Core cells are the image's. Such a callee
-is opaque at every level. `jet build` and `jet test` bind none, so a built
-program carries the Core code it calls. The pack, which a full program link
-reads whole, holds the runtime alone. Binding a program object to that image
+calls the `jet_core_fn_*` symbol when the export list's signature is the
+call's, and the program's Core cells are Core's. A program that binds to
+the image (no C closure) finds them there; one with a C closure, or one the
+image refuses, links `jet_core.o` beside the pack in its full link, which
+keeps only the Core sections the program reaches. Such a callee is opaque
+at every level. `jet build` and `jet test` bind none, so a built program
+carries the Core code it calls. The pack, which a full program link reads
+whole, holds the runtime alone. Binding a program object to that image
 (`Image/MemoryLink.jet` `x64_link_with_runtime_image`) does not relink the
 runtime and looks up only the program's imports in that index; the bound
 bytes are a complete static executable at the
@@ -471,7 +483,8 @@ point is the pass name its findings carry:
 - `ir.build` and `ir.opt` in the runtime library build (`Request.jet`
   `jet_cli_runtime_library`) and the Core code library
   (`CoreLibrary.jet` `jet_cli_core_library`), after the build and after
-  the O1 optimizer; each finding is one of their issue rows.
+  the optimizer (O1 for the runtime library, O2 for Core); each finding is
+  one of their issue rows.
 
 The functions split across the compiler threads. A finding is a compiler
 bug, never a user diagnostic (AGENTS.md I2, I3): it becomes an ICE census

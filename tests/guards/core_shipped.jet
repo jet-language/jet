@@ -1,0 +1,127 @@
+use core_shipped_files: core.files
+
+// The Core packages the toolchain ships as machine code. A Core package
+// ships when at least one in CORE_SHIPPED_SHARE of the program files under
+// CORE_SHIPPED_PROGRAMS names it (`core.<package>`). The Prelude always
+// ships, since every program reaches it. JetCli CoreLibrary.jet lists the
+// other packages in JET_CLI_CORE_LOWERED, and the Core library leaves their
+// functions out, so a program that calls one lowers it itself. This guard
+// recounts and holds that list to the rule.
+CORE_SHIPPED_PROGRAMS: [String]{"Examples", "Tools/gauntlet/entries"}
+// One folder per Core package, named as the package in CamelCase.
+CORE_SHIPPED_PACKAGES: "Core"
+CORE_SHIPPED_LIST: "Compiler/JetCli/Source/Cli/CoreLibrary.jet"
+CORE_SHIPPED_LIST_OPENER: "JET_CLI_CORE_LOWERED: [String]{{"
+CORE_SHIPPED_SHARE: 100
+CORE_SHIPPED_ALWAYS: "prelude"
+
+// The Core package names, sorted.
+core_shipped_packages: fn() -> [String] {
+    names := [String]{}
+    loop child in (core_shipped_files.list_dir(CORE_SHIPPED_PACKAGES) ?? panic("list {CORE_SHIPPED_PACKAGES}: {err}")) {
+        if child.name.starts_with(".") || !core_shipped_files.is_dir("{CORE_SHIPPED_PACKAGES}/{child.name}") -> next
+        names.push(child.name.to_lower())
+    }
+    names.sort()
+    names
+}
+
+// Every `.jet` file under `path`.
+core_shipped_scan: fn(path: String, found: &[String]) {
+    kind: core_shipped_files.stat(path) ?? return
+    if kind.is_symlink -> return
+    if kind.is_dir {
+        loop child in (core_shipped_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name.starts_with(".") || child.name == "target" || child.name == "build" -> next
+            core_shipped_scan("{path}/{child.name}", found)
+        }
+        return
+    }
+    if path.ends_with(".jet") -> found.push(path.copy())
+}
+
+// The packages of `packages` that `text` names as `core.<package>`, each
+// once, in the order it first names them.
+core_shipped_named: fn(text: String, packages: [String]) -> [String] {
+    named := [String]{}
+    pieces: text.split("core.").to_list()
+    loop at in 1..<pieces.len() {
+        before: pieces[at - 1].bytes()
+        // `score.x` and `a.core.x` name no package.
+        if before.len() > 0 && (closed_list_ident_byte(before[before.len() - 1]) || before[before.len() - 1] == (U8{46})) -> next
+        after: pieces[at].bytes()
+        end := 0
+        loop end < after.len() && after[end] >= (U8{97}) && after[end] <= (U8{122}) -> end += 1
+        if end == 0 || (end < after.len() && closed_list_ident_byte(after[end])) -> next
+        word: policy_slice_raw(after, 0, end)
+        if packages.contains(word) && !named.contains(word) -> named.push(word)
+    }
+    named
+}
+
+// The packages of `packages` the rule leaves to each program: every one
+// that fewer than one in CORE_SHIPPED_SHARE of `programs` files names
+// (`counts`), but the Prelude.
+core_shipped_lowered: fn(counts: [String:Int], packages: [String], programs: Int) -> [String] {
+    lowered := [String]{}
+    loop package in packages {
+        if package == CORE_SHIPPED_ALWAYS -> next
+        if (counts.get(package) ?? 0) * CORE_SHIPPED_SHARE < programs -> lowered.push(package.copy())
+    }
+    lowered
+}
+
+// The names of JET_CLI_CORE_LOWERED in `source`.
+core_shipped_listed: fn(source: String) -> [String] {
+    parts: source.split(CORE_SHIPPED_LIST_OPENER).to_list()
+    assert(parts.len() == 2, "{CORE_SHIPPED_LIST} must declare `{CORE_SHIPPED_LIST_OPENER}...}}` once")
+    body: parts[1].split("}}").to_list()[0]
+    quoted: body.split("\"").to_list()
+    listed := [String]{}
+    loop at in 0..<quoted.len() {
+        if at % 2 == 1 -> listed.push(quoted[at].copy())
+    }
+    listed
+}
+
+// Each package the list and the rule disagree on, with the count that
+// decides it.
+core_shipped_problems: fn(listed: [String], lowered: [String], counts: [String:Int], programs: Int) -> [String] {
+    problems := [String]{}
+    loop package in lowered {
+        if !listed.contains(package) -> problems.push("core.{package}: {counts.get(package) ?? 0} of {programs} program files name it, fewer than one in {CORE_SHIPPED_SHARE}; add it to JET_CLI_CORE_LOWERED in {CORE_SHIPPED_LIST}")
+    }
+    loop package in listed {
+        if !lowered.contains(package) -> problems.push("core.{package}: {counts.get(package) ?? 0} of {programs} program files name it, at least one in {CORE_SHIPPED_SHARE}, or it is the Prelude or no Core package; remove it from JET_CLI_CORE_LOWERED in {CORE_SHIPPED_LIST}")
+    }
+    problems
+}
+
+#Test("the Core packages each program lowers itself are the ones fewer than one in a hundred program files name") {
+    guards_enter_root()
+    packages: core_shipped_packages()
+    assert(packages.contains(CORE_SHIPPED_ALWAYS), "{CORE_SHIPPED_PACKAGES} must hold the Prelude's folder")
+    paths := [String]{}
+    loop root in CORE_SHIPPED_PROGRAMS -> core_shipped_scan(root, paths)
+    assert(paths.len() > 0, "no program files under {CORE_SHIPPED_PROGRAMS}")
+    counts := [String:Int]{}
+    loop path in paths {
+        text: core_shipped_files.read(path) ?? panic("read {path}: {err}")
+        loop package in core_shipped_named(text, packages) -> counts[package] = (counts.get(package) ?? 0) + 1
+    }
+    lowered: core_shipped_lowered(counts, packages, paths.len())
+    listed: core_shipped_listed(core_shipped_files.read(CORE_SHIPPED_LIST) ?? panic("read {CORE_SHIPPED_LIST}: {err}"))
+    assert_eq(core_shipped_problems(listed, lowered, counts, paths.len()).join("\n"), "")
+}
+
+#Test("the Core package census counts the packages a file names and holds the list to the share") {
+    packages: [String]{"db", "files", "http", "prelude", "time"}
+    assert_eq(core_shipped_named("use h: core.http.client\nx: score.files a.core.db core.Files core.db_x core.time core.http core.nope", packages), [String]{"http", "time"})
+    counts: [String:Int]{"files": 2, "http": 1}
+    assert_eq(core_shipped_lowered(counts, packages, 200), [String]{"db", "http", "time"})
+    assert_eq(core_shipped_listed("x\nJET_CLI_CORE_LOWERED: [String]{{\n    \"db\", \"time\",\n}}\ny: [String]{{\"z\"}}\n"), [String]{"db", "time"})
+    assert_eq(core_shipped_problems([String]{"db", "files"}, [String]{"db", "http"}, counts, 200), [String]{
+        "core.http: 1 of 200 program files name it, fewer than one in 100; add it to JET_CLI_CORE_LOWERED in Compiler/JetCli/Source/Cli/CoreLibrary.jet",
+        "core.files: 2 of 200 program files name it, at least one in 100, or it is the Prelude or no Core package; remove it from JET_CLI_CORE_LOWERED in Compiler/JetCli/Source/Cli/CoreLibrary.jet",
+    })
+}

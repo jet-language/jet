@@ -72,7 +72,6 @@ use {
         effect_root_removed,
         ModuleID,
         ModuleTable,
-        module_find,
         module_intern,
         module_none,
         module_table,
@@ -121,7 +120,6 @@ use {
     jet_sema.[
         SEMA_CONTEXT_CORE_FIELDS,
         SemaRegistrationImportEdge,
-        SemaRegistrationModule,
         SemaSourceOrigin,
         SemaSourceSegment,
         sema_cli_entry_expand,
@@ -151,7 +149,7 @@ use {
     jet_pkg_model.[
         ImportBoundary, PackageFacts, PackageGrant, PackageMarker, PackageParseError, pkg_build_entry_source, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
         pkg_inline_deps_l0203_unpinned, pkg_inline_deps_valid_package_name,
-        pkg_inline_deps_version_matches, pkg_lex_workspace_declaration, pkg_manifest_parse_diagnostic, pkg_package_marker_source, pkg_package_markers, pkg_package_markers_masked,
+        pkg_inline_deps_version_matches, pkg_lex_workspace_declaration, pkg_manifest_parse_diagnostic, pkg_package_marker_source, pkg_package_markers, pkg_package_markers_masked, pkg_workspace_head_possible,
     ]
     jetpack_foundation.[DEFAULT_ENTRY_FILE]
 }
@@ -2480,9 +2478,12 @@ jet_driver_is_project_configuration: fn(relative_path: String) -> Bool Never! {
 
 // A file with a top-level `workspace: module` declaration is workspace
 // authority (the index, or a policy boundary under another name), read by the
-// workspace evaluator rather than compiled into the package namespace.
+// workspace evaluator rather than compiled into the package namespace. Only
+// a file where some `workspace` is followed by `:` or a comment can declare
+// one, so no other file is lexed (the gate workspace discovery reads with,
+// pkg_workspace_declaration_probe).
 jet_driver_declares_workspace: fn(source: String) -> Bool Never! {
-    source.contains("workspace") && pkg_lex_workspace_declaration(source.bytes()).declares_module
+    pkg_workspace_head_possible(source) && pkg_lex_workspace_declaration(source.bytes()).declares_module
 }
 
 jet_driver_lookup_file_target: fn(source_units: [JetDriverSourceUnit], importing_unit: JetDriverSourceUnit, import_path: String, span: Span, diagnostics: &[Diagnostic]) -> Int? {
@@ -3646,12 +3647,6 @@ JetDriverParsedUnit: struct {
     tokens: Int{0}
     line_starts: [Int]{[Int]{}}
     words: JetDriverUnitWords?{None}
-    // A Core module the Core record holds (JetDriverParseJob.Record): its
-    // module key position there, and its finalized registration row (a list
-    // of one, as JetDriverLoadedModule holds it), whose tree is `parsed`'s
-    // program.
-    core_record_index: Int{-1}
-    core_registration: [SemaRegistrationModule]{[SemaRegistrationModule]{}}
 }
 
 jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand Never! {
@@ -4122,13 +4117,6 @@ JetDriverParseJob: enum {
     // `tested` unit is the Core source a `jet test` of that file runs
     // (JetDriverCompileRequest.core_tests): it keeps its #Test controls.
     Core(text: String, module_name: String, owned_members: [String], runtime: Bool, tested: Bool)
-    // A Core module the Core record holds: the record, the bytes its
-    // registration row takes there (its parse weight), the module's name and
-    // its module key position. Decoding the row replaces the lex and the
-    // parse: its tree is the program the record checked. The row is read
-    // only when the job runs, so a wave holds one row's tree per parse
-    // thread, never every row's at once.
-    Record(record: JetDriverCoreRecord, bytes: Int, module_name: String, index: Int)
     // A Core unit whose row is out of range: an empty program.
     Missing
 }
@@ -4191,21 +4179,7 @@ jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSource
     }
     if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
     row: request.core_sources[unit.file_index]
-    if request.core_record == .Val(record) {
-        if jet_driver_core_record_loads(request, record) && module_find(record.module_table, jet_driver_unit_module_identity(unit)) == .Val(recorded) {
-            if record.module_rows.get(recorded.id) == .Val(index) {
-                return JetDriverParseJob.Record{record: record, bytes: jet_driver_core_record_registration_size(record, index), module_name: row.module_name, index: index}
-            }
-        }
-    }
     JetDriverParseJob.Core{text: row.source(), module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: request.core_tests != "" && row.path == request.core_tests}
-}
-
-// Whether the Core record loads this compile's Core modules: it was checked
-// for the compile's target, and the compile doesn't check Core from its
-// source (`every_core_body`, `core_tests`).
-jet_driver_core_record_loads: fn(request: JetDriverCompileRequest, record: JetDriverCoreRecord) -> Bool Never! {
-    !request.every_core_body && request.core_tests == "" && request.build_os == "" && (request.host_facts.target_triple ?? "") == record.target
 }
 
 jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
@@ -4214,25 +4188,8 @@ jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
         .RuntimeEntry(text) -> text.len()
         .Prelude(text) -> text.len()
         .Core(text, _, _, _, _) -> text.len()
-        .Record(_, bytes, _, _) -> bytes
         .Missing -> 0
     }
-}
-
-// The CPU a Core record row's decode takes per row byte, in source bytes
-// parsed: a row is a dense tree a decode rebuilds node by node, so
-// one byte of it costs about as much as 64 bytes of the source it was
-// checked from. (A `jet run` of a script that imports core.files and
-// core.process decoded 340 KB of rows in 3.3 CPU-s; parsing the same
-// modules' 2.1 MB of source took under 0.33 CPU-s.)
-JET_DRIVER_RECORD_ROW_BYTE_WORK: 64
-
-// A parse job's work in source bytes parsed, which admits its wave's
-// threads: a source's own size, and a record row's `bytes` scaled to the
-// source parse its decode costs as much as.
-jet_driver_parse_job_work: fn(job: JetDriverParseJob, bytes: Int) -> Int Never! {
-    if job == .Record(_, _, _, _) -> return bytes * JET_DRIVER_RECORD_ROW_BYTE_WORK
-    bytes
 }
 
 // `threads` are the compiler threads a parse may split one unit across
@@ -4244,35 +4201,7 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
         .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
         .Prelude(text) -> jet_driver_parse_prelude_source(text, threads)
         .Core(text, module_name, owned_members, runtime, tested) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, tested, threads)
-        .Record(record, _, module_name, index) -> jet_driver_core_record_parsed_unit(jet_driver_core_record_registration_tree(record, index) ?? panic("the Core record: {err}"), jet_driver_core_record_reach(record, index) ?? panic("the Core record: {err}"), module_name, index)
         .Missing -> JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
-    }
-}
-
-// A Core module the Core record holds: its registration row decoded, the
-// row's tree the unit's program, the row kept without it, and `input` (its
-// reach, moved in) what the record's check found its source spells: the
-// identifier demand, so the load takes the Core modules its bodies name as
-// a load of its source would, and the words, so it does so only once
-// reached code of it spells them
-// (CoreReach.jet jet_driver_reach_recorded_words). Its line table is the
-// row's own, so no load step scans the module's text for one
-// (jet_driver_fill_line_starts). A record this jet wrote whose row doesn't
-// decode is a compiler fault.
-jet_driver_core_record_parsed_unit: fn(row: Dyn, input: &&JetDriverCoreModuleReach, module_name: String, index: Int) -> JetDriverParsedUnit {
-    reach := input.move()
-    registration := jet_driver_core_record_registration_decode(row, module_name) ?? panic("the Core record: {err}")
-    program := registration.program.move()
-    registration.program = ast_program()
-    // copy: the seeded row keeps its segments for sema's spans.
-    line_starts: if registration.source_segments.len() == 1 -> registration.source_segments[0].line_starts.copy() else -> [Int]{}
-    JetDriverParsedUnit{
-        parsed: ParseResult{program: program.move(), diagnostics: [Diagnostic]{}},
-        demand: reach.demand.move(),
-        line_starts: line_starts,
-        words: Val(reach.words.move()),
-        core_record_index: index,
-        core_registration: [SemaRegistrationModule]{registration.move()},
     }
 }
 
@@ -4746,9 +4675,8 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
     loop position in first..<pending.len() {
         job: jet_driver_parse_job(request, source_units[pending[position]], pending[position] == runtime_entry, pending[position] == prelude_entry)
         bytes: jet_driver_parse_job_bytes(job)
-        work: jet_driver_parse_job_work(job, bytes)
-        weights.push(work)
-        total += work
+        weights.push(bytes)
+        total += bytes
         if bytes > largest -> largest = bytes
         // Loaded payloads selected for this wave, not lexer-consumed bytes:
         // inline-package errors can reject before lexing, and Core filtering
@@ -4776,8 +4704,6 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
                     core_input_bytes += text.count_bytes()
                     core_source_units += 1
                 }
-                // A record row is no source.
-                .Record(_, _, _, _) -> {}
                 .Missing -> {}
             }
             user_jobs.push(user_job)
@@ -5162,13 +5088,8 @@ jet_driver_load: fn(request: JetDriverCompileRequest) -> JetDriverLoadResult {
 // (jet_driver_load_with_names), JET_KEEP_GOING and `jet check Core` need.
 jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) -> JetDriverLoadResult {
     diagnostics := [Diagnostic]{}
-    // Module ids, interned as the load meets each module. A Core record the
-    // compile takes rows from interns its module table first, so the ids its
-    // rows name are this table's.
+    // Module ids, interned as the load meets each module.
     table := module_table()
-    if request.core_record == .Val(record) {
-        if jet_driver_core_record_loads(request, record) -> _: jet_driver_core_record_intern_modules(table, record) ?? panic("the Core record: {err}")
-    }
     failed_stage := JetDriverStage?{None}
     catalog := jet_driver_build_source_catalog(request)
     loop diagnostic in catalog.diagnostics -> diagnostics.push(diagnostic)
@@ -5247,7 +5168,6 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
     }
     modules := [JetDriverLoadedModule]{}
-    core_reach := [JetDriverCoreModuleReachRow]{}
     namespace_expanded := [Bool]{}
     loop root_index in 0..<request.authorized_sources.roots.len() -> namespace_expanded.push(false)
     resolved_imports := [SemaRegistrationImportEdge]{}
@@ -5382,17 +5302,6 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             }
         }
 
-        // A module the Core record holds loads its finalized row. Its
-        // imports are final, so none is added, but like a Core source's they
-        // load once reached code of it spells their aliases, and its
-        // recorded identifier demand once that code spells its words
-        // (CoreReach.jet JetDriverReachUnit.recorded).
-        core_record_index: parsed_unit.core_record_index
-        core_registration := parsed_unit.core_registration.move()
-        recorded: core_registration.len() > 0
-        // A row the record wrote without its source takes the embedded Core
-        // source it was checked from (CoreRecord.jet module keys).
-        if recorded && request.core_record == .Val(record) && record.module_embedded_sources[core_record_index] -> core_registration[0].source = request.core_sources[unit.file_index].source()
         // A Core module (public module, private part or runtime unit) defers
         // its private imports until reached code spells their aliases.
         defers: reach.enabled && is_core && !is_runtime_entry
@@ -5404,9 +5313,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
         parse_result := parsed_unit.parsed.move()
         // Runtime member imports consult shared rows only on the load thread.
-        if !recorded {
-            if importer_core -> jet_driver_core_runtime_member_imports(parse_result.program, request.core_sources) else -> jet_driver_member_imports(parse_result.program, request, source_units, unit, catalog.packages, source_index_result.index)
-        }
+        if importer_core -> jet_driver_core_runtime_member_imports(parse_result.program, request.core_sources) else -> jet_driver_member_imports(parse_result.program, request, source_units, unit, catalog.packages, source_index_result.index)
         parse_diagnostic_start: diagnostics.len()
         loop diagnostic in parse_result.diagnostics -> diagnostics.push(diagnostic)
         loop parse_diagnostic_index in parse_diagnostic_start..<diagnostics.len() {
@@ -5916,32 +5823,26 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         unit_words: words ?? jet_driver_unit_no_words()
         // copy: reach admits the same rows from unit_words below.
         if unit_words.held.len() > 0 -> held_modules.push(JetDriverReachHeldModule{loaded: modules.len(), declarations: unit_words.held.copy()})
+
         if reach.enabled {
-            reach_unit: jet_driver_reach_admit(reach, modules.len(), unit.module_name, unit_words, program.imports, !is_core || is_runtime_entry, recorded)
+            reach_unit: jet_driver_reach_admit(reach, modules.len(), unit.module_name, unit_words, program.imports, !is_core || is_runtime_entry)
             loop scoped in deferred -> jet_driver_reach_defer(reach, reach_unit, scoped)
             if defers {
                 jet_driver_reach_core_demands(reach, reach_unit, demand, path_words, path_modules)
                 _ := jet_driver_follow_core_demands(reach, source_units, queued, pending, generated_records, request.core_sources, entry_module, entry_index ?? 0, bare_modules, diagnostics)
             }
         }
-        // The Core record's check keeps each module's reach for the record
-        // (CoreRecord.jet section 16), which leaves its entry's out. Pushed
-        // after the reach reads `demand`, so the row takes it.
-        if request.every_core_body -> core_reach.push(JetDriverCoreModuleReachRow{module_identity: module_identity, reach: JetDriverCoreModuleReach{demand: demand.move(), words: jet_driver_reach_recorded_words(unit_words, program.items)}})
         // Pushed last, so the loop reads its own program instead of a copy of
         // the module row's.
         modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
-        if recorded {
-            modules[modules.len() - 1].core_record_index = core_record_index
-            modules[modules.len() - 1].core_registration = core_registration.move()
-        }
         loop import_diagnostic_index in import_diagnostic_start..<diagnostics.len() {
             diagnostics[import_diagnostic_index] = diagnostic_with_source_path(diagnostics[import_diagnostic_index], unit.path, 0)
         }
     }
     // The held declarations the load reached take their stubs' places, then
     // the unreached rest of each Core module leaves it (CoreReach.jet).
-    held_parsed: jet_driver_reach_parse_held(request, reach, held_modules, modules, source_units, diagnostics)
+    reached: jet_driver_reach_reached_items(reach, modules.len())
+    held_parsed: jet_driver_reach_parse_held(request, reach, reached, held_modules, modules, source_units, diagnostics)
     if held_parsed < 0 -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
     if request.trace_sink == .Val(sink) {
         held_total := 0
@@ -6001,7 +5902,6 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         complete: complete,
         run_member_paths: run_member_paths,
         spells_program: spells_program,
-        core_reach: core_reach.move(),
     }
 }
 

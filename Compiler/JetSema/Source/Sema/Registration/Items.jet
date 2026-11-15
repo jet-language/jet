@@ -137,7 +137,6 @@ use {
         symbol_is_local,
         symbol_key_text,
         symbol_keys,
-        symbol_keys_empty,
         symbol_mint,
         symbol_none,
         symbol_table_key,
@@ -821,29 +820,9 @@ SemaRegistrationGraph: struct {
     // fixed at graph construction.
     module_rows: [Int]
     // The run's symbols (Docs/spec/compiler-data.md): each module's range,
-    // reserved before the module is prepared, the Core record's ranges
-    // when the graph takes its rows, and the open range the serial passes
-    // after preparation intern into.
+    // reserved before the module is prepared, and the open range the serial
+    // passes after preparation intern into.
     symbols: SymbolTable
-    // The first `seeded` rows of `modules` came registered and finalized
-    // (sema_registration_prepare_graph `seeds`): the registration passes
-    // that bind, expand or edit a module start after them.
-    seeded: Int{0}
-    // The finalized result of each seeded module, in `modules` order, when
-    // the seeds came with them (the Core record's module rows). Finalization
-    // takes these as they are: it checks none of their bodies again and
-    // writes none of them (sema_finalize_seeded_taken). Empty when the seeds
-    // came without results, and then every module is checked.
-    seeded_results: [SemaGraphModuleResult]{[SemaGraphModuleResult]{}}
-    // The Core usage of each taken seeded module (sema_finalize_seeded_taken),
-    // in `modules` order: the record's row of what the Core check's walk of
-    // that module's bodies noted (CoreUsage.jet), so finalization walks no
-    // body of a taken module for it.
-    seeded_core_usage: [SemaCoreModuleUsageResult]{[SemaCoreModuleUsageResult]{}}
-    // The Core record's body packets of the taken seeded modules, when the
-    // seeds came from one (CoreRecordBodies.jet): their results then hold no
-    // body, and finalization takes each body's packet as it demands it.
-    core_bodies: SemaCoreBodyStore?{None}
     edges: [SemaRegistrationImportEdge]
     foreign_providers: [SemaForeignProviderInput]
     core_builtin_owner_facts: [SemaRegistrationCoreBuiltinOwnerFact]
@@ -2922,8 +2901,7 @@ sema_registration_declared_type_name: fn(item: Item) -> String Never! {
 // the declaring member's nominal; an impl whose type no member declares is
 // E0301.
 sema_registration_attach_namespace_impls: fn(graph: &SemaRegistrationGraph) {
-    // A seeded module's impls were attached when it was finalized.
-    loop module_index in graph.seeded..<graph.modules.len() {
+    loop module_index in 0..<graph.modules.len() {
         package_identity: graph.modules[module_index].package_identity
         if !sema_registration_package_is_namespace(package_identity) -> next
         loop impl_index in 0..<graph.modules[module_index].impls.len() {
@@ -4435,8 +4413,7 @@ sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index:
     // Core's authoritative export ledger also owns runtime builtin carriers
     // that have no source nominal declaration. Keep their builtin identity,
     // and never apply this rule to a user module with a Core-like name. No
-    // registration declares such a carrier, so its symbol is a run-wide one
-    // only when a seeded record minted its key; otherwise it is none.
+    // registration declares such a carrier, so its symbol is none.
     private_native: module_is_core(requester_module) && (sema_reserved_type_name(name) || core_record_literal_fields(name) != None)
     if module_is_core(module_row.module_identity) && (core_module_has_type(module_row.module_name, name) || private_native) {
         id: symbol_find(graph.symbols, symbol_key_text(SymbolKind.Type, module_text(graph.module_table, module_row.module_identity), "", name)) ?? symbol_none()
@@ -4805,44 +4782,11 @@ sema_registration_compiler_builtin_row: fn(graph: SemaRegistrationGraph, name: S
     graph.compiler_builtin_rows.get(name)
 }
 
-// The symbol ranges a graph prepared from `table`'s graph's rows of the
-// `seeded` modules reserves (sema_registration_prepare_graph): a seeded
-// module's range and every range of no module (the serial ones, the last
-// closed at its keys) with their keys, and every other module's bare, so a
-// module prepared again interns into the ids it had.
-sema_registration_reserved_symbols: fn(table: SymbolTable, seeded: [ModuleID]) -> [SymbolKeys] {
-    reserved := [SymbolKeys]{}
-    last: table.ranges.len() - 1
-    loop (index, range) in table.ranges {
-        kept := module_is_none(range.module_identity)
-        loop identity in seeded {
-            if identity == range.module_identity -> kept = true
-        }
-        if !kept {
-            bare := symbol_keys(range.base, range.bound)
-            bare.module_identity = range.module_identity
-            reserved.push(bare)
-            next
-        }
-        // copy: the reservation holds the keys `table` keeps.
-        keys := range.copy()
-        if index == last -> keys.bound = keys.keys.texts.len()
-        reserved.push(keys)
-    }
-    reserved
-}
-
 // `counting` sets the graph's `counting` (#4319 lookup counters). The inputs
 // are consumed: each program moves into its module row. The unit scans and
 // the module rows are prepared on up to `threads` compiler threads, with the
-// same rows and diagnostics for any thread count. `seeds` are module rows
-// already registered and finalized (the precompiled Core record's, rebased to
-// this graph and its `module_table`): they take the first module indexes, in
-// order, and the passes that bind, expand or edit a module skip them
-// (`seeded`). `reserved_symbols` are the symbol ranges the caller fixed (the
-// Core record's): a seeded module's range with its keys, the record's serial
-// range, and the bare range a record module prepared here interns into.
-sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], seeds: &&[SemaRegistrationModule], reserved_symbols: &&[SymbolKeys], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: ModuleID, canonical_effect_module_identity: ModuleID, module_table: &&ModuleTable, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads) -> SemaRegistrationGraph {
+// same rows and diagnostics for any thread count.
+sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: ModuleID, canonical_effect_module_identity: ModuleID, module_table: &&ModuleTable, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     // Rust CheckInner `retain_error_prelude_module` runs first: the original
@@ -4912,26 +4856,14 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     codecs := sema_derive_foreign_codecs(prepared_inputs)
     // Each module interns its symbols into its own id range, fixed before any
     // thread runs, so every id is the same for any thread count
-    // (Docs/spec/compiler-data.md). A module the caller reserved a range for
-    // takes it; the others share three quarters of the ids after the
-    // reserved ones, each in proportion to its source and the templates it
-    // instantiates, and the serial passes intern after the last range.
-    reserved := reserved_symbols.move()
-    // A first graph starts the builtin range; a graph prepared again keeps
-    // the one its reservations carry.
-    if reserved.len() == 0 -> reserved.push(symbol_builtin_keys())
-    reserved_slots := [Int]{}
-    loop _ in 0..<module_count(table) -> reserved_slots.push(-1)
-    symbols_cursor := 0
-    loop (index, range) in reserved {
-        if !module_is_none(range.module_identity) -> reserved_slots[module_index(range.module_identity)] = index
-        if range.base + range.bound > symbols_cursor -> symbols_cursor = range.base + range.bound
-    }
-    taken := loop _ in reserved -> false
+    // (Docs/spec/compiler-data.md). The modules share three quarters of the
+    // ids after the builtin range, each in proportion to its source and the
+    // templates it instantiates, and the serial passes intern after the last
+    // range.
+    builtin := symbol_builtin_keys()
+    symbols_cursor := builtin.base + builtin.bound
     symbols_weight := 0
-    loop index in 0..<prepared_inputs.len() {
-        if reserved_slots[module_index(prepared_inputs[index].module_identity)] < 0 -> symbols_weight += sema_registration_symbol_weight(prepared_inputs[index], imported_templates[index].len())
-    }
+    loop index in 0..<prepared_inputs.len() -> symbols_weight += sema_registration_symbol_weight(prepared_inputs[index], imported_templates[index].len())
     symbols_share: (SYMBOL_LOCAL_BOUND - symbols_cursor) /% 4 * 3
     // Each input moves out of the list (front to back) into its prepare job.
     prepared_inputs.reverse()
@@ -4944,15 +4876,9 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
         module_codecs := codecs.pop() ?? break
         policies: package_policies.get(input.package_identity) ?? [UserPolicyDecl]{}
         input_text: module_text(table, input.module_identity)
-        slot: reserved_slots[module_index(input.module_identity)]
-        symbols := symbol_keys_empty()
-        if slot >= 0 {
-            symbols = symbol_keys(reserved[slot].base, reserved[slot].bound)
-        } else {
-            bound: symbols_share * sema_registration_symbol_weight(input, templates.len()) /% symbols_weight
-            symbols = symbol_keys(symbols_cursor, bound)
-            symbols_cursor += bound
-        }
+        bound: symbols_share * sema_registration_symbol_weight(input, templates.len()) /% symbols_weight
+        symbols := symbol_keys(symbols_cursor, bound)
+        symbols_cursor += bound
         symbols.module_identity = input.module_identity
         jobs.push(SemaRegistrationPrepareJob{input: input.move(), module_text: input_text, symbols: symbols.move(), templates: templates.move(), policies: policies, settings: build_facts.settings, codecs: module_codecs.move()})
     }
@@ -4960,19 +4886,8 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     // Each prepared row moves out (front to back) into its module row, after
     // its diagnostics, as one module after another reported them.
     prepared.reverse()
-    // The seeded rows come first, at the module indexes they were rebased to.
-    seed_rows := seeds.move()
-    seed_rows.reverse()
-    loop seed_rows.len() > 0 {
-        seed := seed_rows.pop() ?? break
-        module_rows[module_index(seed.module_identity)] = modules.len()
-        modules.push(seed)
-    }
-    seeded: modules.len()
-    // Each prepared module's range, then the reserved ranges no module
-    // prepared into (the seeded modules' and the serial one). A duplicate
-    // keeps no range: its keys are its first row's, which the graph holds, and
-    // a seeded module's input duplicate leaves the seed its reserved range.
+    // Each prepared module's range, then the builtin range. A duplicate
+    // keeps no range: its keys are its first row's, which the graph holds.
     symbol_ranges := [SymbolKeys]{}
     loop prepared.len() > 0 {
         row := prepared.pop() ?? break
@@ -4984,21 +4899,16 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
             duplicate -> diagnostics.push(sema_defined_twice_optional(module_text(table, module_row.module_identity), "module identities must be unique in one declaration graph", None))
             else -> {
                 module_rows[identity] = modules.len()
-                if reserved_slots[identity] >= 0 -> taken[reserved_slots[identity]] = true
                 modules.push(module_row)
                 symbol_ranges.push(row.symbols.move())
             }
         }
     }
-    loop reserved.len() > 0 {
-        range := reserved.pop() ?? break
-        if !taken[reserved.len()] -> symbol_ranges.push(range)
-    }
+    symbol_ranges.push(builtin)
     if package_identity == "" || module_is_none(entry_module_identity) {
         diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
     graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_table: table.move(), module_rows: module_rows, symbols: symbol_table_of(symbol_ranges), edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: Shared{SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [U32:SemaRegistrationRowRef]{}, codec_demand: Shared{SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}}, derive_demand: Shared{SemaDeriveDemand{keys: [String:Bool]{}}}}
-    graph.seeded = seeded
     sema_registration_index_all_nominal_rows(graph)
     sema_registration_index_source_impls(graph)
     loop module_index in 0..<graph.modules.len() -> sema_registration_note_root_functions(graph, module_index)
@@ -5072,7 +4982,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     // against its module's imports and every import against every edge made
     // registration M³ and M⁴ for a package of M files.
     declared_spans := [String:Bool]{}
-    loop declared_module in graph.seeded..<graph.modules.len() -> sema_registration_declared_import_spans(declared_module, graph.modules[declared_module].program.imports, graph.modules[declared_module].program.items, declared_spans)
+    loop declared_module in 0..<graph.modules.len() -> sema_registration_declared_import_spans(declared_module, graph.modules[declared_module].program.imports, graph.modules[declared_module].program.items, declared_spans)
     edge_spans := [String:Bool]{}
     loop edge in edges -> edge_spans["{edge.source_module_identity.id}|{edge.declaration.span.start}|{edge.declaration.span.end}"] = true
     registered := SemaRegistrationImportIndex{spans: [String:Bool]{}, aliases: [String:Bool]{}}
@@ -5084,10 +4994,6 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
             next
         }
         source_module_index: source_index ?? 0
-        // A seeded module came registered: its row holds the imports its
-        // edges name, rebased to the graph (the Core record's), and its
-        // source declarations stay out of `declared_spans`.
-        if source_module_index < graph.seeded -> next
         declared: declared_spans.get("{source_module_index}|{edge.declaration.span.start}|{edge.declaration.span.end}") != None
         if {
             !declared -> sema_registration_push_graph_diagnostic(graph, source_module_index, sema_error("E0003", edge.declaration.span, "an import edge has no source declaration", "semantic preparation only registers imports present in the source program", "retain the original ImportDecl when constructing the resolved edge"))
@@ -5106,7 +5012,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     // sema_inline_core_imports), and a module's Module record reads core.meta
     // through its generated alias (ModuleMeta.jet); each alias binds the
     // loaded Core module it names.
-    loop hoisted_module in graph.seeded..<graph.modules.len() {
+    loop hoisted_module in 0..<graph.modules.len() {
         hoisted := [ImportDecl]{}
         loop declaration in graph.modules[hoisted_module].program.imports {
             if sema_inline_core_alias_import(declaration) || sema_module_meta_import(declaration) -> hoisted.push(declaration)
@@ -5134,7 +5040,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     // file-level alias that shares the scoped declaration's span
     // (InlineModules.jet sema_inline_alias_imports); the alias binds the
     // module that declaration's own edge names.
-    loop aliased_module in graph.seeded..<graph.modules.len() {
+    loop aliased_module in 0..<graph.modules.len() {
         aliased := [ImportDecl]{}
         loop declaration in graph.modules[aliased_module].program.imports {
             if sema_inline_module_alias_import(declaration) -> aliased.push(declaration)
@@ -5158,7 +5064,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
             if !bound -> sema_registration_push_graph_diagnostic(graph, aliased_module, sema_error("E0003", declaration.span, "an inline module's own import has no resolved graph edge", "a lowered inline module reads its own import through the module that import's edge names", "keep the loader's scoped edge for the inline module's import"))
         }
     }
-    module_index := graph.seeded
+    module_index := 0
     loop module_index < graph.modules.len() {
         // Every source import must have one exact edge. A missing edge is not
         // recovered by matching a module name or alias.
@@ -5174,13 +5080,13 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     }
     // Each module's file and module import ids first
     // (sema_registration_mint_module_imports).
-    module_index = graph.seeded
+    module_index = 0
     loop module_index < graph.modules.len() {
         sema_registration_mint_module_imports(graph, module_index)
         module_index += 1
     }
     import_module_indices := [Int]{}
-    module_index = graph.seeded
+    module_index = 0
     loop module_index < graph.modules.len() {
         sema_registration_populate_imports(graph, module_index, import_module_indices)
         sema_inline_modules_check_imports(graph, module_index)
@@ -5206,7 +5112,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     // Rust erases templates and aliases once expanded: their symbols stay
     // registered, but no later pass sees an unexpanded body. They are removed
     // in place; every other item stays where it is, uncopied.
-    loop erased_index in graph.seeded..<graph.modules.len() {
+    loop erased_index in 0..<graph.modules.len() {
         item_index := 0
         loop item_index < graph.modules[erased_index].program.items.len() {
             if sema_registration_item_is_expanded_template(graph.modules[erased_index].program.items[item_index]) {
@@ -5245,7 +5151,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     sema_registration_index_canonical_nominals(graph)
     graph = sema_divergence_solve(graph, threads)
     // Each test's id once the user templates have generated theirs.
-    loop row_index in graph.seeded..<graph.modules.len() -> sema_registration_mint_tests(graph, row_index)
+    loop row_index in 0..<graph.modules.len() -> sema_registration_mint_tests(graph, row_index)
     graph
 }
 
@@ -5395,8 +5301,7 @@ sema_registration_bind_namespaces: fn(graph: &SemaRegistrationGraph, own_symbols
     derive_words := [String]{}
     source: SEMA_PRELUDE_DERIVE_SOURCE.bytes()
     sema_source_words(source, 0, source.len(), derive_seen, derive_words)
-    // A seeded module keeps the bindings it was finalized with.
-    loop module_index in graph.seeded..<graph.modules.len() {
+    loop module_index in 0..<graph.modules.len() {
         slot: graph.modules[module_index].namespace_slot
         if slot < 0 -> next
         entries := [Int]{}
