@@ -329,6 +329,12 @@ SemaGraphModuleResult: struct {
     // module whose body checked, in declaration order; the checked synthetic
     // function is in `functions` and its key in `injected_function_keys`.
     tests: [TTestFact]{[TTestFact]{}}
+    // Under a per-function trace: each Core body a demand wave checked into
+    // this module, as its position in `functions`, and the task CPU time
+    // (ns) its check took at the same position of `core_check_ns`
+    // (sema_core_bound_charge), which sema_core_bound_counters reads.
+    core_check_rows: [Int]{[Int]{}}
+    core_check_ns: [Int]{[Int]{}}
 }
 
 // #3708: what one checked function body propagates: the keys of the declared

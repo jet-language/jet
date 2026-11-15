@@ -854,7 +854,11 @@ time, each phase's start and end (with its duration, item count, and resident
 and peak memory), the item being processed (a module or, with
 `--trace-detail=functions`, a function; that detail also writes one
 `ir.function` event per function the IR builder receives, so a trace names
-every body the compile lowers), throttled progress counts, and the
+every body the compile lowers, and for an executable whose Core is the Core
+built into the jet the `sema.core_bound.*` counters: of the Core bodies the
+Core demand checked, how many and how much CPU time were for functions the
+runtime image exports (`bound_*`), for bodies only those name (`behind_*`),
+and for the rest (`kept_*`)), throttled progress counts, and the
 scaling counters. `--trace=FILE` writes the same events to FILE as Chrome
 trace-event lines, flushed per event, in the `JET_TRACE_FILE` trace format
 (`Tools/perf/jetc-trace/summarize.mjs FILE --watch`

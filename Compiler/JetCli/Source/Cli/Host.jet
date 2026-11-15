@@ -168,6 +168,7 @@ use {
         IROutputCheck,
         IRChecks,
         IRCoreImage,
+        IR_CORE_DATA,
         IR_CORE_FUNCTION_PREFIX,
         IRJob,
         IRModule,
@@ -727,6 +728,19 @@ jet_cli_runtime_part: fn(name: String) -[Env]> [U8] Never! {
     part: "{JET_CLI_RUNTIME_PART_PREFIX}{name}"
     size: cli_runtime.image_part_size(part) ?? panic("this jet carries its identity but not its runtime part `{part}`; the compiler build adds both")
     cli_runtime.image_part(part, 0, size) ?? panic("the runtime part `{part}` has a size but no bytes")
+}
+
+// The keys of the functions in the Core export list `exports`
+// (JET_CLI_CORE_EXPORTS_FILE: `symbol<TAB>key<TAB>signature` rows), its
+// data rows left out.
+jet_cli_core_bound_keys: fn(exports: [U8]) -> [String] Never! {
+    keys := [String]{}
+    text: String.from_bytes(exports) ?? return keys
+    loop line in text.split("\n") {
+        columns: line.split("\t").to_list()
+        if columns.len() == 3 && columns[2] != IR_CORE_DATA -> keys.push(columns[1])
+    }
+    keys
 }
 
 // This jet's runtime image part, lent (jet_cli_runtime_part), for a bind

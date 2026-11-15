@@ -45,6 +45,7 @@ use jet_foundation.[
     compiler_threads_failure_text,
     compiler_threads_partition,
     compiler_transfer_rows,
+    symbol_find,
     symbol_is_local,
     symbol_key_text,
     symbol_table_key,
@@ -329,6 +330,10 @@ sema_check_demand_module_lent: fn(environment: &SemaScopeEnvironment, program: S
     scopes := owned_scopes.move()
     bodies := prepared.move()
     core: kind == SemaWaveKind.Core
+    // A per-function trace times each Core body this wave checks
+    // (sema_core_bound_charge).
+    timed := false
+    if core && trace_sink == .Val(sink) -> timed = sink.functions()
     keep_going: sema_check_registered_keep_going(environment, program)
     before: result.functions.len()
     diagnostics_before: result.diagnostics.len()
@@ -345,14 +350,20 @@ sema_check_demand_module_lent: fn(environment: &SemaScopeEnvironment, program: S
         loop position in 0..<before -> prelude_demands[position] = [SemaPreludeConversionDemand]{}
         loop item_index in 0..<item_count {
             if !sema_check_registered_item_is_jet_function(environment, program, module_index, item_index) || !sema_check_registered_item_in_core_wave(environment, program, module_index, item_index) -> next
+            started: if timed -> sema_core_bound_clock(trace_sink) else -> 0
+            count: result.functions.len()
             sema_check_registration_top_level(module_index, item_index, memory_plan, environment, program, scopes, return_view_rows, ready, queries, memo, host_hooks, comptime_functions, comptime_rows, result, prelude_demands, scopes_changed, keep_going, pending_obligations, false, trace_sink, item_count, false, functions_checked)
+            if timed -> sema_core_bound_charge(trace_sink, started, count, result)
         }
     }
     method_ready := [SemaPreparedBody]{}
     if bodies.methods_prepared && !scopes_changed -> method_ready = bodies.methods.move()
     scanned := 0
     loop job in sema_check_registered_method_jobs(environment, program, module_index, scanned, false) {
+        started: if timed -> sema_core_bound_clock(trace_sink) else -> 0
+        count: result.functions.len()
         if !sema_check_apply_method_job(module_index, memory_plan, job, method_ready, queries, None, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, result.diagnostics, result.functions, prelude_demands, result.call_facts, result.hardware_use, result.comptime_requests, result.name_references, result.comptime_body_sources, result.compute_facts, result.failure_facts, result.exact_int_reachable, result.copy_events, result.incomplete_reasons, keep_going, pending_obligations) -> result.complete = false
+        if timed -> sema_core_bound_charge(trace_sink, started, count, result)
     }
     if core {
         module_identity: sema_check_registered_module_identity(environment, program, module_index)
@@ -362,6 +373,140 @@ sema_check_demand_module_lent: fn(environment: &SemaScopeEnvironment, program: S
     }
     sema_check_registered_locate_diagnostics(environment, program, module_index, diagnostics_before, result.diagnostics)
     result.functions.len() - before
+}
+
+// The running task's CPU clock (ns) through `trace_sink`, 0 without one.
+sema_core_bound_clock: fn(trace_sink: CompilerTraceSink?) -> Int {
+    if trace_sink == .Val(sink) -> return sink.cpu_ns()
+    0
+}
+
+// Charges the task CPU time since `started` to the body a check appended
+// to `result` past its first `count` functions (the last one it added), in
+// result.core_check_rows and core_check_ns.
+sema_core_bound_charge: fn(trace_sink: CompilerTraceSink?, started: Int, count: Int, result: &SemaGraphModuleResult) {
+    if result.functions.len() <= count -> return
+    result.core_check_rows.push(result.functions.len() - 1)
+    result.core_check_ns.push(sema_core_bound_clock(trace_sink) - started)
+}
+
+// How a finalization's Core demand splits over the Core functions the
+// runtime image exports (`bound_keys`), traced as counters once its rounds
+// ran: the driver counts so under a per-function trace whose Core is the
+// Core built into the jet. Each body a demand wave checked
+// (graph.core_checked) is in one part. `bound`: its key is an export.
+// `behind`: not an export, and only bound bodies, or bodies behind them,
+// name it, so a demand that stopped at the exports would not check it
+// either. `kept`: the rest. Each part counts its bodies and the task CPU
+// time their checks took (SemaGraphModuleResult.core_check_ns). The kept
+// bodies are those the demand's own walk reaches through no bound body:
+// from every checked body that did not wait for demand (the user's, the
+// Core ones checked up front) and the comptime functions, along the names
+// a body holds (sema_core_demand_body_keys) and its call-site facts. The
+// tables are keyed by symbol; a checked key no symbol holds counts as kept.
+sema_core_bound_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], comptime_functions: [SemaComptimeFunctionResult], bound_keys: [String], trace_sink: CompilerTraceSink?) Never! {
+    if trace_sink == None || graph.core_checked.len() == 0 -> return
+    bound := [U32:Bool]{}
+    loop key in bound_keys {
+        if symbol_find(graph.symbols, key) == .Val(id) -> bound[id.id] = true
+    }
+    // Each deferred checked body's module, position and check time, and the
+    // module and position of each of its call-site facts.
+    places := [U32:Int]{}
+    positions := [U32:Int]{}
+    spent := [U32:Int]{}
+    fact_index := [U32:Int]{}
+    fact_rows := [[Int]]{}
+    names := sema_core_demand_names_new()
+    loop module_index in 0..<modules.len() {
+        loop position in 0..<modules[module_index].functions.len() {
+            key: modules[module_index].functions[position].key
+            if graph.core_demand_rows.get(key) == None {
+                sema_core_demand_body_keys(modules[module_index].functions[position], graph.decls, graph.symbols, names)
+                next
+            }
+            id: symbol_find(graph.symbols, key) ?? next
+            places[id.id] = module_index
+            positions[id.id] = position
+        }
+        loop at in 0..<modules[module_index].core_check_rows.len() {
+            if symbol_find(graph.symbols, modules[module_index].functions[modules[module_index].core_check_rows[at]].key) == .Val(id) -> spent[id.id] = modules[module_index].core_check_ns[at]
+        }
+        loop position in 0..<modules[module_index].call_facts.len() {
+            caller: modules[module_index].call_facts[position].caller_key
+            if graph.core_demand_rows.get(caller) == None {
+                if modules[module_index].call_facts[position].callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, names)
+                next
+            }
+            id: symbol_find(graph.symbols, caller) ?? next
+            at := fact_index.get(id.id) ?? -1
+            if at < 0 {
+                at = fact_rows.len()
+                fact_index[id.id] = at
+                fact_rows.push([Int]{})
+            }
+            fact_rows[at].push(module_index)
+            fact_rows[at].push(position)
+        }
+    }
+    loop result in comptime_functions {
+        if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, names)
+        loop fact in result.call_facts {
+            if fact.callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, names)
+        }
+    }
+    kept := [U32:Bool]{}
+    loop names.keys.len() > 0 {
+        key: names.keys.pop() ?? break
+        template: sema_core_demand_template_key(key)
+        if template != key -> names.keys.push(template)
+        if graph.core_demand_rows.get(key) == None -> next
+        id: symbol_find(graph.symbols, key) ?? next
+        if bound.get(id.id) != None || kept.get(id.id) != None -> next
+        kept[id.id] = true
+        if places.get(id.id) == .Val(module_index) {
+            sema_core_demand_body_keys(modules[module_index].functions[positions.get(id.id) ?? 0], graph.decls, graph.symbols, names)
+        }
+        if fact_index.get(id.id) == .Val(at) {
+            loop pair in 0..<fact_rows[at].len().div_euclid(2) {
+                fact_module: fact_rows[at][2 * pair]
+                if modules[fact_module].call_facts[fact_rows[at][2 * pair + 1]].callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, names)
+            }
+        }
+    }
+    bound_bodies := 0
+    bound_ns := 0
+    behind_bodies := 0
+    behind_ns := 0
+    kept_bodies := 0
+    kept_ns := 0
+    loop key in graph.core_checked.keys() {
+        found: symbol_find(graph.symbols, key)
+        if found == .Val(id) {
+            took: spent.get(id.id) ?? 0
+            if bound.get(id.id) != None {
+                bound_bodies += 1
+                bound_ns += took
+                next
+            }
+            if kept.get(id.id) == None {
+                behind_bodies += 1
+                behind_ns += took
+                next
+            }
+            kept_ns += took
+        }
+        kept_bodies += 1
+    }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.sema.core_bound.exports", bound.len(), -1)
+        sink.progress("counters.sema.core_bound.bound_bodies", bound_bodies, -1)
+        sink.progress("counters.sema.core_bound.bound_ns", bound_ns, -1)
+        sink.progress("counters.sema.core_bound.behind_bodies", behind_bodies, -1)
+        sink.progress("counters.sema.core_bound.behind_ns", behind_ns, -1)
+        sink.progress("counters.sema.core_bound.kept_bodies", kept_bodies, -1)
+        sink.progress("counters.sema.core_bound.kept_ns", kept_ns, -1)
+    }
 }
 
 // Locates module `module_index`'s diagnostics from `start` in its source

@@ -1836,6 +1836,12 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             // carries only when its Core is the Core built into this jet, and
             // no Core source is under test (Host.jet jet_cli_native_executable).
             built_in: compiled_request.core_tests == "" && jet_cli_core_built_in(snapshot.entry_path)
+            // A traced run with per-function spans whose Core is the built-in
+            // one counts its Core demand's checks against the image's exports
+            // (JetSema CoreDemand.jet sema_core_bound_counters).
+            if built_in && trace_sink == .Val(sink) {
+                if sink.functions -> compiled_request.core_bound_keys = jet_cli_core_bound_keys(jet_cli_runtime_part(JET_CLI_CORE_EXPORTS_FILE))
+            }
             front := jet_cli_lowering_inputs(compiled_request, trace_sink)
             front.compile.core_built_in = built_in
             // The native route traces through the same sink and builds on the
@@ -2285,6 +2291,10 @@ JetCLITraceSink: struct {
 
         functions: fn(self) -[]> Bool Never! {
             self.functions
+        }
+
+        cpu_ns: fn(self) -[Time]> Int Never! {
+            cli_tasks.cpu_ns()
         }
     }
 
