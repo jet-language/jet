@@ -6,6 +6,7 @@
 // declarations on every commit.
 use {
     cli_files: core.files
+    jet_backend.[x64_self_read]
     jet_foundation.[CORE_SOURCE_OWNED_ROWS, CoreDeclarationFile, EFFECT_CANONICAL_MODULE, core_declarations_assets]
     jet_sema.[SemaCoreBodiesRecords, SemaCoreSeal, SemaCoreSealSource]
 }
@@ -159,20 +160,19 @@ JetCLICoreSealRead: struct {
 
 // A compile's read of the records of this jet's Core bodies part (JetSema
 // CoreBodies.jet SemaCoreBodiesRecords): positioned reads of this jet's own
-// file, whose part starts at file offset `at`. The records a compile loads
-// lie all through the part, and a mapped page stays mapped once touched
-// (2 MiB at a time where the kernel maps file pages huge), so a record is
-// read into memory of its own and none of the part's record pages is
-// mapped. The header, table and keys a lookup reads stay lent from the
-// mapped image (jet_cli_runtime_part).
+// file, whose part starts at file offset `at`, through the one descriptor
+// the process holds of it (JetBackend Image/Loader.jet x64_self_read). The
+// records a compile loads lie all through the part, and a mapped page stays
+// mapped once touched (2 MiB at a time where the kernel maps file pages
+// huge), so a record is read into memory of its own and none of the part's
+// record pages is mapped. The header, table and keys a lookup reads stay
+// lent from the mapped image (jet_cli_runtime_part).
 JetCLICoreBodiesRecords: struct {
     at: Int
 
     impl SemaCoreBodiesRecords {
-        read: fn(self, at: Int, size: Int) -[FS]> [U8]? {
-            bytes: cli_files.read_at(JET_CLI_SELF_EXECUTABLE, self.at + at, size) ?? return None
-            if bytes.len() != size -> return None
-            Val(bytes)
+        read: fn(self, at: Int, size: Int) -[FS, FFI.Asm]> [U8]? {
+            x64_self_read(self.at + at, size)
         }
     }
 }

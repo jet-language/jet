@@ -27,7 +27,7 @@ JetCLIStoredBuild: enum {
 // jet_cli_build_binary and stored. `verbose` reports the runtime pack and the
 // cache decision as `[build]` lines. A store that can't be opened or written,
 // or saved work that isn't reused, leaves the build uncached.
-jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, verbose: Bool) -[Env, FS, Exec, Time, Rand]> JetCLIStoredBuild Never! {
+jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, verbose: Bool) -[Env, FS, Exec, Time, Rand, FFI.Asm]> JetCLIStoredBuild Never! {
     log := ""
     if verbose {
         log = "[build] runtime   -> packaged {jet_cli_runtime_key(jet_cli_runtime_dir()) ?? "missing"}\n"

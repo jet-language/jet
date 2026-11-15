@@ -515,12 +515,15 @@ x64_image_load: fn(bytes: [U8]) -> X64LoadedImage {
 x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
     if exe.image_end == 0 -> return x64_image_load(exe.tail)
     // The file is opened between two checks of its identity, so the
-    // descriptor is the file the image was read from.
+    // descriptor is the file the image was read from. This jet's own file
+    // is the descriptor the process holds (loader_self_fd), never closed
+    // here.
+    held: exe.image_path == X64_SELF_EXECUTABLE
     file := -1
     if exe.image_at % OS_PAGE_SIZE == 0 && loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) {
-        file = loader_open(exe.image_path)
+        file = if held -> loader_self_fd() else -> loader_open(exe.image_path)
         if file >= 0 && !loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) {
-            loader_close(file)
+            if !held -> loader_close(file)
             file = -1
         }
     }
@@ -536,7 +539,7 @@ x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
     failure := plan.failure
     if failure == "" -> failure = loader_reserve(plan)
     if failure != "" {
-        loader_close(file)
+        if !held -> loader_close(file)
         return loader_failed(failure)
     }
     image := X64LoadedImage{low: plan.low, high: plan.high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: exe.tail_at + exe.tail.len(), failure: ""}
@@ -560,7 +563,7 @@ x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
         }
         failure = loader_view(image, exe, file, memfd)
     }
-    loader_close(file)
+    if !held -> loader_close(file)
     if memfd >= 0 -> loader_close(memfd)
     if failure == "" -> failure = loader_protect(plan)
     if failure != "" {
@@ -723,26 +726,25 @@ x64_image_file_read: fn(path: String) -> X64ImageFile {
     loader_image_file_whole(path, 0, -1)
 }
 
-// Where the part `name` of the executable file `path` lies (Image/ELF.jet
-// x64_executable_add_parts): its bytes' file offset and length, and the
-// file's identity, the same before and after the reads of its ELF header,
-// program headers and note heads. None when it has no such part, can't be
-// read or changed meanwhile.
+// Where the part `name` of this jet's own file (X64_SELF_EXECUTABLE) lies
+// (Image/ELF.jet x64_executable_add_parts): its bytes' file offset and
+// length, and the file's identity, the same before and after the reads of
+// its ELF header, program headers and note heads. Every read goes through
+// the one descriptor the process holds of the file (x64_self_read). None
+// when it has no such part, can't be read or changed meanwhile.
 X64ImagePart: struct {
     at: Int
     size: Int
     stamp: [Int]
 }
 
-x64_image_part_file: fn(path: String, name: String) -> X64ImagePart? {
-    before: loader_file_stamp(path)
+x64_image_part_file: fn(name: String) -> X64ImagePart? {
+    before: loader_file_stamp(X64_SELF_EXECUTABLE)
     if before.len() == 0 -> return None
-    header: loader_files.read_at(path, 0, 64) ?? return None
-    if header.len() < 64 -> return None
+    header: x64_self_read(0, 64) ?? return None
     phoff: loader_u64(header, 32)
     phnum: loader_u16(header, 56)
-    table: loader_files.read_at(path, phoff, phnum * 56) ?? return None
-    if table.len() < phnum * 56 -> return None
+    table: x64_self_read(phoff, phnum * 56) ?? return None
     label: name.bytes()
     descriptor: (label.len() + 8) /% 8 * 8
     loop k in 0..<phnum {
@@ -750,13 +752,58 @@ x64_image_part_file: fn(path: String, name: String) -> X64ImagePart? {
         at: loader_u64(table, k * 56 + 8)
         size: loader_u64(table, k * 56 + 32)
         if size < 16 + descriptor || at + size > before[2] -> next
-        note: loader_files.read_at(path, at, 16 + descriptor) ?? return None
+        note: x64_self_read(at, 16 + descriptor) ?? return None
         if x64_part_note(note, 0, size, label) == .Val(length) {
-            if !loader_same_stamp(loader_file_stamp(path), before) -> return None
+            if !loader_same_stamp(loader_file_stamp(X64_SELF_EXECUTABLE), before) -> return None
             return Val(X64ImagePart{at: at + 16 + descriptor, size: length, stamp: before})
         }
     }
     None
+}
+
+// The path a jet reads its own file at: the kernel's link to the running
+// executable, which names no toolchain path. The link stays bound to that
+// file however its path is replaced, so the process opens it once
+// (loader_self_fd) and reads and maps it through that one descriptor; the
+// file's identity, taken around each use (loader_file_stamp), still shows a
+// change made in place.
+X64_SELF_EXECUTABLE: "/proc/self/exe"
+
+// The process's descriptor of X64_SELF_EXECUTABLE: unopened, then the
+// descriptor or -errno from its one open.
+LoaderSelf: struct {
+    opened: Bool
+    fd: Int
+}
+
+LOADER_SELF: Shared{LoaderSelf{opened: false, fd: -1}}
+
+// The descriptor of X64_SELF_EXECUTABLE, opened read-only and close-on-exec
+// at its first use and held until the process ends; -errno when it can't be
+// opened. The loader's plan closes it with every close-on-exec descriptor
+// when a program replaces this process (loader_plan).
+loader_self_fd: fn() -> Int {
+    guard := LOADER_SELF.guard_edit()
+    if !guard.value.opened {
+        guard.value.fd = loader_open(X64_SELF_EXECUTABLE)
+        guard.value.opened = true
+    }
+    guard.value.fd
+}
+
+// `size` bytes from byte `at` of this jet's own file (X64_SELF_EXECUTABLE),
+// read with pread through the one descriptor the process holds of it
+// (loader_self_fd) into a List of their own; None when the file can't be
+// opened or read, or ends first.
+x64_self_read: fn(at: Int, size: Int) -> [U8]? {
+    if at < 0 || size < 0 -> return None
+    fd: loader_self_fd()
+    if fd < 0 -> return None
+    bytes := [U8]{}
+    if size == 0 -> return Val(bytes)
+    link_pad_to(bytes, size, 0)
+    if loader_pread(fd, mem.address_of(bytes[0]), size, at) != "" -> return None
+    Val(bytes)
 }
 
 // Names the kept form (x64_executable_keep): "JETKEEP2".
@@ -976,8 +1023,7 @@ x64_executable_write: fn(exe: X64Executable, path: String) -> String {
 // The identity of the file at `path`: device, inode, size, and modification
 // and status-change times in nanoseconds; empty when it can't be read. A
 // final link is followed, as the reads that open `path` follow it: a jet
-// reads its own parts at /proc/self/exe (JetCli Host.jet
-// JET_CLI_SELF_EXECUTABLE), whose own size is 0.
+// reads its own parts at X64_SELF_EXECUTABLE, whose own size is 0.
 loader_file_stamp: fn(path: String) -> [Int] {
     found: loader_files.stat(path, Val(loader_files.LinkPolicy.Follow)) ?? return [Int]{}
     modified: found.modified.to_unix_ns() ?? return [Int]{}
@@ -986,7 +1032,7 @@ loader_file_stamp: fn(path: String) -> [Int] {
 }
 
 #Test("a file's stamp follows a final link, so /proc/self/exe stamps as the running executable") {
-    stamp: loader_file_stamp("/proc/self/exe")
+    stamp: loader_file_stamp(X64_SELF_EXECUTABLE)
     assert_eq(stamp.len(), 5)
     // The link's own size is 0; the executable's is not.
     assert(stamp[2] > 0, "/proc/self/exe stamps with size {stamp[2]}")

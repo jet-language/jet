@@ -295,7 +295,10 @@ it loads from jet's own file at the record's offset into memory of its
 own (`JetCli/Cli/CoreSources.jet` `JetCLICoreBodiesRecords`), so no
 record page of the part is mapped: the records one compile loads lie all
 through the part, and a mapped page stays mapped once touched, 2 MiB at a
-time where the kernel maps file pages huge. It
+time where the kernel maps file pages huge. A jet opens its own file once
+and keeps that descriptor for every read and map of it: the part lookups,
+each record and the runtime image's segments (`Image/Loader.jet`
+`loader_self_fd`). It
 loads the packet in place of checking its body when the file's
 facts are its own and every key resolves, reading every packet's strings
 into one pool so each spelling is one String across the loads; it records
