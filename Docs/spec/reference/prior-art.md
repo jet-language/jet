@@ -283,7 +283,7 @@ actual contracts.
 Every source that a mining run reads has a row here, in a section for that
 run: `### Subject (mined YYYY-MM-DD)`, then the run ID and the report or the
 Tower cards that hold its findings, then one row per source URL. A mining run
-adds its rows before hand-in; `check_coverage.mjs` in the `mine-for-jet-v2`
+adds its rows before hand-in; `check_coverage.mjs` in the `mine-for-jet-v3`
 skill fails while any mined source in the run has no row or the run ID is
 missing. A row records that a run read the source. It does not record that the
 reading was complete: rows marked "first pass only" were read in full but did

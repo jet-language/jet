@@ -5,7 +5,7 @@ root holds `coverage.json`, `ledger.json` and `claims.json` (and, after review,
 `recall-audit.json`). The gate is:
 
 ```sh
-Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs "$CAPTURE_ROOT"
+Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v3/scripts/check_coverage.mjs "$CAPTURE_ROOT"
 ```
 
 Hand-in requires exit 0. Publication additionally requires `--audit` exit 0.
@@ -35,7 +35,7 @@ out of scope. Nothing is skipped by leaving a hole.
 
 ```json
 {
-  "schema": "mine-for-jet-v2/coverage@1",
+  "schema": "mine-for-jet-v3/coverage@1",
   "run_id": "RUN_ID",
   "sources": [{
     "source_id": "VIDEO_ID", "kind": "video", "title": "TITLE", "ref": "URL", "duration_s": 2379,
@@ -65,7 +65,7 @@ timestamps in claim `locator`s (a shard starting at 1:00:00 never writes
 stay unique across shards. Join and re-check before hand-in:
 
 ```sh
-Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs \
+Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v3/scripts/check_coverage.mjs \
   --merge "$CAPTURE_ROOT/shard-a" "$CAPTURE_ROOT/shard-b" --out "$CAPTURE_ROOT/merged"
 ```
 
@@ -94,7 +94,7 @@ items whose `at` falls outside their segment fail.
 
 ```json
 {
-  "schema": "mine-for-jet-v2/ledger@1",
+  "schema": "mine-for-jet-v3/ledger@1",
   "segments": {
     "VIDEO_ID/01": [
       { "id": "VIDEO_ID/01.L1", "at": "01:12", "kind": "mechanism",
@@ -144,7 +144,7 @@ mapping disputes (an item that should have been a claim, a wrong `covered`).
 
 ```json
 {
-  "schema": "mine-for-jet-v2/recall-audit@1", "reviewer": "REVIEWER_ID", "seed": "SEED",
+  "schema": "mine-for-jet-v3/recall-audit@1", "reviewer": "REVIEWER_ID", "seed": "SEED",
   "segments": [{ "segment": "VIDEO_ID/01",
     "concepts": [{ "at": "02:10", "concept": "Small-vector inline capacity", "ledger": null }],
     "disputes": [{ "ledger": "VIDEO_ID/01.L2", "reason": "Confirms a Jet choice; should be a claim" }] }]
@@ -172,3 +172,23 @@ seed, sample, misses and outcome in the report.
   remaining segments explicitly. When a source is split, whoever writes its
   macro claims reads every range's ledger first. Densities in the checker output
   show whether a batch was too large.
+
+## 7. Outcomes at publication
+
+`--audit` also checks that the run was distilled. Every claim carries one
+`outcome`:
+
+```json
+{ "id": "C7", "contribution": "adds-new", "extends": "the build cache key",
+  "outcome": { "kind": "ballot", "ref": "draft:cache-input-identity" } }
+```
+
+`kind` is `criterion` (a criterion on an existing card), `card`, `ballot`,
+`evidence` (a witness attached to an existing record), `rejected` or `gap`. The
+first four need `ref`: an existing record, or `draft:ID` for a reviewed payload
+the orchestrator will publish. `rejected` and `gap` need a specific `reason`. A
+claim whose contribution is `adds-new` and whose outcome is a card or ballot
+names the existing Jet mechanism it grows in `extends`, or explains in `why_new`
+why no existing mechanism can carry the job. The checker prints the counts per
+kind; keep that line in the report. Many claims and few outcomes means the run
+is not finished.

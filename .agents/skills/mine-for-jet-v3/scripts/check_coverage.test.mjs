@@ -180,6 +180,26 @@ test('recall audit sample is deterministic, sized max(2, 10%) and fails on misse
   expectError(none, /^recall\|recall-audit\.json\|missing/, { requireAudit: true });
 });
 
+test('publication distils every claim to one outcome and makes new mechanisms name what they extend', () => {
+  const out = sink();
+  main([FIXTURE, '--audit', '--registry', REGISTRY], out, sink());
+  assert.match(out.data, /outcomes: criterion 3, card 1, ballot 1, evidence 3, rejected 0, gap 2/);
+  assert.deepEqual(rules(run()), [], 'hand-in without --audit does not need outcomes yet');
+  const none = run(); delete claim(none, 'C3').outcome;
+  expectError(none, /^outcome\|claims\.json C3\|needs outcome\.kind/, { requireAudit: true });
+  const noRef = run(); claim(noRef, 'C4').outcome = { kind: 'criterion' };
+  expectError(noRef, /^outcome\|claims\.json C4\|criterion outcome needs ref/, { requireAudit: true });
+  const vagueGap = run(); claim(vagueGap, 'C2').outcome = { kind: 'gap', reason: 'not applicable' };
+  expectError(vagueGap, /^outcome\|claims\.json C2\|gap outcome reason: reason too short/, { requireAudit: true });
+  const parallel = run(); claim(parallel, 'C7').contribution = 'adds-new';
+  expectError(parallel, /^outcome\|claims\.json C7\|new mechanism: needs extends/, { requireAudit: true });
+  const extending = run(); Object.assign(claim(extending, 'C7'), { contribution: 'adds-new', extends: 'the build cache key' });
+  assert.deepEqual(rules(extending, { requireAudit: true }), []);
+  const justified = run(); Object.assign(claim(justified, 'C7'), { contribution: 'adds-new',
+    why_new: 'No existing incremental builds mechanism records cache input identity, so nothing can grow to carry it' });
+  assert.deepEqual(rules(justified, { requireAudit: true }), []);
+});
+
 test('vague accepts specific reasons and rejects boilerplate', () => {
   assert.equal(vague('Sponsor read for a VPN service with no language or tooling mechanism', 'sponsor VPN'), null);
   assert.match(vague('not applicable'), /too short/);
