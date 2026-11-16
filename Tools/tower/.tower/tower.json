@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108537,
+    "rev": 108550,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27422,11 +27422,11 @@
         {
           "n": 11,
           "text": "Enum case metadata reads through the same typed reflection path as every other type (TypeInfo); a non-enum, a generic enum, case ordering and private cases each have explicit behavior or a registered refusal, and no empty trait or case catalog is made up. Proof: `jet test Compiler --profile ui --filter enum_cases_refuse_`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:56.624Z"
+          "evidence": "Holds on dev aa8715dacd (rerun by Main on p214): jet test Compiler --profile ui --filter enum_cases_refuse_ -> PASS enum_cases_refuse_generic_without_arguments.jet (E0904) and enum_cases_refuse_private_payload_field/run.jet (E0605), 2/0. Non-enum (empty cases), declaration order and no made-up catalog are stated in Docs/spec/reference/metaprogramming.md:431-460 and read through TypeInfo; the reflection goldens Metaprogramming/Reflection are 85/0 on p214.",
+          "at": "2026-11-16T10:38:06.076Z"
         },
         {
           "n": 12,
@@ -27449,11 +27449,11 @@
         {
           "n": 15,
           "text": "No handwritten built-in enum case list remains in Compiler/ (today CoreEnumRows.jet and CoreModules.jet hold `core_enum_variants`); completion, construction and missing-case lists come from the Core declarations (D-ONE-SHAPE1=A), and rename, skip, computed and default values, field order and unknown fields round-trip through the derived shape. Proof: `git grep -n core_enum_variants Compiler` prints nothing and `jet test Compiler --profile ui --filter core_enum_missing_case` passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:59.483Z"
+          "evidence": "Holds on dev aa8715dacd (found by GoalsA-1-4, rerun by Main on the p214 batch compiler): git grep -n core_enum_variants aa8715dacd -- Compiler prints nothing (exit 1); jet test Compiler --profile ui --filter core_enum_missing_case -> PASS tests/ui/core_enum_missing_case.jet, 1/0. The Core declarations (CasePayload, PluginError, PluginLimit, IOOperation, ProcessResourceLimit, landed in p214) are the only case lists.",
+          "at": "2026-11-16T10:38:05.104Z"
         },
         {
           "n": 16,
@@ -27545,7 +27545,7 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T09:23:36.765Z",
+      "updated": "2026-11-16T10:38:06.077Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
@@ -96093,6 +96093,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "Cutover scope settled by the first full validation run (census plus ui/golden/cases/core on the bridge build of a 78f4541780 cutover). (1) Folders only, plus acronym casing in PascalCase names (c1, c3). Renaming snake_case corpus files is out: a .jet file's stem is its module name, so renaming it changes program meaning and every snapshot that names the module. (2) Kept names, each listed in the generated exemption table with its reason: the whole state/ and fixture-state/ subtrees (planted as .jet by the test kit); Jetpack/Provider/Batteries/<name> (a version dependency resolves to the battery folder named after its package, jet_cli_first_party_battery); and the contents of fixtures (inside *.fixture/ or a fixtures/<name>/ root; the fixture folder itself is renamed), because a fixture reproduces a project as its users lay it out and its steps, manifests and foreign build files name those paths. (3) The rewrite also covers fixture: line values, bare sibling names with _ - or . in corpus files, a {root}/child segment where the file spells the parent path as a full literal, the sema fuzz kind list, the docs-index link literal, and the byte-order pairs in closed_lists duplicates.tsv. The next validation runs on p214's tip."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "Owner 2026-11-15: folder TitleCase done \"as soon as we can reasonably do it\"; exceptions only where another language or tool requires the casing. Main owns the cutover (c1-c3 together, one stack), landed at the precompiled-Core to G6 hand-off so no in-flight agent patch is broken by the renames."
         },
         {
@@ -96147,7 +96152,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:40.028Z",
-      "updated": "2026-11-16T03:51:39.272Z",
+      "updated": "2026-11-16T10:27:31.748Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -104001,29 +104006,29 @@
         {
           "n": 15,
           "text": "A value of a trait with no methods prints and interpolates as its concrete value, as a one-method trait does (c13 says every trait; spec.md:939-941). Today it prints an empty line directly, in \"bare: {s}\" and inside a list, on O0, O1 and O2 (p204, probes c2 and c2b in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes, D-PRIM-ANY1 round 3). Proof: a traits/ cases row printing a method-less trait value three ways on each tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T05:01:34.169Z"
+          "evidence": "Landed 1e6bb8daf2. jet test Compiler --profile cases --filter empty_trait_value_prints -> 1/0 on the p214 batch compiler (dev aa8715dacd), cycle p214 proof rows. tests/cases/traits/empty_trait_value_prints runs jet run -O0, -O1 and -O2 and prints a method-less trait value directly, in \"bare: {s}\" and in a list (14 / bare: 14 / hi / Point { x: 1, y: 2 } / [14, hi, Point { x: 1, y: 2 }]).",
+          "at": "2026-11-16T10:40:12.625Z"
         },
         {
           "n": 16,
           "text": "reflect.of on a trait value reports the user's spelling: type_name() gives the concrete type's name and path() its module path, never the internal key (today module:14:…::Shown) (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probes n09_reflect_trait_value.jet and n13_reflect_trait_value_method.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a reflect/ cases row on each tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T05:20:07.275Z"
+          "evidence": "Landed 26ac9d9275 (with the reflection path already on dev). jet test Compiler --profile cases --filter reflect/ -> 15 pass, 1 known-failing unrelated (checked_text_contract_is_reflected_on_the_nominal_type) on the p214 batch compiler (dev aa8715dacd), cycle p214 proof rows. tests/cases/reflect/erased_trait_value_reflects_its_type and erased_trait_value_reflects_a_builtin run O0, O1 and O2; type_name and path print the user's spelling (Square main.Square, label: String String), never the internal module:N:…::Shown key.",
+          "at": "2026-11-16T10:40:13.774Z"
         },
         {
           "n": 17,
           "text": "A struct declared in an inline module prints with its declared name: Point { x: 1, y: 2 }, never the mangled M3GeoPoint { … } (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probe n16_inline_use_fn_control.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a cases row printing an inline-module struct directly, interpolated and in a list on each tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T05:20:09.675Z"
+          "evidence": "Landed 50d75d6587. jet test Compiler --profile cases --filter inline_module_struct_prints_its_source_name -> 1/0, and --filter inline_module_ 12/0 on the p214 batch compiler (dev aa8715dacd), cycle p214 proof rows. The case runs O0, O1 and O2 and prints Point { x: 1, y: 2 } directly, interpolated (at Point { … }) and in a list, never M3GeoPoint.",
+          "at": "2026-11-16T10:40:14.849Z"
         },
         {
           "n": 18,
@@ -104047,7 +104052,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:40.964Z",
-      "updated": "2026-11-16T09:46:43.435Z",
+      "updated": "2026-11-16T10:40:14.849Z",
       "updatedBy": "Main",
       "criteriaLastN": 18
     },
@@ -104365,11 +104370,11 @@
         {
           "n": 13,
           "text": "Comptime on native O0 supports Shared values, tasks, select, native calls and fixed backing (the operations the retired JetEval host adapter lacked). Proof: `jet test Compiler --profile cases --filter comptime/native_o0_shared_tasks_select`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:29:13.774Z"
+          "evidence": "Landed 09ad940e3f (p213, dev 78f4541780). p213 batch compiler: jet test Compiler --profile cases --filter comptime/native_o0_shared_tasks_select -> 1 passed, 0 bad (#run runs Shared values, tasks, select, runtime kernels, native calls and fixed backing as a run does). The p213 suite's cases profile has no new comptime failures.",
+          "at": "2026-11-16T09:50:34.311Z"
         },
         {
           "n": 14,
@@ -104411,7 +104416,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:42.975Z",
-      "updated": "2026-11-16T09:48:36.181Z",
+      "updated": "2026-11-16T09:50:34.311Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -104635,11 +104640,11 @@
         {
           "n": 11,
           "text": "Markers are PascalCase only: `#Allow(lint)` and `#Wire` are the only spellings, `#allow` and `#wire` (5 .jet files on dev 452b6443f3) are migrated, and a test checks every marker row against the marker NameCase rule. Proof: `git grep -l -E '#(allow|wire)\\b' -- '*.jet'` prints nothing and `jet test tests/guards --filter closed_lists` passes. (was #4022 c19)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:13:53.271Z"
+          "evidence": "Landed aa8715dacd. git grep -l -E '#(allow|wire)\\b' aa8715dacd -- '*.jet' prints nothing (0 files); jet test tests/guards -> pass (p214 'all test tests/guards' rc=0, which includes closed_lists and its marker NameCase test).",
+          "at": "2026-11-16T10:40:15.912Z"
         }
       ],
       "refs": [],
@@ -104654,7 +104659,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:44.799Z",
-      "updated": "2026-11-16T01:13:53.271Z",
+      "updated": "2026-11-16T10:40:15.912Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -106477,7 +106482,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "State on dev 78f4541780 (Speed-3-2 survey): c9's grep matches Docs/research/2026-11-15-sync-partial-bootstrap-and-local-only.md, but the note is a fifth draft whose own status needs a fifth adversarial review before anything is built, and review 4, which it cites, is not in Docs/audits; c9 stays open. c1 and c3-c7 are blocked by no ballot but need unbuilt parts: the offline client queue (.offline(.Queue)); a signed-in caller over HTTP (#App.SignedIn endpoints answer 401 today); a browser runtime with IndexedDB and Web Locks; and the frame's notice list. c2 (request keys) is in progress (Speed-3-2)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -106545,11 +106556,11 @@
         {
           "n": 8,
           "text": "Network partitions, concurrent merges, duplicated or reordered operations and reconnects keep every replica convergent: a seeded property test of random schedules over two and three replicas ends with equal state. Proof: `jet test Compiler --profile cases --filter sync_crdt/partitions_converge`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:54:09.432Z"
+          "evidence": "Already holds on dev 78f4541780 (found by Speed-3-2, rerun by Main on the p213 batch compiler): jet test Compiler --profile cases --filter sync_crdt/partitions_converge -> PASS tests/cases/sync_crdt/partitions_converge.case, 1 passed, 0 failed.",
+          "at": "2026-11-16T10:03:56.516Z"
         },
         {
           "n": 9,
@@ -106573,7 +106584,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:09.432Z",
-      "updated": "2026-11-16T01:14:23.668Z",
+      "updated": "2026-11-16T10:03:57.566Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -119844,6 +119855,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "c1 is still open on dev 78f4541780. The evidence so far is IR Lint call.marked on ir.build (O0), ir.opt (O1/O2), CoreLibrary and eval.batch, plus the InlineContracts golden with inspect choices on O0/O1/O2. Missing: (1) a committed test that runs the zero-marked-Call census over Examples, Core and Compiler on each tier (the lint stops a build; no test counts); (2) the web path (calls from the JS partition into a marked #Export(wasm) function)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "p206 (dev fe8c7b89ef): census-r3 dc38cfa29d (the call.marked IR lint, E1016/E1017, E0917 for cycles, guarantee text) and core-abs f9128ac736 landed. golden Contracts/InlineContracts passes; the suites show no new exit-101. Three ui snapshots fail: inline_always_scrub has a wrong fixture (ReadOnlyValueNotOwned fires before E1016), and cycle and reads_trace need their real spans blessed. Three O2 .err.out files cite shifted Math.jet lines. One fix SUB from PrecompiledCore-4; c1, c2 and c4 are met after it."
         },
         {
@@ -119870,11 +119886,11 @@
         {
           "n": 2,
           "text": "The inliner never quietly leaves a marked call: each reason it refuses a site today (a written parameter, a last-owner routine, a context.trace read, stops in another file, a fixed value revealed to a public result, and any other) is either handled by the inliner for marked callees or refused by sema with a registered diagnostic (what/why/fix and a UI snapshot), so a marked call that reaches codegen uninlined is an internal compiler error (exit 101), never a silent call. Proof: one UI snapshot per new diagnostic and one test per former refusal reason.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:44:37.548Z"
+          "evidence": "Landed c9a590769f (p213, dev 78f4541780). p213 batch compiler: jet test Compiler/JetIR/Source/OptInline.jet rc=0, with one test per former refusal reason (written parameter, last-owner routine, context.trace read, stops in another file, fixed value revealed to a public result, foreign body). The foreign body, the reason that was silently accepted, is now refused by sema as E1021 (registered, what/why/fix); ui --filter inline_always 7 passed, 0 bad, including the new inline_always_foreign snapshot. A marked call that reaches codegen uninlined stops the build through IR Lint call.marked (ICE). DiagnosticRows --check and DiagnosticCensus --check pass; the census is clean (jet check Core: no E1021 in Core).",
+          "at": "2026-11-16T09:50:12.550Z"
         },
         {
           "n": 3,
@@ -119888,11 +119904,11 @@
         {
           "n": 4,
           "text": "The marker's reference text and its diagnostics say guarantee: the Markers spec and E0917-E0919 state that every direct call is inlined on every tier or the program is refused, with the full list of refusals. Proof: the spec text and the UI snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:44:39.714Z"
+          "evidence": "Landed c9a590769f (p213, dev 78f4541780). p213 batch compiler: the Markers reference text and every refusal (E0917-E0919, E1021) state the guarantee in their Why: every direct call is inlined on every tier or the program is refused, with the full list of refusals. ui --filter inline_always 7 passed, 0 bad (six re-blessed snapshots with the guarantee Why, plus E1021); cases inspect_choices_shows_each_inlined_call_and_why 1/0; golden InlineContracts passes in the p213 golden suite (0 FAIL).",
+          "at": "2026-11-16T09:50:13.747Z"
         }
       ],
       "refs": [],
@@ -119903,7 +119919,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T01:44:26.232Z",
-      "updated": "2026-11-16T05:34:11.067Z",
+      "updated": "2026-11-16T09:50:14.850Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     }
@@ -220155,6 +220171,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T10:40:15.912Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0255wk0",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-16T10:40:14.849Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-16T10:40:13.774Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-16T10:40:12.625Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-16T10:38:06.077Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w7t4qu",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-16T10:38:05.104Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w7t4qu",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-16T10:27:31.748Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07k91t6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T10:03:57.566Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m0czk2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T10:03:56.516Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m0czk2",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-16T09:50:34.311Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07ywjvi",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-16T09:50:14.851Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hjzhes",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T09:50:13.747Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hjzhes",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T09:50:12.550Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hjzhes",
+      "note": "#2"
+    },
     {
       "at": "2026-11-16T09:49:23.768Z",
       "by": "Main",
