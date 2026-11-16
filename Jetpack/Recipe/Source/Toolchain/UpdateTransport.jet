@@ -371,7 +371,7 @@ recipe_update_read_state: fn(path: String) -[FS, Env]> ToolchainUpdateState? Rec
 }
 
 // Durably replace the update state through an exclusive partial file.
-recipe_update_write_state: fn(path: String, state: ToolchainUpdateState) RecipeError! -[FS, Env]> {
+recipe_update_write_state: fn(path: String, state: ToolchainUpdateState) -[FS, Env]> RecipeError! {
     if path == "" -> return Err(RecipeError.Update("toolchain update state path is empty"))
     parent: files.dirname(path)
     if parent == "" -> return Err(RecipeError.Update("toolchain update state has no parent"))
@@ -421,19 +421,19 @@ recipe_update_write_state: fn(path: String, state: ToolchainUpdateState) RecipeE
     recipe_update_sync_parent(parent)
 }
 
-recipe_update_write_all_synced: fn(out: &FileWriter, bytes: [U8]) IOError! -[FS]> {
+recipe_update_write_all_synced: fn(out: &FileWriter, bytes: [U8]) -[FS]> IOError! {
     out.write_bytes(bytes)
     out.fsync()
 }
 
 // Make a rename inside `parent` durable (folder fsync).
-recipe_update_sync_parent: fn(parent: String) RecipeError! -[FS]> {
+recipe_update_sync_parent: fn(parent: String) -[FS]> RecipeError! {
     files.fsync(parent) ?? return Err(RecipeError.Update("fsync executable parent: {err}"))
 }
 
 // Refuse `..` components and any symlink or non-directory ancestor from the
 // path up to its root; missing components are allowed.
-recipe_update_validate_no_symlink_ancestors: fn(path: String, label: String) RecipeError! -[FS, Env]> {
+recipe_update_validate_no_symlink_ancestors: fn(path: String, label: String) -[FS, Env]> RecipeError! {
     if path == "" -> return Err(RecipeError.Update("{label} path is empty"))
     if recipe_has_parent_component(path) -> return Err(RecipeError.Update("{label} path is unsafe"))
     probe := if files.is_abs(path) -> path else -> files.join(files.cwd() ?? return Err(RecipeError.Update("inspect {label}: {err}")), path)
@@ -463,7 +463,7 @@ recipe_update_validate_no_symlink_ancestors: fn(path: String, label: String) Rec
 }
 
 // A `file://` endpoint root is a real directory with no linked ancestor.
-recipe_update_validate_local_root: fn(path: String) RecipeError! -[FS, Env]> {
+recipe_update_validate_local_root: fn(path: String) -[FS, Env]> RecipeError! {
     recipe_update_validate_no_symlink_ancestors(path, "toolchain endpoint")
     info: files.stat(path) ?? return Err(RecipeError.Update("inspect toolchain endpoint: {err}"))
     if info.is_symlink || !info.is_dir {

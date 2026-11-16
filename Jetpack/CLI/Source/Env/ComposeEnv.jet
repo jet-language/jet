@@ -30,7 +30,7 @@ EnvReadyStats: struct {
     }
 
     // Refresh each selection to the most recently used matching entry.
-    canonicalize: fn(&self, roots: HangarRoots) Never! -[FS, Env]> {
+    canonicalize: fn(&self, roots: HangarRoots) -[FS, Env]> Never! {
         if self.realized.len() == 0 {
             return
         }
@@ -77,7 +77,7 @@ EnvReadyStats: struct {
 // Seal every provider record against the final project lock after all
 // package publications; only this post-pass writes the digest that later
 // online and offline replays use.
-cli_seal_project_producer_records: fn(verification: &StoreVerification, roots: HangarRoots, project_root: String, ready_stats: EnvReadyStats) CLIError! -[FS, Env, Time]> {
+cli_seal_project_producer_records: fn(verification: &StoreVerification, roots: HangarRoots, project_root: String, ready_stats: EnvReadyStats) -[FS, Env, Time]> CLIError! {
     lock_digest: provider_project_lock_digest(Val(project_root)) ?? return Err(CLIError.Other(err.message()))
     if lock_digest == "" {
         return
@@ -642,7 +642,7 @@ cli_adapter_plan_item: fn(roots: HangarRoots, ctx: ProviderCtx, adapter: Adapter
 
 // Every integration fact must still be executable: disclosed tasks keep their
 // packages, secrets, providers, grants, and host checks.
-cli_validate_integration_facts: fn(plan: RunPlan) CLIError! -[Env]> {
+cli_validate_integration_facts: fn(plan: RunPlan) -[Env]> CLIError! {
     facts: plan.environment.integration_facts
     if facts.validate() == {
         .Err(error) -> return Err(CLIError.InvalidData(error.message))
@@ -825,7 +825,7 @@ cli_name_column_width: fn(refs: [RefSpec]) -> Int Never! {
 
 // The `config sandbox require` policy refuses composition when no native
 // sandbox is available.
-cli_enforce_required_sandbox_policy: fn(theme: Theme, json_output: Bool) CLIError! -[IO, FS, Env, Exec, Time.Wait]> {
+cli_enforce_required_sandbox_policy: fn(theme: Theme, json_output: Bool) -[IO, FS, Env, Exec, Time.Wait]> CLIError! {
     if env_read_sandbox_policy() != SandboxPolicy.Require {
         return
     }

@@ -3285,7 +3285,7 @@ data_loader_validate: fn<T>(loader: DataLoader<T>) DataError! {
 // last-good snapshot keeps it and reads nothing; a failed read is recorded in
 // the loader status. `read` only reads, so a program reaches `FS.Read`
 // through it and no other FS capability.
-__read_file: fn<T>(loader: &DataLoader<T>, read: fn(String) -[FS.Read]> [U8] Err!) DataError! -[FS.Read]> {
+__read_file: fn<T>(loader: &DataLoader<T>, read: fn(String) -[FS.Read]> [U8] Err!) -[FS.Read]> DataError! {
     if loader.cancelled {
         return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was cancelled before read")))
     }

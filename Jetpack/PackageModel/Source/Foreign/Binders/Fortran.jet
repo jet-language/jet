@@ -160,7 +160,7 @@ pkg_fortran_bind: fn(source_path: String, source: String, lib: String, cache_dir
     Ok(FortranBindResult{source: generated, bound: bound, archive: archive, layouts: layouts, provenance: provenance})
 }
 
-pkg_fortran_compile: fn(source: String, object: String, module_dir: String) ForeignBindError! -[Exec, Time.Wait]> {
+pkg_fortran_compile: fn(source: String, object: String, module_dir: String) -[Exec, Time.Wait]> ForeignBindError! {
     argv: [String]{"gfortran", "-c", "-fPIC", "-ffree-line-length-none", "-J", module_dir, "-I", module_dir, source, "-o", object}
     output: pkg_binder_capture(argv, None, "gfortran", FORTRAN_TOOL_ACTION)
     if output.success {

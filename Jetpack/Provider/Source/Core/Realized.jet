@@ -173,7 +173,7 @@ ProviderError: enum {
     // Render the one friendly diagnostic for this failure (Rust CLI
     // `report_provider_error`; it lives with the carrier so Provider callers
     // below the CLI can report without reaching up).
-    report: fn(self, theme: Theme) Never! -[IO, Time.Wait]> {
+    report: fn(self, theme: Theme) -[IO, Time.Wait]> Never! {
         if self == {
             .BuildFailed(reason) -> {
                 theme.error("the provider failed to build that package", reason, "check the package name, e.g. `fastfetch@jetpack`.")

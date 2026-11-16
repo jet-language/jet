@@ -208,7 +208,7 @@ provider_packagist_verified_git_source: fn(release: Dyn, dist_url: String, refer
 // Inspect the zip with PHP ZipArchive under the archive budgets, refuse
 // unsafe names, links, and special entries, extract it, and copy the package
 // root into `vendor/<vendor>/<package>`.
-provider_packagist_install: fn(artifact: RegistryArtifact, out: String, scratch: String) RegistryError! -[FS, Exec, Time.Wait]> {
+provider_packagist_install: fn(artifact: RegistryArtifact, out: String, scratch: String) -[FS, Exec, Time.Wait]> RegistryError! {
     provider_registry_ensure_download_budget(artifact.path)
     listing_spec: process.cmd(
         [String]{
@@ -265,7 +265,7 @@ PackagistAutoloadMapping: struct {
 
 // `vendor/autoload.php`: one `spl_autoload_register` over every PSR-4
 // mapping, longest prefix first; `composer-autoload` names it.
-provider_packagist_write_autoloader: fn(artifacts: [RegistryArtifact], out: String) RegistryError! -[FS]> {
+provider_packagist_write_autoloader: fn(artifacts: [RegistryArtifact], out: String) -[FS]> RegistryError! {
     mappings := [PackagistAutoloadMapping]{}
     loop artifact in artifacts {
         prefixes := artifact.package.psr4.keys().to_list()

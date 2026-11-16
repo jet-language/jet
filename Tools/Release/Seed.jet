@@ -104,7 +104,7 @@ clock: fn() -[Time]> String Never! {
 }
 
 // `[TOOL HH:MM:SS] message` on stderr, and in `log` when there is one.
-say: fn(tool: String, log: String, message: String) Never! -[FS, IO, Time]> {
+say: fn(tool: String, log: String, message: String) -[FS, IO, Time]> Never! {
     line: "[{tool} {clock()}] {message}"
     term.eprint(line)
     if log != "" -> files.append_all(log, "{line}\n") ?? ()
@@ -132,13 +132,13 @@ sha256_file: fn(path: String) -[FS]> String Never! {
 }
 
 // Copies the file `from` to `to` and marks it executable (0755) or not (0644).
-copy_file: fn(from: String, to: String, executable: Bool) IOError! -[FS]> {
+copy_file: fn(from: String, to: String, executable: Bool) -[FS]> IOError! {
     files.copy(from, to) ?? return Err(err)
     files.set_mode(to, if executable -> 493 else -> 420) ?? return Err(err)
     Ok()
 }
 
-link_compiler_aliases: fn(dir: String) IOError! -[FS]> {
+link_compiler_aliases: fn(dir: String) -[FS]> IOError! {
     loop alias in COMPILER_ALIASES {
         files.hard_link(files.join(dir, "jet"), files.join(dir, alias)) ?? return Err(err)
     }
@@ -158,7 +158,7 @@ copy_tree: fn(from: String, to: String) -[Exec, Time.Wait]> Bool Never! {
 
 // Removes `dir`; test fixtures leave read-only directories behind, so the
 // tree is made writable first.
-remove_tree: fn(dir: String) Never! -[FS, Exec, Time.Wait]> {
+remove_tree: fn(dir: String) -[FS, Exec, Time.Wait]> Never! {
     if !files.exists(dir) {
         return
     }
@@ -259,7 +259,7 @@ run_logged: fn(argv: [String], cwd: String, vars: [Var], log: String, seconds: I
 
 // Copies each piece of a child's output into `log` as it arrives; a failed
 // write still drains the pipe.
-pump_stdout: fn(stream: ProcessStdoutStream, log: String) Never! -[Exec, FS, Time.Wait]> {
+pump_stdout: fn(stream: ProcessStdoutStream, log: String) -[Exec, FS, Time.Wait]> Never! {
     writer := files.append(log) ?? {
         loop _ in stream.chunks(65536) {
 
@@ -272,7 +272,7 @@ pump_stdout: fn(stream: ProcessStdoutStream, log: String) Never! -[Exec, FS, Tim
     }
 }
 
-pump_stderr: fn(stream: ProcessStderrStream, log: String) Never! -[Exec, FS, Time.Wait]> {
+pump_stderr: fn(stream: ProcessStderrStream, log: String) -[Exec, FS, Time.Wait]> Never! {
     writer := files.append(log) ?? {
         loop _ in stream.chunks(65536) {
 

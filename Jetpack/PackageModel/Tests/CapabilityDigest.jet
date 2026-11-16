@@ -3,9 +3,9 @@
 use jet_pkg_model.[PKG_API_SNAPSHOT_VERSION, pkg_api_snapshot_line_name, pkg_api_snapshot_render, pkg_capability_snapshot_parse]
 
 #Test("api snapshot render round trips through parse") {
-    signatures: [String]{"fn area(s: Shape) Float Never! -[]>", "struct Point<T: Ord> {{ .. }}", "variant Shape.Square{{side: Float}}"}
+    signatures: [String]{"fn area(s: Shape) -[]> Float Never!", "struct Point<T: Ord> {{ .. }}", "variant Shape.Square{{side: Float}}"}
     text: pkg_api_snapshot_render("geo", "1.2.0", signatures)
-    assert_eq(text, "api_version = 4\npackage = geo\npublished_version = 1.2.0\nfn area(s: Shape) Float Never! -[]>\nstruct Point<T: Ord> {{ .. }}\nvariant Shape.Square{{side: Float}}\n")
+    assert_eq(text, "api_version = 4\npackage = geo\npublished_version = 1.2.0\nfn area(s: Shape) -[]> Float Never!\nstruct Point<T: Ord> {{ .. }}\nvariant Shape.Square{{side: Float}}\n")
     snapshot: pkg_capability_snapshot_parse(text) ?? panic("snapshot")
     assert_eq(snapshot.api_version, PKG_API_SNAPSHOT_VERSION)
     assert_eq(snapshot.package, "geo")
@@ -20,7 +20,7 @@ api_snapshot_test_line: fn(line: String) -> String Never! {
 }
 
 #Test("api snapshot line names end at the first signature delimiter") {
-    assert_eq(api_snapshot_test_line("fn geometry.area(s: Shape) Float Never! -[]>"), "fn geometry.area")
+    assert_eq(api_snapshot_test_line("fn geometry.area(s: Shape) -[]> Float Never!"), "fn geometry.area")
     assert_eq(api_snapshot_test_line("struct Point<T> {{ .. }}"), "struct Point")
     assert_eq(api_snapshot_test_line("field Point.x: Int = _"), "field Point.x")
     assert_eq(api_snapshot_test_line("variant Shape.Square{{side: Float}}"), "variant Shape.Square")

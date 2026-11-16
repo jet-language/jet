@@ -220,7 +220,7 @@ terminal_columns: fn() -[Env]> Int Never! {
 }
 
 // Every Jetpack stderr transition is one complete write, which may wait for IO.
-terminal_write_output: fn(text: String) Never! -[IO, Time.Wait]> {
+terminal_write_output: fn(text: String) -[IO, Time.Wait]> Never! {
     stderr_handle := term.stderr()
     stderr_handle.write(text).drop("terminal output is best-effort")
 }
@@ -430,26 +430,26 @@ Theme: struct {
     gutter: fn(self) -> String Never! { self.cyan(JETPACK_PROMPT_LABEL) }
 
     // A primary status line: `  jetpack  <msg>`.
-    status: fn(self, msg: String) Never! -[IO, Time.Wait]> {
+    status: fn(self, msg: String) -[IO, Time.Wait]> Never! {
         terminal_write_output("  {self.gutter()}  {msg}\n")
     }
 
     // A secondary, indented detail line: `           ▸ <msg>`.
-    detail: fn(self, msg: String) Never! -[IO, Time.Wait]> {
+    detail: fn(self, msg: String) -[IO, Time.Wait]> Never! {
         terminal_write_output("{terminal_pad()}{self.gray("▸")} {msg}\n")
     }
 
-    graph_identity: fn(self, identity: String) Never! -[IO, Time.Wait]> {
+    graph_identity: fn(self, identity: String) -[IO, Time.Wait]> Never! {
         self.detail("package graph identity: {identity}")
     }
 
     // A success line ending in a green check.
-    ok: fn(self, msg: String) Never! -[IO, Time.Wait]> {
+    ok: fn(self, msg: String) -[IO, Time.Wait]> Never! {
         terminal_write_output("  {self.gutter()}  {msg} {self.green("✓")}\n")
     }
 
     // A plain note without the gutter, e.g. the trust-prompt preamble.
-    note: fn(self, msg: String) Never! -[IO, Time.Wait]> {
+    note: fn(self, msg: String) -[IO, Time.Wait]> Never! {
         terminal_write_output("\n  {self.gray(msg)}\n")
     }
 
@@ -460,7 +460,7 @@ Theme: struct {
         "{self.green("✓")} {self.bold(terminal_pad_end(name, name_w))}  {self.gray(terminal_pad_end(shown, 8))}  {self.gray(state)}"
     }
 
-    row: fn(self, name: String, name_w: Int, version: String, state: String) Never! -[IO, Time.Wait]> {
+    row: fn(self, name: String, name_w: Int, version: String, state: String) -[IO, Time.Wait]> Never! {
         terminal_write_output("{terminal_pad()}{self.render_row(name, name_w, version, state)}\n")
     }
 
@@ -475,7 +475,7 @@ Theme: struct {
 
     // A mutation plan row. Colour carries the mark on a TTY; plain output
     // keeps the same + / - / ~ symbols.
-    plan_row: fn(self, mark: PlanMark, name: String, name_w: Int, from: String, to: String) Never! -[IO, Time.Wait]> {
+    plan_row: fn(self, mark: PlanMark, name: String, name_w: Int, from: String, to: String) -[IO, Time.Wait]> Never! {
         terminal_write_output("{terminal_pad()}{self.render_plan_row(mark, name, name_w, from, to)}\n")
     }
 
@@ -513,7 +513,7 @@ Theme: struct {
     }
 
     // Dependency-chain progress for long phases; the plain ledger floor.
-    progress_chain: fn(self, phase: String, done: Int, total: Int, node: String, edge: String) Never! -[IO, Time.Wait]> {
+    progress_chain: fn(self, phase: String, done: Int, total: Int, node: String, edge: String) -[IO, Time.Wait]> Never! {
         terminal_write_output("{terminal_pad()}{self.render_progress_chain(phase, done, total, node, edge)}\n")
     }
 
@@ -523,7 +523,7 @@ Theme: struct {
         "{self.green("✓")} {self.bold(terminal_pad_end(name, name_w))}  {self.gray(shown)}"
     }
 
-    ready_row: fn(self, name: String, name_w: Int, version: String) Never! -[IO, Time.Wait]> {
+    ready_row: fn(self, name: String, name_w: Int, version: String) -[IO, Time.Wait]> Never! {
         terminal_write_output("{terminal_pad()}{self.render_ready_row(name, name_w, version)}\n")
     }
 
@@ -533,7 +533,7 @@ Theme: struct {
         "{count} {noun} Ready {self.green("✓")}"
     }
 
-    ready_summary: fn(self, count: Int) Never! -[IO, Time.Wait]> {
+    ready_summary: fn(self, count: Int) -[IO, Time.Wait]> Never! {
         terminal_write_output("  {self.gutter()}  {self.render_ready_summary(count)}\n")
     }
 
@@ -562,7 +562,7 @@ Theme: struct {
         "Download {terminal_human_size(bytes)}"
     }
 
-    download_line: fn(self, bytes: Int) Never! -[IO, Time.Wait]> {
+    download_line: fn(self, bytes: Int) -[IO, Time.Wait]> Never! {
         self.status(Theme.render_download_line(bytes))
     }
 
@@ -630,7 +630,7 @@ Theme: struct {
     // `  ── myproj ─ temporary shell · exit to leave ──────────────`.
     // The label is bold cyan; the rest is quiet. It reads the same without
     // colour, so the threshold survives NO_COLOR.
-    rule: fn(self, segments: [String]) Never! -[IO, Env, Time.Wait]> {
+    rule: fn(self, segments: [String]) -[IO, Env, Time.Wait]> Never! {
         if segments.len() == 0 {
             return
         }
@@ -683,7 +683,7 @@ Theme: struct {
     }
 
     // An operational Jet failure through the registered E1340 row.
-    error: fn(self, headline: String, why: String, fix: String) Never! -[IO, Time.Wait]> {
+    error: fn(self, headline: String, why: String, fix: String) -[IO, Time.Wait]> Never! {
         shown_why: if why == "" -> "Jet cannot finish this command without the input or valid operation named above" else -> why
         shown_fix: if fix == "" -> "correct the named input or operation and run the command again" else -> fix
         self.error_coded("E1340", headline, shown_why, shown_fix)
@@ -709,11 +709,11 @@ Theme: struct {
 
     // A coded Jetpack failure through the shared renderer. The Why text is
     // the default root-cause key when no structured cause token exists.
-    error_coded: fn(self, code: String, headline: String, why: String, fix: String) Never! -[IO, Time.Wait]> {
+    error_coded: fn(self, code: String, headline: String, why: String, fix: String) -[IO, Time.Wait]> Never! {
         self.error_coded_with_root_cause(code, why, headline, why, fix)
     }
 
-    error_coded_with_root_cause: fn(self, code: String, root_cause_key: String, headline: String, why: String, fix: String) Never! -[IO, Time.Wait]> {
+    error_coded_with_root_cause: fn(self, code: String, root_cause_key: String, headline: String, why: String, fix: String) -[IO, Time.Wait]> Never! {
         if self.invocation == .Val(collector) {
             permit: collector.guard_edit()
             permit.value.record(self.color, code, root_cause_key, headline, why, fix)
@@ -723,7 +723,7 @@ Theme: struct {
     }
 
     // A coded Jetpack warning through the shared renderer.
-    warning_coded: fn(self, code: String, headline: String, why: String, fix: String) Never! -[IO, Time.Wait]> {
+    warning_coded: fn(self, code: String, headline: String, why: String, fix: String) -[IO, Time.Wait]> Never! {
         diagnostic := diagnostic_from_registry(code, None, headline, why, fix)
         diagnostic.severity = TERMINAL_LINT_SEVERITY
         terminal_write_output(diagnostic_render(diagnostic, "", "", self.color))
@@ -851,7 +851,7 @@ ByteProgress: struct {
         "{transferred} / {total}"
     }
 
-    discovered_bytes: fn(self, bytes: Int) Never! -[IO, Env, Time.Wait]> {
+    discovered_bytes: fn(self, bytes: Int) -[IO, Env, Time.Wait]> Never! {
         if self.record_discovered(bytes) -> self.render_if_needed(false)
     }
 
@@ -872,7 +872,7 @@ ByteProgress: struct {
         true
     }
 
-    transferred_bytes: fn(self, bytes: Int) Never! -[IO, Env, Time.Wait]> {
+    transferred_bytes: fn(self, bytes: Int) -[IO, Env, Time.Wait]> Never! {
         self.record_transferred(bytes)
         self.render_if_needed(false)
     }
@@ -886,7 +886,7 @@ ByteProgress: struct {
         }
     }
 
-    phase: fn(self, phase: String) Never! -[IO, Env, Time.Wait]> {
+    phase: fn(self, phase: String) -[IO, Env, Time.Wait]> Never! {
         self.record_phase(phase)
         self.render_if_needed(false)
     }
@@ -897,7 +897,7 @@ ByteProgress: struct {
         permit.value.phase = phase
     }
 
-    object_progress: fn(self, done: Int, total: Int) Never! -[IO, Env, Time.Wait]> {
+    object_progress: fn(self, done: Int, total: Int) -[IO, Env, Time.Wait]> Never! {
         self.record_objects(done, total)
         self.render_if_needed(false)
     }
@@ -941,7 +941,7 @@ ByteProgress: struct {
 
     // Redraw the aggregate line on a structural change or after enough bytes.
     // Non-TTY output only ever appends structural changes.
-    render_if_needed: fn(self, force: Bool) Never! -[IO, Env, Time.Wait]> {
+    render_if_needed: fn(self, force: Bool) -[IO, Env, Time.Wait]> Never! {
         state: self.state
         permit: state.guard_edit()
         current: permit.value
@@ -995,20 +995,20 @@ LiveRegion: struct {
 
     // Erase the drawn status lines, so no stale progress text sits beside
     // a diagnostic.
-    clear: fn(&self) Never! -[IO, Time.Wait]> {
+    clear: fn(&self) -[IO, Time.Wait]> Never! {
         erase: self.clear_control()
         if erase != "" -> terminal_write_output(erase)
     }
 
     // Promote one finished row: erase the region, then print the row
     // permanently. On non-TTY this is the whole deterministic ledger.
-    finish: fn(&self, line: String) Never! -[IO, Env, Time.Wait]> {
+    finish: fn(&self, line: String) -[IO, Env, Time.Wait]> Never! {
         erase: self.clear_control()
         terminal_write_output("{erase}{terminal_pad()}{terminal_fit_live_line(line, terminal_columns())}\n")
     }
 
     // Redraw the status lines in place; inert on non-TTY.
-    set_status: fn(&self, lines: [String]) Never! -[IO, Env, Time.Wait]> {
+    set_status: fn(&self, lines: [String]) -[IO, Env, Time.Wait]> Never! {
         if !self.tty {
             return
         }
@@ -1023,7 +1023,7 @@ LiveRegion: struct {
 
     // Start or advance the aggregate realization line with the package-level
     // count and the current phase, before the provider begins work.
-    set_aggregate_status: fn(&self, phase: String, completed_packages: Int, total_packages: Int) Never! -[IO, Env, Time.Wait]> {
+    set_aggregate_status: fn(&self, phase: String, completed_packages: Int, total_packages: Int) -[IO, Env, Time.Wait]> Never! {
         self.progress.begin_aggregate_step(phase, completed_packages, total_packages)
         self.progress.activate_renderer(self.theme, self.tty)
         self.progress.render_if_needed(true)
@@ -1031,7 +1031,7 @@ LiveRegion: struct {
 
     // Project one dependency edge: a two-line pinned region on a TTY, one
     // stable chain line per node otherwise.
-    set_dependency_status: fn(&self, phase: String, completed: Int, total: Int, source: String, node: String, state: String) Never! -[IO, Env, Time.Wait]> {
+    set_dependency_status: fn(&self, phase: String, completed: Int, total: Int, source: String, node: String, state: String) -[IO, Env, Time.Wait]> Never! {
         base_line: self.theme.render_dependency_status(phase, completed, total, source, node, state)
         line: if self.progress.has_facts() -> "{base_line}  {self.theme.gray(self.progress.render())}" else -> base_line
         if !self.tty {
@@ -1042,7 +1042,7 @@ LiveRegion: struct {
     }
 
     // Close the region into one final summary line.
-    collapse: fn(&self, summary: String) Never! -[IO, Env, Time.Wait]> {
+    collapse: fn(&self, summary: String) -[IO, Env, Time.Wait]> Never! {
         erase: self.clear_control()
         line: terminal_fit_line("  {self.theme.gutter()}  {summary}", terminal_columns())
         terminal_write_output("{erase}{line}\n")

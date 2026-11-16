@@ -148,7 +148,7 @@ check: fn(layout: Layout) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem!
 }
 
 // `--contract` with an empty PATH names the primitive it could not find.
-missing_primitive: fn(layout: Layout, launcher: String) Problem! -[Env, Exec, Time.Wait]> {
+missing_primitive: fn(layout: Layout, launcher: String) -[Env, Exec, Time.Wait]> Problem! {
     missing: launch(process.cmd([String]{launcher.copy(), "--contract"}).cwd(layout.root).env("PATH", ""))
     rejected(missing, if sys.is_linux() -> "bubblewrap" else -> "unavailable")
 }

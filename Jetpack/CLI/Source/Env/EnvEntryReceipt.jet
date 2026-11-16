@@ -78,7 +78,7 @@ cli_has_line_separator: fn(text: String) -> Bool Never! {
 
 // Write the receipt through an exclusive temporary, fsync it, then rename it
 // over the receipt. A failed write removes its temporary.
-cli_write_env_entry_receipt: fn(project_dir: String, stamp: String, secret_identity: String, packages: [EnvironmentSelection]) CLIError! -[FS, Env, Time]> {
+cli_write_env_entry_receipt: fn(project_dir: String, stamp: String, secret_identity: String, packages: [EnvironmentSelection]) -[FS, Env, Time]> CLIError! {
     if stamp == "" || cli_has_line_separator(stamp) || secret_identity == "" || cli_has_line_separator(secret_identity) {
         return Err(CLIError.InvalidData("environment entry identity cannot contain line separators"))
     }
@@ -107,7 +107,7 @@ cli_write_env_entry_receipt: fn(project_dir: String, stamp: String, secret_ident
 
 // `if_exists: .Refuse` is the O_EXCL create the staging
 // file needs.
-cli_publish_receipt: fn(temporary: String, path: String, text: String) CLIError! -[FS]> {
+cli_publish_receipt: fn(temporary: String, path: String, text: String) -[FS]> CLIError! {
     writer := files.create(temporary, if_exists: CreateIfExists.Refuse)
     writer.write_bytes(text.bytes())
     writer.fsync()
@@ -273,7 +273,7 @@ cli_format_env_changes: fn(previous: [(name: String, version: String)], current:
 
 // Print the ready banner, then record the receipt unless this entry reused
 // an exact one.
-cli_announce_env_ready: fn(theme: Theme, project_dir: String, roots: HangarRoots, warm_reused: Bool, elapsed: time.Duration, definition_fingerprint: String, secret_identity: String, stats: EnvReadyStats) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
+cli_announce_env_ready: fn(theme: Theme, project_dir: String, roots: HangarRoots, warm_reused: Bool, elapsed: time.Duration, definition_fingerprint: String, secret_identity: String, stats: EnvReadyStats) -[IO, FS, Env, Time, Time.Wait]> CLIError! {
     theme.status(cli_format_env_ready(elapsed, stats.cache_hit_percent()))
     if warm_reused {
         return
@@ -283,7 +283,7 @@ cli_announce_env_ready: fn(theme: Theme, project_dir: String, roots: HangarRoots
 
 // Stamp the realized selections, report what changed since the previous
 // receipt, and rewrite the receipt when anything differs.
-cli_record_env_entry_receipt: fn(theme: Theme, project_dir: String, roots: HangarRoots, definition_fingerprint: String, secret_identity: String, stats: EnvReadyStats) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
+cli_record_env_entry_receipt: fn(theme: Theme, project_dir: String, roots: HangarRoots, definition_fingerprint: String, secret_identity: String, stats: EnvReadyStats) -[IO, FS, Env, Time, Time.Wait]> CLIError! {
     current: stats.realized_set()
     selections: stats.realized_entries()
     stamp: store_environment_entry_stamp(roots, project_dir, definition_fingerprint, selections) ?? return Err(CLIError.Store(err))

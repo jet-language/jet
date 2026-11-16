@@ -218,7 +218,7 @@ impl WatchHandle {
         core.watcher.__event(self).once(scope, handler)
     }
 
-    cancel: fn(self) Never! -[IO]> { core.watcher.__cancel(self) }
+    cancel: fn(self) -[IO]> Never! { core.watcher.__cancel(self) }
 
     is_active: fn(self) -> Bool Never! { core.watcher.__is_active(self) }
 
@@ -234,7 +234,7 @@ impl WatchHandle {
 
 // WatchSet: a shared list of handles polled in order.
 impl WatchSet {
-    add: fn(self, handle: WatchHandle) Never! -[IO]> { core.watcher.__set_add(self, handle) }
+    add: fn(self, handle: WatchHandle) -[IO]> Never! { core.watcher.__set_add(self, handle) }
 
     poll: fn(self) -[IO]> [WatchEvent] Never! {
         out := [WatchEvent]{}
@@ -314,7 +314,7 @@ poll: fn(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.poll() }
 
 events: fn(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.events() }
 
-cancel: fn(handle: WatchHandle) Never! -[IO]> { handle.cancel() }
+cancel: fn(handle: WatchHandle) -[IO]> Never! { handle.cancel() }
 
 is_active: fn(handle: WatchHandle) -> Bool Never! { handle.is_active() }
 

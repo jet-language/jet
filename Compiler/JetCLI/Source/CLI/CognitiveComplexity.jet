@@ -66,7 +66,7 @@ JetCLIComplexityVisitor: struct {
     mixed: Int
     recursive: Bool
 
-    visit: fn(&self, tables: ASTTables, expression: ExprNode) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
+    visit: fn(&self, tables: ASTTables, expression: ExprNode) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never! {
         if ast_expr(tables, expression) == {
             .If(_, _, _, _, _, span, _) -> {
                 self.controls.push(span.copy())

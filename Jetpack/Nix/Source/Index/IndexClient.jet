@@ -405,7 +405,7 @@ NixIndexClient: struct {
 
     // Refuse a manifest older than the recorded highest generation, or a
     // different manifest at that same generation.
-    check_generation: fn(self, channel: String, manifest: NixIndexChannelManifest, bytes: [U8]) NixIndexError! -[FS]> {
+    check_generation: fn(self, channel: String, manifest: NixIndexChannelManifest, bytes: [U8]) -[FS]> NixIndexError! {
         found: self.load_highest_generation(channel)
         highest: found ?? return
         if manifest.generation < highest.generation || (manifest.generation == highest.generation && pkg_sha256_hex(bytes) != highest.digest) {
@@ -431,7 +431,7 @@ NixIndexClient: struct {
         Ok(Val((compressed: bytes, signature: signature)))
     }
 
-    cache_manifest_atomically: fn(self, channel: String, manifest: NixIndexCachedManifest) NixIndexError! -[FS, Env]> {
+    cache_manifest_atomically: fn(self, channel: String, manifest: NixIndexCachedManifest) -[FS, Env]> NixIndexError! {
         directory: self.manifest_dir(channel)
         nix_index_ensure_real_directory(directory)
         generation: manifest.manifest.generation
@@ -445,14 +445,14 @@ NixIndexClient: struct {
         nix_index_write_atomic(files.join(directory, "current.sig.json"), manifest.signature_bytes, true)
     }
 
-    cache_target_atomically: fn(self, key: NixIndexKey, target: NixIndexManifestTarget, bytes: [U8], signature: [U8]) NixIndexError! -[FS, Env]> {
+    cache_target_atomically: fn(self, key: NixIndexKey, target: NixIndexManifestTarget, bytes: [U8], signature: [U8]) -[FS, Env]> NixIndexError! {
         path: self.target_path(key, target.sha256)
         nix_index_ensure_real_directory(files.dirname(path))
         nix_index_write_atomic(path, bytes, false)
         nix_index_write_atomic("{path}.sig.json", signature, false)
     }
 
-    record_highest_generation_atomically: fn(self, channel: String, manifest: NixIndexChannelManifest, bytes: [U8]) NixIndexError! -[FS, Env]> {
+    record_highest_generation_atomically: fn(self, channel: String, manifest: NixIndexChannelManifest, bytes: [U8]) -[FS, Env]> NixIndexError! {
         directory: self.generation_dir(channel)
         nix_index_ensure_real_directory(directory)
         state: "{manifest.generation}\n{pkg_sha256_hex(bytes)}\n"
@@ -650,7 +650,7 @@ nix_index_path_exists: fn(path: String) -[FS]> Bool NixIndexError! {
 
 // Every existing component of `path` must be a real directory; missing ones
 // are created one at a time.
-nix_index_ensure_real_directory: fn(path: String) NixIndexError! -[FS]> {
+nix_index_ensure_real_directory: fn(path: String) -[FS]> NixIndexError! {
     current := if path.starts_with("/") -> "/" else -> ""
     segments: path.split("/").to_list()
     loop segment in segments {
@@ -706,7 +706,7 @@ nix_index_read_regular: fn(path: String, limit: Int) -[FS]> [U8] NixIndexError! 
 // Publish `bytes` at `path` through a private, fsynced, no-follow temporary:
 // a rename for replaceable state, a hard link for an immutable object (an
 // existing object must already hold exactly these bytes).
-nix_index_write_atomic: fn(path: String, bytes: [U8], replace: Bool) NixIndexError! -[FS, Env]> {
+nix_index_write_atomic: fn(path: String, bytes: [U8], replace: Bool) -[FS, Env]> NixIndexError! {
     parent: files.dirname(path)
     if parent == "" -> return Err(NixIndexError.Invalid("nix index state file has no parent"))
     nix_index_ensure_real_directory(parent)
@@ -738,7 +738,7 @@ nix_index_write_atomic: fn(path: String, bytes: [U8], replace: Bool) NixIndexErr
     }
 }
 
-nix_index_publish: fn(temporary: String, path: String, parent: String, bytes: [U8], replace: Bool) NixIndexError! -[FS]> {
+nix_index_publish: fn(temporary: String, path: String, parent: String, bytes: [U8], replace: Bool) -[FS]> NixIndexError! {
     out := files.create(temporary, if_exists: .Refuse, mode: 0o600, links: .Refuse) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
     out.write_bytes(bytes) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
     out.fsync() ?? return Err(NixIndexError.Transport("write {path}: {err}"))

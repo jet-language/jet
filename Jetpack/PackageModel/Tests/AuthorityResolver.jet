@@ -13,7 +13,7 @@ pkg_test_authority_root: fn(label: String) -[FS, Env]> String Never! {
     root
 }
 
-pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String, descendant: Bool) Never! -[FS, Env]> {
+pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String, descendant: Bool) -[FS, Env]> Never! {
     directory: resolver.checked_directory(path) ?? panic("check directory")
     if descendant -> assert(directory.handle == .Val(_)) else -> assert(directory.handle == None)
     handle: resolver.directory_handle(directory)

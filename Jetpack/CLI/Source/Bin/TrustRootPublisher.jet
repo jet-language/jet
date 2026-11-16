@@ -90,7 +90,7 @@ cli_trust_root_main: fn(args: [String]) -[FS, IO]> Int {
     }
 }
 
-cli_trust_root_run: fn(args: [String]) CLIToolError! -[FS, IO]> {
+cli_trust_root_run: fn(args: [String]) -[FS, IO]> CLIToolError! {
     request: TrustRootExportRequest.parse(args)
     output: request.output ?? return Err(CLIToolError.new("--output is required\n\n{cli_trust_root_usage()}"))
     keys := [PublicTrustKey]{}
@@ -133,7 +133,7 @@ cli_trust_root_read_public_key: fn(path: String) -[FS]> String CLIToolError! {
 
 // Publish `body` at `path` exactly once. An existing regular file with the
 // same bytes is accepted; any other existing entry is refused.
-cli_trust_root_write_immutable: fn(path: String, body: [U8]) CLIToolError! -[FS]> {
+cli_trust_root_write_immutable: fn(path: String, body: [U8]) -[FS]> CLIToolError! {
     parent: files.dirname(path)
     if parent != "" {
         files.create_dir_all(parent) ?? return Err(CLIToolError.new("create {parent}: {err}"))

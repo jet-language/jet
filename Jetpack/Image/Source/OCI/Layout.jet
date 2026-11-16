@@ -191,7 +191,7 @@ image_build_with_base: fn(spec: OCIBuildSpec, out_dir: String, ref_name: String,
 // Copy a validated local OCI layout to another local layout root. Every
 // regular file is compared before reuse; symlinks and special files are never
 // allowed. This is the local half of `--push`.
-image_copy_layout: fn(source: String, destination: String) ImageError! -[FS, Env, Rand]> {
+image_copy_layout: fn(source: String, destination: String) -[FS, Env, Rand]> ImageError! {
     _: image_load_base(source)
     if source == destination {
         return
@@ -238,7 +238,7 @@ image_copy_probe: fn(destination: String, parent: String, destination_exists: Bo
     Ok(files.join(files.canonicalize(parent), name))
 }
 
-image_publish_staged_copy: fn(source: String, stage: String, destination: String) ImageError! -[FS, Env]> {
+image_publish_staged_copy: fn(source: String, stage: String, destination: String) -[FS, Env]> ImageError! {
     image_copy_layout_tree(source, stage)
     _: image_load_base(stage)
     if (image_node(destination) ?? OCINode.Missing) != OCINode.Missing {
@@ -247,7 +247,7 @@ image_publish_staged_copy: fn(source: String, stage: String, destination: String
     files.rename(stage, destination)
 }
 
-image_copy_layout_tree: fn(source: String, destination: String) ImageError! -[FS, Env]> {
+image_copy_layout_tree: fn(source: String, destination: String) -[FS, Env]> ImageError! {
     names := [String]{}
     loop entry in files.list_dir(source) -> names.push(entry.name)
     names.sort()
@@ -316,7 +316,7 @@ image_blob_dir: fn(root: String) -> String Never! {
     files.join(files.join(root, "blobs"), "sha256")
 }
 
-image_write_blob: fn(out_dir: String, digest: String, data: [U8]) ImageError! -[FS, Env]> {
+image_write_blob: fn(out_dir: String, digest: String, data: [U8]) -[FS, Env]> ImageError! {
     path: files.join(image_blob_dir(out_dir), image_digest_hex(digest))
     existing: image_node(path) ?? OCINode.Missing
     if existing != OCINode.Missing {
@@ -335,7 +335,7 @@ image_write_blob: fn(out_dir: String, digest: String, data: [U8]) ImageError! -[
     result
 }
 
-image_link_new_blob: fn(temporary: String, path: String, digest: String, data: [U8]) ImageError! -[FS]> {
+image_link_new_blob: fn(temporary: String, path: String, digest: String, data: [U8]) -[FS]> ImageError! {
     image_write_new_file(temporary, data)
     if files.hard_link(temporary, path) == .Err(error) {
         if (image_node(path) ?? OCINode.Missing) == OCINode.Missing {
@@ -347,7 +347,7 @@ image_link_new_blob: fn(temporary: String, path: String, digest: String, data: [
     }
 }
 
-image_write_index: fn(out_dir: String, manifest_digest: String, manifest_size: Int, ref_name: String) ImageError! -[FS, Env]> {
+image_write_index: fn(out_dir: String, manifest_digest: String, manifest_size: Int, ref_name: String) -[FS, Env]> ImageError! {
     annotations := [String:Dyn]{}
     annotations["org.opencontainers.image.ref.name"] = Dyn.Text(ref_name.copy())
     descriptor := [String:Dyn]{}
@@ -679,7 +679,7 @@ image_load_optional_base: fn(base: String?) -[FS, Env]> OCIBaseLayout? ImageErro
     Ok(Val(image_load_base(root)))
 }
 
-image_remove_stale_temporary: fn(path: String) ImageError! -[FS]> {
+image_remove_stale_temporary: fn(path: String) -[FS]> ImageError! {
     node: image_node(path)
     if node == OCINode.Missing {
         return
@@ -689,14 +689,14 @@ image_remove_stale_temporary: fn(path: String) ImageError! -[FS]> {
 }
 
 // Create `path`, refusing an existing entry or a final link, and sync it.
-image_write_new_file: fn(path: String, bytes: [U8]) ImageError! -[FS]> {
+image_write_new_file: fn(path: String, bytes: [U8]) -[FS]> ImageError! {
     writer := files.create(path, if_exists: .Refuse, links: .Refuse)
     writer.write_bytes(bytes)
     writer.fsync()
 }
 
 // Publish one layout metadata file through create-new, sync, rename.
-image_write_layout_file: fn(path: String, bytes: [U8]) ImageError! -[FS, Env]> {
+image_write_layout_file: fn(path: String, bytes: [U8]) -[FS, Env]> ImageError! {
     node: image_node(path) ?? OCINode.Missing
     if node != OCINode.Missing && !node.is_file() {
         return Err(image_invalid("OCI layout metadata is not a regular file"))
@@ -709,7 +709,7 @@ image_write_layout_file: fn(path: String, bytes: [U8]) ImageError! -[FS, Env]> {
     }
 }
 
-image_replace_through: fn(temporary: String, path: String, bytes: [U8]) ImageError! -[FS]> {
+image_replace_through: fn(temporary: String, path: String, bytes: [U8]) -[FS]> ImageError! {
     image_write_new_file(temporary, bytes)
     files.rename(temporary, path)
 }
@@ -732,7 +732,7 @@ image_path_starts_with: fn(path: String, prefix: String) -> Bool Never! {
 }
 
 // Refuse `..` components and any existing symlink along `path`.
-image_validate_real_path: fn(path: String) ImageError! -[FS, Env]> {
+image_validate_real_path: fn(path: String) -[FS, Env]> ImageError! {
     current := if files.is_abs(path) -> "/" else -> sys.current_dir()
     loop component in files.split_slash(path) {
         if component == "" || component == "." -> next
@@ -744,7 +744,7 @@ image_validate_real_path: fn(path: String) ImageError! -[FS, Env]> {
     }
 }
 
-image_ensure_real_layout_directory: fn(path: String) ImageError! -[FS, Env]> {
+image_ensure_real_layout_directory: fn(path: String) -[FS, Env]> ImageError! {
     image_validate_real_path(path)
     node: image_node(path)
     if node == OCINode.Missing {

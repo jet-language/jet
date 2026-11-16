@@ -24,7 +24,9 @@
 // screens, a state that none of them opens is E2821 where an address is
 // taken of it, or it is opened or read (sema_app_route_diagnostics).
 // `.sitemap(list)` lowers to `App.__sitemap<V>`, which takes each state
-// `list` gives to its address the same way (sema_call_app_sitemap).
+// `list` gives to its address the same way (sema_call_app_sitemap), and
+// `.head(head)` to `App.__head<V>`, the page metadata of the screen whose
+// state is `V` (sema_call_app_head).
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -75,6 +77,11 @@ SEMA_APP_GO: "__go"
 
 SEMA_APP_CURRENT: "__current"
 
+// core.ui's node tree, which a view may give: its page is the tree's HTML.
+SEMA_APP_NODE_MODULE: "core.ui"
+
+SEMA_APP_NODE: "UINode"
+
 // The most bytes one call's body holds when `.api` names no `max_upload:`.
 SEMA_APP_MAX_UPLOAD: 1000000
 
@@ -96,6 +103,14 @@ sema_app_is_graph: fn(ty: Type, environment: SemaScopeEnvironment, program: Sema
     row: sema_type_resolve_nominal_row(graph, sema_call_resolved_type(ty, environment, program), environment.module_identity) ?? return false
     module_row: graph.modules[row.module_index]
     module_is_core(module_row.module_identity) && module_row.module_name == SEMA_APP_MARKER_MODULE && module_row.nominals[row.row].symbol.name == SEMA_APP_GRAPH
+}
+
+// Whether `ty`, seen from `module_identity`, is core.ui's node tree, which a
+// screen's view may give for its page.
+sema_app_is_node: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> Bool {
+    row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return false
+    module_row: graph.modules[row.module_index]
+    module_is_core(module_row.module_identity) && module_row.module_name == SEMA_APP_NODE_MODULE && module_row.nominals[row.row].symbol.name == SEMA_APP_NODE
 }
 
 // The screen state `ty` is, seen from `module_identity`; None when `ty` is no
@@ -140,8 +155,9 @@ sema_app_no_screen: fn(state: String, span: Span) -> Diagnostic {
 // `graph.screen(path, view, signed_in:)` on an `app.App`: checks `view`'s
 // state against `path` and lowers the call to `graph.__screen<V>(path, key,
 // query, signed_in, open)`, where `open` is the screen's opener
-// (`sema_app_screen_opener`).
-sema_call_app_screen: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+// (`sema_app_screen_opener`), checked with no effect bound
+// (`sema_app_screen_callback`).
+sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
     positional := [CallArg]{}
@@ -229,7 +245,8 @@ sema_call_app_screen: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
             }
         }
     }
-    // What the view shows: its result, which can't fail and derives `Encode`.
+    // What the view shows: its result, which can't fail and is a node tree
+    // or derives `Encode`.
     declared: sema_type_resolve_declared(graph, handler.function.declaration.return_type ?? Type.Named{name: "Unit"}, view_module)
     shown: if {
         declared == .Result(ok, err) -> {
@@ -241,27 +258,50 @@ sema_call_app_screen: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
         }
         else -> declared
     }
-    if sema_type_bound_satisfied(graph, shown, "Encode", view_module) == (Val(false)) {
+    node: sema_app_is_node(graph, shown, view_module)
+    if !node && sema_type_bound_satisfied(graph, shown, "Encode", view_module) == (Val(false)) {
         diagnostics.push(sema_app_screen_error(path, "`{handler.name}` gives {sema_type_show_quoted(shown)}, which doesn't derive `Encode`, and a screen shows its view's result", positional[1].span))
         return rejected
     }
+    text: if node -> [Type]{} else -> [Type]{shown}
+    opener: sema_app_screen_callback(sema_app_screen_opener(positional[1].expr, services, states[0], text, found, graph, span), sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 4, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return rejected
     query := [Expr]{}
     loop field in found.query -> query.push(sema_app_text(field, span))
+    listed: sema_app_strings(query, span)
+    queried: sema_check_expression(listed, Val(sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 2, span, environment, program, diagnostics)), environment, program, scopes, state, tail_store, context, diagnostics) ?? return rejected
     open: signed_in ?? Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}
-    opener := sema_app_arg(sema_app_screen_opener(positional[1].expr, services, states[0], shown, found, graph, span), AccessConvention.Read, span)
-    opener.convention = AccessConvention.Move
+    gated: sema_check_expression(open, Val(sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 3, span, environment, program, diagnostics)), environment, program, scopes, state, tail_store, context, diagnostics) ?? return rejected
     _: positional.pop()
     written: positional.pop() ?? panic("`.screen` was checked to have a path")
     viewed: states.pop() ?? panic("`.screen` was checked to have one state")
-    registration: [CallArg]{
-        written,
-        sema_app_arg(sema_app_text(found.key, span), AccessConvention.Read, span),
-        sema_app_arg(sema_app_strings(query, span), AccessConvention.Read, span),
-        sema_app_arg(open, AccessConvention.Read, span),
+    registration: [TCallArg]{
+        sema_call_http_static_tree_arg(sema_call_http_core_string(path, span), written),
+        sema_call_http_static_tree_arg(sema_call_http_core_string(found.key, span), sema_http_mount_arg(sema_app_text(found.key, span), span)),
+        sema_call_http_static_tree_arg(queried, sema_http_mount_arg(listed, span)),
+        sema_call_http_static_tree_arg(gated, sema_http_mount_arg(open, span)),
         opener,
     }
-    value: sema_expr_check_declared_method(receiver, receiver_value, SEMA_APP_SCREEN, SEMA_APP_SCREEN, span, [Type]{}, [Type]{viewed}, registration, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    SemaMethodSpecialCheck{handled: true, value: value}
+    candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, SEMA_APP_SCREEN, [Type]{}, [Type]{}, span, environment, program, diagnostics)
+    registered: candidates.pop() ?? panic("App.{SEMA_APP_SCREEN} is not registered")
+    result_type: sema_call_resolved_type(sema_call_signature_return(registered.signature) ?? panic("App.{SEMA_APP_SCREEN} has no result"), environment, program)
+    built: sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver_value, method: registered.method, type_args: [Type]{viewed}, args: registration}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)}
+}
+
+// A screen's opener `opener`, checked as the escaping callback type
+// `callback_type` that `App.__screen` takes, with no effect bound, as a
+// mounted method's answer is (`sema_app_mount_callback`): a view may use
+// whatever its package's authority allows, its reads and its Remotes' calls
+// among them, and the framework runs it on a request worker.
+sema_app_screen_callback: fn(opener: Expr, callback_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+    argument := sema_http_mount_arg(opener, span)
+    unbounded: if {
+        callback_type == .Fn(params, ret, _, contract, metadata, provenance) -> Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
+        else -> callback_type
+    }
+    callback: sema_check_expression_with_lambda_escapes(argument.expr, Val(unbounded), environment, program, scopes, state, tail_store, context, Val(true), diagnostics) ?? return None
+    argument.convention = AccessConvention.Move
+    Val(sema_call_http_static_tree_arg(callback, argument))
 }
 
 SEMA_APP_CACHE: "__cache"
@@ -326,7 +366,18 @@ sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg]
         return rejected
     }
     declared: handler.function.declaration.return_type ?? Type.Named{name: "Unit"}
-    returned: sema_type_resolve_declared(graph, declared, handler.function.symbol.module_identity)
+    resolved: sema_type_resolve_declared(graph, declared, handler.function.symbol.module_identity)
+    // A function that can't fail (`Never!`) gives its success type.
+    returned: if {
+        resolved == .Result(ok, err) -> {
+            if err != (Type.Named{name: "Never"}) {
+                diagnostics.push(sema_error("E2810", args[0].span, "App `sitemap` requires a function that can't fail, and `{handler.name}` can fail", "a crawler reads the sitemap whenever it likes, and no caller is there to handle a failure", shape))
+                return rejected
+            }
+            ok
+        }
+        else -> resolved
+    }
     listed: sema_app_list_element(returned) ?? {
         diagnostics.push(sema_error("E2810", args[0].span, "App `sitemap` requires a function that gives a list of screen states, and `{handler.name}` gives `{type_name(returned)}`", "the sitemap lists the address of each state the function gives", shape))
         return rejected
@@ -345,7 +396,7 @@ sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg]
         texts.push(Expr.MethodCall{receiver: Expr.Ident{name: graph_name, span: span, id: AST_NODE_GENERATED}, method: SEMA_APP_ADDRESS_TEXT, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{sema_app_arg(read, AccessConvention.Read, span)}, id: AST_NODE_GENERATED})
     }
     params: [LambdaParam]{
-        LambdaParam{name: graph_name, name_span: span, ty: Val(receiver_value.ty.copy()), ty_span: None, convention: AccessConvention.Read},
+        LambdaParam{name: graph_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read},
         LambdaParam{name: state_name, name_span: span, ty: Val(listed.copy()), ty_span: None, convention: AccessConvention.Read},
     }
     address: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: Expr.ListLit{elements: texts, span: span, id: AST_NODE_GENERATED}}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
@@ -356,6 +407,55 @@ sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg]
         sema_app_arg(address, AccessConvention.Read, span),
     }
     value: sema_expr_check_declared_method(receiver, receiver_value, SEMA_APP_SITEMAP, SEMA_APP_SITEMAP, span, [Type]{}, [Type]{listed}, registration, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: value}
+}
+
+SEMA_APP_HEAD: "__head"
+
+// `graph.head(head)` on an `app.App`: `head` is a named function that takes
+// one screen state `V` and gives the `app.Head` of its page. Lowers the call
+// to `graph.__head<V>(key, fn(graph, fields) { made }, head)`, `key` naming
+// `V` as `.screen`'s does and `made` the `V` at an address
+// (`sema_app_state_made`), as `current<V>()` makes it; the registration's
+// parameter checks that `head` gives an `app.Head`. A page asks the
+// function for the state at its address, so `V` derives `Decode`.
+sema_call_app_head: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() != 1 {
+        diagnostics.push(sema_call_arity_diagnostic("head", 1, args.len(), false, span))
+        return rejected
+    }
+    if args[0].spread || args[0].label != None {
+        diagnostics.push(sema_error("E0104", args[0].span, "`.head` takes one unlabeled argument", "`.head(head)` takes the function that gives a screen's page metadata", "pass the function's name alone"))
+        return rejected
+    }
+    handler: sema_app_named_handler("head", args[0], environment, program, scopes, diagnostics) ?? return rejected
+    shape: "`{handler.name}` must take a screen's state and give its page's metadata, as `fn(view: LandingView) -> app.Head`"
+    if handler.function.declaration.params.len() != 1 {
+        diagnostics.push(sema_error("E2810", args[0].span, "App `head` requires a function that takes one screen state, and `{handler.name}` takes {handler.function.declaration.params.len()} parameters", "a page asks the function for the metadata of the state it shows", shape))
+        return rejected
+    }
+    module_identity: handler.function.symbol.module_identity
+    viewed: sema_type_resolve_declared(graph, handler.function.declaration.params[0].ty, module_identity)
+    found: sema_app_state(graph, viewed, module_identity) ?? {
+        diagnostics.push(sema_error("E2810", args[0].span, "App `head` requires a function that takes a screen state, and `{type_name(viewed)}` is no struct declared outside Core, or has type parameters", "a screen's state is what its page shows", shape))
+        return rejected
+    }
+    if sema_type_bound_satisfied(graph, viewed, "Decode", module_identity) == (Val(false)) {
+        diagnostics.push(sema_error("E2810", args[0].span, "App `head` requires a screen state that derives `Decode`, and `{found.name}` doesn't", "a page makes the state it shows back from its address to ask its head", "derive `Decode` on `{found.name}`"))
+        return rejected
+    }
+    graph_name: "__jet_app_graph_{span.start}"
+    fields_name: "__jet_app_fields_{span.start}"
+    made: sema_app_state_made(sema_app_ident(graph_name, span), found, viewed.copy(), fields_name, graph, span)  // copy: the registration's type argument keeps the state
+    decode: sema_app_lambda([LambdaParam]{sema_app_lambda_param(graph_name, None, span), sema_app_lambda_param(fields_name, None, span)}, made, span)
+    registration: [CallArg]{
+        sema_app_arg(sema_app_text(found.key, span), AccessConvention.Read, span),
+        sema_app_arg(decode, AccessConvention.Read, span),
+        args[0].copy(),  // copy: the caller's argument list keeps the written function
+    }
+    value: sema_expr_check_declared_method(receiver, receiver_value, SEMA_APP_HEAD, SEMA_APP_HEAD, span, [Type]{}, [Type]{viewed}, registration, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
@@ -377,13 +477,15 @@ sema_app_remote_service: fn(graph: SemaRegistrationGraph, ty: Type, module_ident
 }
 
 // A screen's opener, as `App.__screen` takes it:
-// `fn(graph, fields) { graph.__opened<V>(made, fn(state: V) {
-// graph.__view_text<N>(view(…)) }) }`, where `made` is the state `V` made
-// from the address's field texts `fields` (`sema_app_state_made`), `view`
-// the written view, called with its parameters in order, each Remote one
-// the graph's Remote of its service (`services`, `App.__remote<S>`) and the
-// state one the state, and `N` what the view shows.
-sema_app_screen_opener: fn(view: Expr, services: [(ty: Type, key: String)?], state_ty: Type, shown: Type, found: SemaAppState, graph: SemaRegistrationGraph, span: Span) -> Expr Never! {
+// `fn(graph, fields) { graph.__opened<V>(made, fn(state) { shown }) }`,
+// where `made` is the state `V` made from the address's field texts
+// `fields` (`sema_app_state_made`), and `shown` the HTML of what the view
+// gives: `view(…).__html()` when it gives a node tree (`text` empty), else
+// `graph.__view_html<N>(view(…))`, `N` what it gives (`text`'s one type).
+// `view` is the written view, called with its parameters in order, each
+// Remote one the graph's Remote of its service (`services`,
+// `App.__remote<S>`) and the state one the state.
+sema_app_screen_opener: fn(view: Expr, services: [(ty: Type, key: String)?], state_ty: Type, text: [Type], found: SemaAppState, graph: SemaRegistrationGraph, span: Span) -> Expr Never! {
     graph_name: "__jet_app_graph_{span.start}"
     fields_name: "__jet_app_fields_{span.start}"
     state_name: "__jet_app_state_{span.start}"
@@ -397,8 +499,8 @@ sema_app_screen_opener: fn(view: Expr, services: [(ty: Type, key: String)?], sta
         view == .Field(base, member, _, _) -> sema_app_member_call(base, member, [Type]{}, view_args, span)
         else -> Expr.CallValue{callee: view.copy(), args: view_args, span: span, id: AST_NODE_GENERATED}  // copy: the written argument keeps its expression
     }
-    text: sema_app_member_call(sema_app_ident(graph_name, span), "__view_text", [Type]{shown}, [CallArg]{sema_app_arg(called, AccessConvention.Read, span)}, span)
-    run: sema_app_lambda([LambdaParam]{sema_app_lambda_param(state_name, Val(state_ty.copy()), span)}, text, span)
+    shown: if text.len() == 0 -> sema_app_member_call(called, "__html", [Type]{}, [CallArg]{}, span) else -> sema_app_member_call(sema_app_ident(graph_name, span), "__view_html", text, [CallArg]{sema_app_arg(called, AccessConvention.Read, span)}, span)
+    run: sema_app_lambda([LambdaParam]{sema_app_lambda_param(state_name, None, span)}, shown, span)
     made: sema_app_state_made(sema_app_ident(graph_name, span), found, state_ty.copy(), fields_name, graph, span)
     opened: sema_app_member_call(sema_app_ident(graph_name, span), "__opened", [Type]{state_ty}, [CallArg]{sema_app_arg(made, AccessConvention.Read, span), sema_app_arg(run, AccessConvention.Read, span)}, span)
     sema_app_lambda([LambdaParam]{sema_app_lambda_param(graph_name, None, span), sema_app_lambda_param(fields_name, None, span)}, opened, span)
@@ -489,14 +591,15 @@ sema_call_app_api: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], 
 }
 
 // A method of the app graph the compiler lowers: `.screen`, `.api`,
-// `.mount` of a service, `.cache<V>` and `.sitemap`.
+// `.mount` of a service, `.cache<V>`, `.sitemap` and `.head`.
 sema_call_app_graph_method: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method == {
-        "screen" -> sema_call_app_screen(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        "screen" -> sema_call_app_screen(receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "api" -> sema_call_app_api(receiver, receiver_value, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "mount" -> sema_call_http_mount(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "cache" -> sema_call_app_cache(receiver, receiver_value, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "sitemap" -> sema_call_app_sitemap(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        "head" -> sema_call_app_head(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         else -> SemaMethodSpecialCheck{handled: false, value: None}
     }
 }

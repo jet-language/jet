@@ -101,7 +101,7 @@ ScriptRegistryProvider: struct {
     kind: ScriptRegistryKind
 
     // A locked realization must still match `authority.providers`.
-    validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
+    validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> ProviderError! {
         project: ctx.project_dir ?? return
         locked: pkg_lock_registry_realization(project, self.kind.label(), spec.raw) ?? return
         current: provider_script_registry_cache_authority(self.kind, ctx)
@@ -366,7 +366,7 @@ provider_script_fetch_candidates: fn(kind: ScriptRegistryKind, authority: Regist
 
 // ── Installation ──
 
-provider_script_install_artifact: fn(kind: ScriptRegistryKind, artifact: RegistryArtifact, out: String, scratch: String) RegistryError! -[FS, Exec, Time.Wait]> {
+provider_script_install_artifact: fn(kind: ScriptRegistryKind, artifact: RegistryArtifact, out: String, scratch: String) -[FS, Exec, Time.Wait]> RegistryError! {
     if kind.family == {
         .RubyGems -> { provider_rubygems_install(artifact, out, scratch) }
         .Cpan -> { provider_cpan_install(artifact, out, scratch) }
@@ -377,7 +377,7 @@ provider_script_install_artifact: fn(kind: ScriptRegistryKind, artifact: Registr
     }
 }
 
-provider_script_write_runtime_projection: fn(kind: ScriptRegistryKind, artifacts: [RegistryArtifact], out: String) RegistryError! -[FS, Env]> {
+provider_script_write_runtime_projection: fn(kind: ScriptRegistryKind, artifacts: [RegistryArtifact], out: String) -[FS, Env]> RegistryError! {
     if kind.family == {
         .RubyGems -> { provider_rubygems_write_projection(artifacts, out) }
         .Cpan -> {
@@ -392,7 +392,7 @@ provider_script_write_runtime_projection: fn(kind: ScriptRegistryKind, artifacts
 
 // Refuse links, special files, forbidden names, and native-code suffixes
 // anywhere below an installed root.
-provider_script_reject_tree_features: fn(kind: ScriptRegistryKind, root: String, forbidden: [String]) RegistryError! -[FS]> {
+provider_script_reject_tree_features: fn(kind: ScriptRegistryKind, root: String, forbidden: [String]) -[FS]> RegistryError! {
     entries: files.list_dir(root) ?? return Err(RegistryError.Reason("could not inspect installed source: {err}"))
     markers := forbidden
     loop suffix in kind.native_suffixes -> markers.push(suffix.copy())
@@ -418,7 +418,7 @@ provider_script_reject_tree_features: fn(kind: ScriptRegistryKind, root: String,
 
 // Copy a tree of regular files and directories; links and special files are
 // refused.
-provider_script_copy_tree: fn(source: String, destination: String) RegistryError! -[FS]> {
+provider_script_copy_tree: fn(source: String, destination: String) -[FS]> RegistryError! {
     provider_registry_create_dir_all(destination, "could not create installed package tree")
     entries: files.list_dir(source) ?? return Err(RegistryError.Reason("could not read package tree: {err}"))
     loop entry in entries {

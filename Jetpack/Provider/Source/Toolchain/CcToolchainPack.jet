@@ -305,7 +305,7 @@ provider_cc_pack_fetch: fn(url: String, asset: CcPackAsset, release: String?, of
 
 // Download the pack through the native release client. The file is scratch
 // that install verifies and deletes, so it is never flushed.
-provider_cc_pack_download: fn(url: String, destination: String, asset: CcPackAsset) CcToolchainError! -[FS, Env, Net, Time.Wait]> {
+provider_cc_pack_download: fn(url: String, destination: String, asset: CcPackAsset) -[FS, Env, Net, Time.Wait]> CcToolchainError! {
     response: provider_native_get_within(url, "C toolchain pack", CC_PACK_FETCH_TIMEOUT_MS) ?? return Err(CcToolchainError.Invalid(err.message()))
     output := files.create(destination, if_exists: .Refuse) ?? return Err(CcToolchainError.Invalid("create C toolchain pack staging file: {err}"))
     total := 0
@@ -321,7 +321,7 @@ provider_cc_pack_download: fn(url: String, destination: String, asset: CcPackAss
 
 // The open archive must hash to the embedded SHA-256 within the expected
 // size; it is then rewound so the same handle is unpacked.
-provider_cc_pack_verify_archive: fn(file: &files.FileReader, asset: CcPackAsset, origin: String) CcToolchainError! -[FS]> {
+provider_cc_pack_verify_archive: fn(file: &files.FileReader, asset: CcPackAsset, origin: String) -[FS]> CcToolchainError! {
     hasher := StreamingSHA256.new()
     total := 0
     loop {
@@ -431,7 +431,7 @@ provider_cc_pack_digests: fn(staging: String) -[FS, Env]> CcPackDigests CcToolch
 }
 
 // Every regular file below `path`, with its size.
-provider_cc_pack_collect_files: fn(path: String, paths: &[String], sizes: &[Int]) CcToolchainError! -[FS]> {
+provider_cc_pack_collect_files: fn(path: String, paths: &[String], sizes: &[Int]) -[FS]> CcToolchainError! {
     entries: files.list_dir(path) ?? return Err(CcToolchainError.Invalid("list C toolchain pack directory `{path}`: {err}"))
     loop entry in entries {
         info: files.stat(entry.path) ?? return Err(CcToolchainError.Invalid("inspect C toolchain pack entry `{entry.path}`: {err}"))
@@ -566,7 +566,7 @@ CcPackTarStream: struct {
     }
 
     // Drop the next `count` bytes.
-    skip: fn(&self, count: Int) CcToolchainError! -[FS.Read]> {
+    skip: fn(&self, count: Int) -[FS.Read]> CcToolchainError! {
         remaining := count
         loop remaining > 0 {
             if !(self.fill(1)) {
@@ -580,7 +580,7 @@ CcPackTarStream: struct {
     }
 
     // Write the next `count` bytes to a new file at `path`.
-    copy_to: fn(&self, path: String, count: Int) CcToolchainError! -[FS]> {
+    copy_to: fn(&self, path: String, count: Int) -[FS]> CcToolchainError! {
         output := files.create(path, if_exists: .Refuse) ?? return Err(CcToolchainError.Invalid("create `{path}`: {err}"))
         remaining := count
         loop remaining > 0 {
@@ -598,7 +598,7 @@ CcPackTarStream: struct {
 
 // Unpack the regular files and directories of a pack archive below
 // `destination`, within the entry and byte limits.
-provider_cc_pack_untar: fn(file: &&files.FileReader, destination: String) CcToolchainError! -[FS]> {
+provider_cc_pack_untar: fn(file: &&files.FileReader, destination: String) -[FS]> CcToolchainError! {
     stream := CcPackTarStream{reader: zstd.reader(file), buffer: [U8]{}, at: 0}
     entries := 0
     unpacked := 0
@@ -783,7 +783,7 @@ provider_cc_pack_descriptor: fn(entry_id: String, root: String, pack_root: Strin
 
 // Copy a pack subtree into a writable staging tree, refusing symlinks and
 // special files.
-provider_cc_pack_copy_tree: fn(source: String, destination: String) CcToolchainError! -[FS]> {
+provider_cc_pack_copy_tree: fn(source: String, destination: String) -[FS]> CcToolchainError! {
     metadata: files.stat(source) ?? return Err(CcToolchainError.Invalid("read C toolchain pack `{source}`: {err}"))
     if metadata.is_symlink {
         return Err(CcToolchainError.Invalid("C toolchain pack contains symlink `{source}`"))
@@ -806,7 +806,7 @@ provider_cc_pack_copy_tree: fn(source: String, destination: String) CcToolchainE
 // Build musl's libc.a and crt objects for `target` into `usr/lib` with the
 // pack's own clang and llvm-ar; the other libc archives are empty, as in a
 // musl install. Objects are compiled in `scratch`.
-provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: String, scratch: String) CcToolchainError! -[IO, FS, Env, Exec, Time.Wait]> {
+provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: String, scratch: String) -[IO, FS, Env, Exec, Time.Wait]> CcToolchainError! {
     term.eprint("building musl for {target.short} (first time only)")
     source_root: files.join(tools.root, "musl/src")
     internal: files.join(scratch, "internal")

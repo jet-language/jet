@@ -530,7 +530,7 @@ CcResponseExpansion: struct {
         Ok(expansion.expanded)
     }
 
-    expand: fn(&self, args: [String], base_dir: String, scope_roots: [String], depth: Int) CLIToolError! -[FS]> {
+    expand: fn(&self, args: [String], base_dir: String, scope_roots: [String], depth: Int) -[FS]> CLIToolError! {
         if depth > CC_MAX_RESPONSE_DEPTH {
             return Err(CLIToolError.new("response-file nesting exceeds {CC_MAX_RESPONSE_DEPTH} levels"))
         }
@@ -761,7 +761,7 @@ cli_cc_absolutize_lexically: fn(base: String, raw: String, label: String) -> Str
 
 // Refuse a path whose existing components traverse a symlink below
 // `scope_root`; the walk stops at the first missing component.
-cli_cc_reject_existing_symlinks: fn(scope_root: String, path: String, label: String) CLIToolError! -[FS]> {
+cli_cc_reject_existing_symlinks: fn(scope_root: String, path: String, label: String) -[FS]> CLIToolError! {
     relative: cli_cc_path_strip_prefix(path, scope_root) ?? return Err(CLIToolError.new("{label} path {path} escapes its scope"))
     current := scope_root
     loop part in relative {
@@ -793,7 +793,7 @@ cli_cc_canonical_real_directory: fn(path: String, label: String) -[FS, Env]> Str
 
 // Refuse a path with a `..` component or an existing symlink component; the
 // walk stops at the first missing component.
-cli_cc_reject_symlinks_in_path: fn(path: String, label: String) CLIToolError! -[FS]> {
+cli_cc_reject_symlinks_in_path: fn(path: String, label: String) -[FS]> CLIToolError! {
     rooted: path.starts_with("/")
     current := [String]{}
     loop part in path.split("/") {

@@ -184,15 +184,23 @@ path_case_hump_end: fn(bytes: [U8], at: Int) -> Int {
     run: uppers - at
     if run >= 2 {
         digits: path_case_digits_end(bytes, uppers)
-        if digits < count && (Int{bytes[digits]}) == 115 && (digits + 1 >= count || !path_case_lower(bytes[digits + 1])) -> return digits + 1
+        if digits < count && (Int{bytes[digits]}) == 115 && (digits + 1 >= count || !path_case_lower(bytes[digits + 1])) {
+            return digits + 1
+        }
     }
     if run >= 1 {
-        if uppers >= count || !path_case_lower(bytes[uppers]) -> return path_case_digits_end(bytes, uppers)
+        if uppers >= count || !path_case_lower(bytes[uppers]) {
+            return path_case_digits_end(bytes, uppers)
+        }
         if run >= 2 -> return uppers - 1
         return path_case_digits_end(bytes, path_case_lowers_end(bytes, at + 1))
     }
-    if path_case_lower(bytes[at]) -> return path_case_digits_end(bytes, path_case_lowers_end(bytes, at))
-    if path_case_digit(bytes[at]) -> return path_case_lowers_end(bytes, path_case_digits_end(bytes, at))
+    if path_case_lower(bytes[at]) {
+        return path_case_digits_end(bytes, path_case_lowers_end(bytes, at))
+    }
+    if path_case_digit(bytes[at]) {
+        return path_case_lowers_end(bytes, path_case_digits_end(bytes, at))
+    }
     if (Int{bytes[at]}) == 95 && at + 1 < count && path_case_digit(bytes[at + 1]) -> return at + 1
     at
 }
@@ -218,9 +226,7 @@ path_case_words: fn(stem: String) -> [String] {
             if found && at > 0 && path_case_digit(bytes[at - 1]) && path_case_lower(bytes[at]) {
                 last: words.len() - 1
                 words[last] = "{words[last]}{hump}"
-            } else {
-                words.push(hump)
-            }
+            } else { words.push(hump) }
             found = true
             at = end
         }
@@ -259,7 +265,9 @@ path_case_title_word: fn(word: String, lexicon: PathCaseLexicon) -> String {
     digits: policy_slice_bytes(lower, letters, bytes.len())
     if lexicon.acronyms.get(head) == .Val(acronym) -> return "{acronym}{digits}"
     if letters > 2 && head.ends_with("s") {
-        if lexicon.acronyms.get(policy_slice_bytes(head, 0, letters - 1)) == .Val(acronym) -> return "{acronym}s{digits}"
+        if lexicon.acronyms.get(policy_slice_bytes(head, 0, letters - 1)) == .Val(acronym) {
+            return "{acronym}s{digits}"
+        }
     }
     "{policy_slice_bytes(lower, 0, 1).to_upper()}{policy_slice_bytes(lower, 1, bytes.len())}"
 }
@@ -368,14 +376,18 @@ path_case_depth: fn(path: String) -> Int { path.split("/").to_list().len() }
 
 path_case_data: fn(path: String) -> Bool {
     loop row in PATH_CASE_DATA {
-        if path_case_under(path, row.pattern) && path_case_depth(path) > path_case_depth(row.pattern) -> return true
+        if path_case_under(path, row.pattern) && path_case_depth(path) > path_case_depth(row.pattern) {
+            return true
+        }
     }
     false
 }
 
 path_case_named: fn(path: String) -> Bool {
     loop row in PATH_CASE_NAMED {
-        if path_case_under(path, row.pattern) && path_case_depth(path) == path_case_depth(row.pattern) -> return true
+        if path_case_under(path, row.pattern) && path_case_depth(path) == path_case_depth(row.pattern) {
+            return true
+        }
     }
     false
 }
@@ -422,7 +434,9 @@ path_case_fixture_folder: fn(segments: [String]) -> Bool {
 
 path_case_fixtures_tree: fn(segments: [String]) -> Bool {
     loop index in 0..<segments.len() - 1 {
-        if (segments[index] == "Fixtures" || segments[index] == "fixtures") && index + 1 < segments.len() - 1 -> return true
+        if (segments[index] == "Fixtures" || segments[index] == "fixtures") && index + 1 < segments.len() - 1 {
+            return true
+        }
     }
     false
 }
@@ -455,7 +469,9 @@ path_case_class_keeps: fn(kind: PathCaseClass, folder: String, segments: [String
 // Whether a folder keeps its spelling, by name, by place or by class.
 path_case_kept: fn(folder: String, facts: PathCaseFacts) -> Bool {
     segments: folder.split("/").to_list()
-    if path_case_tool_owned(segments) || path_case_data(folder) || path_case_kept_tree(folder) || path_case_named(folder) -> return true
+    if path_case_tool_owned(segments) || path_case_data(folder) || path_case_kept_tree(folder) || path_case_named(folder) {
+        return true
+    }
     loop row in PATH_CASE_CLASSES {
         if path_case_class_keeps(row.kind, folder, segments, facts) -> return true
     }
@@ -494,7 +510,9 @@ path_case_fixture_root: fn(line: String) -> String? {
     if halves.len() != 2 -> return None
     value := halves[1].trim().copy()
     if value == "" || value.contains(" ") || value.contains("\t") -> return None
-    if value.starts_with("\"") && value.ends_with("\"") && value.bytes().len() >= 2 -> value = policy_slice_bytes(value, 1, value.bytes().len() - 1)
+    if value.starts_with("\"") && value.ends_with("\"") && value.bytes().len() >= 2 {
+        value = policy_slice_bytes(value, 1, value.bytes().len() - 1)
+    }
     Val(path_case_normal("{path_case_parent(halves[0])}/{value}"))
 }
 
@@ -521,7 +539,9 @@ path_case_facts: fn(tracked: [String], fixture_roots: [String]) -> PathCaseFacts
         if segments.len() < 2 -> next
         leaf: segments[segments.len() - 1]
         parent: path_case_parent(path)
-        if leaf == "run.jet" || leaf == "package.jet" || leaf == "workspace.jet" -> projects[parent] = true
+        if leaf == "run.jet" || leaf == "package.jet" || leaf == "workspace.jet" {
+            projects[parent] = true
+        }
         if leaf == "module.jet" -> modules[parent] = true
         if leaf == "Cargo.toml" -> crates[parent] = true
         if !path.ends_with(".jet") -> next
@@ -567,10 +587,14 @@ path_case_findings: fn(tracked: [String], fixture_roots: [String], lexicon: Path
         }
         if facts.modules.get(folder) != None {
             // `name: module` loads `name/module.jet`, and a module name is snake_case.
-            if !path_case_snake(name) -> findings.push("{folder}: directory module `{name}` is named like its `name: module` declaration, in snake_case")
+            if !path_case_snake(name) {
+                findings.push("{folder}: directory module `{name}` is named like its `name: module` declaration, in snake_case")
+            }
             next
         }
-        if path_case_folder_problem(name, lexicon) == .Val(problem) -> findings.push("{folder}: {problem}")
+        if path_case_folder_problem(name, lexicon) == .Val(problem) {
+            findings.push("{folder}: {problem}")
+        }
     }
     loop path in tracked {
         segments: path.split("/").to_list()
@@ -578,7 +602,9 @@ path_case_findings: fn(tracked: [String], fixture_roots: [String], lexicon: Path
         stem: segments[segments.len() - 1].split(".").to_list()[0]
         if !path_case_pascal(stem) -> next
         respelled: path_case_title(stem, lexicon)
-        if respelled != stem -> findings.push("{path}: `{stem}` writes an acronym in lowercase; write `{respelled}`")
+        if respelled != stem {
+            findings.push("{path}: `{stem}` writes an acronym in lowercase; write `{respelled}`")
+        }
     }
     findings.sort()
     findings
@@ -687,7 +713,9 @@ path_case_matches_any: fn(paths: [String], pattern: String) -> Bool {
 
 path_case_matches_below: fn(paths: [String], pattern: String) -> Bool {
     loop path in paths {
-        if path_case_under(path, pattern) && path_case_depth(path) > path_case_depth(pattern) -> return true
+        if path_case_under(path, pattern) && path_case_depth(path) > path_case_depth(pattern) {
+            return true
+        }
     }
     false
 }

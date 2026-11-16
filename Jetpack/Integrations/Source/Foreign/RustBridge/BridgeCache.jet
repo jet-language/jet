@@ -158,7 +158,7 @@ pkg_ffi_sorted_unique: fn(values: [String]) -> [String] Never! {
 
 // Static archives named by `-L native=<dir>` / `-l static=<name>` rustflags
 // enter the identity by exact bytes; an absent archive is recorded as such.
-pkg_ffi_identity_static_link_inputs: fn(identity: &ForeignIdentityBuilder, args: [String]) Never! -[FS]> {
+pkg_ffi_identity_static_link_inputs: fn(identity: &ForeignIdentityBuilder, args: [String]) -[FS]> Never! {
     dirs := [String]{}
     static_libs := [String]{}
     loop index in 1..<args.len() {
@@ -270,7 +270,7 @@ pkg_ffi_bridge_artifact_paths: fn(rlib: String, target: String, crate_name: Stri
 
 // A missing or invalid manifest must not let Cargo bless an old or corrupt
 // output in place: remove only this exact key's link products.
-pkg_ffi_invalidate_bridge_artifacts: fn(rlib: String, target: String, crate_name: String) Never! -[FS]> {
+pkg_ffi_invalidate_bridge_artifacts: fn(rlib: String, target: String, crate_name: String) -[FS]> Never! {
     stem: "lib{crate_name}"
     paths: [String]{rlib, files.join(target, "{stem}.so"), files.join(target, "{stem}.dylib"), files.join(target, "{crate_name}.dll"), files.join(target, "{crate_name}.wasm"), pkg_ffi_bridge_manifest_path(target, crate_name), pkg_ffi_bridge_provenance_path(target, crate_name)}
     loop path in paths -> files.remove(path).drop("an absent artifact is already invalidated")
@@ -396,7 +396,7 @@ pkg_ffi_bridge_cache_verified: fn(target: String, crate_name: String, cache_iden
 }
 
 // Publish the artifact digest manifest: stage beside the target, rename.
-pkg_ffi_publish_bridge_manifest: fn(target: String, crate_name: String, artifacts: [String]) ForeignBridgeError! -[FS, Env]> {
+pkg_ffi_publish_bridge_manifest: fn(target: String, crate_name: String, artifacts: [String]) -[FS, Env]> ForeignBridgeError! {
     manifest := "{FFI_BRIDGE_ARTIFACTS_SCHEMA}\n"
     loop path in artifacts {
         relative: pkg_ffi_artifact_relative_path(target, path) ?? return Err(pkg_bridge_error("FFI artifact escapes the shared target dir: {path}"))
@@ -486,7 +486,7 @@ pkg_ffi_boundary_entry_identity: fn(entries: [ExternEntry], language: ForeignLan
 
 // Publish the bridge provenance sidecar: build receipt, descriptors, one
 // boundary row per language, handle facts, link closure, artifact digests.
-pkg_ffi_publish_bridge_provenance: fn(path: String, cache_identity: String, selected_target: String, crate_name: String, target: String, source: String, receipt: CargoBridgeReceipt, entries: [ExternEntry], handle_facts: [FFIHandleFact], link_closure: FFILinkClosure, artifacts: [String], rust_toolchain: String) ForeignBridgeError! -[FS, Env]> {
+pkg_ffi_publish_bridge_provenance: fn(path: String, cache_identity: String, selected_target: String, crate_name: String, target: String, source: String, receipt: CargoBridgeReceipt, entries: [ExternEntry], handle_facts: [FFIHandleFact], link_closure: FFILinkClosure, artifacts: [String], rust_toolchain: String) -[FS, Env]> ForeignBridgeError! {
     artifact_digests := [(name: String, digest: String)]{}
     loop artifact in artifacts {
         relative: pkg_ffi_artifact_relative_path(target, artifact) ?? return Err(pkg_bridge_error("FFI artifact escapes the shared target dir: {artifact}"))
@@ -567,7 +567,7 @@ CargoLockPackage: struct {
 }
 
 // Record the registry crates the bridge resolved into the project lock.
-pkg_ffi_sync_bridge_lock: fn(project_root: String?, cache_root: String, bridge_identity: String, rlib: String) ForeignBridgeError! -[FS, Env, Exec, Time, Time.Wait]> {
+pkg_ffi_sync_bridge_lock: fn(project_root: String?, cache_root: String, bridge_identity: String, rlib: String) -[FS, Env, Exec, Time, Time.Wait]> ForeignBridgeError! {
     root: project_root ?? return
     if !files.is_file(files.join(root, PACKAGE_FILE)) {
         return

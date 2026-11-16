@@ -200,11 +200,11 @@ JSONReader: struct<R: Reader> {
 JSONWriter: struct<W: Writer> {
     output: stream.JSONPush<W>
 
-    write: fn(&self, event: &&DataEvent) EncodingError! -[IO]> { self.output.write(event) }
+    write: fn(&self, event: &&DataEvent) -[IO]> EncodingError! { self.output.write(event) }
 
-    flush: fn(&self) EncodingError! -[IO]> { self.output.flush() }
+    flush: fn(&self) -[IO]> EncodingError! { self.output.flush() }
 
-    finish: fn(&self) EncodingError! -[IO]> { self.output.finish() }
+    finish: fn(&self) -[IO]> EncodingError! { self.output.finish() }
 }
 
 writer: fn<W: Writer>(target: &&W, limits: EncodingLimits{EncodingLimits.safe()}, canonical: Bool{false}) -> JSONWriter<W> EncodingError! {

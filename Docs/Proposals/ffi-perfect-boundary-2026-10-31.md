@@ -454,7 +454,7 @@ PROPOSED in ballot D-FFI-CALLBACK3, which amends D-CABI-CALLBACK1.
 Today the same program is rejected, from `Tests/UI/cffi_callback_capture.stderr`:
 
 ```text
-Error [jet.NonCAbiType]: `fn(I32) I32 -[]>` is not a C-compatible type for a foreign function parameter or return.
+Error [jet.NonCAbiType]: `fn(I32) -[]> I32` is not a C-compatible type for a foreign function parameter or return.
  Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
 ```

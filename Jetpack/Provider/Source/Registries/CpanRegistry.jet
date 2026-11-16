@@ -98,7 +98,7 @@ provider_cpan_parse_release: fn(repository: String, value: Dyn) -> RegistryPacka
 
 // A pure-Perl distribution: its `lib` tree copied into the output's `lib`,
 // with no XS, C, or native objects anywhere in the unpacked source.
-provider_cpan_install: fn(artifact: RegistryArtifact, out: String, scratch: String) RegistryError! -[FS]> {
+provider_cpan_install: fn(artifact: RegistryArtifact, out: String, scratch: String) -[FS]> RegistryError! {
     provider_registry_validate_tar_archive(artifact.path, true)
     unpack: files.join(scratch, "cpan-{provider_script_safe_filename(artifact.package.name)}")
     provider_registry_create_dir_all(unpack, "could not create CPAN scratch")

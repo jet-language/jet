@@ -1,0 +1,127 @@
+// Two clients of one board server: the phone and the desk. The phone saves
+// two tasks. Then the test host cuts it off (`app.disconnect`). On a device
+// that queues (`app.new(…).offline(.Queue)`), its two renames wait in the
+// queue (`app.pending()`), and each call succeeds at once. The desk, still
+// connected, removes the second task. Once the test restores the phone's
+// link (`app.reconnect`), the queue sends the renames in order. The server
+// commits the first and refuses the second, whose task is gone, so the phone
+// rolls that write back: it leaves the queue, and the server keeps no trace
+// of it.
+use {
+    app
+    db: core.db
+    net: core.net
+    web: core.web
+}
+
+#Codable
+Task: struct {
+    id: Int
+    title: String
+}
+
+#Error
+BoardError: enum {
+    Missing(Int)
+    Failed(String)
+    Unreachable(String)
+}
+
+impl app.CallError -> BoardError {
+    if self == {
+        .Unreachable(why) -> BoardError.Unreachable(why)
+        .Invalid(errors) -> BoardError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> BoardError.Unreachable("signed out")
+        .UpdateRequired -> BoardError.Unreachable("update required")
+    }
+}
+
+tasks_in: fn(store: db.Store) -> db.Table<Int, Task> {
+    store.table("tasks", key: fn(task: Task) { task.id })
+}
+
+Board: struct {
+    store: db.Store
+
+    // Saves task `id`, titled `title`.
+    #App.Public save: fn(self, id: Int, title: String) BoardError! {
+        _: tasks_in(self.store).put(Task{id: id, title: title}) ?? return Err(BoardError.Failed(err.message()))
+        Ok()
+    }
+
+    // Renames task `id`; `.Missing` when no task `id` is saved.
+    #App.Public rename: fn(self, id: Int, title: String) BoardError! {
+        tasks: tasks_in(self.store)
+        if tasks.get(id) == {
+            .Val(_) -> {}
+            .None -> return Err(BoardError.Missing(id))
+            .Err(failure) -> return Err(BoardError.Failed(failure.message()))
+        }
+        _: tasks.put(Task{id: id, title: title}) ?? return Err(BoardError.Failed(err.message()))
+        Ok()
+    }
+
+    // Removes task `id`.
+    #App.Public remove: fn(self, id: Int) BoardError! {
+        if tasks_in(self.store).delete(id) == .Err(failure) {
+            return Err(BoardError.Failed(failure.message()))
+        }
+        Ok()
+    }
+
+    // The title of task `id`, or `none`.
+    #App.Public title: fn(self, id: Int) -> String BoardError! {
+        if tasks_in(self.store).get(id) == {
+            .Val(task) -> Ok(task.title)
+            .None -> Ok("none")
+            .Err(failure) -> Err(BoardError.Failed(failure.message()))
+        }
+    }
+}
+
+// What a failed call gave, as text.
+said: fn(failure: BoardError) -> String {
+    if failure == {
+        .Missing(id) -> "task {id} is missing"
+        .Failed(why) -> "failed: {why}"
+        .Unreachable(why) -> "unreachable: {why}"
+    }
+}
+
+// The titles of tasks 1 and 2, as `board` reads them.
+titles: fn(board: app.Remote<Board>) -> String {
+    first: board.title(1) ?? return said(err)
+    second: board.title(2) ?? return said(err)
+    "{first}, {second}"
+}
+
+// The calls the server answers: the phone's two saves, the desk's removal
+// and its two reads, the phone's two queued renames, and the desk's two
+// reads after.
+SENDS: 9
+
+run: fn() {
+    _: app.new("Crew").offline(.Queue)
+    store: db.open_memory()
+    served: web.app().mount("/api", Board{store: store.copy()})
+    server := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address: "http://{server.local_addr()}/api"
+    serving: task {
+        loop _ in 0..<SENDS { served.serve_once(server) ?? panic("serve") }
+    }
+    serving.detach()
+    phone: app.remote_at<Board>(address, client: "phone")
+    desk: app.remote_at<Board>(address, client: "desk")
+    if phone.save(1, "plan") == .Err(failure) -> print("save 1: {said(failure)}")
+    if phone.save(2, "ship") == .Err(failure) -> print("save 2: {said(failure)}")
+    print("phone saved, pending: {app.pending()}")
+    app.disconnect("phone")
+    if phone.rename(1, "plan v2") == .Err(failure) -> print("rename 1: {said(failure)}")
+    if phone.rename(2, "ship it") == .Err(failure) -> print("rename 2: {said(failure)}")
+    print("phone cut off, pending: {app.pending()}")
+    if desk.remove(2) == .Err(failure) -> print("remove 2: {said(failure)}")
+    print("desk reads: {titles(desk)}")
+    app.reconnect("phone")
+    print("phone reconnected, pending: {app.pending()}")
+    print("desk reads: {titles(desk)}")
+}

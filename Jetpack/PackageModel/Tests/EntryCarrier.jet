@@ -31,7 +31,7 @@ pkg_entry_test_root: fn(label: String) -[FS, Env]> String Never! {
     root
 }
 
-pkg_entry_test_write: fn(root: String, relative: String, text: String) Never! -[FS]> {
+pkg_entry_test_write: fn(root: String, relative: String, text: String) -[FS]> Never! {
     path: files.join(root, relative)
     files.create_dir_all(pkg_authority_effective_root(pkg_path_parent(path))) ?? panic("create fixture parent")
     files.write(path, text) ?? panic("write carrier fixture")

@@ -117,13 +117,13 @@ Stdout: struct {
     fd: Int
 
     impl Writer {
-        write_bytes: fn(&self, bytes: [U8]) IOError! -[IO]> { stdio_bytes(bytes, false) }
+        write_bytes: fn(&self, bytes: [U8]) -[IO]> IOError! { stdio_bytes(bytes, false) }
 
-        flush: fn(&self) IOError! -[IO]> { stdio_flush(false) }
+        flush: fn(&self) -[IO]> IOError! { stdio_flush(false) }
 
-        write: fn(&self, text: String) IOError! -[IO]> { stdio_write(text, false, false) }
+        write: fn(&self, text: String) -[IO]> IOError! { stdio_write(text, false, false) }
 
-        write_line: fn(&self, text: String) IOError! -[IO]> { stdio_write(text, true, false) }
+        write_line: fn(&self, text: String) -[IO]> IOError! { stdio_write(text, true, false) }
     }
 
     // A pure query: the read receiver lets a temporary ask (`stdout().is_tty()`).
@@ -135,13 +135,13 @@ Stderr: struct {
     fd: Int
 
     impl Writer {
-        write_bytes: fn(&self, bytes: [U8]) IOError! -[IO]> { stdio_bytes(bytes, true) }
+        write_bytes: fn(&self, bytes: [U8]) -[IO]> IOError! { stdio_bytes(bytes, true) }
 
-        flush: fn(&self) IOError! -[IO]> { stdio_flush(true) }
+        flush: fn(&self) -[IO]> IOError! { stdio_flush(true) }
 
-        write: fn(&self, text: String) IOError! -[IO]> { stdio_write(text, false, true) }
+        write: fn(&self, text: String) -[IO]> IOError! { stdio_write(text, false, true) }
 
-        write_line: fn(&self, text: String) IOError! -[IO]> { stdio_write(text, true, true) }
+        write_line: fn(&self, text: String) -[IO]> IOError! { stdio_write(text, true, true) }
     }
 
     is_tty: fn(self) -[IO]> Bool Never! { rt.stderr_terminal() }
@@ -234,7 +234,7 @@ __print_separator: fn() -> String Never! { context.print.list_separator }
 // Whether `print` shows the labels of a struct or variant it renders.
 __print_field_names: fn() -> Bool Never! { context.print.field_names }
 
-print: fn(text: String) Never! -[IO, Time.Wait]> {
+print: fn(text: String) -[IO, Time.Wait]> Never! {
     out := stdout()
     out.write_line(text).drop("stdout write")
 }
@@ -242,7 +242,7 @@ print: fn(text: String) Never! -[IO, Time.Wait]> {
 // The write's failure is discarded, so eprint skips stdio_write's IOError:
 // the same IO.Write checkpoint, then the same raw write, whose cause text is
 // dropped unread.
-eprint: fn(text: String) Never! -[IO, Time.Wait]> {
+eprint: fn(text: String) -[IO, Time.Wait]> Never! {
     if rt.stdio_fault("IO.Write") {
         return
     }
@@ -318,7 +318,7 @@ priv cursor_read: fn(cursor: &Reader, limit: Int) -> [U8] IOError! {
 
 binread: fn(path: String) -[FS, IO, Time.Wait]> [U8] IOError! { core.files.read_bytes(path) }
 
-binwrite: fn(path: String, bytes: [U8]) IOError! -[FS, IO, Time.Wait]> {
+binwrite: fn(path: String, bytes: [U8]) -[FS, IO, Time.Wait]> IOError! {
     core.files.write_bytes(path, bytes)
 }
 
@@ -361,7 +361,7 @@ __input_lines: fn() -[Exec.Args]> __InputLines Never! {
 // named, the lines of `lines` (standard input) are printed changed. A file
 // that cannot be read or replaced stops the edit with its IOError; the files
 // before it stay edited.
-__input_edit: fn(lines: &&Iter<String>, change: fn(String) -> String Never!) IOError! -[IO, FS.Read, FS.Write, Exec.Args, Time.Wait]> {
+__input_edit: fn(lines: &&Iter<String>, change: fn(String) -> String Never!) -[IO, FS.Read, FS.Write, Exec.Args, Time.Wait]> IOError! {
     paths: core.process.args()
     if paths.len() == 0 {
         loop line in lines -> print(change(line))
@@ -440,7 +440,7 @@ WinSize: struct {
     h: Int
 }
 
-progress: fn(label: String) IOError! -[IO, Time.Wait]> {
+progress: fn(label: String) -[IO, Time.Wait]> IOError! {
     if rt.terminal8_machine_output() -> return Ok()
     // Without a terminal on stderr the label is a plain stdout line, so a
     // piped run still records its progress.
@@ -541,7 +541,7 @@ terminal_invalid: fn(cause: String) -> IOError Never! {
     IOError.InvalidInput(IOContext{operation: .Read, resource: Val("stdin"), os_code: None, cause: Val(cause)})
 }
 
-terminal_write_preflight: fn(resource: String) IOError! -[IO, Time.Wait]> {
+terminal_write_preflight: fn(resource: String) -[IO, Time.Wait]> IOError! {
     if rt.terminal8_fault("IO.Write") {
         return Err(terminal_other(.Write, Val(resource), "fault injected: IO.Write"))
     }
@@ -551,7 +551,7 @@ terminal_write_preflight: fn(resource: String) IOError! -[IO, Time.Wait]> {
     Ok()
 }
 
-terminal_prompt: fn(text: String, choose: Bool) IOError! -[IO, Time.Wait]> {
+terminal_prompt: fn(text: String, choose: Bool) -[IO, Time.Wait]> IOError! {
     terminal_write_preflight("stdout")
     cause: rt.terminal8_write_stdout(text, true)
     if cause != None {
@@ -561,7 +561,7 @@ terminal_prompt: fn(text: String, choose: Bool) IOError! -[IO, Time.Wait]> {
     Ok()
 }
 
-terminal_read_preflight: fn() IOError! -[IO, Time.Wait]> {
+terminal_read_preflight: fn() -[IO, Time.Wait]> IOError! {
     if rt.terminal8_fault("IO.Read") {
         return Err(terminal_other(.Read, Val("stdin"), "fault injected: IO.Read"))
     }
@@ -812,19 +812,19 @@ stdio_result: fn(cause: String?, operation: IOOperation, resource: String) IOErr
 // buffered bytes are written: at each LF on a terminal, else when the buffer
 // fills, at an explicit flush or at a named boundary. stderr is never held.
 // So a write never asks for a flush of its own.
-stdio_write: fn(text: String, newline: Bool, stderr: Bool) IOError! -[IO]> {
+stdio_write: fn(text: String, newline: Bool, stderr: Bool) -[IO]> IOError! {
     resource: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Write, resource, "IO.Write")
     stdio_result(rt.stdio_put_text(text, newline, stderr), .Write, resource)
 }
 
-stdio_bytes: fn(bytes: [U8], stderr: Bool) IOError! -[IO]> {
+stdio_bytes: fn(bytes: [U8], stderr: Bool) -[IO]> IOError! {
     resource: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Write, resource, "IO.Write")
     stdio_result(rt.stdio_put_bytes(bytes, stderr), .Write, resource)
 }
 
-stdio_flush: fn(stderr: Bool) IOError! -[IO]> {
+stdio_flush: fn(stderr: Bool) -[IO]> IOError! {
     resource: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Flush, resource, "IO.Flush")
     stdio_result(rt.stdio_flush(stderr), .Flush, resource)

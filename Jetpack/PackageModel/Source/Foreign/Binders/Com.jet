@@ -231,7 +231,7 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
 // Validate the published COM cache before the linker consumes it. COM's
 // registry and type-library ABI are outside the Jet compiler, so the cache
 // must carry enough identity to reject a stale or hand-edited bridge.
-pkg_com_validate_provenance: fn(provenance_path: String, generated_source: String, archive: String, lib: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
+pkg_com_validate_provenance: fn(provenance_path: String, generated_source: String, archive: String, lib: String) -[FS, Env, Exec, Time.Wait]> ForeignBindError! {
     provenance: pkg_bridge_read_provenance(provenance_path)
     if provenance.schema != FOREIGN_BRIDGE_PROVENANCE_SCHEMA {
         return Err(ForeignBindError.Source("unsupported COM binding provenance schema `{provenance.schema}`"))
@@ -425,7 +425,7 @@ pkg_com_unique_suffix: fn() -[Time]> Int { time.unix_ns() }
 
 // Swap the staged archive into place, keeping the previous archive until the
 // new one is published.
-pkg_com_publish_archive: fn(staged: String, archive: String) ForeignBindError! -[FS, Env, Time]> {
+pkg_com_publish_archive: fn(staged: String, archive: String) -[FS, Env, Time]> ForeignBindError! {
     backup: files.with_suffix(archive, ".a.previous.{sys.pid()}-{pkg_com_unique_suffix()}")
     had_previous: files.exists(archive)
     if had_previous && !files.is_file(archive) {
@@ -600,7 +600,7 @@ pkg_com_render_jet: fn(lib: String, schema: ComSchema) -> String Never! {
             args = "{args}, {pkg_com_abi_call_arg(param)}"
         }
         unit: method.result == ComKind.Unit
-        head: if unit -> ") ComError! -[FFI.Com]> {{\n    " else -> ") -[FFI.Com]> {method.result.jet()} ComError! {{\n    value: "
+        head: if unit -> ") -[FFI.Com]> ComError! {{\n    " else -> ") -[FFI.Com]> {method.result.jet()} ComError! {{\n    value: "
         out = "{out}{name}: fn(object: {method.interface}{params}{head}abi.{name}(object.value{args})\n    code: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n"
         tail: if method.result == {
             .Unit -> "    return\n"
@@ -705,7 +705,7 @@ pkg_com_run_capture: fn(argv: [String], tool: String) -[Exec, Time.Wait]> [U8] F
     Ok(output.stdout)
 }
 
-pkg_com_run: fn(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
+pkg_com_run: fn(argv: [String], tool: String) -[Exec, Time.Wait]> ForeignBindError! {
     pkg_com_run_capture(argv, tool)
 }
 

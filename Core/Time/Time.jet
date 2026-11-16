@@ -48,7 +48,7 @@ start: fn() -[Time]> Stopwatch Never! {
 }
 
 // Waiting is the `Time.Wait` leaf, so sleeping needs no clock grant.
-sleep: fn(duration: Duration) Never! -[Time.Wait]> {
+sleep: fn(duration: Duration) -[Time.Wait]> Never! {
     // Even a zero or negative delay is a deadline/cancellation wait boundary.
     // The shared scheduler clamps the delay and owns pre/post wait checks.
     rt.sleep_ns(duration.ns)
@@ -56,7 +56,7 @@ sleep: fn(duration: Duration) Never! -[Time.Wait]> {
 
 // `task.timeout(duration)` (Sema TaskGroups.jet): moves the task deadline to
 // the earlier of the installed one and now plus `duration`.
-__task_timeout: fn(duration: Duration) Never! -[Time]> { rt.task_timeout(duration.ns) }
+__task_timeout: fn(duration: Duration) -[Time]> Never! { rt.task_timeout(duration.ns) }
 
 /// Wall-clock time as Unix nanoseconds. `time.instant()` is the monotonic
 /// point for measuring; this is the timestamp for stamps, nonces, and expiry.
@@ -1069,7 +1069,7 @@ DateTime: struct {
         Error: TimeError
         Hole: String
 
-        check: fn(text: String) TimeError! -[]> {
+        check: fn(text: String) -[]> TimeError! {
             if text.contains("{{}}") {
                 return Err(TimeError{reason: "a `DateTime` literal cannot contain interpolation"})
             }
@@ -2643,7 +2643,7 @@ civil_monotonic_ns: fn() -[Time]> Int Never! {
 
 instant: fn() -[Time]> Instant Never! { Instant{start_ns: civil_monotonic_ns()} }
 
-sleep_until: fn(deadline: Instant) Never! -[Time]> {
+sleep_until: fn(deadline: Instant) -[Time]> Never! {
     remaining: saturating_sub_ns(deadline.start_ns, civil_monotonic_ns())
     sleep(duration_ns(remaining))
 }

@@ -117,7 +117,7 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
 
     length_api: pap_api(root, "length", "physics", "keep: fn<Q: Quantity<Length, .Linear>>(value: &&Q) -> Q {{ value }}\n")
     time_api: pap_api(root, "time", "physics", "keep: fn<Q: Quantity<Time, .Linear>>(value: &&Q) -> Q {{ value }}\n")
-    assert_eq(pap_find(length_api, "keep").signature, "fn keep<Q: Quantity<Length, .Linear>>(value: &&Q) Q Never! -[]>")
+    assert_eq(pap_find(length_api, "keep").signature, "fn keep<Q: Quantity<Length, .Linear>>(value: &&Q) -[]> Q Never!")
     keep_changes: pap_changes(length_api, time_api)
     assert(keep_changes.len() == 1, "{keep_changes.len()} changes\nLength API:\n{pap_text(length_api)}\nTime API:\n{pap_text(time_api)}")
 }

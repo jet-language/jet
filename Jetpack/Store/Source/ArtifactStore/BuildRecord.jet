@@ -216,7 +216,7 @@ store_build_last_run_directory: fn(root: String, create: Bool) -[FS, Env]> files
     Ok(held)
 }
 
-store_build_write_last_run: fn(root: String, program: String, key: String) ArtifactStoreError! -[FS, Env, Time.Wait]> {
+store_build_write_last_run: fn(root: String, program: String, key: String) -[FS, Env, Time.Wait]> ArtifactStoreError! {
     bytes: store_build_last_run_encode(program, key)
     held: store_build_last_run_directory(root, true)
     _lock: held.lock()
@@ -236,7 +236,7 @@ store_build_write_last_run: fn(root: String, program: String, key: String) Artif
     held.fsync()
 }
 
-store_build_last_run_fill: fn(writer: &files.FileWriter, bytes: [U8]) IOError! -[FS, Time.Wait]> {
+store_build_last_run_fill: fn(writer: &files.FileWriter, bytes: [U8]) -[FS, Time.Wait]> IOError! {
     writer.write_bytes(bytes)
     writer.fsync()
 }

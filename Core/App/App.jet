@@ -31,6 +31,7 @@ use {
     log_rt: jet.runtime.log
     push_wire: __core_app_push
     url: core.net.url
+    markup: core.text.html
 }
 
 SYNC_MAX_SESSION: 256
@@ -214,7 +215,10 @@ priv webhook_signed: fn(signature: Signature, key: String, sent: String, body: S
 // that fails with `E` needs `impl CallError -> E`, and one that can't fail
 // answers `R CallError!`. A Remote made for a named client fails each call
 // `.Unreachable`, running nothing, while a test has that client cut off
-// (`disconnect`).
+// (`disconnect`). On a device that queues (`App.offline(.Queue)`), a
+// method that answers nothing is a write, and a write through a Remote
+// that posts joins the device's queue when it can't be sent now (`__write`);
+// every call through such a Remote sends its client's queued writes first.
 Remote: struct<S> {
     priv service: S?
     priv address: String
@@ -228,20 +232,8 @@ Remote: struct<S> {
     // the server, and `fail` gives a `CallError` as the method's own error.
     __call: fn<R: [Encode, Decode], E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -[Net, Time]> R E! {
         if links_cut(self.client) -> return fail(links_unreachable(self.client, method))
-        if self.service == .Val(service) {
-            loop _ in 0..<transactions.attempts() {
-                call: transactions.begin() ?? return direct(service)
-                if direct(service) == {
-                    .Ok(value) -> {
-                        if transactions.end(call, true) -> return Ok(value)
-                    }
-                    .Err(error) -> {
-                        if transactions.end(call, false) -> return Err(error)
-                    }
-                }
-            }
-            return fail(.Unreachable("the database stayed busy"))
-        }
+        if self.service == .Val(service) -> return remote_direct(service, direct, fail)
+        if queue_on() -> _: queue_drain(self.client)
         reply: remote_post(self.address, self.local, method, args) ?? return fail(err)
         tree: live_json.parse(reply) ?? return fail(.Unreachable("the server's reply to `{method}` is not JSON"))
         if live_json.at<E>(tree, "/err") == .Ok(error) -> return Err(error)
@@ -252,18 +244,48 @@ Remote: struct<S> {
     // A call of the endpoint method `method` of `S`, which can't fail.
     __call_value: fn<R: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R Never!) -[Net, Time]> R CallError! {
         if links_cut(self.client) -> return Err(links_unreachable(self.client, method))
-        if self.service == .Val(service) {
-            loop _ in 0..<transactions.attempts() {
-                call: transactions.begin() ?? return Ok(direct(service))
-                value: direct(service)
-                if transactions.end(call, true) -> return Ok(value)
-            }
-            return Err(.Unreachable("the database stayed busy"))
-        }
+        if self.service == .Val(service) -> return remote_direct_value(service, direct)
+        if queue_on() -> _: queue_drain(self.client)
         reply: remote_post(self.address, self.local, method, args)
         tree: live_json.parse(reply) ?? return Err(.Unreachable("the server's reply to `{method}` is not JSON"))
         value: live_json.at<R>(tree, "/ok") ?? return Err(.Unreachable("the server's reply to `{method}` has no value"))
         Ok(value)
+    }
+
+    // A call of the endpoint method `method` of `S` that answers nothing
+    // and can fail with `E`: a write. On a device that queues, a write
+    // through a Remote that posts joins the queue, and the call succeeds at
+    // once, when its client is cut off, when the client's earlier writes
+    // are still queued, or when no answer comes (`queue_post`); otherwise
+    // it runs as `__call` runs a call.
+    __write: fn<E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) E!, fail: fn(CallError) E!) -[Net, Time]> E! {
+        held: self.service == .Val(_)
+        queues: queue_on() && !held
+        if !queues && links_cut(self.client) -> return fail(links_unreachable(self.client, method))
+        if self.service == .Val(service) -> return remote_direct(service, direct, fail)
+        reply := ""
+        if queues {
+            reply = queue_post(self.client, self.address, self.local, method, args) ?? return fail(err)
+        } else { reply = remote_post(self.address, self.local, method, args) ?? return fail(err) }
+        if reply == "" -> return Ok()
+        tree: live_json.parse(reply) ?? return fail(.Unreachable("the server's reply to `{method}` is not JSON"))
+        if live_json.at<E>(tree, "/err") == .Ok(error) -> return Err(error)
+        Ok()
+    }
+
+    // A write of the endpoint method `method` of `S`, which can't fail.
+    __write_value: fn(self, method: String, args: [String], direct: fn(S) Never!) -[Net, Time]> CallError! {
+        held: self.service == .Val(_)
+        queues: queue_on() && !held
+        if !queues && links_cut(self.client) -> return Err(links_unreachable(self.client, method))
+        if self.service == .Val(service) -> return remote_direct_value(service, direct)
+        reply := ""
+        if queues {
+            reply = queue_post(self.client, self.address, self.local, method, args) ?? return Err(err)
+        } else { reply = remote_post(self.address, self.local, method, args) }
+        if reply == "" -> return Ok()
+        _: live_json.parse(reply) ?? return Err(.Unreachable("the server's reply to `{method}` is not JSON"))
+        Ok()
     }
 
     // One argument of a remote call, encoded.
@@ -274,6 +296,33 @@ Remote: struct<S> {
     // `failure` as an error of the call; the compiler's `fail` binds it, so
     // the method's error type takes it through its conversion.
     __raise: fn<R>(self, failure: CallError) -> R CallError! { Err(failure) }
+}
+
+// A call that `direct` runs on `service`, the service a Remote holds, as one
+// transaction on each store it uses, retried while a store stays busy.
+priv remote_direct: fn<S, R, E>(service: S, direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -> R E! {
+    loop _ in 0..<transactions.attempts() {
+        call: transactions.begin() ?? return direct(service)
+        if direct(service) == {
+            .Ok(value) -> {
+                if transactions.end(call, true) -> return Ok(value)
+            }
+            .Err(error) -> {
+                if transactions.end(call, false) -> return Err(error)
+            }
+        }
+    }
+    fail(.Unreachable("the database stayed busy"))
+}
+
+// remote_direct for a method that can't fail.
+priv remote_direct_value: fn<S, R>(service: S, direct: fn(S) -> R Never!) -> R CallError! {
+    loop _ in 0..<transactions.attempts() {
+        call: transactions.begin() ?? return Ok(direct(service))
+        value: direct(service)
+        if transactions.end(call, true) -> return Ok(value)
+    }
+    Err(.Unreachable("the database stayed busy"))
 }
 
 // How a remote call failed. Every call through a `Remote` can fail this way,
@@ -333,6 +382,111 @@ new_id: fn() -[Rand, Time]> String Never! {
     assert(made >= before && made <= after)
 }
 
+// Where a handler's failure goes. A control's handler has the type
+// `fn() app.Notice!`, so its error type converts to a Notice; the frame
+// shows the notice beside the control, announces it, and keeps it until
+// it is dismissed. `retry` offers to run the handler again.
+#Error
+Notice: struct {
+    text: String
+    retry: Bool{false}
+}
+
+// The app's notice list holds the notices that have no control to sit
+// beside: a failed background run, a queued write refused after its screen
+// closed. The frame shows the list on every screen and keeps each notice
+// until it is dismissed. The list lives in one process-wide cell, or in
+// the World's own cell inside a deterministic world, as length-prefixed
+// fields: each notice's text, then "1" or "0" for its retry.
+NoticeCell: struct {
+    bytes: [U8]
+}
+
+NOTICE_CELL: Shared{NoticeCell{bytes: [U8]{}}}
+
+NOTICE_STORE: "app.notices"
+
+notice_cell_load: fn() -> [U8] {
+    if world_rt.world_store_load(NOTICE_STORE) == .Val(bytes) -> return bytes
+    NOTICE_CELL.bytes
+}
+
+notice_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
+    if world_rt.world_store_replace(NOTICE_STORE, expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    cell := NOTICE_CELL.guard_edit()
+    if cell.value.bytes != expected -> return false
+    cell.value.bytes = replacement.move()
+    true
+}
+
+// Adds `notice` to the end of the app's notice list.
+__keep_notice: fn(notice: Notice) {
+    loop {
+        seen: notice_cell_load()
+        kept := seen.copy()
+        live_put(kept, notice.text)
+        live_put(kept, if notice.retry -> "1" else -> "0")
+        if notice_cell_replace(seen, kept) {
+            return
+        }
+    }
+}
+
+// The app's notice list, oldest first.
+__notices: fn() -> [Notice] { notice_decode(notice_cell_load()) }
+
+// Removes the notice at position `at` of the app's notice list; nothing
+// when there is none.
+__dismiss: fn(at: Int) {
+    loop {
+        seen: notice_cell_load()
+        notices: notice_decode(seen)
+        if at < 0 || at >= notices.len() {
+            return
+        }
+        kept := [U8]{}
+        loop index in 0..<notices.len() {
+            if index == at -> next
+            live_put(kept, notices[index].text)
+            live_put(kept, if notices[index].retry -> "1" else -> "0")
+        }
+        if notice_cell_replace(seen, kept) {
+            return
+        }
+    }
+}
+
+// The notices of an encoded list; malformed bytes are an empty list.
+notice_decode: fn(raw: [U8]) -> [Notice] {
+    fields: live_fields(raw) ?? return [Notice]{}
+    notices := [Notice]{}
+    at := 0
+    loop at + 1 < fields.len() {
+        notices.push(Notice{text: fields[at], retry: fields[at + 1] == "1"})
+        at += 2
+    }
+    notices
+}
+
+#Test("a kept notice stays in the app's notice list, in order, until it is dismissed") {
+    before: __notices().len()
+    __keep_notice(Notice{text: "Couldn't sync the board.", retry: true})
+    __keep_notice(Notice{text: "That task no longer exists."})
+    kept: __notices()
+    assert_eq(kept.len(), before + 2)
+    assert_eq(kept[before].text, "Couldn't sync the board.")
+    assert(kept[before].retry, "the first notice offers a retry")
+    assert_eq(kept[before + 1].text, "That task no longer exists.")
+    assert(!kept[before + 1].retry, "a notice offers no retry unless it says so")
+    __dismiss(before)
+    __dismiss(kept.len())
+    left: __notices()
+    assert_eq(left.len(), before + 1)
+    assert_eq(left[before].text, "That task no longer exists.")
+}
+
 // The largest reply a remote call reads.
 REMOTE_MAX_REPLY: 16777216
 
@@ -363,8 +517,12 @@ remote_at: fn<S>(address: String, client: String{""}) -> Remote<S> Never! {
 disconnect: fn(client: String) Never! { links_set(client, true) }
 
 // Restores the link `disconnect` cut: the client's next call reaches the
-// server again.
-reconnect: fn(client: String) Never! { links_set(client, false) }
+// server again, and the writes the client queued meanwhile are sent now, in
+// order (`queue_drain`).
+reconnect: fn(client: String) -[Net, Time]> Never! {
+    links_set(client, false)
+    _: queue_drain(client)
+}
 
 // The clients a test cut off, one name a line, sorted, in one process-wide
 // cell; inside a deterministic world, the World's own cell `app.links`.
@@ -440,6 +598,243 @@ priv links_unreachable: fn(client: String, method: String) -> CallError Never! {
     assert_eq(links_names(links_load()).len(), 0)
 }
 
+// The device's queue of the writes it couldn't send, oldest first, when the
+// app graph queues (`App.offline(.Queue)`): each is the call of `method`
+// through a Remote of `client` that posts to `address` (`local`: the app
+// graph answers it), its encoded arguments `body`, and the request key it
+// keeps on every send, so a server that ran it once answers a repeat with
+// the reply it kept.
+#Equatable
+priv QueuedWrite: struct {
+    client: String
+    address: String
+    local: Bool
+    method: String
+    body: String
+    key: String
+}
+
+// The queue lives in one process-wide cell, or in the World's own cell
+// `app.queue` inside a deterministic world, as length-prefixed fields: each
+// write's client, address, "1" or "0" for local, method, body and key.
+priv QUEUE_CELL: Shared{LiveCell{bytes: [U8]{}}}
+
+priv QUEUE_STORE: "app.queue"
+
+priv queue_load: fn() -> [U8] Never! {
+    if world_rt.world_store_load(QUEUE_STORE) == .Val(bytes) -> return bytes
+    QUEUE_CELL.bytes
+}
+
+priv queue_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool Never! {
+    if world_rt.world_store_replace(QUEUE_STORE, expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    cell := QUEUE_CELL.guard_edit()
+    if cell.value.bytes != expected -> return false
+    cell.value.bytes = replacement.move()
+    true
+}
+
+// The writes of an encoded queue; malformed bytes are an empty queue.
+priv queue_decode: fn(raw: [U8]) -> [QueuedWrite] Never! {
+    fields: live_fields(raw) ?? return [QueuedWrite]{}
+    writes := [QueuedWrite]{}
+    at := 0
+    loop at + 5 < fields.len() {
+        writes.push(QueuedWrite{client: fields[at], address: fields[at + 1], local: fields[at + 2] == "1", method: fields[at + 3], body: fields[at + 4], key: fields[at + 5]})
+        at += 6
+    }
+    writes
+}
+
+priv queue_put: fn(out: &[U8], write: QueuedWrite) Never! {
+    live_put(out, write.client)
+    live_put(out, write.address)
+    live_put(out, if write.local -> "1" else -> "0")
+    live_put(out, write.method)
+    live_put(out, write.body)
+    live_put(out, write.key)
+}
+
+// Adds `write` to the end of the queue.
+priv queue_add: fn(write: QueuedWrite) Never! {
+    loop {
+        seen: queue_load()
+        kept := seen.copy()
+        queue_put(kept, write)
+        if queue_replace(seen, kept) {
+            return
+        }
+    }
+}
+
+// Removes the write whose request key is `key`; nothing when none is queued.
+priv queue_remove: fn(key: String) Never! {
+    loop {
+        seen: queue_load()
+        kept := [U8]{}
+        loop write in queue_decode(seen) {
+            if write.key != key -> queue_put(kept, write)
+        }
+        if queue_replace(seen, kept) {
+            return
+        }
+    }
+}
+
+// The oldest write client `client` queued.
+priv queue_first: fn(client: String) -> QueuedWrite? Never! {
+    loop write in queue_decode(queue_load()) {
+        if write.client == client -> return Val(write.copy())
+    }
+    None
+}
+
+// Whether the app graph queues the writes it can't send.
+priv queue_on: fn() -> Bool Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.offline == .Queue
+}
+
+// The number of writes the device's queue holds, waiting to send.
+pending: fn() -> Int Never! { queue_decode(queue_load()).len() }
+
+// The clients whose queue a task is sending now, so one task sends a
+// client's writes, in order, and a write made meanwhile, even by a call the
+// sending runs, waits behind them.
+priv QUEUE_SENDERS: Shared{[String]{}}
+
+priv queue_claim: fn(client: String) -> Bool Never! {
+    senders := QUEUE_SENDERS.guard_edit()
+    loop name in senders.value {
+        if name == client -> return false
+    }
+    senders.value.push(client.copy())
+    true
+}
+
+priv queue_release: fn(client: String) Never! {
+    senders := QUEUE_SENDERS.guard_edit()
+    kept := [String]{}
+    loop name in senders.value {
+        if name != client -> kept.push(name.copy())
+    }
+    senders.value = kept
+}
+
+// Sends client `client`'s queued writes, oldest first, each under its own
+// request key, unless another task sends them now. A write the server
+// commits leaves the queue. A write it refuses (its method's error, or
+// `.Invalid`) is rolled back: it leaves the queue, and a notice naming it
+// and the refusal joins the app's notice list (`__keep_notice`), since its
+// screen may be long gone. No answer, `.SignedOut` or `.UpdateRequired`
+// stops the sending and keeps the write. True when the client's queue is
+// empty after.
+priv queue_drain: fn(client: String) -[Net, Time]> Bool Never! {
+    if !queue_claim(client) -> return false
+    sent: queue_send(client)
+    queue_release(client)
+    sent
+}
+
+priv queue_send: fn(client: String) -[Net, Time]> Bool Never! {
+    loop {
+        if links_cut(client) -> return false
+        write: queue_first(client) ?? return true
+        refusal := String?{None}
+        if remote_send(write.address, write.local, write.method, write.body, write.key) == {
+            .Ok(reply) -> { refusal = queue_refusal(reply) }
+            .Err(failure) -> {
+                if failure == {
+                    .Invalid(fields) -> { refusal = Val(queue_invalid(fields)) }
+                    .Unreachable(_) | .SignedOut | .UpdateRequired -> return false
+                }
+            }
+        }
+        queue_remove(write.key)
+        if refusal == .Val(why) {
+            __keep_notice(Notice{text: "The server refused `{write.method}`, so it was undone: {why}"})
+        }
+    }
+}
+
+// The error JSON of a reply that `__reply_err` made, `{"err":…}`; None for
+// any other reply.
+priv queue_refusal: fn(reply: String) -> String? Never! {
+    if !reply.starts_with("{{\"err\":") || !reply.ends_with("}}") -> return None
+    Val(reply.slice(7, reply.len() - 1))
+}
+
+priv queue_invalid: fn(fields: [FieldError]) -> String Never! {
+    reasons := [String]{}
+    loop field in fields {
+        reasons.push(if field.path == "" -> field.reason.copy() else -> "{field.path}: {field.reason}")
+    }
+    reasons.join("; ")
+}
+
+// A write of `method` through a Remote of `client` that posts to `address`,
+// on a device that queues: queued, so the call succeeds at once (""), when
+// the client is cut off, when its earlier writes are still queued, or when
+// no answer comes; else the reply it got, which is never empty. Sent or
+// queued, the write keeps one request key.
+priv queue_post: fn(client: String, address: String, local: Bool, method: String, args: [String]) -[Net, Time]> String CallError! {
+    write: QueuedWrite{client: client, address: address, local: local, method: method, body: "[{args.join(",")}]", key: remote_key(address, method)}
+    if links_cut(client) || !queue_drain(client) {
+        queue_add(write)
+        return Ok("")
+    }
+    sent: remote_send(write.address, write.local, write.method, write.body, write.key) ?? {
+        if !call_unanswered(err) -> return Err(err)
+        queue_add(write)
+        return Ok("")
+    }
+    Ok(sent)
+}
+
+// Whether `failure` is no answer at all, so a write may wait in the queue.
+priv call_unanswered: fn(failure: CallError) -> Bool Never! {
+    if failure == {
+        .Unreachable(_) -> true
+        .Invalid(_) | .SignedOut | .UpdateRequired -> false
+    }
+}
+
+#Test("a queued write keeps its key and order, and leaves the queue by its key") {
+    before: pending()
+    queue_add(QueuedWrite{client: "queue-test", address: "http://127.0.0.1:9/api", local: false, method: "save", body: "[1]", key: "k1"})
+    queue_add(QueuedWrite{client: "queue-test", address: "http://127.0.0.1:9/api", local: false, method: "save", body: "[2]", key: "k2"})
+    assert_eq(pending(), before + 2)
+    first: queue_first("queue-test") ?? panic("a write is queued")
+    assert_eq(first.key, "k1")
+    assert_eq(first.body, "[1]")
+    assert(!first.local)
+    assert_eq(queue_first("queue-other"), None)
+    queue_remove("k1")
+    assert_eq((queue_first("queue-test") ?? panic("one write is left")).key, "k2")
+    queue_remove("k2")
+    assert_eq(pending(), before)
+}
+
+#Test("a refusal is the error JSON of an err reply, and an ok reply is none") {
+    assert_eq(queue_refusal("{{\"err\":\"Conflict\"}}"), Val("\"Conflict\""))
+    assert_eq(queue_refusal("{{\"ok\":null}}"), None)
+    assert_eq(queue_invalid([FieldError]{FieldError{path: "title", reason: "is empty"}, FieldError{path: "", reason: "no JSON"}}), "title: is empty; no JSON")
+    assert(call_unanswered(.Unreachable("down")))
+    assert(!call_unanswered(.SignedOut))
+}
+
+#Test("one task sends a client's queue at a time") {
+    assert(queue_claim("queue-claim"))
+    assert(!queue_claim("queue-claim"))
+    assert(queue_claim("queue-claim-other"))
+    queue_release("queue-claim")
+    queue_release("queue-claim-other")
+    assert(queue_claim("queue-claim"))
+    queue_release("queue-claim")
+}
+
 // The times a remote call is sent, in all, while its reply is lost: each
 // send carries the call's one request key, so a server that ran the call
 // answers a repeat with the reply it kept, and the call runs once.
@@ -449,20 +844,29 @@ priv REMOTE_SENDS: 3
 // sends so far.
 priv REMOTE_RESEND_MS: 200
 
-// One remote call: POST the JSON array of `args` to `{address}/{method}`;
-// the reply's body on 200, else the failure its status names. The call
-// carries a W3C `traceparent` that starts its trace, and that trace's id as
-// its `x-request-id`, so the server's span of the call has both. It also
-// carries a request key, its `idempotency-key`, and is sent again under the
-// same key when no reply comes, up to `REMOTE_SENDS` times. A `local` call
-// is the app graph's, answered in this process under the same key
-// (`graph_post`).
+// One remote call: POST the JSON array of `args` to `{address}/{method}`
+// under a fresh request key (`remote_send`).
 priv remote_post: fn(address: String, local: Bool, method: String, args: [String]) -[Net, Time]> String CallError! {
-    seed: "{rt.clock_mono_ns()}:{trace_next()}:{address}/{method}"
-    trace: make_trace_id("trace:{seed}", 16)
-    key: make_trace_id("key:{seed}", 16)
-    body: "[{args.join(",")}]"
+    remote_send(address, local, method, "[{args.join(",")}]", remote_key(address, method))
+}
+
+// A fresh request key for a call of `{address}/{method}`.
+priv remote_key: fn(address: String, method: String) -> String Never! {
+    make_trace_id("key:{rt.clock_mono_ns()}:{trace_next()}:{address}/{method}", 16)
+}
+
+// One send of a remote call: POST `body`, the JSON array of its arguments,
+// to `{address}/{method}`; the reply's body on 200, else the failure its
+// status names. The call carries a W3C `traceparent` that starts its trace,
+// and that trace's id as its `x-request-id`, so the server's span of the
+// call has both. It also carries its request key `key`, its
+// `idempotency-key`, and is sent again under that key when no reply comes,
+// up to `REMOTE_SENDS` times. A `local` call is the app graph's, answered in
+// this process under the same key (`graph_post`).
+priv remote_send: fn(address: String, local: Bool, method: String, body: String, key: String) -[Net, Time]> String CallError! {
     if local -> return graph_post("{address}/{method}", key, body)
+    seed: "{rt.clock_mono_ns()}:{trace_next()}:{key}"
+    trace: make_trace_id("trace:{seed}", 16)
     lost := ""
     loop sends in 0..<REMOTE_SENDS {
         if sends > 0 -> tasks.sleep(REMOTE_RESEND_MS * sends)
@@ -648,7 +1052,7 @@ live_run: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> T
 // the handler holds `binding` because it read it for its own caller under
 // that caller's policy. Once the last connection watching `binding` closes,
 // its caller is present nowhere through it (__live_left_settle).
-watch: fn<T: [Encode, Decode], E: [Encode, Decode]>(socket: WsConn, binding: Live<T, E>) Never! -[Net]> {
+watch: fn<T: [Encode, Decode], E: [Encode, Decode]>(socket: WsConn, binding: Live<T, E>) -[Net]> Never! {
     ws.__live_watch(socket, "live:{binding.id}")
 }
 
@@ -1680,7 +2084,7 @@ priv(package) push: module {
 
     // Sets up the push services `settings` names, in place of the ones set
     // up before.
-    configure: fn(settings: push_wire.PushSettings) push_wire.PushError! -[FS.Read, Net]> {
+    configure: fn(settings: push_wire.PushSettings) -[FS.Read, Net]> push_wire.PushError! {
         push_wire.push_configure(settings)
     }
 
@@ -1777,11 +2181,12 @@ App: struct {
     // `query` lists its `#App.Query` fields, and `open` opens the screen at
     // an address: from the text of each of `V`'s fields there, by name, it
     // makes the state, runs `view` with it and the graph's Remotes, and gives
-    // the text of what the view shows (`__view_text`); None when the texts
-    // don't make a `V`. The screen joins the graph's route set, in the order
-    // the graph adds it, where `__url_of` finds its address, `__go` opens it,
-    // and a renderer walks it (`screens`).
-    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool, open: &&fn(App, [String:String]) -> String? Never!) -> App Never! {
+    // the HTML of what the view shows (a tree's `__html`, else
+    // `__view_html`); None when the texts don't make a `V`. The screen joins
+    // the graph's route set, in the order the graph adds it, where
+    // `__url_of` finds its address, `__go` opens it, and a renderer walks it
+    // (`screens`).
+    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool, open: &&fn(App, [String:String]) -[Net, FS.Read]> String? Never!) -> App Never! {
         held := APP_GRAPH.guard_edit()
         held.value.screens.push(AppScreen{path: path, state: state, query: query, signed_in: signed_in, open: Shared{AppOpen{run: open.move()}}})
         self.copy()
@@ -1858,14 +2263,17 @@ App: struct {
     }
 
     // Runs `run` with `state`, and gives its text; None for no state.
-    __opened: fn<V>(self, state: V?, run: fn(V) -> String Never!) -> String? Never! {
+    __opened: fn<V>(self, state: V?, run: fn(V) -[Net, FS.Read]> String Never!) -[Net, FS.Read]> String? Never! {
         if state == .Val(made) -> return Val(run(made))
         None
     }
 
-    // The text of what a screen's view shows: a string's own text, and any
-    // other value's JSON.
-    __view_text: fn<N: Encode>(self, shown: N) -> String Never! { App.__address_arg<N>(shown) }
+    // The HTML of what a screen's view shows when it is no node tree: its
+    // text (a string's own text, any other value's JSON), escaped, as a
+    // paragraph. A view that gives a tree shows the tree's HTML (`__html`).
+    __view_html: fn<N: Encode>(self, shown: N) -> String Never! {
+        "<p>{markup.escape(App.__address_arg<N>(shown))}</p>"
+    }
 
     // `app.go(view)` as the compiler lowers it: opens the screen whose state
     // is `V`, which `state` names, at the address of the fields `names` with
@@ -1873,7 +2281,7 @@ App: struct {
     // one (`__current`), and its view runs. The compiler refuses a state that
     // no screen of the program's graph opens, so a state with no screen here
     // is one whose graph this process has not built.
-    __go: fn<V>(state: String, names: [String], values: [String]) Never! {
+    __go: fn<V>(state: String, names: [String], values: [String]) -[Net, FS.Read]> Never! {
         fields := [String:String]{}
         loop index in 0..<names.len() -> fields[names[index].copy()] = values[index].copy()
         screen: app_screen(state) ?? panic("no screen opens `{state}` yet: build the app graph (`app.new`) before opening a screen")
@@ -1890,6 +2298,10 @@ App: struct {
         decode(App{title: app_graph_title()}, now.fields)
     }
 
+    // The graph as it stands, as a server holds it to answer its screens'
+    // addresses.
+    __graph: fn() -> App Never! { App{title: app_graph_title()} }
+
     // The screens of the graph, in the order it adds them: what a renderer
     // walks to answer each address.
     __screens: fn(self) -> [AppScreen] Never! {
@@ -1898,11 +2310,27 @@ App: struct {
     }
 
     // Opens `screen` at the address whose field texts are `fields`, by field
-    // name, as a renderer does: the text of what its view shows, or None
+    // name, as a renderer does: the HTML of what its view shows, or None
     // when the texts make no state of the screen.
-    __open: fn(self, screen: AppScreen, fields: [String:String]) -> String? Never! {
+    __open: fn(self, screen: AppScreen, fields: [String:String]) -[Net, FS.Read]> String? Never! {
         opener: screen.open.guard_read()
         opener.value.run(self.copy(), fields)
+    }
+
+    // `.head(head)` as the compiler lowers it: `head` gives the page
+    // metadata of the screen whose state is `V`, and `state` names `V` as
+    // `__screen`'s does. `decode` makes a `V` from its address's field
+    // texts, as `__current`'s does. The last head given for `V` holds; a
+    // page asks it for the address it shows (`heads.of`).
+    __head: fn<V>(self, state: String, decode: &&fn(App, [String:String]) -> V? Never!, head: &&fn(V) -> Head Never!) -> App Never! {
+        held := APP_HEADS.guard_edit()
+        held.value[state.copy()] = Shared{AppHead{
+            run: fn(graph: App, fields: [String:String]) {
+                shown: decode(graph, fields) ?? return Head?{None}
+                Val(head(shown))
+            },
+        }}
+        self.copy()
     }
 
     // The address of the screen whose state is `V`, as the compiler lowers
@@ -1979,7 +2407,7 @@ App: struct {
     // `jet.push.failed`) and kept with its service, account and reason
     // (`push.outcomes`): the published signature declares only Net, so no
     // log record can carry them.
-    __notify: fn(to: auth.AccountID, title: String, body: String, open_route: String) Never! -[Net]> {
+    __notify: fn(to: auth.AccountID, title: String, body: String, open_route: String) -[Net]> Never! {
         account: to.raw()
         devices: push.devices(account)
         if devices.len() == 0 {
@@ -2017,11 +2445,13 @@ Query: struct {
     }
 }
 
-// Starts the app graph, titled `title`: a graph with no services, screens or
-// queue yet.
+// Starts the app graph, titled `title`: a graph with no services, screens,
+// heads or queue yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
     held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, current: None}
+    heads := APP_HEADS.guard_edit()
+    heads.value = [String:Shared<AppHead>]{}
     App{title: title}
 }
 
@@ -2047,7 +2477,7 @@ AppScreen: struct {
 // How a screen opens at an address: from its fields' texts, the text of
 // what its view shows, or None when they make no state.
 AppOpen: struct {
-    run: fn(App, [String:String]) -> String? Never!
+    run: fn(App, [String:String]) -[Net, FS.Read]> String? Never!
 }
 
 // How the replies of one type may be kept, as `.cache<V>(policy)` sets it.
@@ -2064,6 +2494,19 @@ CachePolicy: enum {
 
 // The cache policy of each reply type, by the name `__cache` was given.
 priv APP_CACHE: Shared{[String:CachePolicy]{}}
+
+// A page's metadata on the web output, as `.head(fn)` gives it for a
+// screen's state: the page's title, the description and share image a search
+// result or a shared link shows, whether the page names its own address as
+// its canonical one, and whether search engines may index it. A screen only
+// a signed-in caller opens is never indexed, whatever its head says.
+Head: struct {
+    title: String
+    description: String?{None}
+    image: String?{None}
+    canonical: Bool{true}
+    index: Bool{true}
+}
 
 // A reply a store keeps for a `.Public` policy, as it finds it: the encoded
 // reply and the milliseconds since it was kept, by the store's clock.
@@ -2218,6 +2661,45 @@ priv app_screen_public: fn(state: String) -> Bool Never! {
     !screen.signed_in
 }
 
+// The head `.head(fn)` gave a screen's state: `run` gives the head of the
+// state whose address has the field texts it is given, None when the texts
+// make no such state.
+priv AppHead: struct {
+    run: fn(App, [String:String]) -[]> Head? Never!
+}
+
+// The head of each screen's state, by the state's name.
+priv APP_HEADS: Shared{[String:Shared<AppHead>]{}}
+
+// What core.web's screen pages put in their `<head>`: the metadata the
+// graph gave a state, and whether search engines may index its page.
+priv(package) heads: module {
+    // The head `.head(fn)` gives the state named `state` of `graph` at the
+    // address whose field texts are `fields`, by field name; None when no
+    // head was given for it or the texts make no such state.
+    of: fn(graph: App, state: String, fields: [String:String]) -> Head? Never! {
+        given: app_head(state) ?? return None
+        held: given.guard_read()
+        held.value.run(graph, fields)
+    }
+
+    // Whether search engines may index the page of the state named
+    // `state`, whose head is `head`: never when only a signed-in caller
+    // opens its screen, else as its head says, and yes with no head.
+    indexed: fn(state: String, head: Head?) -> Bool Never! {
+        if !app_screen_public(state) -> return false
+        if head == .Val(given) -> return given.index
+        true
+    }
+}
+
+// The head given for the state named `state`, copied out so it runs with no
+// lock held.
+priv app_head: fn(state: String) -> Shared<AppHead>? Never! {
+    held: APP_HEADS.guard_read()
+    held.value.get(state)
+}
+
 // The states of a sitemap test's public guide screen and signed-in inbox.
 priv SitemapTestGuide: struct {
     slug: String
@@ -2253,6 +2735,53 @@ priv SitemapTestInbox: struct {
     paths: sitemap.signed_in_paths()
     assert(paths.contains("/inbox/*$"))
     assert(!paths.contains("/guides/*$"))
+}
+
+// The states of the head test's public guide screen and signed-in inbox.
+priv HeadTestGuide: struct {
+    slug: String
+}
+
+priv HeadTestInbox: struct {
+    box: String
+}
+
+// The guide and the inbox at an address, as the compiler lowers their
+// decoding from its field texts.
+priv head_test_guide: fn(_: App, fields: [String:String]) -> HeadTestGuide? Never! {
+    slug: fields.get("slug") ?? return None
+    Val(HeadTestGuide{slug: slug})
+}
+
+priv head_test_inbox: fn(_: App, fields: [String:String]) -> HeadTestInbox? Never! {
+    box: fields.get("box") ?? return None
+    Val(HeadTestInbox{box: box})
+}
+
+#Test("a screen's head is the last `.head` given for its state, and only a public screen whose head allows it is indexed") {
+    graph: new("Crew").__screen<HeadTestGuide>("/help/:slug", "app.HeadTestGuide", [String]{}, false, fn(_: App, _: [String:String]) { String?{None} }).__screen<HeadTestInbox>("/mail/:box", "app.HeadTestInbox", [String]{}, true, fn(_: App, _: [String:String]) { String?{None} })
+    faq_fields: [String:String]{"slug": "faq"}
+    assert(heads.of(graph, "app.HeadTestGuide", faq_fields) == None)
+    assert(heads.indexed("app.HeadTestGuide", None))
+    _: graph.__head<HeadTestGuide>("app.HeadTestGuide", head_test_guide, fn(guide: HeadTestGuide) { Head{title: "old {guide.slug}"} })
+    _: graph.__head<HeadTestGuide>("app.HeadTestGuide", head_test_guide, fn(guide: HeadTestGuide) { Head{title: "Help: {guide.slug}", description: Val("Answers about {guide.slug}"), index: guide.slug != "draft"} })
+    _: graph.__head<HeadTestInbox>("app.HeadTestInbox", head_test_inbox, fn(inbox: HeadTestInbox) { Head{title: "Mail: {inbox.box}"} })
+    faq: heads.of(graph, "app.HeadTestGuide", faq_fields) ?? panic("the guide has a head")
+    assert_eq(faq.title, "Help: faq")
+    assert_eq(faq.description, Val("Answers about faq"))
+    assert_eq(faq.image, String?{None})
+    assert(faq.canonical)
+    assert(heads.indexed("app.HeadTestGuide", Val(faq)))
+    draft: heads.of(graph, "app.HeadTestGuide", [String:String]{"slug": "draft"}) ?? panic("the draft has a head")
+    assert(!heads.indexed("app.HeadTestGuide", Val(draft)))
+    // Texts that make no guide give no head.
+    assert(heads.of(graph, "app.HeadTestGuide", [String:String]{"box": "mine"}) == None)
+    // A signed-in screen is never indexed, whatever its head says.
+    mine: heads.of(graph, "app.HeadTestInbox", [String:String]{"box": "mine"}) ?? panic("the inbox has a head")
+    assert_eq(mine.title, "Mail: mine")
+    assert(mine.index)
+    assert(!heads.indexed("app.HeadTestInbox", Val(mine)))
+    assert(!heads.indexed("app.HeadTestNowhere", None))
 }
 
 #Test("a reply type's cache policy is the last `.cache` set for it") {
@@ -2485,14 +3014,11 @@ priv RouteTestBoard: struct {
 priv RouteTestService: struct {}
 
 // The graph test's board view, as the compiler lowers `.screen`'s `open`:
-// it makes the state from the address's texts, and greets its project
-// through the graph's Remote of the service.
-priv route_test_open: fn(graph: App, fields: [String:String]) -> String? Never! {
+// it makes the state from the address's texts, and shows its project and
+// filter.
+priv route_test_open: fn(graph: App, fields: [String:String]) -[Net, FS.Read]> String? Never! {
     made: graph.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{graph.__address_json<String>(fields, "project"), graph.__address_json<String>(fields, "q")})
-    graph.__opened<RouteTestBoard>(made, fn(state: RouteTestBoard) {
-        greeting: remote_post("app.RouteTestService", true, "greet", [String]{live_json.to_string<String>(state.project) ?? "null"}) ?? "{err}"
-        graph.__view_text<String>("{greeting}: {state.q}")
-    })
+    graph.__opened<RouteTestBoard>(made, fn(state: RouteTestBoard) { graph.__view_html<String>("{state.project} <{state.q}>") })
 }
 
 #Test("the app graph opens each screen at its state's address, with the graph's Remotes") {
@@ -2526,7 +3052,9 @@ priv route_test_open: fn(graph: App, fields: [String:String]) -> String? Never! 
     assert_eq(screens.len(), 1)
     assert_eq(screens[0].path, "/projects/:project/board")
     assert_eq(screens[0].signed_in, true)
-    assert_eq(graph.__open(screens[0], [String:String]{"project": "p1", "q": "mine"}), Val("{{\"ok\":\"hello p1\"}}: mine"))
+    assert_eq(graph.__open(screens[0], [String:String]{"project": "p1", "q": "mine"}), Val("<p>p1 &lt;mine&gt;</p>"))
+    // A view calls the graph's Remote of a service it mounts in this process.
+    assert_eq(remote_post("app.RouteTestService", true, "greet", [String]{"\"p1\""}) ?? "{err}", "{{\"ok\":\"hello p1\"}}")
     assert_eq(graph.__open(screens[0], [String:String]{"q": "mine"}), String?{None})
     // `go` makes a screen the current one.
     assert_eq(App.__current<RouteTestBoard>("app.RouteTestBoard", fn(at: App, fields: [String:String]) { at.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{at.__address_json<String>(fields, "project"), at.__address_json<String>(fields, "q")}) }) == None, true)
@@ -2680,6 +3208,9 @@ priv RemoteArgs: struct {
     __reply_value: fn<R: Encode>(self, value: R) -> String Never! {
         "{{\"ok\":{live_json.to_string<R>(value) ?? "null"}}}"
     }
+
+    // The reply of a call whose method answers nothing: `{"ok": null}`.
+    __reply_unit: fn<R>(self, _value: R) -> String Never! { "{{\"ok\":null}}" }
 
     // The reply of a job that failed with an error that doesn't encode.
     __failed: fn<E>(self, _error: E) -> String Never! { "{{\"err\":null}}" }

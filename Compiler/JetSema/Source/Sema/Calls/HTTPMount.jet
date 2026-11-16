@@ -225,6 +225,10 @@ SEMA_APP_REMOTE_CALL: "__call"
 
 SEMA_APP_REMOTE_CALL_VALUE: "__call_value"
 
+SEMA_APP_REMOTE_WRITE: "__write"
+
+SEMA_APP_REMOTE_WRITE_VALUE: "__write_value"
+
 SEMA_APP_REMOTE_ARG: "__arg"
 
 SEMA_APP_REMOTE_RAISE: "__raise"
@@ -333,8 +337,9 @@ sema_app_remote_method_call: fn(remote: String, method: String, type_args: [Type
 // lowers to the Remote's `__call` (a method that can fail with `E`) or
 // `__call_value` (one that can't): `direct` runs the method on the service
 // the Remote holds, and otherwise the encoded arguments go to the server.
-// The call's type is `R E!`, or `R app.CallError!` for a method that can't
-// fail.
+// A method that answers nothing is a write, which a device that queues may
+// queue, so it lowers to `__write` or `__write_value`. The call's type is
+// `R E!`, or `R app.CallError!` for a method that can't fail.
 sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declaration: Func, service_module: ModuleID, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     graph: program.registration_graph ?? return None
     method: declaration.name
@@ -417,6 +422,7 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
     raised_return: sema_type_resolve_declared(graph, returned, service_module)
     lowered: if {
         declared_return == .Result(ok, failure) -> sema_app_remote_fallible(remote, hidden, wire, ok, failure, raised_return, method_span)
+        declared_return == (Type.Named{name: "Unit"}) -> sema_app_remote_method_call(remote, SEMA_APP_REMOTE_WRITE_VALUE, [Type]{}, wire, method_span)
         else -> sema_app_remote_method_call(remote, SEMA_APP_REMOTE_CALL_VALUE, [Type]{declared_return}, wire, method_span)
     }
     // The lowered call keeps its Result carrier: the remote call is the call
@@ -432,10 +438,11 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
 }
 
 // `remote.__call<R, E>(method, args, direct, fail)` for an endpoint method
-// that fails with `E`: `fail` binds the transport's `CallError` raised as an
-// `R CallError!`, so it converts to `E` as any propagated error does.
-// `raised_return` is the method's `R E!` once more, for `__raise<R>`;
-// `hidden` prefixes the closure's names.
+// that fails with `E`, or `remote.__write<E>(…)` when `R` is `Unit`: `fail`
+// binds the transport's `CallError` raised as an `R CallError!`, so it
+// converts to `E` as any propagated error does. `raised_return` is the
+// method's `R E!` once more, for `__raise<R>`; `hidden` prefixes the
+// closure's names.
 sema_app_remote_fallible: fn(remote: String, hidden: String, wire: &&[CallArg], ok: Type, failure: Type, raised_return: Type, span: Span) -> Expr Never! {
     failure_name: "{hidden}_failure"
     raised_name: "{hidden}_raised"
@@ -448,6 +455,9 @@ sema_app_remote_fallible: fn(remote: String, hidden: String, wire: &&[CallArg], 
     fail: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: failure_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: fail_body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
     filled := wire.move()
     filled.push(sema_http_mount_arg(fail, span))
+    if ok == (Type.Named{name: "Unit"}) {
+        return sema_app_remote_method_call(remote, SEMA_APP_REMOTE_WRITE, [Type]{failure}, filled, span)
+    }
     sema_app_remote_method_call(remote, SEMA_APP_REMOTE_CALL, [Type]{ok, failure}, filled, span)
 }
 
@@ -1030,9 +1040,11 @@ sema_app_mount_answer: fn(value_name: String, method: Func, method_module: Modul
     invocation: Expr.MethodCall{receiver: sema_app_remote_ident(value_name, span), method: method.name, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
     declared_return: sema_type_resolve_declared(graph, method.return_type ?? Type.Named{name: "Unit"}, method_module)
     // A method that can fail replies with its error: `value: method(...) ??
-    // return Ok(args.__reply_err<E>(err))`; then `Ok(args.__reply_value<R>(value))`.
-    // A method that can't fail (`T Never!`) has no error to encode, so its
-    // fallback, which never runs, is `__failed`.
+    // return Ok(args.__reply_err<E>(err))`; then `Ok(args.__reply_value<R>(value))`,
+    // or `Ok(args.__reply_unit<Unit>(value))` when it answers nothing, since
+    // `Unit` has no codec to meet `__reply_value`'s `Encode` bound. A method
+    // that can't fail (`T Never!`) has no error to encode, so its fallback,
+    // which never runs, is `__failed`.
     replied: "{args_name}_value"
     reply_type: if {
         declared_return == .Result(ok, err) -> {
@@ -1047,7 +1059,8 @@ sema_app_mount_answer: fn(value_name: String, method: Func, method_module: Modul
             declared_return
         }
     }
-    statements.push(Stmt.Expr{expr: Expr.Ok{value: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__reply_value", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{reply_type}, args: [CallArg]{sema_http_mount_arg(sema_app_remote_ident(replied, span), span)}, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}})
+    answer: if reply_type == (Type.Named{name: "Unit"}) -> "__reply_unit" else -> "__reply_value"
+    statements.push(Stmt.Expr{expr: Expr.Ok{value: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: answer, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{reply_type}, args: [CallArg]{sema_http_mount_arg(sema_app_remote_ident(replied, span), span)}, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}})
     sema_app_mount_callback(args_name, statements, answer_type, span, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 

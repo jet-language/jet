@@ -255,7 +255,7 @@ pkg_cpp_has_line_break: fn(value: String) -> Bool Never! {
     false
 }
 
-pkg_cpp_validate_options: fn(options: CppBindOptions) ForeignBindError! -[FS]> {
+pkg_cpp_validate_options: fn(options: CppBindOptions) -[FS]> ForeignBindError! {
     if !pkg_binder_is_ident(options.lib) {
         return Err(ForeignBindError.Source("`{options.lib}` is not a valid Jet library name"))
     }
@@ -372,7 +372,7 @@ pkg_cpp_nul_joined: fn(values: [String]) -> [U8] Never! {
 
 // Compile the shim, prove it links as a shared library against the selected
 // libraries, then archive the object.
-pkg_cpp_build_archive: fn(shim: String, archive: String, store: String, options: CppBindOptions) ForeignBindError! -[FS, Exec, Time.Wait]> {
+pkg_cpp_build_archive: fn(shim: String, archive: String, store: String, options: CppBindOptions) -[FS, Exec, Time.Wait]> ForeignBindError! {
     build: files.join(store, ".build")
     pkg_binder_remove_tree_quiet(build)
     pkg_binder_create_dir_all(build, "could not create the C++ build directory")
@@ -407,7 +407,7 @@ pkg_cpp_build_archive: fn(shim: String, archive: String, store: String, options:
 
 // Publish the archive under its stable name with a `<lib>.link` record of
 // the target, boundary, and link inputs.
-pkg_cpp_materialize_projection: fn(cache: String, archive: String, options: CppBindOptions, boundary: ForeignBoundaryContract) ForeignBindError! -[FS]> {
+pkg_cpp_materialize_projection: fn(cache: String, archive: String, options: CppBindOptions, boundary: ForeignBoundaryContract) -[FS]> ForeignBindError! {
     pkg_binder_create_dir_all(cache, "could not create the C++ binding directory")
     pkg_binder_copy(archive, files.join(cache, "libjet_cpp_{options.lib}.a"), "could not materialize the C++ archive")
     links := "target\t{options.target}\nboundary\t{boundary.digest()}\n"
@@ -485,7 +485,7 @@ pkg_cpp_supervised: fn(argv: [String], timeout: Duration, tool: String) -[Exec, 
     Ok(output)
 }
 
-pkg_cpp_run: fn(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
+pkg_cpp_run: fn(argv: [String], tool: String) -[Exec, Time.Wait]> ForeignBindError! {
     output: pkg_cpp_supervised(argv, 60s, tool)
     if output.success {
         return

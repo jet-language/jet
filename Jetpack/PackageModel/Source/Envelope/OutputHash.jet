@@ -108,13 +108,13 @@ EnvelopeWalkHook: struct {
         EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: pkg_envelope_walk_ignore}
     }
 
-    observe: fn(&self, path: String, stage: EnvelopeWalkStage) Never! -[FS]> {
+    observe: fn(&self, path: String, stage: EnvelopeWalkStage) -[FS]> Never! {
         self.events.push(EnvelopeWalkEvent{path: path.copy(), stage: stage})
         self.react(path, stage)
     }
 }
 
-pkg_envelope_walk_ignore: fn(path: String, stage: EnvelopeWalkStage) Never! -[FS]> {}
+pkg_envelope_walk_ignore: fn(path: String, stage: EnvelopeWalkStage) -[FS]> Never! {}
 
 // The streamed canonical archive: the magic, then header/payload records in
 // the reference byte order.
@@ -327,7 +327,7 @@ pkg_envelope_count_inode_peers_under_except: fn(root: String, key: FileID, exclu
     count
 }
 
-pkg_envelope_encode_node: fn(root: String, path: String, rel: String, envelope_archive: &EnvelopeArchive, hardlinks: &[EnvelopeHardlink], allow_semantic_xattrs: Bool, allow_nix_store_symlinks: Bool, hook: &EnvelopeWalkHook) EnvelopeError! -[FS, Env]> {
+pkg_envelope_encode_node: fn(root: String, path: String, rel: String, envelope_archive: &EnvelopeArchive, hardlinks: &[EnvelopeHardlink], allow_semantic_xattrs: Bool, allow_nix_store_symlinks: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> EnvelopeError! {
     pkg_validate_rel_path_with_mode(rel, allow_nix_store_symlinks) ?? return Err(EnvelopeError.PathLaw(err))
     info: files.stat(path) ?? return Err(EnvelopeError.Inspect{path: path, detail: "{err}"})
     rel_bytes: rel.bytes()

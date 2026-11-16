@@ -618,11 +618,10 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
         owners.push(if names[index] == "" -> "_{index}" else -> names[index])
     }
     return_view: parser_parse_opt_declared_view_from(state, owners)
+    // An effect row comes right after the parameters; one after the result
+    // is not a function type, so it gets the generic parse error.
     if effect_bound == None && parser_func_effect_starts_here(state) {
-        late_first: parser_current_kind(state)
-        if late_first == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_LBRACKET {
-            effect_bound = Val(parser_parse_effect_arrow_row(state))
-        }
+        parser_report_expected(state, "the end of the function type")
     }
     end = parser_lookahead(state, -1).span
     // Only a marked parameter needs call metadata; its names repeat the contract's labels so

@@ -598,7 +598,7 @@ CBORPush: struct<W: Writer> {
         Ok(out)
     }
 
-    accept: fn(&self, input: &&[U8]) EncodingError! -[IO, Time.Wait]> {
+    accept: fn(&self, input: &&[U8]) -[IO, Time.Wait]> EncodingError! {
         bytes := input.move()
         size: bytes.len()
         self.replacement(0, size) ?? {
@@ -670,7 +670,7 @@ CBORPush: struct<W: Writer> {
         self.retained += size
     }
 
-    close_frame: fn(&self, input: &&WriteFrame) EncodingError! -[IO, Time.Wait]> {
+    close_frame: fn(&self, input: &&WriteFrame) -[IO, Time.Wait]> EncodingError! {
         frame := input.move()
         heap: frame_heap(frame)
         old := 0
@@ -711,7 +711,7 @@ CBORPush: struct<W: Writer> {
         self.accept(out)
     }
 
-    write_inner: fn(&self, event: DataEvent) EncodingError! -[IO, Time.Wait]> {
+    write_inner: fn(&self, event: DataEvent) -[IO, Time.Wait]> EncodingError! {
         if self.finished -> return Err(error(.State, self.total, "$", "write called after finish"))
         if event == {
             .ArrayStart | .ObjectStart -> {
@@ -745,17 +745,17 @@ CBORPush: struct<W: Writer> {
         }
     }
 
-    write: fn(&self, event: &&DataEvent) EncodingError! -[IO, Time.Wait]> {
+    write: fn(&self, event: &&DataEvent) -[IO, Time.Wait]> EncodingError! {
         if self.terminal == .Val(first) -> return Err(first.copy())
         self.write_inner(event) ?? return Err(self.fail(err))
     }
 
-    flush: fn(&self) EncodingError! -[IO, Time.Wait]> {
+    flush: fn(&self) -[IO, Time.Wait]> EncodingError! {
         if self.terminal == .Val(first) -> return Err(first.copy())
         self.output.flush() ?? return Err(self.fail(io_error(self.total, "$", stream.io_cause(err))))
     }
 
-    finish: fn(&self) EncodingError! -[IO, Time.Wait]> {
+    finish: fn(&self) -[IO, Time.Wait]> EncodingError! {
         if self.terminal == .Val(first) -> return Err(first.copy())
         if self.finished {
             return

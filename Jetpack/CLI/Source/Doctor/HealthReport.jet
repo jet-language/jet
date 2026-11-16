@@ -331,7 +331,7 @@ cli_doctor_endpoint_reachable: fn(url: String, online: Bool) -[FS, Env, Exec, Ti
 
 // `git ls-remote <url> HEAD` without prompts, without the registry
 // variables, and within four seconds.
-cli_doctor_git_registry_probe: fn(url: String) DoctorRegistryFailure! -[Env, Exec, Time, Time.Wait]> {
+cli_doctor_git_registry_probe: fn(url: String) -[Env, Exec, Time, Time.Wait]> DoctorRegistryFailure! {
     spec := process.cmd([String]{"git", "-c", "credential.useHttpPath=true", "ls-remote", url, "HEAD"})
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(.Capture)

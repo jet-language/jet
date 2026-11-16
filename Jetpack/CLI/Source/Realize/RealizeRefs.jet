@@ -207,17 +207,17 @@ cli_realize_ref: fn(verification: &StoreVerification, theme: Theme, roots: Hanga
 }
 
 // Erase a caller's live region before a diagnostic or row.
-cli_clear_live_region: fn(live: &LiveRegion?) Never! -[IO, Time.Wait]> {
+cli_clear_live_region: fn(live: &LiveRegion?) -[IO, Time.Wait]> Never! {
     if &live == .Val(region) -> region.clear()
 }
 
 // Stop the resolving spinner, if one is drawn, before any other output.
-cli_stop_spinner: fn(spinner: &&Spinner?) Never! -[IO]> {
+cli_stop_spinner: fn(spinner: &&Spinner?) -[IO]> Never! {
     if spinner == .Val(active) -> close(active)
 }
 
 // Report an offline refusal for a Nix ref that has no Hangar copy.
-cli_report_offline_nix: fn(theme: Theme, spec: RefSpec) Never! -[IO, Time.Wait]> {
+cli_report_offline_nix: fn(theme: Theme, spec: RefSpec) -[IO, Time.Wait]> Never! {
     ProviderError.Offline("`{spec.raw}` is not in the hangar and --offline forbids fetching provider output").report(theme)
 }
 
@@ -448,7 +448,7 @@ cli_package_fixture_available: fn(flags: CLIFlags, spec: RefSpec) -[FS, Env]> Bo
 
 // E1272: packages with no supported Nix compatibility output. Under `--json`
 // the hole list precedes the human diagnostic.
-cli_report_nix_bridge_required: fn(theme: Theme, flags: CLIFlags, holes: [NixBridgeNeed], realized_refs: [String]) Never! -[IO, Time.Wait]> {
+cli_report_nix_bridge_required: fn(theme: Theme, flags: CLIFlags, holes: [NixBridgeNeed], realized_refs: [String]) -[IO, Time.Wait]> Never! {
     if flags.json {
         hole_texts := [String]{}
         loop hole in holes -> hole_texts.push(hole.reference)
@@ -511,7 +511,7 @@ cli_realize_adapter: fn(verification: &StoreVerification, theme: Theme, roots: H
     }
 }
 
-cli_report_realize_error: fn(theme: Theme, error: RealizeError) Never! -[IO, Time.Wait]> {
+cli_report_realize_error: fn(theme: Theme, error: RealizeError) -[IO, Time.Wait]> Never! {
     if error == {
         .Integrity(failure) -> { store_report_integrity(theme, failure) }
         .LockedNix(inner) -> {

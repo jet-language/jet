@@ -27,13 +27,13 @@ CoreTextTrace: struct {
     timed: Bool
 
     impl CompilerTraceSink {
-        begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS, Time]> {}
+        begin: fn(self, name: String, detail: String, index: Int, total: Int) -[FS, Time]> Never! {}
 
-        begin_item: fn(self, name: String, file: String, item: String) Never! -[FS, Time]> {}
+        begin_item: fn(self, name: String, file: String, item: String) -[FS, Time]> Never! {}
 
-        end: fn(self, name: String, items: Int) Never! -[FS, Time]> {}
+        end: fn(self, name: String, items: Int) -[FS, Time]> Never! {}
 
-        progress: fn(self, name: String, done: Int, total: Int) Never! -[FS, Time]> {
+        progress: fn(self, name: String, done: Int, total: Int) -[FS, Time]> Never! {
             if name.starts_with("counters.") {
                 text_files.append_all(self.path, "{name} = {done}\n") ?? panic("cannot write the trace: {err}")
             }

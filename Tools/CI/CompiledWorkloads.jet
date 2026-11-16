@@ -394,7 +394,7 @@ file_sha256: fn(path: String) -[FS]> String Never! {
 
 // --- digests -----------------------------------------------------------------
 
-collect_files: fn(root: String, relative: String, out: &[String]) Problem! -[FS]> {
+collect_files: fn(root: String, relative: String, out: &[String]) -[FS]> Problem! {
     path: "{root}/{relative}"
     meta: files.stat(path) ?? return Err(problem("`{relative}` cannot be read: {err}"))
     if meta.is_dir {
@@ -444,7 +444,7 @@ TreeEntry: struct {
     mode: String
 }
 
-walk_tree: fn(relative: String, path: String, out: &[TreeEntry]) Problem! -[FS]> {
+walk_tree: fn(relative: String, path: String, out: &[TreeEntry]) -[FS]> Problem! {
     meta: files.stat(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
     kind: if meta.is_dir -> "dir" else if meta.is_symlink -> "symlink" else if meta.is_file -> "file" else -> ""
     if kind == "" -> return Err(problem("`{path}` is not a file, directory or link"))
@@ -605,7 +605,7 @@ Owners: struct {
     live: [String:Bool]
 }
 
-require_live_loss_owner: fn(contract: Contract, owners: &Owners, owner: String, context: String) Problem! -[Env, Exec, FS, Time, Time.Wait]> {
+require_live_loss_owner: fn(contract: Contract, owners: &Owners, owner: String, context: String) -[Env, Exec, FS, Time, Time.Wait]> Problem! {
     if full("#[0-9]+", owner) {
         live := false
         if owners.live.get(owner) == .Val(known) -> live = known else {
@@ -624,7 +624,7 @@ require_live_loss_owner: fn(contract: Contract, owners: &Owners, owner: String, 
     Err(problem("loss owner is not a card or ratified non-goal: {context}"))
 }
 
-require_manifest_loss_owner: fn(contract: Contract, owners: &Owners, task: String, owner: String, context: String) Problem! -[Env, Exec, FS, Time, Time.Wait]> {
+require_manifest_loss_owner: fn(contract: Contract, owners: &Owners, task: String, owner: String, context: String) -[Env, Exec, FS, Time, Time.Wait]> Problem! {
     expected: at(contract.task_loss, task)
     if expected == "" || owner != expected {
         shown: if expected == "" -> "missing" else -> expected.copy()
@@ -1260,7 +1260,7 @@ median_of: fn(sorted: [Float]) -> Float Never! {
 read_report: fn(dir: String, name: String) -[FS]> String Never! { files.read("{dir}/{name}") ?? "" }
 
 // `board` is the Tower store loss owners are checked against.
-check_report: fn(contract: Contract, given: String, candidate: String, board: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+check_report: fn(contract: Contract, given: String, candidate: String, board: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     dir: under(contract.root, given)
     corpus: "{contract.root}/{CORPUS}"
     owners := Owners{board: board.copy(), live: [String:Bool]{}}
@@ -2674,7 +2674,7 @@ self_check: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int {
 
 // The self-check's own Tower store: every manifest loss card is a live card,
 // so a measured loss reaches the superiority verdict whatever the real board holds.
-write_fixture_board: fn(state: SelfCheck) Problem! -[FS]> {
+write_fixture_board: fn(state: SelfCheck) -[FS]> Problem! {
     cards := [Dyn]{}
     seen := [String]{}
     loop id in state.contract.tasks {
@@ -2864,7 +2864,7 @@ canaries: fn(state: SelfCheck) -[FS]> [Canary] Never! {
     list
 }
 
-apply_edit: fn(dir: String, edit: Edit) Problem! -[FS]> {
+apply_edit: fn(dir: String, edit: Edit) -[FS]> Problem! {
     path: "{dir}/{edit.file}"
     if edit.action == "remove" {
         files.remove(path) ?? return Err(problem("`{path}` cannot be removed: {err}"))
@@ -2925,12 +2925,12 @@ edit_selects: fn(where: String, index: Int, fields: [String], changed: Bool) -> 
     false
 }
 
-refresh_review_digest: fn(dir: String) Problem! -[FS]> {
+refresh_review_digest: fn(dir: String) -[FS]> Problem! {
     digest: hash_report_files(dir) ?? return Err(err)
     apply_edit(dir, set("review.tsv", 7, digest, "row2"))
 }
 
-write_lines: fn(path: String, lines: [String]) Problem! -[FS]> {
+write_lines: fn(path: String, lines: [String]) -[FS]> Problem! {
     files.write(path, "{lines.join("\n")}\n") ?? return Err(problem("`{path}` cannot be written: {err}"))
     Ok()
 }
@@ -2941,7 +2941,7 @@ toolchain_path: fn(root: String, command: String) -[Env, FS]> String Never! {
 }
 
 // The synthetic producer report: every Jet value 1 and every peer value 2.
-write_synthetic_report: fn(state: SelfCheck) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+write_synthetic_report: fn(state: SelfCheck) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     contract: state.contract
     corpus: "{state.root}/{CORPUS}"
     report: state.report
@@ -3585,12 +3585,12 @@ resolve_executable: fn(candidate: String) -[Env, FS]> String Never! {
     ""
 }
 
-require_file: fn(file: String, label: String) Problem! -[FS]> {
+require_file: fn(file: String, label: String) -[FS]> Problem! {
     if !files.is_file(file) -> return Err(problem("missing {label}: {file}"))
     Ok()
 }
 
-require_input_path: fn(file: String, label: String) Problem! -[FS]> {
+require_input_path: fn(file: String, label: String) -[FS]> Problem! {
     meta: files.stat(file) ?? return Err(problem("missing {label}: {file}"))
     if !meta.is_file && !meta.is_dir -> return Err(problem("missing {label}: {file}"))
     Ok()
@@ -3819,7 +3819,7 @@ powershell_processes: fn(shell: String) -[Env, Exec, FS, Time, Time.Wait]> [Proc
     Val(out)
 }
 
-checked: fn(result: Measured, expected: String, label: String) Problem! -[FS]> {
+checked: fn(result: Measured, expected: String, label: String) -[FS]> Problem! {
     if result.status != 0 {
         return Err(problem("{label} exited {result.status}: {clean_text(result.stderr)}"))
     }
@@ -3832,7 +3832,7 @@ checked: fn(result: Measured, expected: String, label: String) Problem! -[FS]> {
 
 // --- the peer isolation launcher
 
-launcher_kind: fn(launcher: String) Problem! -[Env, FS]> {
+launcher_kind: fn(launcher: String) -[Env, FS]> Problem! {
     lower: launcher.lower()
     if sys.family() == "windows" {
         if !lower.ends_with(".exe") {
@@ -3982,7 +3982,7 @@ assert_frozen_peer_command: fn(task_id: String, language: String, phase: String,
 
 // --- staging
 
-remove_tree: fn(path: String) Problem! -[FS]> {
+remove_tree: fn(path: String) -[FS]> Problem! {
     if !path_exists(path) -> return Ok()
     if files.is_symlink(path) || !files.is_dir(path) {
         files.remove(path) ?? return Err(problem("`{path}` cannot be removed: {err}"))
@@ -3992,14 +3992,14 @@ remove_tree: fn(path: String) Problem! -[FS]> {
     Ok()
 }
 
-preserve_mode: fn(source: String, destination: String, mode: Int) Problem! -[Env, FS]> {
+preserve_mode: fn(source: String, destination: String, mode: Int) -[Env, FS]> Problem! {
     if sys.family() == "windows" -> return Ok()
     files.set_mode(destination, mode) ?? return Err(problem("could not preserve mode for {source}: {err}"))
     Ok()
 }
 
 // Copies files, directories (without `.jet`) and links as links, keeping modes.
-copy_path: fn(source: String, destination: String, exclude_control: Bool) Problem! -[Env, FS]> {
+copy_path: fn(source: String, destination: String, exclude_control: Bool) -[Env, FS]> Problem! {
     meta: files.stat(source) ?? return Err(problem("`{source}` cannot be read: {err}"))
     parent: files.dirname(destination)
     files.create_dir_all(parent) ?? return Err(problem("`{parent}` cannot be created: {err}"))
@@ -4026,7 +4026,7 @@ copy_path: fn(source: String, destination: String, exclude_control: Bool) Proble
 }
 
 // A fixture copied with its `.fixture-modes.tsv` modes applied, deepest first.
-stage_path: fn(source: String, destination: String) Problem! -[Env, FS]> {
+stage_path: fn(source: String, destination: String) -[Env, FS]> Problem! {
     remove_tree(destination) ?? return Err(err)
     meta: files.stat(source) ?? return Err(problem("`{source}` cannot be read: {err}"))
     if !meta.is_dir -> return copy_path(source, destination, false)
@@ -4091,7 +4091,7 @@ source_entry: fn(source: String, language: String) -[FS]> String Problem! {
     Err(problem("source directory has no conventional {language} entry: {source}"))
 }
 
-closure_walk: fn(file: String, out: &[String]) Problem! -[FS]> {
+closure_walk: fn(file: String, out: &[String]) -[FS]> Problem! {
     meta: files.stat(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
     if meta.is_dir {
         if files.basename(file) == ".jet" -> return Ok()
@@ -4265,7 +4265,7 @@ matches_somewhere: fn(pattern: String, text: String) -> Bool Never! {
     compiled.is_match(text)
 }
 
-write_workload_package: fn(project: String, task: [String:String], source: String) Problem! -[FS]> {
+write_workload_package: fn(project: String, task: [String:String], source: String) -[FS]> Problem! {
     allow: jet_authority(task, source) ?? return Err(err)
     path: "{project}/package.jet"
     files.write(path, "name: \"compiled-workload\"\nversion: \"0.1.0\"\nauthority: {{ allow: [{allow}] }}\n") ?? return Err(problem("`{path}` cannot be written: {err}"))
@@ -4968,7 +4968,7 @@ TaskPaths: struct {
 
 // One sample of one side: cold build, warmed source-edit rebuild, native and
 // hostile runs, the diagnostic probe and a deployment of the artifact closure.
-measure_sample: fn(state: Producer, task: [String:String], peer: [String:String], side: &Side, sample: Int, paths: TaskPaths) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+measure_sample: fn(state: Producer, task: [String:String], peer: [String:String], side: &Side, sample: Int, paths: TaskPaths) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     task_id: at(task, "task_id")
     normal_input: "{paths.work}/input-{side.name}-{sample}"
     hostile_input: "{paths.work}/hostile-{side.name}-{sample}"
@@ -5251,7 +5251,7 @@ tier_rows_for: fn(state: Producer, rows: &Rows, task: [String:String], peer: [St
 }
 
 // Paired, interleaved samples of Jet and the selected peer for one task.
-measure_task: fn(state: Producer, rows: &Rows, task: [String:String], adapter: [String:String], peer: [String:String], jet_tool: ToolInfo, tiers: [[String:String]]) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+measure_task: fn(state: Producer, rows: &Rows, task: [String:String], adapter: [String:String], peer: [String:String], jet_tool: ToolInfo, tiers: [[String:String]]) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     task_id: at(task, "task_id")
     work: "{state.work}/{task_id}"
     files.create_dir_all(work) ?? return Err(problem("`{work}` cannot be created: {err}"))
@@ -5337,7 +5337,7 @@ coverage_key_path: fn(key: String) -> String Never! {
 }
 
 // Every peer candidate, selected or not, measured natively on its own.
-run_peer_coverage: fn(state: Producer, rows: &Rows, peer: [String:String], task: [String:String], adapter: [String:String], metrics: [[String:String]]) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+run_peer_coverage: fn(state: Producer, rows: &Rows, peer: [String:String], task: [String:String], adapter: [String:String], metrics: [[String:String]]) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     key: peer_key(peer)
     task_id: at(task, "task_id")
     language: at(peer, "language")

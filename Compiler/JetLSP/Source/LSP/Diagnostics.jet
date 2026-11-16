@@ -7,7 +7,7 @@ use {
 }
 
 // One framed JSON-RPC message: its header counts bytes, not characters.
-lsp_write_message: fn(stdout: &lsp_diag_term.Stdout, json: String) IOError! -[IO]> {
+lsp_write_message: fn(stdout: &lsp_diag_term.Stdout, json: String) -[IO]> IOError! {
     stdout.write("Content-Length: {json.count_bytes()}\r\n\r\n{json}") ?? return Err(err)
     stdout.flush() ?? return Err(err)
 }
@@ -228,12 +228,12 @@ lsp_document_group_json: fn(state: LSPDiagnosticState, target: String, diagnosti
 // didClose drops the document and marks the open documents that read it
 // dirty, then clears each URI only this root's publication held. The state
 // changes even when a clear's write fails.
-lsp_close_document: fn(server: &LSPServer, uri: String, stdout: &lsp_diag_term.Stdout) IOError! -[IO]> {
+lsp_close_document: fn(server: &LSPServer, uri: String, stdout: &lsp_diag_term.Stdout) -[IO]> IOError! {
     _ := server.published.remove(uri)
     lsp_close_document_state(server.diagnostic_state, uri, stdout) ?? return Err(err)
 }
 
-lsp_close_document_state: fn(state: &LSPDiagnosticState, uri: String, stdout: &lsp_diag_term.Stdout) IOError! -[IO]> {
+lsp_close_document_state: fn(state: &LSPDiagnosticState, uri: String, stdout: &lsp_diag_term.Stdout) -[IO]> IOError! {
     if state.docs.remove(uri) == .Val(doc) {
         readers := [String]{}
         loop (root, modules) in state.checked_modules {

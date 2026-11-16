@@ -622,7 +622,9 @@ sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffe
 // names the bare effect, which stands for every value.
 sema_library_effect_check_values: fn(node: SemaEffectNode, reached: [String], diagnostics: &[Diagnostic]) {
     rare: node.rare ?? return
-    if !sema_library_effect_has_value(rare.library_rows) -> return
+    if !sema_library_effect_has_value(rare.library_rows) {
+        return
+    }
     loop token in reached {
         if !token.contains("/") -> next
         base: effect_value_base(token)
@@ -653,7 +655,9 @@ sema_library_effect_has_value: fn(rows: [SemaLibraryEffectName]) -> Bool Never! 
 // `base` (`Bucket` for `Bucket{name: "photos"}`), or None.
 sema_library_effect_value_written: fn(rows: [SemaLibraryEffectName], base: String) -> String? Never! {
     loop row in rows {
-        if effect_value_is_valued(row.token) && effect_value_base(row.token) == base -> return Val(effect_value_base(row.written))
+        if effect_value_is_valued(row.token) && effect_value_base(row.token) == base {
+            return Val(effect_value_base(row.written))
+        }
     }
     None
 }

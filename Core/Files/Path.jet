@@ -271,44 +271,44 @@ read_bytes: fn(path: Path) -[FS]> [U8] IOError! { files.read_bytes(path.raw) }
 
 read_lines: fn(path: Path) -[FS]> [String] IOError! { files.read_lines(path.raw) }
 
-write_text: fn(path: Path, text: String) IOError! -[FS]> { files.write(path.raw, text) }
+write_text: fn(path: Path, text: String) -[FS]> IOError! { files.write(path.raw, text) }
 
-write_bytes: fn(path: Path, bytes: [U8]) IOError! -[FS]> { files.write_bytes(path.raw, bytes) }
+write_bytes: fn(path: Path, bytes: [U8]) -[FS]> IOError! { files.write_bytes(path.raw, bytes) }
 
-write_lines: fn(path: Path, lines: [String]) IOError! -[FS]> { files.write_lines(path.raw, lines) }
+write_lines: fn(path: Path, lines: [String]) -[FS]> IOError! { files.write_lines(path.raw, lines) }
 
-append_text: fn(path: Path, text: String) IOError! -[FS]> { files.append_all(path.raw, text) }
+append_text: fn(path: Path, text: String) -[FS]> IOError! { files.append_all(path.raw, text) }
 
 /// pathlib spelling of `files.create_dir_all`: missing parents are always
 /// created, so `parents` does not change the result.
-mkdir: fn(path: Path, parents: Bool) IOError! -[FS]> { files.create_dir_all(path.raw) }
+mkdir: fn(path: Path, parents: Bool) -[FS]> IOError! { files.create_dir_all(path.raw) }
 
-ensure_dir: fn(path: Path) IOError! -[FS]> { files.create_dir_all(path.raw) }
+ensure_dir: fn(path: Path) -[FS]> IOError! { files.create_dir_all(path.raw) }
 
-rmdir: fn(path: Path) IOError! -[FS]> { files.remove_dir(path.raw) }
+rmdir: fn(path: Path) -[FS]> IOError! { files.remove_dir(path.raw) }
 
-rmtree: fn(path: Path) IOError! -[FS]> { files.remove_all(path.raw) }
+rmtree: fn(path: Path) -[FS]> IOError! { files.remove_all(path.raw) }
 
-unlink: fn(path: Path) IOError! -[FS]> { files.remove(path.raw) }
+unlink: fn(path: Path) -[FS]> IOError! { files.remove(path.raw) }
 
-rename: fn(path: Path, to: Path) IOError! -[FS]> { files.rename(path.raw, to.raw) }
+rename: fn(path: Path, to: Path) -[FS]> IOError! { files.rename(path.raw, to.raw) }
 
-replace: fn(path: Path, to: Path) IOError! -[FS]> { files.relocate(path.raw, to.raw) }
+replace: fn(path: Path, to: Path) -[FS]> IOError! { files.relocate(path.raw, to.raw) }
 
-touch: fn(path: Path) IOError! -[FS]> { files.touch(path.raw) }
+touch: fn(path: Path) -[FS]> IOError! { files.touch(path.raw) }
 
-chmod: fn(path: Path, mode: Int) IOError! -[FS]> { files.set_mode(path.raw, mode) }
+chmod: fn(path: Path, mode: Int) -[FS]> IOError! { files.set_mode(path.raw, mode) }
 
-symlink_to: fn(path: Path, target: Path) IOError! -[FS]> { files.symlink(target.raw, path.raw) }
+symlink_to: fn(path: Path, target: Path) -[FS]> IOError! { files.symlink(target.raw, path.raw) }
 
-hardlink_to: fn(path: Path, target: Path) IOError! -[FS]> { files.hard_link(target.raw, path.raw) }
+hardlink_to: fn(path: Path, target: Path) -[FS]> IOError! { files.hard_link(target.raw, path.raw) }
 
 readlink: fn(path: Path) -[FS]> Path IOError! {
     t: files.read_link(path.raw)
     Ok(Path{raw: t})
 }
 
-copy_file: fn(path: Path, to: Path) IOError! -[FS]> { files.copy2(path.raw, to.raw) }
+copy_file: fn(path: Path, to: Path) -[FS]> IOError! { files.copy2(path.raw, to.raw) }
 
 copy_into: fn(path: Path, dir: Path) -[FS]> Path IOError! {
     dest: join(dir, name(path))

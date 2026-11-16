@@ -1,0 +1,46 @@
+// A public board screen and a signed-in inbox screen on the app graph. A
+// served web app answers a GET of the board's address with server HTML: the
+// view's text escaped into the page, then the page's resume state. An
+// address whose texts make no board is not found, and the inbox refuses a
+// caller with no session.
+use {
+    app
+    http: core.http
+    net: core.net
+    web: core.web
+}
+
+BoardView: struct {
+    project: String
+    #App.Query tab: String
+}
+
+InboxView: struct {
+    box: String
+}
+
+board: fn(view: BoardView) -> String Never! { "{view.project} <{view.tab}>" }
+
+inbox: fn(view: InboxView) -> String Never! { view.box }
+
+// GET `path`, and print its status, its Cache-Control and, with `whole`,
+// its body.
+fetch: fn(addr: String, path: String, whole: Bool) HTTPError! {
+    answer: http.send_request(http.request_with(.Get, "http://{addr}{path}", http.headers(), http.body_text("")))
+    print("{path}: {answer.status} cache-control={answer.header("cache-control") ?? "none"}")
+    if whole -> print(answer.text())
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    _: app.new("Crew").screen("/boards/:project", board).screen("/inbox/:box", inbox, signed_in: true)
+    served: web.app()
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<3 { served.serve_once(listener) }
+    }
+    fetch(addr, "/boards/p%201?tab=mine%26more", true)
+    fetch(addr, "/boards/p1", false)
+    fetch(addr, "/inbox/mine", false)
+    serving.join()
+}

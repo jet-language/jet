@@ -30,7 +30,7 @@ use {
 // `.jet/` when absent and keeping every unrelated lock record. A failed write
 // is returned to the caller.
 // Reuse the command's declaration cache when checking the plan's authority.
-env_workspace_lock_write: fn(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
+env_workspace_lock_write: fn(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) -[FS, Env, Exec, Time, Time.Wait]> EnvironmentError! {
     // Refusal precedes the process lock too, whose acquisition can create
     // filesystem state.
     pkg_check_workspace_overlay_gates(cache, workspace_root, plan.overlay_policy) ?? return Err(EnvironmentError.Gate(err))
@@ -43,7 +43,7 @@ env_workspace_lock_invalid: fn(text: String) -> EnvironmentError Never! {
     EnvironmentError.InvalidData(text)
 }
 
-env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
+env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) -[FS, Env, Exec, Time, Time.Wait]> EnvironmentError! {
     guard: env_runtime_project_lock(workspace_root, "workspace-lock")
     resolver: AuthorityResolver.open(workspace_root) ?? return Err(env_workspace_lock_invalid("workspace authority cannot be opened: {err.message()}"))
     existing_lock := CheckedFile?{None}

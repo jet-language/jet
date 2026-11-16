@@ -27,7 +27,7 @@ provider_script_test_selected: fn(closure: [RegistryPackage]) -> [String:String]
     selected
 }
 
-provider_script_test_run: fn(argv: [String]) Never! -[Exec, Time.Wait]> {
+provider_script_test_run: fn(argv: [String]) -[Exec, Time.Wait]> Never! {
     receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? panic("start `{argv[0]}`")
     assert(receipt.success, "`{argv.join(" ")}` failed: {receipt.errors}")
 }
@@ -41,7 +41,7 @@ provider_script_test_require_tools: fn(tools: [String]) -[FS, Env]> Bool Never! 
     true
 }
 
-provider_script_test_require_zip: fn() Never! -[Exec, Time.Wait]> {
+provider_script_test_require_zip: fn() -[Exec, Time.Wait]> Never! {
     receipt: process.cmd([String]{"php", "-r", "exit(class_exists('ZipArchive') ? 0 : 1);"}).run() ?? panic("start php")
     assert(receipt.success, "the dev shell PHP must provide ZipArchive")
 }

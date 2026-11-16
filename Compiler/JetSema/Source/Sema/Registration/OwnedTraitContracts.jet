@@ -358,7 +358,7 @@ sema_owned_pure: fn(method: Func) -> Bool Never! {
 }
 
 // `impl T.CheckedText`: one `type Error`, the pure checker
-// `check: fn(text: String) Error! -[]>` and the pure hole encoder
+// `check: fn(text: String) -[]> Error!` and the pure hole encoder
 // `encode_hole: fn<T: Printable>(value: T) -[]> Hole`. A type whose holes stay
 // values binds `type Hole` and declares the pure assembler
 // `build: fn(parts: [String], holes: [Hole]) -[]> T`; without `build` the owner
@@ -374,7 +374,7 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
     hole_type: if hole_bindings.len() > 0 -> associated[hole_bindings[0]].ty.copy() else -> Type.String
     error_name: type_name(error_type)
     hole_name: type_name(hole_type)
-    check_expected: "`check: fn(text: String) {error_name}! -[]>`"
+    check_expected: "`check: fn(text: String) -[]> {error_name}!`"
     hole_expected: "`encode_hole: fn<T: Printable>(value: T) -[]> {hole_name}`"
     build_expected: "`build: fn(parts: [String], holes: [{hole_name}]) -[]> {owner_name}`"
     string_backed: if distinct_base == .Val(base) -> type_identity_equal(base, Type.String) else -> false

@@ -93,7 +93,7 @@ cli_tool_profile_lock: fn() -[FS, Env, Time]> RuntimeLock IOError! {
 cli_now_secs: fn() -[Time]> Int Never! { time.unix_seconds(time.now()) }
 
 // A test-only crash injection point named by the failpoint env var.
-cli_profile_failpoint: fn(phase: String) CLIError! -[Env]> {
+cli_profile_failpoint: fn(phase: String) -[Env]> CLIError! {
     if sys.get(TOOL_PROFILE_FAILPOINT_ENV) == .Val(requested) {
         if requested == phase {
             return Err(CLIError.Other("profile publication failpoint `{phase}`"))
@@ -109,7 +109,7 @@ cli_read_tool_manifest: fn() -[FS, Env]> ToolManifest CLIError! {
     ToolManifest.parse(cli_read_bounded(path))
 }
 
-cli_write_tool_manifest: fn(manifest: ToolManifest) CLIError! -[FS, Env]> {
+cli_write_tool_manifest: fn(manifest: ToolManifest) -[FS, Env]> CLIError! {
     files.create_dir_all(cli_tools_state_dir())
     partial: files.join(cli_tools_state_dir(), TOOL_MANIFEST_PARTIAL)
     if cli_stat_optional(partial) != None -> files.remove(partial)
@@ -121,7 +121,7 @@ cli_write_tool_manifest: fn(manifest: ToolManifest) CLIError! -[FS, Env]> {
 // Record the installed tools in the manifest: sources merge the old
 // declarations with the realization table, and each tool keeps its declared
 // reference and tier unless this install overrides its policy.
-cli_record_tool_manifest_locked: fn(tools: [InstalledUserTool], declared_sources: SourceTable, override_ref: String?, override_policy: ChannelPolicy) CLIError! -[FS, Env]> {
+cli_record_tool_manifest_locked: fn(tools: [InstalledUserTool], declared_sources: SourceTable, override_ref: String?, override_policy: ChannelPolicy) -[FS, Env]> CLIError! {
     old: cli_read_tool_manifest()
     source_map := [String:ToolManifestSource]{}
     loop source in old.sources -> source_map[source.name] = source
@@ -342,7 +342,7 @@ cli_tool_write_generation_body: fn(verification: &StoreVerification, generation:
 }
 
 // Reactivate an existing complete generation.
-cli_activate_tool_generation_locked: fn(verification: &StoreVerification, generation: Int) CLIError! -[FS, Env, Time]> {
+cli_activate_tool_generation_locked: fn(verification: &StoreVerification, generation: Int) -[FS, Env, Time]> CLIError! {
     record: cli_read_tool_generation_record(generation)
     cli_validate_generation_bins(verification, generation, record.tools)
     if record.tools.len() > 0 {
@@ -353,7 +353,7 @@ cli_activate_tool_generation_locked: fn(verification: &StoreVerification, genera
 
 // Prepare, then commit, one Store root per store authority so no target of
 // this generation can be collected while it is reachable.
-cli_ensure_tool_generation_roots: fn(verification: &StoreVerification, generation: Int, tools: [InstalledUserTool], witness: String) CLIError! -[FS, Env, Time]> {
+cli_ensure_tool_generation_roots: fn(verification: &StoreVerification, generation: Int, tools: [InstalledUserTool], witness: String) -[FS, Env, Time]> CLIError! {
     authorities := [String:[String]]{}
     loop tool in tools {
         cli_profile_validate_digest(tool.output_hash)
@@ -383,7 +383,7 @@ cli_ensure_tool_generation_roots: fn(verification: &StoreVerification, generatio
 // pointer and the profile record, then retire names only the previous
 // generation used. A crash or an interrupted cleanup leaves the last
 // published name usable; stale names go on the next successful publish.
-cli_publish_tool_generation: fn(generation: Int, witness: String, tools: [InstalledUserTool]) CLIError! -[FS, Env]> {
+cli_publish_tool_generation: fn(generation: Int, witness: String, tools: [InstalledUserTool]) -[FS, Env]> CLIError! {
     files.create_dir_all(cli_user_jet_dir())
     files.create_dir_all(cli_user_bin_dir())
     if files.stat(cli_user_bin_dir()).is_symlink {
@@ -429,7 +429,7 @@ cli_publish_tool_generation: fn(generation: Int, witness: String, tools: [Instal
 // Remove abandoned partial pointers and projection staging, migrate legacy
 // generations, revalidate and re-root every complete generation, and
 // republish the requested (or newest complete) generation.
-cli_recover_tool_profile_state: fn(verification: &StoreVerification) CLIError! -[FS, Env, Exec, Time, Rand]> {
+cli_recover_tool_profile_state: fn(verification: &StoreVerification) -[FS, Env, Exec, Time, Rand]> CLIError! {
     files.create_dir_all(cli_tools_state_dir())
     partials: [String]{TOOL_PROFILE_POINTER_PARTIAL, TOOL_PROFILE_CURRENT_PARTIAL, TOOL_MANIFEST_PARTIAL}
     loop name in partials {
@@ -492,7 +492,7 @@ LegacyToolGeneration: struct {
 
 // Rewrite every complete legacy generation into the canonical schema (unless
 // an equal canonical generation exists) and archive the legacy directory.
-cli_migrate_legacy_tool_generations_locked: fn(verification: &StoreVerification) CLIError! -[FS, Env, Exec, Time, Rand]> {
+cli_migrate_legacy_tool_generations_locked: fn(verification: &StoreVerification) -[FS, Env, Exec, Time, Rand]> CLIError! {
     if !files.is_dir(cli_tool_generations_dir()) {
         return
     }

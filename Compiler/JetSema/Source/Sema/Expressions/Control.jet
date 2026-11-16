@@ -693,9 +693,16 @@ sema_failure_declared_conversion_name: fn(source_leaf: String, target_leaf: Stri
     "errconv_{sema_failure_conversion_name_part(source_leaf)}_to_{sema_failure_conversion_name_part(target_leaf)}"
 }
 
+// A failure domain by its declared names: a named type by its leaf, a union
+// (`NetError | TaskFailure`) by each member's.
 sema_failure_conversion_leaf: fn(ty: Type) -> String Never! {
     normalized: sema_expr_unwrap_tag(ty)
     if normalized == .Named(name) -> return sema_error_conversion_leaf(name)
+    if normalized == .Union(members) {
+        names := [String]{}
+        loop member in members -> names.push(sema_failure_conversion_leaf(member))
+        return names.join(" | ")
+    }
     type_name(normalized)
 }
 
@@ -2476,7 +2483,9 @@ sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScop
             // A hole table's arm test: its header, marked as in
             // sema_expr_check_paren (E0442).
             outer: scopes.hole_header
-            if inner == .Paren(_, inner_span, _) && inner_span == span -> scopes.hole_header = Val(span)
+            if inner == .Paren(_, inner_span, _) && inner_span == span {
+                scopes.hole_header = Val(span)
+            }
             checked: sema_expression_check_condition_inner(inner, environment, program, scopes, state, tail_store, context, diagnostics)
             scopes.hole_header = outer
             return checked

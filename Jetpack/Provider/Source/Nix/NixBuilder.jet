@@ -68,7 +68,7 @@ NativeNixBuildError: enum {
     }
 
     // Render through the shared Jetpack terminal surface.
-    report: fn(self, theme: Theme) Never! -[IO, Time.Wait]> {
+    report: fn(self, theme: Theme) -[IO, Time.Wait]> Never! {
         theme.error_coded(self.code(), self.what(), self.why(), self.fix())
     }
 }
@@ -107,7 +107,7 @@ NixBuildScratch: struct {
     }
 
     // Best-effort removal: read-only outputs are made writable first.
-    remove: fn(self) Never! -[FS]> {
+    remove: fn(self) -[FS]> Never! {
         nix_builder_make_tree_writable(self.path)
         files.remove_all(self.path).drop("an abandoned build scratch is swept by Hangar cleanup")
     }
@@ -270,7 +270,7 @@ nix_builder_admit: fn(verification: &StoreVerification, roots: HangarRoots, buil
     Ok(entry)
 }
 
-nix_builder_validate_source_dir: fn(path: String) NativeNixBuildError! -[FS]> {
+nix_builder_validate_source_dir: fn(path: String) -[FS]> NativeNixBuildError! {
     info: files.stat(path) ?? return Err(NativeNixBuildError.Invalid("source directory `{path}`: {err}"))
     if info.is_symlink || !info.is_dir {
         return Err(NativeNixBuildError.Invalid("source directory `{path}` is not a real directory"))
@@ -313,7 +313,7 @@ nix_builder_validate_output_name: fn(name: String) NativeNixBuildError! {
 
 // A declared output must exist and not be a symlink; a fixed output must be a
 // flat SHA-256 file with the declared hash.
-nix_builder_validate_built_output: fn(name: String, path: String, declared: NixDerivationOutput) NativeNixBuildError! -[FS]> {
+nix_builder_validate_built_output: fn(name: String, path: String, declared: NixDerivationOutput) -[FS]> NativeNixBuildError! {
     info: files.stat(path) ?? return Err(NativeNixBuildError.Failed("declared output `{name}` is missing: {err}"))
     if info.is_symlink {
         return Err(NativeNixBuildError.Store("declared output `{name}` is a symlink"))
@@ -331,7 +331,7 @@ nix_builder_validate_built_output: fn(name: String, path: String, declared: NixD
     }
 }
 
-nix_builder_create_real_directory: fn(path: String, label: String) NativeNixBuildError! -[FS]> {
+nix_builder_create_real_directory: fn(path: String, label: String) -[FS]> NativeNixBuildError! {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink || !info.is_dir {
@@ -368,7 +368,7 @@ nix_builder_name_from_store_path: fn(path: String) -> String Never! {
 }
 
 // Add owner access to every non-symlink node so the tree can be removed.
-nix_builder_make_tree_writable: fn(path: String) Never! -[FS]> {
+nix_builder_make_tree_writable: fn(path: String) -[FS]> Never! {
     info: files.stat(path) ?? return
     if info.is_symlink {
         return

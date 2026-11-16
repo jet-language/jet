@@ -511,7 +511,7 @@ FlakeGraph: struct {
     // each file once), fingerprint each one, and fold its outputs into the
     // graph. Root modules must be relative paths without `..`; every module
     // must resolve to a regular file inside the flake project.
-    attach_composition_sources: fn(&self, path: String) TrustError! -[FS, Env]> {
+    attach_composition_sources: fn(&self, path: String) -[FS, Env]> TrustError! {
         composition: self.composition ?? return
         project_dir: trust_flake_project_dir(path)
         project_root: files.canonicalize(project_dir) ?? return Err(TrustError.IO("couldn't resolve flake-parts project root `{project_dir}`: {err}"))

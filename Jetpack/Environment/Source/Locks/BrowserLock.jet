@@ -98,7 +98,7 @@ env_browser_list: fn(project_root: String) -[FS]> [LockedBrowser] Never! {
     lock.browsers
 }
 
-env_browser_verify: fn(locked: LockedBrowser) BrowserLockError! -[FS]> {
+env_browser_verify: fn(locked: LockedBrowser) -[FS]> BrowserLockError! {
     path: locked.binary
     if !files.is_file(path) -> return Err(BrowserLockError.MissingBinary(path))
     info: files.stat(path) ?? return Err(BrowserLockError.IO("could not stat {path}: {err}"))

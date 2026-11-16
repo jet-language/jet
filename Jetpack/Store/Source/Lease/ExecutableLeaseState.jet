@@ -174,7 +174,7 @@ ExecutableLeaseProtocol: struct {
         self.publish_receipt(receipt)
     }
 
-    validate_snapshot: fn(self, lease_id: String, generation: Int, owner_scope: String, snapshot_root: String, expected_digest: String) IOError! -[FS, Env]> {
+    validate_snapshot: fn(self, lease_id: String, generation: Int, owner_scope: String, snapshot_root: String, expected_digest: String) -[FS, Env]> IOError! {
         receipt: self.read_generation(lease_id, generation)
         if receipt.owner_scope != owner_scope || receipt.snapshot_rel != self.relative_snapshot(snapshot_root) || receipt.output_digest != expected_digest {
             return Err(store_lease_invalid("executable lease receipt does not match the handoff"))
@@ -186,13 +186,13 @@ ExecutableLeaseProtocol: struct {
         }
     }
 
-    release: fn(self, lease_id: String, generation: Int, owner_scope: String) IOError! -[FS, Env, Time]> {
+    release: fn(self, lease_id: String, generation: Int, owner_scope: String) -[FS, Env, Time]> IOError! {
         state: self.lease_state_lock()
         self.release_unlocked(lease_id, generation, owner_scope)
         close(state)
     }
 
-    release_unlocked: fn(self, lease_id: String, generation: Int, owner_scope: String) IOError! -[FS, Env]> {
+    release_unlocked: fn(self, lease_id: String, generation: Int, owner_scope: String) -[FS, Env]> IOError! {
         receipt: self.read_generation(lease_id, generation)
         if receipt.owner_scope != owner_scope {
             return Err(store_lease_invalid("executable lease release owner mismatch"))
@@ -268,7 +268,7 @@ ExecutableLeaseProtocol: struct {
         self.recover_sweep_containers(protected, preserve_containers)
     }
 
-    recover_collect_live: fn(self, records: String, protected: &[String], preserve_containers: &Bool) IOError! -[FS, Env]> {
+    recover_collect_live: fn(self, records: String, protected: &[String], preserve_containers: &Bool) -[FS, Env]> IOError! {
         entries: files.list_dir(records)
         loop entry in entries {
             name: entry.name
@@ -314,7 +314,7 @@ ExecutableLeaseProtocol: struct {
         }
     }
 
-    recover_reclaim_records: fn(self, records: String, protected: &[String], preserve_containers: &Bool) IOError! -[FS, Env]> {
+    recover_reclaim_records: fn(self, records: String, protected: &[String], preserve_containers: &Bool) -[FS, Env]> IOError! {
         entries: files.list_dir(records)
         loop entry in entries {
             name: entry.name
@@ -715,7 +715,7 @@ ExecutableLeaseProtocol: struct {
         Ok(relative)
     }
 
-    validate_owner_fields: fn(self, lease_id: String, pid: Int, scope: String) IOError! -[FS, Env]> {
+    validate_owner_fields: fn(self, lease_id: String, pid: Int, scope: String) -[FS, Env]> IOError! {
         store_lease_validate_scope(scope)
         if store_lease_owner_scope(lease_id) != scope {
             return Err(store_lease_invalid("executable lease owner scope does not match the lease"))
@@ -750,7 +750,7 @@ store_lease_output_hash: fn(path: String) -[FS, Env]> String IOError! {
     pkg_try_output_hash_of(path) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val(err.message())}))
 }
 
-store_lease_publish_generation: fn(receipt: LeaseReceipt, partial: String, generation_dir: String, generations: String, record: String) IOError! -[FS]> {
+store_lease_publish_generation: fn(receipt: LeaseReceipt, partial: String, generation_dir: String, generations: String, record: String) -[FS]> IOError! {
     files.create_dir_all(partial)
     store_lease_write_new_synced(files.join(partial, LEASE_RECEIPT_FILE), store_lease_receipt_canonical(receipt, true).bytes())
     witness: store_lease_receipt_witness(receipt)
@@ -797,7 +797,7 @@ store_lease_load_or_create_key: fn(service: String) -[FS, Env, Rand]> [U8] IOErr
     files.read_bytes(path)
 }
 
-store_lease_ensure_real_directory: fn(path: String, label: String) IOError! -[FS]> {
+store_lease_ensure_real_directory: fn(path: String, label: String) -[FS]> IOError! {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid(label))
@@ -811,7 +811,7 @@ store_lease_ensure_real_directory: fn(path: String, label: String) IOError! -[FS
     }
 }
 
-store_lease_write_new_synced: fn(path: String, bytes: [U8]) IOError! -[FS]> {
+store_lease_write_new_synced: fn(path: String, bytes: [U8]) -[FS]> IOError! {
     file := files.create(path, if_exists: .Refuse)
     file.write_bytes(bytes)
     file.fsync()
@@ -925,7 +925,7 @@ store_lease_quarantine: fn(path: String, quarantine: String, leases: String, liv
 
 // Remove a lease-owned tree, restoring owner write permission on directories
 // first. Special files are refused.
-store_lease_remove_owned_tree: fn(path: String) IOError! -[FS]> {
+store_lease_remove_owned_tree: fn(path: String) -[FS]> IOError! {
     info: if files.stat(path) == {
         .Ok(found) -> found
         .Err(error) -> {

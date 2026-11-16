@@ -68,12 +68,8 @@ sema_expr_hole_header_reported: fn(diagnostics: [Diagnostic], span: Span) -> Boo
 }
 
 sema_expr_hole_call_name: fn(expr: Expr) -> String Never! {
-    if expr == .MethodCall(_, method, _, _, _, _, _) {
-        return method
-    }
-    if expr == .Call(call, _) {
-        return call.name
-    }
+    if expr == .MethodCall(_, method, _, _, _, _, _) -> return method
+    if expr == .Call(call, _) -> return call.name
     ""
 }
 
@@ -82,22 +78,18 @@ sema_expr_hole_call_name: fn(expr: Expr) -> String Never! {
 // parameter the value it is given.
 sema_expr_hole_call_change: fn(expr: Expr, value: TExpr, state: SemaOwnershipState) -> String Never! {
     if expr == .MethodCall(receiver, _, _, _, _, _, _) {
-        if sema_ownership_walk_receiver_access(state, receiver) == AccessConvention.Write -> return "changes the value it is called on"
+        if sema_ownership_walk_receiver_access(state, receiver) == AccessConvention.Write {
+            return "changes the value it is called on"
+        }
     }
     if sema_expr_hole_call_writes_argument(value) -> return "changes a value it is given"
     ""
 }
 
 sema_expr_hole_call_writes_argument: fn(value: TExpr) -> Bool Never! {
-    if value.kind == .Call(_, _, args) {
-        return sema_expr_hole_args_write(args)
-    }
-    if value.kind == .IndirectCall(_, _, args, _) {
-        return sema_expr_hole_args_write(args)
-    }
-    if value.kind == .MethodCall(_, _, _, args) {
-        return sema_expr_hole_args_write(args)
-    }
+    if value.kind == .Call(_, _, args) -> return sema_expr_hole_args_write(args)
+    if value.kind == .IndirectCall(_, _, args, _) -> return sema_expr_hole_args_write(args)
+    if value.kind == .MethodCall(_, _, _, args) -> return sema_expr_hole_args_write(args)
     // A call behind its generated argument pins is the block's value.
     if value.kind == .InlineBlock(body) {
         if body.len() > 0 && body[body.len() - 1] == .ExprStmt(tail, _) {
@@ -204,7 +196,9 @@ sema_expr_call_source_end: fn(raw: [U8], at: Int) -> Int? Never! {
 sema_expr_hole_table_indent: fn(raw: [U8], header_start: Int) -> Span? Never! {
     position := header_start
     loop position > 0 && sema_expr_hole_blank(raw[position - 1]) -> position -= 1
-    if position < 2 || raw[position - 2] != (U8{105}) || raw[position - 1] != (U8{102}) -> return None
+    if position < 2 || raw[position - 2] != (U8{105}) || raw[position - 1] != (U8{102}) {
+        return None
+    }
     keyword: position - 2
     line_start := keyword
     loop line_start > 0 && sema_expr_hole_blank(raw[line_start - 1]) -> line_start -= 1
@@ -212,6 +206,4 @@ sema_expr_hole_table_indent: fn(raw: [U8], header_start: Int) -> Span? Never! {
     Val(Span{start: line_start, end: keyword})
 }
 
-sema_expr_hole_blank: fn(byte: U8) -> Bool Never! {
-    byte == (U8{32}) || byte == (U8{9})
-}
+sema_expr_hole_blank: fn(byte: U8) -> Bool Never! { byte == (U8{32}) || byte == (U8{9}) }

@@ -1210,7 +1210,7 @@ status :: fn() -[FS, Env]> [DataStatus] Never! {
     rows
 }
 
-require_bridge :: fn(provider: String) DataError! -[FS, Env]> {
+require_bridge :: fn(provider: String) -[FS, Env]> DataError! {
     step :: bridge_provider(provider) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data bridge provider `{provider}`; expected py, r, or gpu", "require_bridge"))
     facts :: bridge_status(step)
     if facts.path == "available" -> return Ok()

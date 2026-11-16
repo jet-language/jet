@@ -251,7 +251,7 @@ JobQueue: struct {
         Ok(committed.receipt)
     }
 
-    recover_expired: fn(self) ServiceError! -[DB, Time]> {
+    recover_expired: fn(self) -[DB, Time]> ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         committed: queue_recover_transaction(self) ?? return Err(err)
         queue_publish_transitions(committed)
@@ -371,7 +371,7 @@ queue_now: fn() -[Time]> Int Never! {
     millis
 }
 
-queue_begin: fn(driver: &db.DBDriver) ServiceError! -[DB]> {
+queue_begin: fn(driver: &db.DBDriver) -[DB]> ServiceError! {
     if !db.__driver_begin(driver) {
         return Err(queue_sql_error("begin", queue_unavailable("queue SQLite begin failed")))
     }
@@ -519,7 +519,7 @@ queue_read_status: fn(queue: JobQueue) -[DB, Time]> JobQueueStatus ServiceError!
     queue_status_on_driver(guard.value.driver, queue.authority, queue.name)
 }
 
-queue_pause_transaction: fn(queue: JobQueue, paused: Bool, now: Int) ServiceError! -[DB]> {
+queue_pause_transaction: fn(queue: JobQueue, paused: Bool, now: Int) -[DB]> ServiceError! {
     guard := queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result: queue_pause_on_driver(guard.value.driver, queue.authority, queue.name, paused, now) ?? {
@@ -614,7 +614,7 @@ queue_publish_optional_transition: fn(observation: QueueTransition?) Never! {
     if observation == .Val(value) -> queue_publish_transition(value)
 }
 
-queue_publish_status: fn(status: JobQueueStatus) Never! -[DB, Time]> {
+queue_publish_status: fn(status: JobQueueStatus) -[DB, Time]> Never! {
     entity: "{status.authority}:{status.queue}"
     fields: "{{\"event\":\"status\",\"state\":\"status\",\"job_id\":{queue_json_text(entity)},\"name\":{queue_json_text(status.queue)},\"queue\":{queue_json_text(status.queue)},\"attempts\":0,\"duration_ms\":null,\"worker\":null,\"request_id\":null,\"failure\":null,\"reason\":null,\"sequence\":0,\"authority\":{queue_json_text(status.authority)},\"queued\":{status.queued},\"running\":{status.running},\"retrying\":{status.retrying},\"completed\":{status.completed},\"failed\":{status.failed},\"dead_lettered\":{status.dead_lettered},\"cancelled\":{status.cancelled},\"depth\":{status.depth},\"wait_ms\":{status.wait_ms},\"throughput\":{status.throughput},\"capacity\":{status.capacity},\"paused\":{status.paused},\"freshness_ms\":{status.freshness_ms},\"labels\":{{}}}}"
     now: queue_now()
@@ -1118,7 +1118,7 @@ queue_int_binding: fn(value: Int?) -> DBValue Never! {
     DBValue.Null
 }
 
-queue_initialize_on_driver: fn(driver: &db.DBDriver, authority: String, name: String, capacity: Int) ServiceError! -[DB, Time]> {
+queue_initialize_on_driver: fn(driver: &db.DBDriver, authority: String, name: String, capacity: Int) -[DB, Time]> ServiceError! {
     statements: [String]{QUEUE_CREATE_META, QUEUE_CREATE_JOBS, QUEUE_CREATE_EVENTS, QUEUE_CREATE_DUE_INDEX, QUEUE_CREATE_EVENT_INDEX}
     loop statement in statements {
         _: queue_execute(driver, statement, [DBValue]{}, "schema") ?? return Err(err)
@@ -1139,7 +1139,7 @@ queue_initialize_on_driver: fn(driver: &db.DBDriver, authority: String, name: St
     Ok()
 }
 
-queue_insert_event: fn(driver: &db.DBDriver, record: StoredJob, state: JobQueueState, attempts: Int, now: Int, reason: String?, duration: Int?, worker: String?) ServiceError! -[DB]> {
+queue_insert_event: fn(driver: &db.DBDriver, record: StoredJob, state: JobQueueState, attempts: Int, now: Int, reason: String?, duration: Int?, worker: String?) -[DB]> ServiceError! {
     _: queue_execute(
         driver,
         "INSERT INTO jet_job_queue_events (authority, queue, job_id, event_sequence, state, attempts, timestamp_ms, reason, duration_ms, worker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1160,7 +1160,7 @@ queue_insert_event: fn(driver: &db.DBDriver, record: StoredJob, state: JobQueueS
     Ok()
 }
 
-queue_update_event: fn(driver: &db.DBDriver, record: StoredJob, state: JobQueueState, attempts: Int, now: Int, reason: String?, duration: Int?, worker: String?, extra: [(column: String, value: DBValue)]) ServiceError! -[DB]> {
+queue_update_event: fn(driver: &db.DBDriver, record: StoredJob, state: JobQueueState, attempts: Int, now: Int, reason: String?, duration: Int?, worker: String?, extra: [(column: String, value: DBValue)]) -[DB]> ServiceError! {
     assignments := "state = ?, attempts = ?, event_sequence = ?, updated_at_ms = ?"
     bindings := [DBValue]{
         .Text(queue_state_text(state)),
@@ -1845,7 +1845,7 @@ queue_status_on_driver: fn(driver: &db.DBDriver, authority: String, name: String
     )
 }
 
-queue_pause_on_driver: fn(driver: &db.DBDriver, authority: String, name: String, paused: Bool, now: Int) ServiceError! -[DB]> {
+queue_pause_on_driver: fn(driver: &db.DBDriver, authority: String, name: String, paused: Bool, now: Int) -[DB]> ServiceError! {
     changed: queue_execute(
         driver,
         "UPDATE jet_job_queue_meta SET paused = ?, updated_at_ms = ? WHERE authority = ? AND queue = ?",

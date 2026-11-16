@@ -64,48 +64,48 @@ LogLevel: enum {
     Fatal
 }
 
-debug: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+debug: fn(message: String, at: SourceLocation{#caller}) -[Log]> Never! {
     emit(.Debug, message, [LogField]{}, at.module)
 }
 
-info: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+info: fn(message: String, at: SourceLocation{#caller}) -[Log]> Never! {
     emit(.Info, message, [LogField]{}, at.module)
 }
 
-warn: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+warn: fn(message: String, at: SourceLocation{#caller}) -[Log]> Never! {
     emit(.Warn, message, [LogField]{}, at.module)
 }
 
-error: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+error: fn(message: String, at: SourceLocation{#caller}) -[Log]> Never! {
     emit(.Error, message, [LogField]{}, at.module)
 }
 
 /// Emit a message at a caller-selected level.
-log: fn(level: LogLevel, message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+log: fn(level: LogLevel, message: String, at: SourceLocation{#caller}) -[Log]> Never! {
     emit(level, message, [LogField]{}, at.module)
 }
 
-critical: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+critical: fn(message: String, at: SourceLocation{#caller}) -[Log]> Never! {
     emit(.Critical, message, [LogField]{}, at.module)
 }
 
-fatal: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+fatal: fn(message: String, at: SourceLocation{#caller}) -[Log]> Never! {
     emit(.Fatal, message, [LogField]{}, at.module)
 }
 
-debug_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> {
+debug_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) -[Log]> Never! {
     emit(.Debug, message, fields, at.module)
 }
 
-info_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> {
+info_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) -[Log]> Never! {
     emit(.Info, message, fields, at.module)
 }
 
-warn_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> {
+warn_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) -[Log]> Never! {
     emit(.Warn, message, fields, at.module)
 }
 
-error_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> {
+error_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) -[Log]> Never! {
     emit(.Error, message, fields, at.module)
 }
 
@@ -134,9 +134,9 @@ span: fn(name: String) -[Log]> LogSpan Never! {
     LogSpan{id: allocated.id, name: allocated.name}
 }
 
-enter: fn(span: LogSpan) Never! -[Log]> { rt.span_enter(span) }
+enter: fn(span: LogSpan) -[Log]> Never! { rt.span_enter(span) }
 
-close: fn(span: LogSpan) Never! -[Log]> { rt.span_close(span) }
+close: fn(span: LogSpan) -[Log]> Never! { rt.span_close(span) }
 
 /// Select the record sink. `stderr` (JSON lines on stderr) and the `json`,
 /// `jsonl` and `text` file sinks are supported. An unsupported kind, or a
@@ -144,7 +144,7 @@ close: fn(span: LogSpan) Never! -[Log]> { rt.span_close(span) }
 /// record that names the rejected setting instead of returning silently.
 /// The sink is the process's: records from every thread, task and handler
 /// reach it, each line whole.
-set_sink: fn(kind: String, path: String) Never! -[Log]> {
+set_sink: fn(kind: String, path: String) -[Log]> Never! {
     normalized: ascii_lower(trim(kind))
     if normalized == "stderr" {
         rt.format_store(1)
@@ -160,7 +160,7 @@ set_sink: fn(kind: String, path: String) Never! -[Log]> {
     rt.sink_store(path)
 }
 
-sample_every: fn(n: Int) Never! -[Log]> {
+sample_every: fn(n: Int) -[Log]> Never! {
     if n > 0 {
         rt.sample_store(n)
         rt.sample_count_store(0)
@@ -172,7 +172,7 @@ counter: fn(name: String, value: Int) -> LogField Never! {
     LogField{key: "metric.counter.{name}", value: "{value}", kind: "counter", redacted: false}
 }
 
-otlp_file: fn(path: String) Never! -[Log, FS]> {
+otlp_file: fn(path: String) -[Log, FS]> Never! {
     if trim(path).len() > 0 -> set_sink("jsonl", path)
 }
 
@@ -180,11 +180,11 @@ otlp_file: fn(path: String) Never! -[Log, FS]> {
 /// it; "" is every module. The code's levels rank above the package's `log:`
 /// field and below JET_LOG and `--log`: when either names the same path, its
 /// level stays, and this call logs one `warn` note that says so.
-set_level: fn(level: LogLevel, path: String{""}, at: SourceLocation{#caller}) Never! -[Log]> {
+set_level: fn(level: LogLevel, path: String{""}, at: SourceLocation{#caller}) -[Log]> Never! {
     code_level(level_rank(level), path, at)
 }
 
-set_trace_id: fn(id: String) Never! -[Log]> {
+set_trace_id: fn(id: String) -[Log]> Never! {
     if trim(id).len() > 0 -> rt.trace_store(id)
 }
 
@@ -195,7 +195,7 @@ set_trace_id: fn(id: String) Never! -[Log]> {
 /// setting or value is reported as an error record and otherwise ignored. The
 /// host owns the sink and process-global cells; Jet owns normalization and
 /// dispatch.
-setup: fn(spec: String) Never! -[Log]> {
+setup: fn(spec: String) -[Log]> Never! {
     loop raw in split_csv(spec) {
         if trim(raw).len() == 0 -> next
         pair: split_once(raw, "=")
@@ -232,9 +232,9 @@ format_code: fn(name: String) -> Int Never! {
 
 reject_setting: fn(message: String) -[Log]> { rt.record_emit("error", message, [LogField]{}) }
 
-disable: fn() Never! -[Log]> { rt.disabled_store(true) }
+disable: fn() -[Log]> Never! { rt.disabled_store(true) }
 
-flush: fn() Never! -[Log]> { rt.flush() }
+flush: fn() -[Log]> Never! { rt.flush() }
 
 /// Whether a record at `level` from the calling module would be written.
 enabled: fn(level: LogLevel, at: SourceLocation{#caller}) -[Log]> Bool Never! {
@@ -622,7 +622,7 @@ format: fn(target: Formatter, event: LogRecord) -> String Never! {
     render_json(event)
 }
 
-handle: fn(target: Handler, event: LogRecord, at: SourceLocation{#caller}) Never! -[Log]> {
+handle: fn(target: Handler, event: LogRecord, at: SourceLocation{#caller}) -[Log]> Never! {
     if level_rank(event.level) < level_rank(target.minimum) {
         return
     }

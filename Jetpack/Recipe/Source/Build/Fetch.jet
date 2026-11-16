@@ -47,7 +47,7 @@ FetchRecord: struct {
     sha256: String
 }
 
-recipe_do_fetch: fn(url: String, sha256: String, ctx: RecipeBuildContext, transport: RecipeTransport?, report: &RunReport) RecipeDiagnostic! -[FS, Env, Net, Rand]> {
+recipe_do_fetch: fn(url: String, sha256: String, ctx: RecipeBuildContext, transport: RecipeTransport?, report: &RunReport) -[FS, Env, Net, Rand]> RecipeDiagnostic! {
     if recipe_credentialed_fetch_url(url) -> return Err(RecipeDiagnostic.e1236_credentialed_url())
     // A locked fetch must carry a path-safe, canonical SHA-256 key (checked in
     // validate too, defensively). An unchecked lock value never selects a

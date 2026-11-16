@@ -1091,17 +1091,15 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
     signature: parser_parse_callable_result(state)
     return_type := signature.return_type
     return_type_span := signature.return_type_span
-    declared_effects := signature.effects
-    effect_via := signature.via
+    declared_effects: signature.effects
+    effect_via: signature.via
     declared_return_view: parser_parse_opt_declared_view_from(state, parser_view_owner_names(params))
-    post_effect := false
+    // An effect row comes right after the parameters; one after the result
+    // is not a signature form, so it gets the generic parse error.
     if declared_effects == None && effect_via == None && !signature.plain_arrow && parser_func_effect_starts_here(state) {
-        post_effect = true
-        effects: parser_parse_opt_func_effects(state)
-        declared_effects = effects.effects
-        effect_via = effects.via
+        parser_report_expected(state, if body_required -> "`{{` to open the function body" else -> "the end of the method signature")
     }
-    effect_body_marker: post_effect || (return_type == None && (declared_effects != None || effect_via != None) && signature.prefix_effect)
+    effect_body_marker: return_type == None && (declared_effects != None || effect_via != None) && signature.prefix_effect
     // The colon before a bare result is not a signature form.
     if parser_current_kind(state) == TOKEN_COLON {
         colon: parser_bump(state)
@@ -1131,7 +1129,7 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
     // body. An
     // `#FFI` function's body is its foreign source instead. A trait slot
     // (`body_required` false) has no effect-arrow body, as Rust
-    // `trait_method_sig`: `f: fn() Never! -[FS]>` ends a bodiless requirement.
+    // `trait_method_sig`: `f: fn() -[FS]> Never!` ends a bodiless requirement.
     marker_kind: parser_current_kind(state)
     marker_span: parser_current(state).span
     effect_body: body_required && !is_ffi && effect_body_marker && marker_kind != TOKEN_UNIFIED_ARROW && marker_kind != TOKEN_COLON && marker_kind != TOKEN_EQ

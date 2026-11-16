@@ -44,14 +44,14 @@ JetCLITransactionRecord: struct {
         project.stage(self.name, bytes, Val(self.mode))
     }
 
-    publish: fn(self, project: JetCLIRootedDirectory, temp: String, destination_id: cli_files.FileID, temp_id: cli_files.FileID) JetCLIReadError! -[FS]> {
+    publish: fn(self, project: JetCLIRootedDirectory, temp: String, destination_id: cli_files.FileID, temp_id: cli_files.FileID) -[FS]> JetCLIReadError! {
         if self.parent == .Val(parent) {
             return parent.publish_staged(temp, self.name, destination_id, temp_id)
         }
         project.publish_staged(temp, self.name, destination_id, temp_id)
     }
 
-    discard: fn(self, project: JetCLIRootedDirectory) JetCLIReadError! -[FS]> {
+    discard: fn(self, project: JetCLIRootedDirectory) -[FS]> JetCLIReadError! {
         // Absence after publication is expected; an existing staged name must
         // still have the identity recorded before any byte is removed.
         present: if self.parent == .Val(parent) -> parent.member_present(self.temp) else -> project.member_present(self.temp)
@@ -138,7 +138,7 @@ jet_cli_transaction_bytes: fn(value: JetCLIStatusValue, name: String) -> [U8] Je
     Ok(cli_transaction_hex.decode(text) ?? return Err(jet_cli_read_error("invalid byte encoding in recovery journal: {err.reason}")))
 }
 
-jet_cli_transaction_recover: fn(project: JetCLIRootedDirectory, journal: JetCLIRootedDirectory) JetCLIReadError! -[FS, Env, Time.Wait]> {
+jet_cli_transaction_recover: fn(project: JetCLIRootedDirectory, journal: JetCLIRootedDirectory) -[FS, Env, Time.Wait]> JetCLIReadError! {
     bytes: journal.read("transaction.journal", JET_CLI_TRANSACTION_MAX_BYTES)
     raw: bytes ?? return
     _: journal.transaction_stat("transaction.journal")

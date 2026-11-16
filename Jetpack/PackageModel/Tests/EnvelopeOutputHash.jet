@@ -67,7 +67,7 @@ pkg_test_envelope_hook_error: fn(out: String, hook: &EnvelopeWalkHook) -[FS, Env
     }
 }
 
-pkg_test_run: fn(argv: [String]) Never! -[FS, Env, Exec, Time.Wait]> {
+pkg_test_run: fn(argv: [String]) -[FS, Env, Exec, Time.Wait]> Never! {
     receipt: process.cmd(argv).run() ?? panic("host tool runs")
     assert(receipt.success)
 }
@@ -98,7 +98,7 @@ pkg_test_reference_header: fn(out: &[U8], kind: U8, path: [U8], mode: Int) Never
     loop byte in pkg_u32_be_bytes(mode) -> out.push(byte)
 }
 
-pkg_test_reference_xattrs: fn(path: String, out: &[U8], allow: Bool) Never! -[FS]> {
+pkg_test_reference_xattrs: fn(path: String, out: &[U8], allow: Bool) -[FS]> Never! {
     names := [String]{}
     listed: pkg_list_xattr_names(path) ?? panic("xattr names")
     loop name in listed {
@@ -117,7 +117,7 @@ pkg_test_reference_xattrs: fn(path: String, out: &[U8], allow: Bool) Never! -[FS
     }
 }
 
-pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links: &[EnvelopeTestLink], allow: Bool) Never! -[FS, Env]> {
+pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links: &[EnvelopeTestLink], allow: Bool) -[FS, Env]> Never! {
     info: files.stat(path) ?? panic("stat fixture node")
     mode: pkg_envelope_mode(info)
     if info.is_dir {

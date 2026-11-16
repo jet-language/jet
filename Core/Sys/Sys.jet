@@ -63,7 +63,7 @@ usize_max: fn() -> U64 Never! { SYS_TARGET_USIZE_MAX }
 // process cell remains the sole writer until the pinned Shared root lands.
 get: fn(name: String) -[Env]> String? Never! { decode_host_env(core.sys.__env_value(name)) }
 
-set: fn(name: String, value: String) Never! -[Env]> {
+set: fn(name: String, value: String) -[Env]> Never! {
     if validate_env_name(name) == {
         .Err(error) -> { panic("core.sys.set: {error}") }
         .Ok(_) -> {}
@@ -1104,30 +1104,30 @@ stack_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! {
 }
 
 /// Set this program's CPU-time limit; children inherit it. None is unlimited.
-set_cpu_time_limit: fn(soft: Duration?, hard: Duration?) IOError! -[Env, Exec]> {
+set_cpu_time_limit: fn(soft: Duration?, hard: Duration?) -[Env, Exec]> IOError! {
     low: limit_seconds(soft, "set_cpu_time_limit")
     high: limit_seconds(hard, "set_cpu_time_limit")
     limit_write(SYS_LIMIT_CPU, low, high, "set_cpu_time_limit")
 }
 
 /// Set this program's address-space limit in bytes; children inherit it.
-set_memory_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> {
+set_memory_limit: fn(soft: Int?, hard: Int?) -[Env, Exec]> IOError! {
     limit_write(SYS_LIMIT_AS, soft, hard, "set_memory_limit")
 }
 
 /// Set this program's open-file limit; children inherit it.
-set_open_file_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> {
+set_open_file_limit: fn(soft: Int?, hard: Int?) -[Env, Exec]> IOError! {
     limit_write(SYS_LIMIT_NOFILE, soft, hard, "set_open_file_limit")
 }
 
 /// Set this program's core-file size limit in bytes; `(0, hard)` turns off
 /// core dumps for this program and the children it starts afterwards.
-set_core_file_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> {
+set_core_file_limit: fn(soft: Int?, hard: Int?) -[Env, Exec]> IOError! {
     limit_write(SYS_LIMIT_CORE, soft, hard, "set_core_file_limit")
 }
 
 /// Set this program's stack size limit in bytes; children inherit it.
-set_stack_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> {
+set_stack_limit: fn(soft: Int?, hard: Int?) -[Env, Exec]> IOError! {
     limit_write(SYS_LIMIT_STACK, soft, hard, "set_stack_limit")
 }
 
@@ -1154,7 +1154,7 @@ usage: fn(of: UsageOf{.Program}) -[Env]> ResourceUsage IOError! {
 /// it this is an `IOError`. The lock lasts until the program ends: there is
 /// no unlock, since munlockall would also unlock a Secret's pages. A
 /// Secret's pages are locked already, so this is for latency, not secrets.
-lock_memory: fn(future: Bool{false}) IOError! -[Env]> {
+lock_memory: fn(future: Bool{false}) -[Env]> IOError! {
     // MCL_CURRENT 1 | MCL_ONFAULT 4, plus MCL_FUTURE 2.
     flags: if future -> 7 else -> 5
     call_unit(core.sys.__mlockall(flags), "lock_memory", .Write, None)
@@ -1204,7 +1204,7 @@ scheduling: fn(pid: Int{0}) -[Env]> Scheduling IOError! {
 /// else `IOError.PermissionDenied`. A real-time process that never waits can
 /// starve the rest of the machine.
 #Unsafe("posix set_scheduling: the caller owns the CPU share of the process it changes")
-set_scheduling: fn(policy: Scheduling, pid: Int{0}) IOError! -[Env, Exec]> {
+set_scheduling: fn(policy: Scheduling, pid: Int{0}) -[Env, Exec]> IOError! {
     // SCHED_OTHER 0, SCHED_FIFO 1, SCHED_RR 2, SCHED_BATCH 3, SCHED_IDLE 5.
     row: if policy == {
         .Normal -> (kind: 0, priority: 0)
@@ -1335,7 +1335,7 @@ priv tree_stat_ticks: fn(stat: String) -> Int Never! {
 /// they read the monotonic clock. Setting needs CAP_SYS_TIME, otherwise it is
 /// `IOError.PermissionDenied`. A time before 1970 is `IOError.InvalidInput`.
 #Unsafe("posix set_wall_clock: the caller owns the machine's wall clock, which every process reads")
-set_wall_clock: fn(time: DateTime) IOError! -[Env]> {
+set_wall_clock: fn(time: DateTime) -[Env]> IOError! {
     ns: time.to_unix_ns() ?? -1
     if ns < 0 {
         return Err(
@@ -1455,24 +1455,24 @@ getpriority: fn(which: Int) -[Env]> Int IOError! {
 }
 
 #Unsafe("posix setpriority: the caller owns the scheduling priority of the process it changes")
-setpriority: fn(which: Int, priority: Int) IOError! -[Env]> {
+setpriority: fn(which: Int, priority: Int) -[Env]> IOError! {
     call_unit(core.sys.__setpriority(which, priority), "setpriority", .Write, None)
 }
 
 #Unsafe("posix utime: the caller owns the file whose timestamps it rewrites")
-utime: fn(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
+utime: fn(path: String, atime: Int, mtime: Int) -[FS, Env]> IOError! {
     if is_unix() && has_nul(path) {
         return Err(syscall_input(.Write, Val(path), "path contains NUL"))
     }
     call_unit(core.sys.__utime(path, atime, mtime), "utime", .Write, Val(path))
 }
 
-sync: fn() Never! -[FS, Env]> { core.sys.__sync_os() }
+sync: fn() -[FS, Env]> Never! { core.sys.__sync_os() }
 
 #Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary")
-stop: fn(code: Int) Never! -[Env, Exec]> { process_api.exit(code) }
+stop: fn(code: Int) -[Env, Exec]> Never! { process_api.exit(code) }
 
-set_current_dir: fn(path: String) IOError! -[FS, Env]> {
+set_current_dir: fn(path: String) -[FS, Env]> IOError! {
     if core.sys.__set_current_dir(path) == {
         .Ok(_) -> { Ok() }
         .Err(cause) -> Err(syscall_input(.Resolve, Val(path), cause))
@@ -1487,7 +1487,7 @@ pipe: fn() -[FS, Env]> [Int] IOError! {
 }
 
 #Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call")
-close_fd: fn(fd: Int) Never! -[FS, Env]> { core.sys.__close_fd_os(fd) }
+close_fd: fn(fd: Int) -[FS, Env]> Never! { core.sys.__close_fd_os(fd) }
 
 // An owned operating-system descriptor, closed exactly once when its owner
 // drops it. Descriptors arrive from `net.unix_receive`,
@@ -1525,7 +1525,7 @@ Fd: struct {
     // Makes `group`, a process group of this terminal's session, the
     // terminal's foreground group (job control: a shell hands it the
     // terminal, then takes it back).
-    set_process_group: fn(self, group: Int(1..2147483647)) IOError! -[Env]> {
+    set_process_group: fn(self, group: Int(1..2147483647)) -[Env]> IOError! {
         core.sys.__fd_set_process_group_raw(self.token, group)
     }
 
@@ -1605,7 +1605,7 @@ SharedMemory: struct {
     len: fn(self) -> Int { self.size }
 
     // Copies `bytes` in at byte `offset`.
-    write: fn(&self, offset: Int(0..1073741824), bytes: [U8]) IOError! -[Env]> {
+    write: fn(&self, offset: Int(0..1073741824), bytes: [U8]) -[Env]> IOError! {
         count: Int(0..1073741824).from_int(bytes.len()) ?? return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
         if !shared_range_valid(self, offset, count) {
             return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
@@ -1628,7 +1628,7 @@ SharedMemory: struct {
     // the conversion happens in place, so presenting a frame allocates
     // nothing and costs only its damage. An image side is at most 16384
     // pixels, so its stride is at most 65536 bytes.
-    write_pixels: fn(&self, offset: Int(0..1073741824), rgba: [U8], stride: Int(4..65536), x: Int(0..16384), y: Int(0..16384), width: Int(0..16384), height: Int(0..16384), format: PixelFormat) IOError! -[Env]> {
+    write_pixels: fn(&self, offset: Int(0..1073741824), rgba: [U8], stride: Int(4..65536), x: Int(0..16384), y: Int(0..16384), width: Int(0..16384), height: Int(0..16384), format: PixelFormat) -[Env]> IOError! {
         row: Int{stride}
         if row %% 4 != 0 {
             return Err(syscall_input(.Write, None, "an RGBA row is a whole number of 4-byte pixels"))
@@ -1650,7 +1650,7 @@ SharedMemory: struct {
 
     // Stores `count` little-endian copies of the 32-bit `value` from byte
     // `offset`: a solid run of pixels.
-    fill_u32: fn(&self, offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295)) IOError! -[Env]> {
+    fill_u32: fn(&self, offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295)) -[Env]> IOError! {
         bytes: Int(0..1073741824).from_int(wrapping(count * 4)) ?? return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
         if !shared_range_valid(self, offset, bytes) {
             return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
@@ -1673,7 +1673,7 @@ SharedMemory: struct {
     }
 
     // Stores `value` atomically into the word at byte `offset`.
-    store: fn(&self, offset: Int(0..1073741816), value: Int) IOError! -[Env]> {
+    store: fn(&self, offset: Int(0..1073741816), value: Int) -[Env]> IOError! {
         if !shared_word_valid(self, offset) {
             return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
         }
@@ -1750,15 +1750,15 @@ PixelFormat: enum {
     XBGR8888
 }
 
-atexit: fn(handler: fn()) Never! -[Env]> { core.sys.__atexit_os(handler) }
+atexit: fn(handler: fn()) -[Env]> Never! { core.sys.__atexit_os(handler) }
 
 // Every registered handler runs, in registration order, once per SIGINT the
 // process receives, each under its own stop boundary on the runtime's signal
 // dispatcher thread (ProcessSignal.jet jet_rt_native_interrupt).
-on_interrupt: fn(handler: fn()) Never! -[Env]> { core.sys.__interrupt_os(handler) }
+on_interrupt: fn(handler: fn()) -[Env]> Never! { core.sys.__interrupt_os(handler) }
 
 #Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates")
-mkfifo: fn(path: String, mode: Int) IOError! -[FS, Env]> {
+mkfifo: fn(path: String, mode: Int) -[FS, Env]> IOError! {
     if is_unix() && has_nul(path) {
         return Err(syscall_input(.Resolve, Val(path), "path contains NUL"))
     }
@@ -1778,7 +1778,7 @@ DeviceKind: enum {
 /// may make a device file; others get an `IOError`. A FIFO is
 /// `mkfifo`, a regular file `files.create`.
 #Unsafe("posix mknod: the caller owns `path` and grants every process that may open it access to the device it names")
-mknod: fn(path: String, mode: Int, kind: DeviceKind, major: Int, minor: Int) IOError! -[FS, Env]> {
+mknod: fn(path: String, mode: Int, kind: DeviceKind, major: Int, minor: Int) -[FS, Env]> IOError! {
     if has_nul(path) -> return Err(syscall_input(.Resolve, Val(path), "path contains NUL"))
     if mode < 0 || mode > 4095 {
         return Err(syscall_input(.Resolve, Val(path), "mode {mode} is outside 0o0..0o7777"))
@@ -1819,10 +1819,10 @@ waitpid: fn(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
 }
 
 #Unsafe("posix setuid: the caller drops or changes process credentials deliberately")
-setuid: fn(uid: Int) IOError! -[Env]> { call_unit(core.sys.__setuid(uid), "setuid", .Write, None) }
+setuid: fn(uid: Int) -[Env]> IOError! { call_unit(core.sys.__setuid(uid), "setuid", .Write, None) }
 
 #Unsafe("posix setgid: the caller drops or changes process credentials deliberately")
-setgid: fn(gid: Int) IOError! -[Env]> { call_unit(core.sys.__setgid(gid), "setgid", .Write, None) }
+setgid: fn(gid: Int) -[Env]> IOError! { call_unit(core.sys.__setgid(gid), "setgid", .Write, None) }
 
 /// A process's real, effective and saved user or group IDs. The kernel
 /// checks access against `effective`; `saved` lets a privileged program give
@@ -1846,7 +1846,7 @@ group_ids: fn() -[Env]> Ids IOError! { ids_of(1, "group_ids") }
 /// `IOError.InvalidInput`. `seteuid(id)` is `set_user_ids(effective: id)`, and
 /// `setreuid` names the saved ID that it sets implicitly.
 #Unsafe("posix set_user_ids: the caller drops or changes process credentials deliberately")
-set_user_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) IOError! -[Env]> {
+set_user_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) -[Env]> IOError! {
     set_ids(0, real, effective, saved, "set_user_ids")
 }
 
@@ -1854,7 +1854,7 @@ set_user_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) IOE
 /// (setresgid), as `set_user_ids` does with CAP_SETGID. Supplementary groups
 /// stay as they are; `initgroups` sets them.
 #Unsafe("posix set_group_ids: the caller drops or changes process credentials deliberately")
-set_group_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) IOError! -[Env]> {
+set_group_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) -[Env]> IOError! {
     set_ids(1, real, effective, saved, "set_group_ids")
 }
 
@@ -2049,15 +2049,15 @@ priv id_rows: module {
 }
 
 #Unsafe("posix setpgrp: the caller owns the process group topology it changes")
-setpgrp: fn() IOError! -[Env]> { call_unit(core.sys.__setpgrp(), "setpgrp", .Write, None) }
+setpgrp: fn() -[Env]> IOError! { call_unit(core.sys.__setpgrp(), "setpgrp", .Write, None) }
 
 #Unsafe("posix setpgid: the caller owns the process group topology it changes")
-setpgid: fn(pid: Int, pgid: Int) IOError! -[Env]> {
+setpgid: fn(pid: Int, pgid: Int) -[Env]> IOError! {
     call_unit(core.sys.__setpgid(pid, pgid), "setpgid", .Write, None)
 }
 
 #Unsafe("posix kill: the caller owns or is entitled to signal the target process")
-kill: fn(pid: Int, signal: Int) IOError! -[Env]> {
+kill: fn(pid: Int, signal: Int) -[Env]> IOError! {
     call_unit(core.sys.__kill(pid, signal), "kill", .Write, None)
 }
 
@@ -2065,12 +2065,12 @@ kill: fn(pid: Int, signal: Int) IOError! -[Env]> {
 /// next takes it: a supervisor re-raising its child's signal on itself. Any
 /// signal number, the fault signals too.
 #Unsafe("posix signal reset: the caller owns the process signal disposition it resets")
-reset_signal: fn(number: Int) IOError! -[Env]> {
+reset_signal: fn(number: Int) -[Env]> IOError! {
     call_unit(core.sys.__reset_signal(number), "reset_signal", .Write, None)
 }
 
 #Unsafe("posix initgroups: the caller changes supplementary groups deliberately")
-initgroups: fn(user: String, group: Int) IOError! -[Env]> {
+initgroups: fn(user: String, group: Int) -[Env]> IOError! {
     if is_unix() && has_nul(user) {
         return Err(syscall_input(.Write, None, "username contains NUL"))
     }

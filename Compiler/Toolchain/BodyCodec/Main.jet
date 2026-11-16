@@ -136,7 +136,7 @@ CodecOut: struct {
 // function whose name starts with HAND_PUT. When the target imports from a
 // package, the hand files are that package's, and every top-level name they
 // declare is `imported`.
-read_hand: fn(out: &CodecOut, path: String, target: CodecTarget) BodyCodecError! -[FS]> {
+read_hand: fn(out: &CodecOut, path: String, target: CodecTarget) -[FS]> BodyCodecError! {
     imported: target.package != ""
     text: files.read(path) ?? return Err(codec_fail("cannot read {path}: {err}"))
     loop line in text.split("\n") {
@@ -165,7 +165,7 @@ word_scalar: fn(piece: String) -> Bool Never! {
 // The struct, enum and alias declarations of every file under `dir`; when
 // the target imports from a package and `dir` is not its own, those it adds
 // are that package's.
-read_shapes: fn(out: &CodecOut, dir: String, target: CodecTarget) BodyCodecError! -[FS]> {
+read_shapes: fn(out: &CodecOut, dir: String, target: CodecTarget) -[FS]> BodyCodecError! {
     imported: target.package != "" && dir != target.own_dir
     entries: files.walk_files(dir).list() ?? return Err(codec_fail("cannot list {dir}: {err}"))
     paths := [String]{}

@@ -137,7 +137,7 @@ impl PackageFacts {
     }
 
     // Load and merge the root's declared Config files.
-    compose_configs: fn(&self, dir: String) PackageParseError! -[FS, Env]> {
+    compose_configs: fn(&self, dir: String) -[FS, Env]> PackageParseError! {
         resolver: AuthorityResolver.open(dir) ?? return Err(pkg_authority_package_error(err))
         directory: resolver.checked_directory(".") ?? return Err(pkg_authority_package_error(err))
         self.compose_configs_checked(resolver, directory)
@@ -145,7 +145,7 @@ impl PackageFacts {
 
     // Resolve every declared Config before changing any fact; a failure
     // leaves the facts (and `resolved_config_paths`) untouched.
-    compose_configs_checked: fn(&self, resolver: AuthorityResolver, directory: CheckedDirectory) PackageParseError! -[FS, Env]> {
+    compose_configs_checked: fn(&self, resolver: AuthorityResolver, directory: CheckedDirectory) -[FS, Env]> PackageParseError! {
         if resolver.revalidate_directory(directory) == .Err(error) {
             return Err(pkg_authority_package_error(error))
         }
@@ -186,11 +186,11 @@ impl PackageFacts {
     }
 
     // Validate member paths against the physical Package root.
-    validate_members_in: fn(self, dir: String) PackageParseError! -[FS, Env]> {
+    validate_members_in: fn(self, dir: String) -[FS, Env]> PackageParseError! {
         self.member_names_in(dir)
     }
 
-    validate_members_in_checked: fn(self, resolver: AuthorityResolver) PackageParseError! -[FS, Env]> {
+    validate_members_in_checked: fn(self, resolver: AuthorityResolver) -[FS, Env]> PackageParseError! {
         self.member_names_in_checked(resolver)
     }
 
@@ -627,7 +627,7 @@ pkg_discover_config_path: fn(resolver: AuthorityResolver, name: String) -[FS, En
 }
 
 // Compose Configs, then guarantees, defaults, and members (the `load` path).
-pkg_load_compose_and_validate: fn(facts: &PackageFacts, resolver: AuthorityResolver) PackageParseError! -[FS, Env]> {
+pkg_load_compose_and_validate: fn(facts: &PackageFacts, resolver: AuthorityResolver) -[FS, Env]> PackageParseError! {
     directory: resolver.checked_directory(".") ?? return Err(pkg_authority_package_error(err))
     facts.compose_configs_checked(resolver, directory)
     facts.validate_guarantees()

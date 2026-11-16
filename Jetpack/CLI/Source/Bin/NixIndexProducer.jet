@@ -50,7 +50,7 @@ cli_nix_index_main: fn(args: [String]) -[FS, Env, IO]> Int {
     }
 }
 
-cli_nix_index_run: fn(args: [String]) CLIToolError! -[FS, Env, IO]> {
+cli_nix_index_run: fn(args: [String]) -[FS, Env, IO]> CLIToolError! {
     usage: "usage: jetpack-nix-index <generate|generate-local|verify-differential|manifest> ..."
     command: NixIndexCommand.parse(args.get(0) ?? "") ?? return Err(CLIToolError.new(usage))
     rest: args.slice(1, args.len())
@@ -68,7 +68,7 @@ cli_nix_index_run: fn(args: [String]) CLIToolError! -[FS, Env, IO]> {
 // evidence. `generate` also writes the signature request; `generate-local`
 // instead marks the output `local-unofficial` and may carry native recipes
 // and import provenance.
-cli_nix_index_generate: fn(args: [String], write_signature_request: Bool) CLIToolError! -[FS, Env, IO]> {
+cli_nix_index_generate: fn(args: [String], write_signature_request: Bool) -[FS, Env, IO]> CLIToolError! {
     options: cli_nix_index_options(args)
     if write_signature_request && options.has_key("native-recipes") {
         return Err(CLIToolError.new("--native-recipes is only valid with generate-local"))
@@ -197,7 +197,7 @@ cli_nix_index_validate_local_provenance: fn(value: Dyn, revision: String, system
 
 // Compare a candidate index against the evaluation oracle record by record
 // and write the differential report.
-cli_nix_index_verify_differential: fn(args: [String]) CLIToolError! -[FS, IO]> {
+cli_nix_index_verify_differential: fn(args: [String]) -[FS, IO]> CLIToolError! {
     options: cli_nix_index_options(args)
     candidate: cli_nix_index_required(options, "candidate")
     oracle_path: cli_nix_index_required(options, "oracle")
@@ -263,7 +263,7 @@ cli_nix_index_verify_differential: fn(args: [String]) CLIToolError! -[FS, IO]> {
 
 // Build the signed-channel manifest over every staged, digest-checked target
 // under `--target-root/index-v1/<revision>/<system>/`.
-cli_nix_index_manifest: fn(args: [String]) CLIToolError! -[IO, FS, Env]> {
+cli_nix_index_manifest: fn(args: [String]) -[IO, FS, Env]> CLIToolError! {
     options: cli_nix_index_options(args)
     channel: cli_nix_index_required(options, "channel")
     endpoint: cli_nix_index_required(options, "endpoint")
@@ -421,7 +421,7 @@ cli_nix_index_parse_u64: fn(value: String) -> Int? Never! {
 }
 
 // Staged evidence is a regular file or directory, never a symlink.
-cli_nix_index_validate_staged_input: fn(path: String, label: String) CLIToolError! -[FS]> {
+cli_nix_index_validate_staged_input: fn(path: String, label: String) -[FS]> CLIToolError! {
     metadata: files.stat(path) ?? return Err(CLIToolError.new("inspect {label}: {err}"))
     if metadata.is_symlink -> return Err(CLIToolError.new("{label} must not be a symlink"))
     if !metadata.is_file && !metadata.is_dir {
@@ -458,7 +458,7 @@ cli_nix_index_read_json_input: fn(path: String, limit: Int, label: String) -[FS]
 // Publish `bytes` at `path` exactly once through an exclusive sibling
 // temporary and a hard link. An existing regular file with the same bytes is
 // accepted; any other existing entry is refused.
-cli_nix_index_write_immutable: fn(path: String, bytes: [U8]) CLIToolError! -[FS, Env]> {
+cli_nix_index_write_immutable: fn(path: String, bytes: [U8]) -[FS, Env]> CLIToolError! {
     if files.stat(path) == {
         .Ok(metadata) -> {
             if metadata.is_symlink || !metadata.is_file {
@@ -485,7 +485,7 @@ cli_nix_index_write_immutable: fn(path: String, bytes: [U8]) CLIToolError! -[FS,
     }
 }
 
-cli_nix_index_publish_partial: fn(partial: String, path: String, bytes: [U8]) CLIToolError! -[FS]> {
+cli_nix_index_publish_partial: fn(partial: String, path: String, bytes: [U8]) -[FS]> CLIToolError! {
     writer := files.create(partial, if_exists: .Refuse, mode: Val(0o600)) ?? return Err(CLIToolError.new("write temporary output: {err}"))
     writer.write_bytes(bytes) ?? return Err(CLIToolError.new("write temporary output: {err}"))
     writer.fsync() ?? return Err(CLIToolError.new("sync temporary output: {err}"))
@@ -616,7 +616,7 @@ cli_nix_index_read_hydra_output_paths: fn(path: String, system: String) -[FS]> [
     Ok(cli_sorted_unique(output_paths))
 }
 
-cli_nix_index_collect_json_files: fn(path: String, found: &[String]) CLIToolError! -[FS]> {
+cli_nix_index_collect_json_files: fn(path: String, found: &[String]) -[FS]> CLIToolError! {
     metadata: files.stat(path) ?? return Err(CLIToolError.new("inspect Hydra build input: {err}"))
     if metadata.is_symlink {
         return Err(CLIToolError.new("Hydra build input `{path}` must not be a symlink"))

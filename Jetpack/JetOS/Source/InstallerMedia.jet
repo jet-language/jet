@@ -18,7 +18,7 @@ jetos_render_installer_limine_conf: fn(system: SystemPlan, generation: JetOSGene
 // Every generation entry except `root`, in name order: directories copy with
 // links dereferenced, anything else (a link included, never followed for the
 // choice) as one replaced file; then sw/bin store links become real files.
-jetos_copy_generation_payload_deref: fn(source: String, destination: String) IOError! -[FS]> {
+jetos_copy_generation_payload_deref: fn(source: String, destination: String) -[FS]> IOError! {
     files.create_dir_all(destination)
     entries := files.list_dir(source)
     entries.sort_by(fn(entry) { entry.name })
@@ -33,7 +33,7 @@ jetos_copy_generation_payload_deref: fn(source: String, destination: String) IOE
 }
 
 // A missing sw/bin is no profile to dereference.
-jetos_deref_profile_bin_symlinks: fn(system: String) IOError! -[FS]> {
+jetos_deref_profile_bin_symlinks: fn(system: String) -[FS]> IOError! {
     entries: if files.list_dir(files.join(system, "sw/bin")) == {
         .Ok(listed) -> listed
         .Err(_) -> {
@@ -54,7 +54,7 @@ jetos_deref_profile_bin_symlinks: fn(system: String) IOError! -[FS]> {
 
 // Store and relative links stay links; any other link is copied through, and
 // a dangling one that is neither is skipped.
-jetos_copy_dir_recursive_deref: fn(source: String, destination: String) IOError! -[FS]> {
+jetos_copy_dir_recursive_deref: fn(source: String, destination: String) -[FS]> IOError! {
     files.create_dir_all(destination)
     entries := files.list_dir(source)
     entries.sort_by(fn(entry) { entry.name })
@@ -94,7 +94,7 @@ jetos_is_store_path: fn(path: String) -> Bool Never! {
 
 // The parent is created, a destination is removed best-effort, and the
 // source link's own target is linked again unchanged.
-jetos_copy_runtime_symlink: fn(source: String, destination: String) IOError! -[FS]> {
+jetos_copy_runtime_symlink: fn(source: String, destination: String) -[FS]> IOError! {
     files.create_dir_all(files.dirname(destination))
     if files.remove(destination) == {
         .Ok(_) -> {}

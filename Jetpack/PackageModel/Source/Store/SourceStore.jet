@@ -166,7 +166,7 @@ pkg_source_store_publish_copy: fn(parent: FoundationDirectoryAuthority, stage: F
     Ok(hash)
 }
 
-pkg_source_store_verify: fn(name: String, entry: String, expected: String) PackageSourceStoreError! -[FS, Env]> {
+pkg_source_store_verify: fn(name: String, entry: String, expected: String) -[FS, Env]> PackageSourceStoreError! {
     source: foundation_open_directory_authority(entry) ?? {
         if err == .NotFound(_) {
             return Err(

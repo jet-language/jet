@@ -413,7 +413,7 @@ NixAdmission: struct {
 
     // Remove the private stage unless the closure was committed. Rust runs
     // this on `Drop`; Jet callers run it on every exit that did not commit.
-    rollback: fn(&self) Never! -[FS]> {
+    rollback: fn(&self) -[FS]> Never! {
         if self.committed {
             return
         }
@@ -598,7 +598,7 @@ store_nix_push_u64: fn(output: &[U8], value: Int) Never! {
     }
 }
 
-store_nix_ensure_dir: fn(path: String, kind: NixCacheErrorKind) NixCacheError! -[FS]> {
+store_nix_ensure_dir: fn(path: String, kind: NixCacheErrorKind) -[FS]> NixCacheError! {
     info: if files.stat(path) == {
         .Ok(found) -> found
         .Err(error) -> {
@@ -613,7 +613,7 @@ store_nix_ensure_dir: fn(path: String, kind: NixCacheErrorKind) NixCacheError! -
 }
 
 // Remove a staged file, symlink, or (read-only) directory tree.
-store_nix_remove_tree: fn(path: String) StoreError! -[FS]> {
+store_nix_remove_tree: fn(path: String) -[FS]> StoreError! {
     info: if files.stat(path) == {
         .Ok(found) -> found
         .Err(error) -> {
@@ -636,7 +636,7 @@ store_nix_remove_tree: fn(path: String) StoreError! -[FS]> {
 }
 
 // Sweep stages left by admission processes that no longer exist.
-store_nix_sweep_dead_admission_stages: fn(stage_parent: String) Never! -[FS, Env]> {
+store_nix_sweep_dead_admission_stages: fn(stage_parent: String) -[FS, Env]> Never! {
     entries: files.list_dir(stage_parent) ?? return
     current_pid: sys.pid()
     loop entry in entries {

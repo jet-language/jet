@@ -88,7 +88,7 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
 // A `.gem` is a plain tar holding `data.tar.gz`; both layers pass the
 // source-archive budget before extraction, and the installed gem may carry
 // no extensions, plugins, or native objects.
-provider_rubygems_install: fn(artifact: RegistryArtifact, out: String, scratch: String) RegistryError! -[FS]> {
+provider_rubygems_install: fn(artifact: RegistryArtifact, out: String, scratch: String) -[FS]> RegistryError! {
     provider_registry_validate_tar_archive(artifact.path, false)
     unpack: files.join(scratch, "gem-{provider_script_safe_filename(artifact.package.name)}")
     provider_registry_create_dir_all(unpack, "could not create gem scratch")
@@ -104,7 +104,7 @@ provider_rubygems_install: fn(artifact: RegistryArtifact, out: String, scratch: 
 
 // `gem-home`, `gem-path`, and `ruby-lib` (every installed gem's `lib`,
 // joined with the host path separator), relative to the output.
-provider_rubygems_write_projection: fn(artifacts: [RegistryArtifact], out: String) RegistryError! -[FS, Env]> {
+provider_rubygems_write_projection: fn(artifacts: [RegistryArtifact], out: String) -[FS, Env]> RegistryError! {
     ruby_lib := [String]{}
     loop artifact in artifacts {
         lib: "gems/{artifact.package.name}-{artifact.package.version}/lib"

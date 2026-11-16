@@ -29,7 +29,7 @@ PrivateStage: struct {
 
     // Replace the output root with the stage; the stage is removed when
     // publication fails.
-    publish: fn(self, output_root: String) RecipeDiagnostic! -[FS, Env, Rand]> {
+    publish: fn(self, output_root: String) -[FS, Env, Rand]> RecipeDiagnostic! {
         if recipe_commit_staged_output(self.parent, self.name, output_root) == {
             .Ok(_) -> {}
             .Err(error) -> {
@@ -39,7 +39,7 @@ PrivateStage: struct {
         }
     }
 
-    discard: fn(self) Never! -[FS]> {
+    discard: fn(self) -[FS]> Never! {
         self.parent.remove_name(self.name).drop("an unpublished recipe stage is private scratch")
     }
 }
@@ -135,7 +135,7 @@ recipe_run_steps: fn(recipe: BuildRecipe, order: [Int], ctx: RecipeBuildContext,
 
 // Perform one admitted step. `logged` selects the step-log wording of an
 // exec failure.
-recipe_run_step: fn(step: BuildStep, ctx: RecipeBuildContext, transport: RecipeTransport?, report: &RunReport, logged: Bool) RecipeDiagnostic! -[FS, Env, Exec, Net, Rand, Time.Wait]> {
+recipe_run_step: fn(step: BuildStep, ctx: RecipeBuildContext, transport: RecipeTransport?, report: &RunReport, logged: Bool) -[FS, Env, Exec, Net, Rand, Time.Wait]> RecipeDiagnostic! {
     if step == {
         .Fetch(url, sha256) -> { recipe_do_fetch(url, sha256, ctx, transport, report) }
         .Exec(tool, args) -> { recipe_do_exec(tool, args, ctx, report, logged) }
@@ -144,7 +144,7 @@ recipe_run_step: fn(step: BuildStep, ctx: RecipeBuildContext, transport: RecipeT
     }
 }
 
-recipe_install_file: fn(src: String, dest: String, ctx: RecipeBuildContext, report: &RunReport) RecipeDiagnostic! -[FS, Env]> {
+recipe_install_file: fn(src: String, dest: String, ctx: RecipeBuildContext, report: &RunReport) -[FS, Env]> RecipeDiagnostic! {
     target: recipe_confined_dest(ctx.output_root, dest)
     from: recipe_confined_source(ctx.source_dir, src, false)
     parent: files.dirname(target)
@@ -166,7 +166,7 @@ recipe_install_file: fn(src: String, dest: String, ctx: RecipeBuildContext, repo
     report.add_effect("write")
 }
 
-recipe_install_tree: fn(src: String, dest: String, ctx: RecipeBuildContext, report: &RunReport) RecipeDiagnostic! -[FS, Env]> {
+recipe_install_tree: fn(src: String, dest: String, ctx: RecipeBuildContext, report: &RunReport) -[FS, Env]> RecipeDiagnostic! {
     target: recipe_confined_dest(ctx.output_root, dest)
     from: recipe_confined_source(ctx.source_dir, src, true)
     if recipe_copy_tree(from, target) == {
@@ -180,7 +180,7 @@ recipe_install_tree: fn(src: String, dest: String, ctx: RecipeBuildContext, repo
 
 // Run a realized tool in the native sandbox. Declared arguments and tool
 // output never reach the diagnostic.
-recipe_do_exec: fn(tool: String, args: [String], ctx: RecipeBuildContext, report: &RunReport, logged: Bool) RecipeDiagnostic! -[FS, Env, Exec, Rand, Time.Wait]> {
+recipe_do_exec: fn(tool: String, args: [String], ctx: RecipeBuildContext, report: &RunReport, logged: Bool) -[FS, Env, Exec, Rand, Time.Wait]> RecipeDiagnostic! {
     exe: recipe_realized_tool(ctx.tools, tool)
     result: recipe_run_tool(exe, args, ctx)
     if !result.receipt.success {
@@ -235,7 +235,7 @@ RecipeSandboxFailure: struct {
 
 // Create the private source and output trees and snapshot the staged source
 // and current output into them.
-recipe_prepare_sandbox: fn(ctx: RecipeBuildContext, source: String, output: String) RecipeSandboxFailure! -[FS, Env]> {
+recipe_prepare_sandbox: fn(ctx: RecipeBuildContext, source: String, output: String) -[FS, Env]> RecipeSandboxFailure! {
     recipe_ensure_directory(source) ?? return Err(RecipeSandboxFailure{what: "could not create the private recipe source", error: err})
     recipe_ensure_directory(output) ?? return Err(RecipeSandboxFailure{what: "could not create the private recipe output", error: err})
     recipe_copy_tree(ctx.source_dir, source) ?? return Err(RecipeSandboxFailure{what: "could not snapshot the recipe source for the sandbox", error: err})
@@ -244,7 +244,7 @@ recipe_prepare_sandbox: fn(ctx: RecipeBuildContext, source: String, output: Stri
 
 // Copy the sandbox output through a fresh staging child and publish it over
 // the staged output root.
-recipe_replace_output: fn(parent: PinnedRecipeDirectory, from: String, to: String) RecipeError! -[FS, Env, Rand]> {
+recipe_replace_output: fn(parent: PinnedRecipeDirectory, from: String, to: String) -[FS, Env, Rand]> RecipeError! {
     staging: parent.exclusive_child("jet-recipe-output")
     if recipe_copy_tree(from, staging.path) == {
         .Ok(_) -> {}

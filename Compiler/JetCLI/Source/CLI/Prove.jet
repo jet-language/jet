@@ -292,7 +292,7 @@ jet_cli_prove_target_refusal: fn(what: String) -> JetCLIProveRefusal Never! {
 }
 
 // `reject_symlink_ancestors`: walk the absolute path one component at a time.
-jet_cli_prove_reject_symlink_ancestors: fn(raw: String, cwd: String) JetCLIProveRefusal! -[FS]> {
+jet_cli_prove_reject_symlink_ancestors: fn(raw: String, cwd: String) -[FS]> JetCLIProveRefusal! {
     absolute: if raw.starts_with("/") -> raw else -> jet_cli_rooted_join(cwd, raw)
     current := "/"
     loop part in absolute.split("/").to_list() {
@@ -313,7 +313,7 @@ jet_cli_prove_reject_symlink_ancestors: fn(raw: String, cwd: String) JetCLIProve
 // `jet_cli_walk_held_sources`): a directory link is skipped, any other link
 // refused; dot names and build output stay out; nested packages stay in, so
 // a workspace reaches its members.
-jet_cli_prove_collect: fn(directory: String, found: &[String]) JetCLIReadError! -[FS]> {
+jet_cli_prove_collect: fn(directory: String, found: &[String]) -[FS]> JetCLIReadError! {
     listed: cli_files.list_dir(directory) ?? return Err(jet_cli_read_error("couldn't read `{directory}`: {jet_cli_io_error_text(err)}"))
     loop entry in listed {
         path: jet_cli_rooted_join(directory, entry.name)

@@ -120,7 +120,7 @@ pkg_pascal_bind: fn(path: String, source: String, lib: String, cache: String) -[
 
 // One supervised Pascal build tool; a failure reports stderr (or stdout when
 // stderr is empty), with any `Fatal:` line collapsed to "compilation failed".
-pkg_pascal_run: fn(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
+pkg_pascal_run: fn(argv: [String], tool: String) -[Exec, Time.Wait]> ForeignBindError! {
     output: pkg_binder_capture(argv, None, tool, PKG_PASCAL_TOOL_ACTION)
     if output.success {
         return

@@ -434,13 +434,13 @@ Gen: trait {
     // AUTH_IGNORE, or another value for a malfunction.
     authorize: fn(self, p: &Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never!
     // sqlite3NestedParse (build.c).
-    nested_parse: fn(self, p: &Parse, a: &ast.AST, sql: [U8]) Never! -[DB]>
+    nested_parse: fn(self, p: &Parse, a: &ast.AST, sql: [U8]) -[DB]> Never!
     // sqlite3Select (select.c).
     select: fn(self, p: &Parse, a: &ast.AST, s: Int, dest: &SelectDest) -[DB]> Int Never!
     // sqlite3SelectPrep (select.c).
-    select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]>
+    select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never!
     // sqlite3SelectExpand (select.c).
-    select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]>
+    select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) -[DB]> Never!
     // sqlite3ResultSetOfSelect (select.c): a Table, in p.db.tables, of the
     // result columns of SELECT `s` with affinity `aff`; -1 on error.
     result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never!
@@ -475,7 +475,7 @@ WalkCb: trait {
     has_select: fn(self) -[]> Bool Never!
     on_select: fn(self, p: &Parse, a: &ast.AST, s: Int) -[DB]> Int Never!
     has_select2: fn(self) -[]> Bool Never!
-    on_select2: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]>
+    on_select2: fn(self, p: &Parse, a: &ast.AST, s: Int) -[DB]> Never!
     // Whether sqlite3WalkSelectExpr also walks the WINDOW definitions:
     // xSelectCallback2 is sqlite3WalkWinDefnDummyCallback or
     // sqlite3SelectPopWith, or the Parse is renaming.
@@ -905,7 +905,7 @@ open_temp_database: fn(p: &Parse, a: &ast.AST) -[DB]> Bool Never! {
 
 // sqlite3CodeVerifySchema: the statement checks database i_db's schema
 // cookie (its OP_Transaction, which sqlite3FinishCoding codes).
-code_verify_schema: fn(p: &Parse, a: &ast.AST, i_db: Int) Never! -[DB]> {
+code_verify_schema: fn(p: &Parse, a: &ast.AST, i_db: Int) -[DB]> Never! {
     mask: top_cookie_mask(p)
     bit: 1 << i_db
     if mask.bit_and(bit) != 0 {
@@ -919,7 +919,7 @@ code_verify_schema: fn(p: &Parse, a: &ast.AST, i_db: Int) Never! -[DB]> {
 
 // sqlite3CodeVerifyNamedSchema: every attached database named `name` (all
 // of them for None).
-code_verify_named_schema: fn(p: &Parse, a: &ast.AST, name: [U8]?) Never! -[DB]> {
+code_verify_named_schema: fn(p: &Parse, a: &ast.AST, name: [U8]?) -[DB]> Never! {
     loop i in 0..<p.db.dbs.len() {
         if p.db.dbs[i].bt < 0 -> next
         if name == .Val(z) && util.str_icmp(z, p.db.dbs[i].name) != 0 -> next
@@ -928,7 +928,7 @@ code_verify_named_schema: fn(p: &Parse, a: &ast.AST, name: [U8]?) Never! -[DB]> 
 }
 
 // sqlite3BeginWriteOperation.
-begin_write_operation: fn(p: &Parse, a: &ast.AST, set_statement: Bool, i_db: Int) Never! -[DB]> {
+begin_write_operation: fn(p: &Parse, a: &ast.AST, set_statement: Bool, i_db: Int) -[DB]> Never! {
     code_verify_schema(p, a, i_db)
     top_set_write_mask(p, i_db)
     top_set_multi_write(p, set_statement)
@@ -1025,7 +1025,7 @@ auth_read_col: fn(p: &Parse, a: &ast.AST, tab: [U8], col: [U8], i_db: Int) -[DB]
 
 // sqlite3AuthRead: check a TK_COLUMN or TK_TRIGGER read of `e` from the
 // tables of FROM list `src`; an ignored read becomes NULL.
-auth_read: fn(p: &Parse, a: &ast.AST, e: Int, schema: Int, src: Int) Never! -[DB]> {
+auth_read: fn(p: &Parse, a: &ast.AST, e: Int, schema: Int, src: Int) -[DB]> Never! {
     i_db: conn.schema_to_index(p.db, schema)
     if i_db < 0 {
         return
@@ -1214,13 +1214,13 @@ CodegenTestGen: struct {
             if code == conn.AUTH_READ -> conn.AUTH_IGNORE else -> conn.AUTH_DENY
         }
 
-        nested_parse: fn(self, p: &Parse, a: &ast.AST, sql: [U8]) Never! -[DB]> {}
+        nested_parse: fn(self, p: &Parse, a: &ast.AST, sql: [U8]) -[DB]> Never! {}
 
         select: fn(self, p: &Parse, a: &ast.AST, s: Int, dest: &SelectDest) -[DB]> Int Never! { 0 }
 
-        select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {}
+        select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {}
 
-        select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
 
         result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! {
             -1

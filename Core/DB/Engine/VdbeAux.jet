@@ -71,7 +71,7 @@ Host: trait {
     // of VT_SAVEPOINT, VT_RELEASE and VT_ROLLBACK_TO. Its result code.
     vtab_call: fn(&self, db: &conn.Conn, vt: Int, method: Int, arg: Int) -[DB]> Int Never!
     // xClose of the Host's virtual table cursor `cursor` on VTable vt.
-    vtab_close: fn(&self, db: &conn.Conn, vt: Int, cursor: Int) Never! -[DB]>
+    vtab_close: fn(&self, db: &conn.Conn, vt: Int, cursor: Int) -[DB]> Never!
     // Take sqlite3_vtab.zErrMsg of VTable vt's instance; None when unset.
     // (No `Never!`: a generic call of a trait method returning `T? Never!`
     // loses the optional in the backend.)
@@ -104,27 +104,27 @@ Host: trait {
     // i_db.
     vtab_call_destroy: fn(&self, db: &conn.Conn, i_db: Int, name: [U8]) -[DB]> Int Never!
     // Call method `method` (FN_*) of the function of the context Vdbe.fctx.
-    func_call: fn(&self, db: &conn.Conn, v: &conn.Vdbe, method: Int) Never! -[DB]>
+    func_call: fn(&self, db: &conn.Conn, v: &conn.Vdbe, method: Int) -[DB]> Never!
     // The commit hook's answer, nonzero to turn the commit into a
     // rollback; 0 when no hook is set.
     commit_hook: fn(&self, db: &conn.Conn) -[DB]> Int Never!
     // Call the rollback hook, if one is set.
-    rollback_hook: fn(&self, db: &conn.Conn) Never! -[DB]>
+    rollback_hook: fn(&self, db: &conn.Conn) -[DB]> Never!
     // Whether an update hook is set (db->xUpdateCallback).
     has_update_hook: fn(&self, db: conn.Conn) -[]> Bool Never!
     // The update hook for operation op (SQLITE_INSERT, SQLITE_DELETE,
     // SQLITE_UPDATE) on row rowid of table `table` in database db_name.
-    update_hook: fn(&self, db: &conn.Conn, op: Int, db_name: [U8], table: [U8], rowid: Int) Never! -[DB]>
+    update_hook: fn(&self, db: &conn.Conn, op: Int, db_name: [U8], table: [U8], rowid: Int) -[DB]> Never!
     // The progress handler: true to interrupt (only called while
     // Conn.n_progress_ops is set).
     progress: fn(&self, db: &conn.Conn) -[DB]> Bool Never!
     // The trace callback for `event` (conn.TRACE_STMT with the statement's
     // text, conn.TRACE_ROW), called while Conn.m_trace has the event.
-    trace: fn(&self, db: &conn.Conn, v: conn.Vdbe, event: Int, text: [U8]) Never! -[DB]>
+    trace: fn(&self, db: &conn.Conn, v: conn.Vdbe, event: Int, text: [U8]) -[DB]> Never!
     // The profile callbacks (sqlite3_profile's xProfile with
     // conn.TRACE_XPROFILE, the trace callback's conn.TRACE_PROFILE) for a
     // statement that ran elapsed_ns nanoseconds.
-    profile: fn(&self, db: &conn.Conn, v: conn.Vdbe, elapsed_ns: Int) Never! -[DB]>
+    profile: fn(&self, db: &conn.Conn, v: conn.Vdbe, elapsed_ns: Int) -[DB]> Never!
     // The sqlite3_wal_hook callback (Conn.wal_hook is conn.WAL_HOOK_USER)
     // after a commit left n_frame frames in database db_name's log.
     wal_hook: fn(&self, db: &conn.Conn, db_name: [U8], n_frame: Int) -[DB]> Int Never!
@@ -263,7 +263,7 @@ commit_internal_changes: fn(db: &conn.Conn) Never! {
 
 // sqlite3RollbackAll: roll back every database's transaction, tripping
 // open cursors with trip_code.
-rollback_all: fn<H: Host>(h: &H, db: &conn.Conn, trip_code: Int) Never! -[DB]> {
+rollback_all: fn<H: Host>(h: &H, db: &conn.Conn, trip_code: Int) -[DB]> Never! {
     conn.sync_btrees(db)
     schema_change: db.m_db_flags.bit_and(conn.DBFLAG_SCHEMA_CHANGE) != 0 && !db.init.busy
     in_trans := false
@@ -292,7 +292,7 @@ vtab_import_errmsg: fn<H: Host>(h: &H, db: conn.Conn, v: &conn.Vdbe, vt: Int) Ne
 
 // Disconnect the VTables whose last reference went (C's sqlite3VtabUnlock
 // does at once) and free their slots.
-vtab_reap: fn<H: Host>(h: &H, db: &conn.Conn) Never! -[DB]> {
+vtab_reap: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Never! {
     i := 0
     loop i < db.vtab_dead.len() {
         vt: db.vtab_dead[i]
@@ -305,7 +305,7 @@ vtab_reap: fn<H: Host>(h: &H, db: &conn.Conn) Never! -[DB]> {
 
 // callFinaliser: call xCommit or xRollback on every VTable of the
 // transaction and empty it.
-vtab_finish: fn<H: Host>(h: &H, db: &conn.Conn, method: Int) Never! -[DB]> {
+vtab_finish: fn<H: Host>(h: &H, db: &conn.Conn, method: Int) -[DB]> Never! {
     trans: db.v_trans.copy()
     db.v_trans = [Int]{}
     loop vt in trans {
@@ -319,12 +319,12 @@ vtab_finish: fn<H: Host>(h: &H, db: &conn.Conn, method: Int) Never! -[DB]> {
 }
 
 // sqlite3VtabRollback.
-vtab_rollback: fn<H: Host>(h: &H, db: &conn.Conn) Never! -[DB]> {
+vtab_rollback: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Never! {
     vtab_finish<H>(h, db, VT_ROLLBACK)
 }
 
 // sqlite3VtabCommit.
-vtab_commit: fn<H: Host>(h: &H, db: &conn.Conn) Never! -[DB]> { vtab_finish<H>(h, db, VT_COMMIT) }
+vtab_commit: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Never! { vtab_finish<H>(h, db, VT_COMMIT) }
 
 // sqlite3VtabSync: xSync every VTable of the transaction until one fails.
 // While the calls run the transaction is in sync (sqlite3VtabInSync).
@@ -1012,7 +1012,7 @@ release_mem_array: fn(v: &conn.Vdbe, from: Int, to: Int) Never! {
 
 // sqlite3VdbeFreeCursorNN: close cursor slot ci of v.csr. An ephemeral
 // table's btree closes with its last cursor and frees its slot.
-free_cursor: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, ci: Int) Never! -[DB]> {
+free_cursor: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, ci: Int) -[DB]> Never! {
     t: v.csr[ci].cur_type
     if t == conn.CURTYPE_BTREE {
         bt: v.csr[ci].bt
@@ -1031,7 +1031,7 @@ free_cursor: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, ci: Int) Never! -
 }
 
 // closeCursorsInFrame: close the running program's cursors.
-close_cursors_in_frame: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) Never! -[DB]> {
+close_cursors_in_frame: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Never! {
     loop ci in v.csr_base..<v.csr.len() {
         if v.csr[ci].live -> free_cursor<H>(h, db, v, ci)
     }
@@ -1071,7 +1071,7 @@ frame_restore: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Neve
 
 // closeAllCursors: end every trigger program, close the cursors, release
 // the registers and free the auxiliary data.
-close_all_cursors: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) Never! -[DB]> {
+close_all_cursors: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Never! {
     loop v.frames.len() > 0 -> _: frame_restore<H>(h, db, v)
     close_cursors_in_frame<H>(h, db, v)
     release_mem_array(v, 0, v.mem.len())
@@ -1339,7 +1339,7 @@ check_fk: fn(db: conn.Conn, v: &conn.Vdbe, deferred: Bool) -> Int Never! {
 
 // Roll back the whole transaction after an error that leaves it unusable
 // and return to autocommit.
-abort_transaction: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) Never! -[DB]> {
+abort_transaction: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Never! {
     rollback_all<H>(h, db, base.ABORT_ROLLBACK)
     close_savepoints(db)
     db.auto_commit = true
@@ -1456,7 +1456,7 @@ reset: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
 
 // sqlite3VdbeDelete: free a statement, dropping the references its ops
 // hold, and its slot.
-delete: fn<H: Host>(h: &H, db: &conn.Conn, v: &&conn.Vdbe) Never! -[DB]> {
+delete: fn<H: Host>(h: &H, db: &conn.Conn, v: &&conn.Vdbe) -[DB]> Never! {
     loop p in v.programs {
         loop o in p.ops -> free_p4(db, o.p4)
     }

@@ -96,7 +96,7 @@ BuildAttempt: struct {
 
     // Write every step's output logs, `attempt.json`, and the package's
     // `latest.json` under `<hangar>/build-logs/<package>/<id>`.
-    persist: fn(&self, hangar_dir: String) StoreError! -[FS, Env, Rand]> {
+    persist: fn(&self, hangar_dir: String) -[FS, Env, Rand]> StoreError! {
         recipe_debug_validate_id(self.id)
         package_dir: recipe_debug_log_dir(hangar_dir, self.package)
         dir: files.join(package_dir, self.id)
@@ -116,7 +116,7 @@ BuildAttempt: struct {
     // Copy the failed build's source and output trees into
     // `<hangar>/failed-scratch/<id>` through a private staging directory.
     // A symlinked output or any error leaves no recorded scratch path.
-    preserve_scratch: fn(&self, hangar_dir: String, source: String, output: String) StoreError! -[FS, Env, Rand]> {
+    preserve_scratch: fn(&self, hangar_dir: String, source: String, output: String) -[FS, Env, Rand]> StoreError! {
         recipe_debug_validate_id(self.id)
         root: files.join(hangar_dir, BUILD_DEBUG_SCRATCH_ROOT)
         recipe_debug_ensure_real_directory(root, "failed-build scratch root")
@@ -154,7 +154,7 @@ BuildAttempt: struct {
 }
 
 // Stage the scratch copy and publish it at `dir`.
-recipe_debug_stage_scratch: fn(stage: String, dir: String, source: String, output: String) StoreError! -[FS]> {
+recipe_debug_stage_scratch: fn(stage: String, dir: String, source: String, output: String) -[FS]> StoreError! {
     recipe_debug_ensure_absent(stage, "failed-build scratch staging")
     files.create_dir_all(stage)
     recipe_debug_copy_tree(source, files.join(stage, "source"))
@@ -252,7 +252,7 @@ recipe_promote_failed_attempt: fn(source_hangar: String, target_hangar: String, 
     }
 }
 
-recipe_debug_promote_stage: fn(stage: String, source_scratch: String, target_scratch: String, target_hangar: String, attempt: &BuildAttempt) StoreError! -[FS, Env, Rand]> {
+recipe_debug_promote_stage: fn(stage: String, source_scratch: String, target_scratch: String, target_hangar: String, attempt: &BuildAttempt) -[FS, Env, Rand]> StoreError! {
     recipe_debug_ensure_absent(stage, "promoted failed-build scratch staging")
     recipe_debug_copy_tree(source_scratch, stage)
     files.rename(stage, target_scratch)
@@ -378,7 +378,7 @@ recipe_debug_num_field: fn(object: [String:Dyn], key: String) -> Int Never! {
 }
 
 // Copy a real directory tree; links and special entries are refused.
-recipe_debug_copy_tree: fn(src: String, dst: String) StoreError! -[FS]> {
+recipe_debug_copy_tree: fn(src: String, dst: String) -[FS]> StoreError! {
     info: files.stat(src)
     if info.is_symlink || !info.is_dir {
         return Err(StoreError.InvalidData("build scratch source is not a real directory: {src}"))
@@ -403,7 +403,7 @@ recipe_debug_copy_tree: fn(src: String, dst: String) StoreError! -[FS]> {
 }
 
 // A real directory at `path`, created with its parents when missing.
-recipe_debug_ensure_real_directory: fn(path: String, label: String) StoreError! -[FS]> {
+recipe_debug_ensure_real_directory: fn(path: String, label: String) -[FS]> StoreError! {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink || !info.is_dir {
@@ -418,7 +418,7 @@ recipe_debug_ensure_real_directory: fn(path: String, label: String) StoreError! 
     }
 }
 
-recipe_debug_ensure_absent: fn(path: String, label: String) StoreError! -[FS]> {
+recipe_debug_ensure_absent: fn(path: String, label: String) -[FS]> StoreError! {
     if files.stat(path) == {
         .Ok(_) -> { Err(StoreError.AlreadyExists("{label} already exists: {path}")) }
         .Err(error) -> {
@@ -431,7 +431,7 @@ recipe_debug_ensure_absent: fn(path: String, label: String) StoreError! -[FS]> {
 }
 
 // Remove a tree without following links; a missing path is removed.
-recipe_debug_remove_tree: fn(path: String) StoreError! -[FS]> {
+recipe_debug_remove_tree: fn(path: String) -[FS]> StoreError! {
     info: if files.stat(path) == {
         .Ok(info) -> info
         .Err(error) -> {
@@ -449,7 +449,7 @@ recipe_debug_remove_tree: fn(path: String) StoreError! -[FS]> {
 
 // Write `bytes` through an exclusive partial file and an atomic rename. A
 // symlinked destination is refused.
-recipe_debug_write_atomic: fn(path: String, bytes: [U8]) StoreError! -[FS, Env, Rand]> {
+recipe_debug_write_atomic: fn(path: String, bytes: [U8]) -[FS, Env, Rand]> StoreError! {
     parent: files.dirname(path)
     if parent == "" -> return Err(StoreError.Other("build log path has no parent"))
     recipe_debug_ensure_real_directory(parent, "build log parent")
@@ -473,7 +473,7 @@ recipe_debug_write_atomic: fn(path: String, bytes: [U8]) StoreError! -[FS, Env, 
     }
 }
 
-recipe_debug_publish_partial: fn(partial: String, path: String, bytes: [U8]) StoreError! -[FS]> {
+recipe_debug_publish_partial: fn(partial: String, path: String, bytes: [U8]) -[FS]> StoreError! {
     out := files.create(partial, if_exists: .Refuse)
     out.write_bytes(bytes)
     out.fsync()

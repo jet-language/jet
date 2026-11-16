@@ -434,7 +434,7 @@ WindowRewriteWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
@@ -499,7 +499,7 @@ WindowAggDepthWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { true }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
             cg.walker_depth_decrease(p)
         }
 
@@ -529,7 +529,7 @@ DisallowAggOrderByWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
@@ -843,7 +843,7 @@ window_read_peer_values: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, csr: In
 // function of the window list mwin on the row of cursor csr, its
 // arguments read into the registers from reg; or the inline code of the
 // built-in functions that take none of the function API.
-window_agg_step: fn(p: &cg.Parse, a: &ast.AST, mwin: Int, csr: Int, inverse: Bool, reg: Int) Never! -[DB]> {
+window_agg_step: fn(p: &cg.Parse, a: &ast.AST, mwin: Int, csr: Int, inverse: Bool, reg: Int) -[DB]> Never! {
     eph: a.windows[mwin].eph_csr
     b_inverse: if inverse -> 1 else -> 0
     win := mwin
@@ -945,7 +945,7 @@ window_agg_final: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, fin: Bool) Nev
 // windowFullScan: code that computes each function of the window list
 // over a scan of the whole current frame (an EXCLUDE frame's way), into
 // the result registers.
-window_full_scan: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) Never! -[DB]> {
+window_full_scan: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) -[DB]> Never! {
     mwin: s.mwin
     mw: a.windows[mwin].copy()
     csr: mw.csr_app
@@ -1002,7 +1002,7 @@ window_full_scan: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) Never! -[DB]> 
 // table through the subroutine at s.addr_gosub, computing first the
 // built-in functions that read rows themselves (nth_value(),
 // first_value(), lead(), lag()).
-window_return_one_row: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) Never! -[DB]> {
+window_return_one_row: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) -[DB]> Never! {
     mwin: s.mwin
     if a.windows[mwin].reg_start_rowid != 0 -> window_full_scan(p, a, s) else {
         eph: a.windows[mwin].eph_csr
@@ -1283,7 +1283,7 @@ window_expr_gt_zero: fn(p: cg.Parse, a: ast.AST, e: Int) -> Bool Never! {
 // subroutine at addr_gosub (register reg_gosub); ends the loop with
 // sqlite3WhereEnd. The frame shapes and the code each takes are
 // window.c's header comment on this routine.
-window_code_step: fn(p: &cg.Parse, a: &ast.AST, sel: Int, wi: &we.WhereInfo, reg_gosub: Int, addr_gosub: Int) Never! -[DB]> {
+window_code_step: fn(p: &cg.Parse, a: &ast.AST, sel: Int, wi: &we.WhereInfo, reg_gosub: Int, addr_gosub: Int) -[DB]> Never! {
     mwin: a.selects[sel].win
     mw: a.windows[mwin].copy()
     ob: mw.order_by

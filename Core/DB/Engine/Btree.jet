@@ -725,7 +725,7 @@ ptrmap_is_page: fn(bt: Btree, pgno: Int) -> Bool Never! { ptrmap_pageno(bt, pgno
 
 // ptrmapPut: the parent of page `key` is `parent`, as e_type. Nothing when
 // rc already holds an error.
-ptrmap_put: fn(bt: &Btree, key: Int, e_type: Int, parent: Int, rc: &Int) Never! -[DB]> {
+ptrmap_put: fn(bt: &Btree, key: Int, e_type: Int, parent: Int, rc: &Int) -[DB]> Never! {
     if rc != base.OK {
         return
     }
@@ -911,7 +911,7 @@ cell_size_of: fn(bt: Btree, s: Int, i: Int) -> Int Never! {
 // ptrmapPutOvflPtr: the pointer-map entry of the overflow chain of the cell
 // at buf[cell], which page s holds. limit is the end of the source page
 // image when buf is one (the SQLITE_OVERFLOW check), else -1.
-ptrmap_put_ovfl_ptr: fn(bt: &Btree, s: Int, buf: [U8], cell: Int, limit: Int, rc: &Int) Never! -[DB]> {
+ptrmap_put_ovfl_ptr: fn(bt: &Btree, s: Int, buf: [U8], cell: Int, limit: Int, rc: &Int) -[DB]> Never! {
     if rc != base.OK {
         return
     }
@@ -1331,7 +1331,7 @@ release_page: fn(bt: &Btree, s: Int) Never! {
 }
 
 // releasePageOne.
-release_page_one: fn(bt: &Btree, s: Int) Never! -[DB]> {
+release_page_one: fn(bt: &Btree, s: Int) -[DB]> Never! {
     pager.pager_unref_page_one(bt.pager, s)
     drain_reinit(bt)
 }
@@ -1599,7 +1599,7 @@ lock_btree: fn(bt: &Btree) -[DB]> Int Never! {
 }
 
 // unlockBtreeIfUnused.
-unlock_btree_if_unused: fn(bt: &Btree) Never! -[DB]> {
+unlock_btree_if_unused: fn(bt: &Btree) -[DB]> Never! {
     if bt.in_transaction == TRANS_NONE && bt.page1 != cache.NO_PAGE {
         s1: bt.page1
         bt.page1 = cache.NO_PAGE
@@ -1964,7 +1964,7 @@ btree_commit_phase_one: fn(bt: &Btree, super: String?) -[DB]> Int Never! {
 }
 
 // btreeEndTransaction.
-btree_end_transaction: fn(bt: &Btree) Never! -[DB]> {
+btree_end_transaction: fn(bt: &Btree) -[DB]> Never! {
     bt.do_truncate = false
     if bt.in_trans > TRANS_NONE && bt.db.n_vdbe_read > 1 -> bt.in_trans = TRANS_READ else {
         if bt.in_trans != TRANS_NONE {
@@ -3134,7 +3134,7 @@ free_page2: fn(bt: &Btree, mem_page: Int, i_page: Int) -[DB]> Int Never! {
 }
 
 // freePage.
-free_page: fn(bt: &Btree, s: Int, rc: &Int) Never! -[DB]> {
+free_page: fn(bt: &Btree, s: Int, rc: &Int) -[DB]> Never! {
     if rc == base.OK {
         pgno: bt.mem[s].pgno
         rc = free_page2(bt, s, pgno)
@@ -3737,7 +3737,7 @@ balance_quick: fn(bt: &Btree, parent: Int, s: Int) -[DB]> Int Never! {
 }
 
 // copyNodeContent: page `to` gets the content of page `from`.
-copy_node_content: fn(bt: &Btree, from: Int, to: Int, rc: &Int) Never! -[DB]> {
+copy_node_content: fn(bt: &Btree, from: Int, to: Int, rc: &Int) -[DB]> Never! {
     if rc != base.OK {
         return
     }
@@ -4963,7 +4963,7 @@ check_ref: fn(db: BtDB, ck: &IntegrityCk, i_page: Int) -> Bool Never! {
 
 // checkPtrmap: report the pointer-map entry of i_child unless it is
 // (e_type, i_parent).
-check_ptrmap: fn(bt: &Btree, ck: &IntegrityCk, i_child: Int, e_type: Int, i_parent: Int) Never! -[DB]> {
+check_ptrmap: fn(bt: &Btree, ck: &IntegrityCk, i_child: Int, e_type: Int, i_parent: Int) -[DB]> Never! {
     got_type := 0
     got_parent := 0
     rc: ptrmap_get(bt, i_child, got_type, got_parent)
@@ -4978,7 +4978,7 @@ check_ptrmap: fn(bt: &Btree, ck: &IntegrityCk, i_child: Int, e_type: Int, i_pare
 
 // checkList: check the freelist (is_free_list) or an overflow chain that
 // starts at i_page and should hold n_expected pages. The count is a u32.
-check_list: fn(bt: &Btree, ck: &IntegrityCk, is_free_list: Bool, i_page_in: Int, n_expected: Int) Never! -[DB]> {
+check_list: fn(bt: &Btree, ck: &IntegrityCk, is_free_list: Bool, i_page_in: Int, n_expected: Int) -[DB]> Never! {
     i_page := i_page_in
     n := n_expected
     n_err_at_start: ck.n_err
@@ -5090,7 +5090,7 @@ check_tree_page: fn(bt: &Btree, ck: &IntegrityCk, i_page: Int, pi_min_key: &Int,
     depth + 1
 }
 
-check_tree_page_body: fn(bt: &Btree, ck: &IntegrityCk, s: Int, i_page: Int, pi_min_key: &Int, max_key_in: Int, depth: &Int, do_coverage: &Bool) Never! -[DB]> {
+check_tree_page_body: fn(bt: &Btree, ck: &IntegrityCk, s: Int, i_page: Int, pi_min_key: &Int, max_key_in: Int, depth: &Int, do_coverage: &Bool) -[DB]> Never! {
     rc := btree_init_page(bt, s)
     if rc != base.OK {
         check_append_msg(bt.db, ck, "btreeInitPage() returns error code {rc}")
@@ -5223,7 +5223,7 @@ btree_integrity_check: fn(bt: &Btree, roots: [Int], mx_err: Int, n_err: &Int, ou
     ck.rc
 }
 
-integrity_check_body: fn(bt: &Btree, ck: &IntegrityCk, roots: [Int], b_partial: Bool, b_ck_freelist: Bool) Never! -[DB]> {
+integrity_check_body: fn(bt: &Btree, ck: &IntegrityCk, roots: [Int], b_partial: Bool, b_ck_freelist: Bool) -[DB]> Never! {
     n_ck: ck.n_ck_page
     loop _ in 0..<n_ck + 1 -> ck.pg_ref.push(false)
     ck.heap = zero_ints(bt.page_size /% 4)
@@ -5381,7 +5381,7 @@ test_key_info: fn() -> record.KeyInfo Never! {
 
 // A database in memory with 512-byte pages, so a thousand rows make a tree
 // of several levels.
-test_open: fn(bt: &Btree, auto_vacuum: Int) Never! -[DB]> {
+test_open: fn(bt: &Btree, auto_vacuum: Int) -[DB]> Never! {
     flags: os.OPEN_READWRITE.bit_or(os.OPEN_CREATE).bit_or(os.OPEN_MAIN_DB)
     assert_eq(btree_open(bt, Val(":memory:"), bt_db_default(), 0, flags, true, false, false, false), base.OK)
     assert_eq(btree_set_page_size(bt, 512, -1, false), base.OK)
@@ -5405,7 +5405,7 @@ test_errors: fn(bt: &Btree, roots: [Int]) -[DB]> Int Never! {
 }
 
 // Insert rows 1..n of t and their index entries in a scattered order.
-test_fill: fn(bt: &Btree, ct: Int, ci: Int, n: Int) Never! -[DB]> {
+test_fill: fn(bt: &Btree, ct: Int, ci: Int, n: Int) -[DB]> Never! {
     loop i in 0..<n {
         // 7919 is prime to n, so i visits every key once.
         k: (i * 7919) % n + 1
@@ -5422,7 +5422,7 @@ test_fill: fn(bt: &Btree, ct: Int, ci: Int, n: Int) Never! -[DB]> {
 
 // Delete the rows whose key is a multiple of m but not of gone (those are
 // deleted already), and their index entries.
-test_delete: fn(bt: &Btree, ct: Int, ci: Int, n: Int, m: Int, gone: Int) Never! -[DB]> {
+test_delete: fn(bt: &Btree, ct: Int, ci: Int, n: Int, m: Int, gone: Int) -[DB]> Never! {
     info: test_key_info()
     res := 0
     loop k in 1..n {
@@ -5441,7 +5441,7 @@ test_delete: fn(bt: &Btree, ct: Int, ci: Int, n: Int, m: Int, gone: Int) Never! 
 
 // The table holds exactly the rows 1..n that are not multiples of m, in
 // rowid order, and the index one entry for each, in key order.
-test_verify: fn(bt: &Btree, ct: Int, ci: Int, n: Int, m: Int) Never! -[DB]> {
+test_verify: fn(bt: &Btree, ct: Int, ci: Int, n: Int, m: Int) -[DB]> Never! {
     res := 0
     assert_eq(btree_first(bt, ct, res), base.OK)
     want := 1
@@ -5480,7 +5480,7 @@ test_verify: fn(bt: &Btree, ct: Int, ci: Int, n: Int, m: Int) Never! -[DB]> {
 
 // Fill, check, delete and check again, committing in between; then drop the
 // index and check what is left.
-test_scenario: fn(auto_vacuum: Int) Never! -[DB]> {
+test_scenario: fn(auto_vacuum: Int) -[DB]> Never! {
     bt := btree_closed()
     test_open(bt, auto_vacuum)
     unused := 0

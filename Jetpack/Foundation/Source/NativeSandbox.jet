@@ -212,7 +212,7 @@ foundation_linux_sandbox_status: fn() -[FS, Env, Exec, Time.Wait]> NativeSandbox
 // `JET_BWRAP_URL`, else this jet's release) and resolve again. Elsewhere, and
 // when a sandbox is already usable, it does nothing; an error says why no
 // sandbox is usable.
-foundation_native_sandbox_prepare: fn() NativeSandboxError! -[FS, Env, Exec, IO, Net, Time.Wait]> {
+foundation_native_sandbox_prepare: fn() -[FS, Env, Exec, IO, Net, Time.Wait]> NativeSandboxError! {
     if !sys.is_linux() || sys.get(NATIVE_SANDBOX_FAKE_ENV) != None -> return Ok()
     if foundation_linux_bwrap() == .Err(first) {
         why: first.message()
@@ -293,7 +293,7 @@ foundation_pinned_bwrap_problem: fn(bytes: [U8], asset: NativeSandboxBwrapAsset)
 
 // Verify `bytes` from `origin` and publish them read-only and executable at
 // the pinned path, through a private staging file renamed into place.
-foundation_install_pinned_bwrap: fn(bytes: [U8], asset: NativeSandboxBwrapAsset, origin: String) NativeSandboxError! -[FS, Env]> {
+foundation_install_pinned_bwrap: fn(bytes: [U8], asset: NativeSandboxBwrapAsset, origin: String) -[FS, Env]> NativeSandboxError! {
     if foundation_pinned_bwrap_problem(bytes, asset) == .Val(problem) {
         return Err(NativeSandboxError.Unsupported("the bubblewrap from {origin} {problem}"))
     }
@@ -309,7 +309,7 @@ foundation_install_pinned_bwrap: fn(bytes: [U8], asset: NativeSandboxBwrapAsset,
 // Download the pinned Bubblewrap into the Hangar from `JET_BWRAP_URL`, else
 // from the release this jet came from (the RELEASE file beside it). A
 // `file://` URL is read where it lies, so it also works offline.
-foundation_fetch_pinned_bwrap: fn(asset: NativeSandboxBwrapAsset) NativeSandboxError! -[FS, Env, IO, Net, Time.Wait]> {
+foundation_fetch_pinned_bwrap: fn(asset: NativeSandboxBwrapAsset) -[FS, Env, IO, Net, Time.Wait]> NativeSandboxError! {
     url := sys.get(NATIVE_SANDBOX_BWRAP_URL_ENV) ?? ""
     if url == "" {
         release: foundation_jet_release_name() ?? {

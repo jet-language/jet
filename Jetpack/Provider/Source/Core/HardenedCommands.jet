@@ -40,12 +40,12 @@ provider_exclusive_temp_dir: fn(parent: String, prefix: String) -[FS, Rand]> Str
 
 // Exclusive mkdirat on the held parent, not the idempotent whole-path helper.
 // AlreadyExists belongs to the naming loop; a collision is never reused.
-provider_create_temp_candidate: fn(parent: Directory, name: String) IOError! -[FS]> {
+provider_create_temp_candidate: fn(parent: Directory, name: String) -[FS]> IOError! {
     _: parent.create_directory(name)
 }
 
 // Best-effort removal of a temporary tree (Rust `TempDirGuard` drop).
-provider_remove_tree_quiet: fn(path: String) Never! -[FS]> {
+provider_remove_tree_quiet: fn(path: String) -[FS]> Never! {
     files.remove_all(path).drop("an abandoned temporary tree is swept by later cleanup")
 }
 
@@ -66,7 +66,7 @@ provider_network_denied: fn() -[Env]> Bool Never! {
     (sys.get(PROVIDER_DENY_NETWORK_ENV) ?? "") != ""
 }
 
-provider_ensure_network_allowed: fn(need: String) ProviderError! -[Env]> {
+provider_ensure_network_allowed: fn(need: String) -[Env]> ProviderError! {
     if provider_network_denied() {
         return Err(ProviderError.Offline("network disabled by {PROVIDER_DENY_NETWORK_ENV} while trying to {need}"))
     }

@@ -141,7 +141,7 @@ join_path: fn(directory: String, name: String) -> String Never! {
     "{directory}/{name}"
 }
 
-visit_docs: fn(directory: String, found: &[String]) DocFlagsError! -[FS]> {
+visit_docs: fn(directory: String, found: &[String]) -[FS]> DocFlagsError! {
     entries: files.list_dir(if directory == "" -> "." else -> directory) ?? return Err(DocFlagsError{message: "cannot list {directory}: {err}"})
     names: ordered_names(entries.map(fn(entry: DirEntry) { entry.name }))
     loop name in names {
@@ -182,7 +182,7 @@ logical_lines: fn(text: String) -> [LogicalLine] Never! {
 }
 
 // Each flag after `script`, which ends at character `script_end` of the line.
-collect_flags: fn(doc: String, line: LogicalLine, script: String, script_end: Int, findings: &[Finding], seen: &[String:Bool]) Never! -[FS]> {
+collect_flags: fn(doc: String, line: LogicalLine, script: String, script_end: Int, findings: &[Finding], seen: &[String:Bool]) -[FS]> Never! {
     if PASSTHROUGH_SCRIPTS.contains(script) {
         return
     }

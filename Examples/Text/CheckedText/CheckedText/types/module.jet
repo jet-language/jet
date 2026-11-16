@@ -19,7 +19,7 @@ Pattern: distinct String
 impl Pattern.CheckedText {
     Error: TextError
 
-    check: fn(text: String) TextError! -[]> {
+    check: fn(text: String) -[]> TextError! {
         if text == "" -> return Err(TextError.Empty)
         return Ok()
     }
@@ -32,7 +32,7 @@ Query: distinct String
 impl Query.CheckedText {
     Error: TextError
 
-    check: fn(text: String) TextError! -[]> {
+    check: fn(text: String) -[]> TextError! {
         if text == "" -> return Err(TextError.Empty)
         if !text.contains("select") -> return Err(TextError.QueryShape)
         return Ok()
@@ -46,7 +46,7 @@ Selector: distinct String
 impl Selector.CheckedText {
     Error: TextError
 
-    check: fn(text: String) TextError! -[]> {
+    check: fn(text: String) -[]> TextError! {
         if text == "" -> return Err(TextError.Empty)
         if !text.contains(".") -> return Err(TextError.SelectorShape)
         return Ok()
@@ -60,7 +60,7 @@ Identity: distinct String
 impl Identity.CheckedText {
     Error: TextError
 
-    check: fn(text: String) TextError! -[]> {
+    check: fn(text: String) -[]> TextError! {
         if text == "" -> return Err(TextError.Empty)
         if !text.contains("@") -> return Err(TextError.IdentityShape)
         return Ok()

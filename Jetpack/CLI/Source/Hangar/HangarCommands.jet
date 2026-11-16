@@ -418,7 +418,7 @@ cli_cmd_clean: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
 }
 
 // The quiet post-success auto-clean every realizing command runs.
-cli_auto_clean_after_success: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots) Never! -[IO, FS, Env, Time, Time.Wait]> {
+cli_auto_clean_after_success: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots) -[IO, FS, Env, Time, Time.Wait]> Never! {
     if store_maybe_auto_clean(verification, roots) == {
         .Ok(found) -> {
             if found == .Val(report) {
@@ -441,7 +441,7 @@ cli_hangar_report_error: fn(theme: Theme, parsed: CLIParsed, code: String, what:
 }
 
 // One successful Hangar status object on stdout.
-cli_hangar_status_json: fn(action: String, fields: StatusFields) ReportError! -[IO]> {
+cli_hangar_status_json: fn(action: String, fields: StatusFields) -[IO]> ReportError! {
     print(report_render_status(action, true, fields) ?? return Err(err))
 }
 

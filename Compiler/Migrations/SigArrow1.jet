@@ -1,0 +1,254 @@
+// Toolchain a0.0.45: a signature's arrow comes right after its parameters.
+// The error-first order `fn(path: Path) (IOError | ParseError)! -[FS.Write]>`
+// becomes `fn(path: Path) -[FS.Write]> (IOError | ParseError)!`, with no unit
+// result written after the arrow, and a type written before a late effect row
+// (`fn(Int) Int -[]>`) moves behind it the same way. The old order is not Jet
+// from this toolchain on, so the plan reads the text, never a parse. A site is
+// a `(…)` whose `(` follows `fn`, `fn<…>` or `fn name` (an API snapshot's
+// row), then one space, the contract on the same line, one space and the
+// effect row `-[…]>`. A site in code, a comment, a string, a Markdown file or
+// an expected output is rewritten alike; the contract and the row keep their
+// spelling. A Markdown code span that ends in an effect row also writes a
+// signature's tail, as a reference table's `String IOError! -[FS]>` or
+// `rollback() (DBError | IOError)! -[DB]>` does: its row moves before its
+// contract the same way, and a `Unit` result goes.
+
+// The contract runs from `start` to `contract_end`, the space before the row,
+// and the row from there to `end`; a `Unit` contract goes with the move.
+SigArrowEdit: struct {
+    start: Int
+    contract_end: Int
+    end: Int
+    keeps_contract: Bool
+}
+
+// The farthest a `(` is looked for behind its `)`.
+SIG_ARROW_PARAMS_REACH: 4000
+
+// Rewrites the error-first signatures of one file of any kind. A Jet source
+// (`source`, or a `.jet` or `.template` path) that parses cleanly keeps its
+// text unless the rewrite parses cleanly too.
+sig_arrow1_file: fn(path: String, text: String, source: Bool) -> MigrationOutcome {
+    bytes: text.bytes()
+    markdown: path.ends_with(".md")
+    edits := [SigArrowEdit]{}
+    plain_tick := -1
+    at := 0
+    loop at < bytes.len() {
+        if markdown && bytes[at] == 96 && at != plain_tick {
+            close: sig_arrow1_span_close(bytes, at) ?? {
+                at += 1
+                next
+            }
+            if sig_arrow1_span_site(bytes, at + 1, close) == .Val(edit) {
+                edits.push(edit)
+                at = close + 1
+                next
+            }
+            plain_tick = close
+            at += 1
+            next
+        }
+        if bytes[at] != 41 {
+            at += 1
+            next
+        }
+        edit: sig_arrow1_site(bytes, at) ?? {
+            at += 1
+            next
+        }
+        at = edit.end
+        edits.push(edit)
+    }
+    if edits.len() == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    out := [String]{}
+    cursor := 0
+    loop edit in edits {
+        out.push(sig_arrow1_text(bytes, cursor, edit.start))
+        out.push(sig_arrow1_text(bytes, edit.contract_end + 1, edit.end))
+        if edit.keeps_contract {
+            out.push(" ")
+            out.push(sig_arrow1_text(bytes, edit.start, edit.contract_end))
+        }
+        cursor = edit.end
+    }
+    out.push(sig_arrow1_text(bytes, cursor, bytes.len()))
+    result: out.join("")
+    if source || path.ends_with(".jet") || path.ends_with(".template") {
+        if lambda_shape1_errors(text) == 0 {
+            after_errors: lambda_shape1_errors(result)
+            if after_errors > 0 {
+                return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: the rewrite does not parse ({after_errors} errors), file left alone"}}
+            }
+        }
+    }
+    MigrationOutcome{text: result, rewritten: edits.len(), skipped: [String]{}}
+}
+
+// The edit for the signature whose parameters close at `close`, when the
+// contract after them comes before the effect row.
+sig_arrow1_site: fn(bytes: [U8], close: Int) -> SigArrowEdit? {
+    if close + 2 >= bytes.len() || bytes[close + 1] != 32 -> return None
+    open: sig_arrow1_opener(bytes, close) ?? return None
+    if !sig_arrow1_fn_head(bytes, open) -> return None
+    start: close + 2
+    contract_end: sig_arrow1_contract_end(bytes, start) ?? return None
+    end: sig_arrow1_row_end(bytes, contract_end + 1) ?? return None
+    Val(SigArrowEdit{start: start, contract_end: contract_end, end: end, keeps_contract: true})
+}
+
+// The closing backtick, on the same line, of the code span that the backtick
+// at `open` opens; a run of backticks opens no span here.
+sig_arrow1_span_close: fn(bytes: [U8], open: Int) -> Int? {
+    if open > 0 && bytes[open - 1] == 96 -> return None
+    at := open + 1
+    if at < bytes.len() && bytes[at] == 96 -> return None
+    loop at < bytes.len() {
+        if bytes[at] == 10 -> return None
+        if bytes[at] == 96 -> return Val(at)
+        at += 1
+    }
+    None
+}
+
+// The edit for a Markdown code span, from `start` to the closing backtick at
+// `close`, that ends in an effect row after a contract: the contract is the
+// span's text after a call's `name(…) `, or the whole text before the row.
+sig_arrow1_span_site: fn(bytes: [U8], start: Int, close: Int) -> SigArrowEdit? {
+    if close - start < 5 || bytes[close - 1] != 62 || bytes[close - 2] != 93 -> return None
+    row_start := -1
+    index := start
+    loop index + 2 < close {
+        if bytes[index] == 32 && bytes[index + 1] == 45 && bytes[index + 2] == 91 && (sig_arrow1_row_end(bytes, index + 1) ?? -1) == close {
+            row_start = index + 1
+            break
+        }
+        index += 1
+    }
+    if row_start < 0 -> return None
+    contract_start := start
+    index = row_start - 2
+    loop index > start {
+        if bytes[index] == 41 && bytes[index + 1] == 32 {
+            open: sig_arrow1_opener(bytes, index) ?? -1
+            if open > start && sig_arrow1_name_byte(bytes[open - 1]) {
+                contract_start = index + 2
+                break
+            }
+        }
+        index -= 1
+    }
+    contract_end: sig_arrow1_contract_end(bytes, contract_start) ?? return None
+    if contract_end != row_start - 1 -> return None
+    unit: sig_arrow1_text(bytes, contract_start, contract_end) == "Unit"
+    Val(SigArrowEdit{start: contract_start, contract_end: contract_end, end: close, keeps_contract: !unit})
+}
+
+// The `(` that the `)` at `close` closes.
+sig_arrow1_opener: fn(bytes: [U8], close: Int) -> Int? {
+    depth := 0
+    at := close
+    loop at >= 0 && close - at < SIG_ARROW_PARAMS_REACH {
+        if bytes[at] == 41 -> depth += 1
+        if bytes[at] == 40 {
+            depth -= 1
+            if depth == 0 -> return Val(at)
+        }
+        at -= 1
+    }
+    None
+}
+
+// Whether the `(` at `open` starts a callable's parameters: `fn(`, `fn<…>(`
+// or, in an API snapshot's row, `fn name(` and `fn name<…>(`.
+sig_arrow1_fn_head: fn(bytes: [U8], open: Int) -> Bool {
+    at := sig_arrow1_skip_type_params(bytes, open)
+    if sig_arrow1_keyword_ends(bytes, at) -> return true
+    name_end: at
+    loop at > 0 && sig_arrow1_name_byte(bytes[at - 1]) -> at -= 1
+    if at == name_end || at < 1 || bytes[at - 1] != 32 -> return false
+    sig_arrow1_keyword_ends(bytes, at - 1)
+}
+
+// Where `fn` would end before `at`: past the `<…>` type parameters that end
+// right before `at`, if any.
+sig_arrow1_skip_type_params: fn(bytes: [U8], at: Int) -> Int {
+    if at < 1 || bytes[at - 1] != 62 -> return at
+    depth := 0
+    index := at - 1
+    loop index >= 0 && at - index < SIG_ARROW_PARAMS_REACH {
+        if bytes[index] == 62 -> depth += 1
+        if bytes[index] == 60 {
+            depth -= 1
+            if depth == 0 -> return index
+        }
+        if bytes[index] == 10 -> return at
+        index -= 1
+    }
+    at
+}
+
+// Whether the keyword `fn` ends right before `at`, as a word of its own: at
+// the start, after a byte that is no name's, or after a string's `\n` escape.
+sig_arrow1_keyword_ends: fn(bytes: [U8], at: Int) -> Bool {
+    if at < 2 || bytes[at - 2] != 102 || bytes[at - 1] != 110 -> return false
+    at == 2 || !sig_arrow1_name_byte(bytes[at - 3]) || (at >= 4 && bytes[at - 3] == 110 && bytes[at - 4] == 92)
+}
+
+sig_arrow1_name_byte: fn(byte: U8) -> Bool {
+    (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 95 || byte == 46
+}
+
+// The end of the contract that starts at `start`: the space before an effect
+// row, reached on the same line with every bracket the contract opens closed.
+// A contract never holds an arrow, a brace, `=`, a quote, a bare `:` or a
+// bare `,`.
+sig_arrow1_contract_end: fn(bytes: [U8], start: Int) -> Int? {
+    if start >= bytes.len() || bytes[start] == 32 || bytes[start] == 45 -> return None
+    depth := 0
+    at := start
+    loop at < bytes.len() {
+        byte: bytes[at]
+        if byte == 32 && depth == 0 && at > start && at + 2 < bytes.len() && bytes[at + 1] == 45 && bytes[at + 2] == 91 {
+            return Val(at)
+        }
+        if {
+            byte == 10 || byte == 13 || byte == 123 || byte == 125 || byte == 61 || byte == 34 || byte == 96 || byte == 39 || byte == 59 || byte == 45 || byte == 92 -> return None
+            (byte == 58 || byte == 44) && depth == 0 -> return None
+            byte == 40 || byte == 91 || byte == 60 -> depth += 1
+            byte == 41 || byte == 93 || byte == 62 -> {
+                depth -= 1
+                if depth < 0 -> return None
+            }
+        }
+        at += 1
+    }
+    None
+}
+
+// The end of the effect row `-[…]>` that starts at `start`, past its `>`.
+sig_arrow1_row_end: fn(bytes: [U8], start: Int) -> Int? {
+    if start + 1 >= bytes.len() || bytes[start] != 45 || bytes[start + 1] != 91 -> return None
+    depth := 0
+    at := start + 1
+    loop at < bytes.len() {
+        if bytes[at] == {
+            10 -> return None
+            91 -> depth += 1
+            93 -> {
+                depth -= 1
+                if depth == 0 {
+                    if at + 1 < bytes.len() && bytes[at + 1] == 62 -> return Val(at + 2)
+                    return None
+                }
+            }
+            else -> {}
+        }
+        at += 1
+    }
+    None
+}
+
+sig_arrow1_text: fn(bytes: [U8], start: Int, end: Int) -> String {
+    String.from_bytes(bytes[start..<end]) ?? ""
+}

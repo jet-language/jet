@@ -356,7 +356,7 @@ cli_detected_project_catalog: fn(project_dir: String) -[FS]> String? Never! {
     None
 }
 
-cli_remember_project_catalog: fn(roots: HangarRoots, project_dir: String, catalog: String) IOError! -[FS, Env]> {
+cli_remember_project_catalog: fn(roots: HangarRoots, project_dir: String, catalog: String) -[FS, Env]> IOError! {
     binding: cli_project_catalog_binding(roots, project_dir)
     files.create_dir_all(files.dirname(binding))
     files.write(binding, "{catalog}\n")
@@ -365,7 +365,7 @@ cli_remember_project_catalog: fn(roots: HangarRoots, project_dir: String, catalo
 // Choose the local unofficial package catalog before a realization that
 // needs one, when no official signed index is configured. The choice is
 // remembered per project; the prompt itself is the grant.
-cli_configure_project_catalog: fn(theme: Theme, roots: HangarRoots, project_dir: String, plan: RunPlan, flags: &CLIFlags) CLIError! -[IO, FS, Env, Net, Time, Time.Wait]> {
+cli_configure_project_catalog: fn(theme: Theme, roots: HangarRoots, project_dir: String, plan: RunPlan, flags: &CLIFlags) -[IO, FS, Env, Net, Time, Time.Wait]> CLIError! {
     if flags.local_nix_catalog != None || !cli_plan_needs_package_catalog(plan) || cli_plan_has_complete_locked_catalog(plan) {
         return
     }

@@ -231,7 +231,7 @@ cli_package_dependency_edit: fn(input: PackageDependencyInput, name: String, spe
 
 // Retain the ORIGINAL source authority through stage/fsync/rename, and re-read
 // the source before staging: a concurrent edit is never overwritten.
-cli_package_dependency_publish: fn(input: PackageDependencyInput, updated: String) PackageDependencyWriteError! -[FS, Env, Time]> {
+cli_package_dependency_publish: fn(input: PackageDependencyInput, updated: String) -[FS, Env, Time]> PackageDependencyWriteError! {
     parent: files.dirname(input.path)
     name: files.basename(input.path)
     resolver: AuthorityResolver.open(parent) ?? return Err(PackageDependencyWriteError{message: "could not open package source authority: {err.message()}"})
@@ -331,7 +331,7 @@ cli_package_dependency_script_lock: fn(root: String, script: String, offline: Bo
 // registry requirement it means (`1.4.2` exactly, `1.4` any `1.4.x`), the
 // verified artifact is ingested into Hangar, and its tree is copied to the
 // script's managed `.jet/inline-deps/<name>/<version>/` folder.
-cli_package_dependency_inline_fetch: fn(script: String, script_dir: String, dep: InlineDep) PackageFetchError! -[FS, Env, Exec, Net, Time, Time.Wait]> {
+cli_package_dependency_inline_fetch: fn(script: String, script_dir: String, dep: InlineDep) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchError! {
     root: files.canonicalize(script_dir) ?? return Err(pkg_fetch_error("E1224", "couldn't open the script directory", "{err}", "restore the script's directory"))
     parts: pkg_inline_deps_numeric_version(dep.selector) ?? return Err(pkg_fetch_registry_error(dep.name, "invalid inline selector `{dep.selector}`"))
     words := [String]{}
@@ -348,7 +348,7 @@ cli_package_dependency_inline_fetch: fn(script: String, script_dir: String, dep:
 
 // Stage the verified tree beside its final name, then rename it into place;
 // a failed copy leaves no partial version directory.
-cli_package_dependency_inline_copy: fn(root: String, name: String, version: String, source: String) IOError! -[FS, Env, Time]> {
+cli_package_dependency_inline_copy: fn(root: String, name: String, version: String, source: String) -[FS, Env, Time]> IOError! {
     project: foundation_open_directory_authority(root)
     package: project.child(".jet", true).child("inline-deps", true).child(name, true)
     if package.child(version) == .Ok(_) {
@@ -448,7 +448,7 @@ cli_package_dependency_vendor: fn(root: String, raw: [String], fetched: PackageF
 // tree hash matches the source; an identical existing copy is kept and a
 // stale one replaced. A symlink or special file in the source refuses the
 // copy and leaves nothing behind.
-cli_package_dependency_vendor_copy: fn(target: String, name: String, source: String) IOError! -[FS, Env, Time]> {
+cli_package_dependency_vendor_copy: fn(target: String, name: String, source: String) -[FS, Env, Time]> IOError! {
     vendor: foundation_open_directory_authority(target)
     origin: foundation_open_directory_authority(source)
     expected: origin.tree_hash()

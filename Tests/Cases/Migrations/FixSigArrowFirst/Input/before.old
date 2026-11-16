@@ -1,0 +1,93 @@
+// Error-first signatures in every place a signature is written. The
+// comment's `save: fn(n: Int) SaveError! -[IO]>` moves too.
+#Error
+LoadError: enum {
+    Missing
+}
+
+#Error
+SaveError: enum {
+    Full
+    Gone
+}
+
+save: fn(n: Int) SaveError! -[IO]> {
+    if n < 0 -> return Err(SaveError.Full)
+    print("saved {n}")
+}
+
+note: fn(n: Int) Never! -[IO]> { print("note {n}") }
+
+either: fn(n: Int) (SaveError | LoadError)! -[IO]> {
+    if n > 9 -> return Err(SaveError.Gone)
+    print("either {n}")
+}
+
+first: fn<T>(items: [T]) SaveError! -[IO]> {
+    if items.len() == 0 -> return Err(SaveError.Gone)
+    print("first of {items.len()}")
+}
+
+apply: fn(f: fn(Int) SaveError! -[IO]>, n: Int) SaveError! -[IO]> { f(n) }
+
+table: fn(
+    rows: [String: Int],
+    limit: Int,
+) SaveError! -[IO]> {
+    if rows.len() > limit -> return Err(SaveError.Full)
+    print("table {rows.len()}")
+}
+
+Saver: trait {
+    store: fn(self, n: Int) SaveError! -[IO]>
+}
+
+Disk: struct {
+    name: String
+}
+
+impl Disk.Saver {
+    store: fn(self, n: Int) SaveError! -[IO]> {
+        if n > 9 -> return Err(SaveError.Full)
+        print("{self.name} {n}")
+    }
+}
+
+Hooks: struct {
+    on_save: fn(Int) SaveError! -[IO]>
+}
+
+// Already arrow-first, or with no effect row: these stay.
+kept: fn(n: Int) -[IO]> SaveError! { save(n) }
+
+valued: fn(n: Int) -[IO]> Int SaveError! {
+    save(n)
+    n
+}
+
+pure: fn(n: Int) SaveError! {
+    if n < 0 -> return Err(SaveError.Full)
+}
+
+QUOTED: "save: fn(n: Int) SaveError! -[IO]> {{ print(n) }}"
+
+run: fn() {
+    save(1) ?? print("failed 1")
+    note(2)
+    either(3) ?? print("failed 3")
+    first([Int]{4}) ?? print("failed 4")
+    apply(save, 5) ?? print("failed 5")
+    table([String: Int]{}, 1) ?? print("failed table")
+    lam: fn(n: Int) SaveError! -[IO]> {
+        if n == 0 -> return Err(SaveError.Full)
+        print("lam {n}")
+    }
+    lam(6) ?? print("failed 6")
+    Disk{name: "d"}.store(7) ?? print("failed 7")
+    hooks: Hooks{on_save: save}
+    hooks.on_save(8) ?? print("failed 8")
+    kept(9) ?? print("failed 9")
+    print(valued(10) ?? 0)
+    pure(-1) ?? print("failed pure")
+    print(QUOTED)
+}

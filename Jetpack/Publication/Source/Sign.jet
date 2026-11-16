@@ -88,7 +88,7 @@ publication_keygen: fn(registry: String, force: Bool) -[FS, Env, Time, Rand]> Pu
 // public key only after the private seed succeeds, both at the ONE key_paths
 // result reported to the caller. Public publication is protected too, but
 // preserves its required 0644 wire mode.
-publication_sign_write_key_pair: fn(paths: PublicationKeyPaths, seed: [U8], public: String, force: Bool) PublicationDiagnosticError! -[FS, Env, Time]> {
+publication_sign_write_key_pair: fn(paths: PublicationKeyPaths, seed: [U8], public: String, force: Bool) -[FS, Env, Time]> PublicationDiagnosticError! {
     publication_write_private_seed(paths.seed_path, seed, force)
     public_policy: FoundationPublicationPolicy{mode: 420, create: .Replace, destination_links: .Refuse, create_root: true}
     if foundation_write_file_nofollow_at_root(files.dirname(paths.public_key_path), files.basename(paths.public_key_path), public.bytes(), None, public_policy) == .Err(error) {
@@ -96,7 +96,7 @@ publication_sign_write_key_pair: fn(paths: PublicationKeyPaths, seed: [U8], publ
     }
 }
 
-publication_write_private_seed: fn(path: String, seed: [U8], force: Bool) PublicationDiagnosticError! -[FS, Env, Time]> {
+publication_write_private_seed: fn(path: String, seed: [U8], force: Bool) -[FS, Env, Time]> PublicationDiagnosticError! {
     if sys.family() != "unix" {
         return Err(publication_sign_io_error("signing key permissions", "private signing-key permissions are unavailable on this platform"))
     }

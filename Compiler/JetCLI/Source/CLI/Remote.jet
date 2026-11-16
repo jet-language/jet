@@ -54,7 +54,7 @@ jet_cli_remote_config: fn() -[FS, Env]> String JetCLIReadError! {
     Ok(jet_cli_rooted_join(jet_cli_remote_absolute(base), "jet/remote-bindings"))
 }
 
-jet_cli_remote_credential: fn(path: String) JetCLIReadError! -[FS, Time.Wait]> {
+jet_cli_remote_credential: fn(path: String) -[FS, Time.Wait]> JetCLIReadError! {
     parts := jet_cli_remote_parts(path)
     name: parts.pop() ?? return Err(jet_cli_read_error("credential provider path has no file name"))
     held: JetCLIRootedDirectory.open("/", parts, false) ?? return Err(jet_cli_read_error("cannot inspect credential provider directory: {err.message}"))
@@ -263,7 +263,7 @@ jet_cli_remote_list: fn(json: Bool) -[FS, Env, Time.Wait]> JetDriverVerbOutput J
     Ok(JetDriverVerbOutput{stdout: text, stderr: stderr, exit_code: 0})
 }
 
-jet_cli_remote_remove: fn(args: [String]) JetCLIReadError! -[FS, Env]> {
+jet_cli_remote_remove: fn(args: [String]) -[FS, Env]> JetCLIReadError! {
     if args.len() <= 2 || args[2].starts_with("-") {
         return Err(jet_cli_read_error("jet remote remove needs a builder name"))
     }

@@ -359,7 +359,7 @@ jet_cli_import_accepted_receipt_json: fn(receipt: ForeignSourceReceipt, assumpti
 
 // Rust `persist_accepted_receipt` (ReceiptStore `record_with_sections_and_links`
 // plus `index_published_receipt`).
-jet_cli_import_persist_accepted_receipt: fn(plan: JetCLIImportPlan, receipt: ForeignSourceReceipt, cwd: String) JetCLIImportPlanError! -[FS, Env, Time, IO]> {
+jet_cli_import_persist_accepted_receipt: fn(plan: JetCLIImportPlan, receipt: ForeignSourceReceipt, cwd: String) -[FS, Env, Time, IO]> JetCLIImportPlanError! {
     receipt.validate() ?? return Err(jet_cli_import_update_error(err.message))
     files := [String]{}
     jet_cli_import_collect_sources(plan.source, plan.source, plan.language, files) ?? return Err(err)

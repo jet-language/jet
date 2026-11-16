@@ -40,7 +40,7 @@ ProjectionPlan: struct {
 }
 
 // Write the classification ledger and the plan and dossier inspection views.
-image_write_projection_artifacts: fn(layout: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) ImageError! -[FS, Env]> {
+image_write_projection_artifacts: fn(layout: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) -[FS, Env]> ImageError! {
     image_write_projection_report(layout, manifest_digest, report)
     plan_json: image_render_projection_plan(manifest_digest, plan) ?? return Err(err)
     image_write_atomic_json(layout, "plan.json", plan_json)
@@ -49,7 +49,7 @@ image_write_projection_artifacts: fn(layout: String, manifest_digest: String, pl
 }
 
 // Write `projection.json`: the sorted, deduplicated classification ledger.
-image_write_projection_report: fn(layout: String, manifest_digest: String, report: ProjectionReport) ImageError! -[FS, Env]> {
+image_write_projection_report: fn(layout: String, manifest_digest: String, report: ProjectionReport) -[FS, Env]> ImageError! {
     path: files.join(layout, "projection.json")
     document := [String:Dyn]{}
     document["schema"] = Dyn.Text("jet.image.projection")
@@ -137,7 +137,7 @@ image_json_strings: fn(values: [String]) -> Dyn Never! {
 
 // Rust `write_atomic_json`: one inspection view through create-new, sync,
 // rename, recovering a stale temporary from an interrupted run.
-image_write_atomic_json: fn(layout: String, name: String, json_text: String) ImageError! -[FS, Env]> {
+image_write_atomic_json: fn(layout: String, name: String, json_text: String) -[FS, Env]> ImageError! {
     path: files.join(layout, name)
     node: image_node(path) ?? OCINode.Missing
     if node != OCINode.Missing && !node.is_file() {
@@ -146,7 +146,7 @@ image_write_atomic_json: fn(layout: String, name: String, json_text: String) Ima
     image_publish_json(image_with_extension(path, "tmp-{sys.pid()}"), path, json_text)
 }
 
-image_publish_json: fn(temporary: String, path: String, json_text: String) ImageError! -[FS]> {
+image_publish_json: fn(temporary: String, path: String, json_text: String) -[FS]> ImageError! {
     image_remove_stale_temporary(temporary)
     image_write_new_file(temporary, json_text.bytes())
     if files.rename(temporary, path) == .Err(error) {

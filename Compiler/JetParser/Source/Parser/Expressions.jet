@@ -1550,14 +1550,8 @@ parser_parse_fn_lambda: fn(state: &JetParserState, depth: Int) -> ParsedExpr {
     params: parser_parse_lambda_params(state, depth)
     parser_expect(state, TOKEN_RPAREN, "`)` after lambda parameters")
     signature: parser_parse_callable_result(state)
-    effects := signature.effects
-    via := signature.via
-    // A unit-fallible contract comes before its effect row (`IOError! -[IO]>`).
-    if effects == None && via == None && !signature.plain_arrow && parser_func_effect_starts_here(state) {
-        after: parser_parse_opt_func_effects(state)
-        effects = after.effects
-        via = after.via
-    }
+    effects: signature.effects
+    via: signature.via
     if via == .Val(written) {
         parser_add_fatal_code(state, "E0119", written.span, "a lambda effect row cannot publish `via`", "a lambda stores a concrete effect row as part of its callable interface", "write the effects directly, for example `-[Net]>`")
     }

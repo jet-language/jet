@@ -100,8 +100,9 @@ RULE_PARSE_LESSON: "parse lesson"
 DIAGNOSTIC_ROWS: "Compiler/Prelude/Diagnostics.jet"
 
 // The checker errors whose source `jet fmt` rewrites into the repaired
-// program: an arm head that repeats the `if`'s comparison loses it.
-FMT_REPAIRED_ERRORS: [String]{"RedundantArmComparison"}
+// program: an arm head that repeats the `if`'s comparison loses it, and an
+// unbraced control body gains its braces.
+FMT_REPAIRED_ERRORS: [String]{"RedundantArmComparison", "EffectBodyWithoutBraces"}
 
 // The Prelude texts `jet build Compiler` copies into compiler sources: each
 // `target:` names a source under Compiler/ that the build writes.
@@ -1178,7 +1179,7 @@ run: fn() {
 #Test("whole trees and adaptation facades are left out by their rule") {
     assert_eq(tree_rule("Compiler/JetSema/Source/Sema/Scopes.jet"), "")
     assert_eq(tree_rule("Tests/UI/bare_error_mark_is_not_a_contract.jet"), "")
-    assert_eq(tree_rule("Tests/Cases/fmt_project/fixtures/x/main.jet"), RULE_FORMATTER_INPUT)
+    assert_eq(tree_rule("Tests/Cases/Fmt/Project/x/main.jet"), RULE_FORMATTER_INPUT)
     assert_eq(tree_rule("Compiler/JetDevServer/Source/Session.jet"), RULE_DEVSERVER)
     assert_eq(tree_rule("Tools/AgentEval/runs/a/main.jet"), "")
     assert_eq(tree_rule("Tests/Fixtures/FFIAdaptations/BorrowedView/after.jet"), RULE_GENERATED)
@@ -1194,7 +1195,7 @@ run: fn() {
 
 #Test("a case's fixtures are relative to its folder or rooted") {
     text: "fixture: fixtures/one\nstep: jet build\nfixture: ./fixtures/two/\nfixture: {{root}}/Examples/Basics\n"
-    assert_eq(case_fixtures("Tests/Cases/BuildEntry/x.case", text).join("|"), "Tests/Cases/BuildEntry/Fixtures/one|Tests/Cases/BuildEntry/Fixtures/two|Examples/Basics")
+    assert_eq(case_fixtures("Tests/Cases/BuildEntry/x.case", text).join("|"), "Tests/Cases/BuildEntry/fixtures/one|Tests/Cases/BuildEntry/fixtures/two|Examples/Basics")
     assert_eq(case_scopes("Tests/Cases/a/x.case", "fixture: fixtures/x\n").join("|"), "Tests/Cases/a/fixtures/x|Tests/Cases/a")
     assert(rewrites_sources("step: jet fmt --check main.jet\n"))
     assert(rewrites_sources("step: jet fix --dry-run main.jet\n"))
@@ -1286,9 +1287,9 @@ run: fn() {
     add_fmt_case_inputs("Tests/Cases/CLI/f.case", "fixture: fixtures/f\nstep: jet fmt --check {{root}}/Examples/Basics/Hello.jet\n", out)
     add_fmt_case_inputs("Tests/Cases/CLI/g.case", "fixture: fixtures/g\nstep: jet check\n", out)
     note(out.exact, "Examples/Basics/Hello.jet", RULE_GENERATED)
-    assert_eq(exclusion_rule("Tests/Cases/cli/fixtures/f/main.jet", out), RULE_FORMATTER_INPUT)
+    assert_eq(exclusion_rule("Tests/Cases/CLI/fixtures/f/main.jet", out), RULE_FORMATTER_INPUT)
     assert_eq(exclusion_rule("Examples/Basics/Hello.jet", out), RULE_FORMATTER_INPUT)
-    assert_eq(exclusion_rule("Tests/Cases/cli/fixtures/g/main.jet", out), "")
+    assert_eq(exclusion_rule("Tests/Cases/CLI/fixtures/g/main.jet", out), "")
     assert_eq(rule_counts([String]{"b", "a", "b"}).join("|"), "2\tb|1\ta")
 }
 
@@ -1305,10 +1306,10 @@ run: fn() {
 }
 
 #Test("a meaning change is the internal error that names the source") {
-    errors: "internal compiler error: `jet fmt` would change the syntax tree of `tests/a.jet`, so the file stays as written; the first difference is in `If`: `x` became `y`\n  --> tests/a.jet\nThis is a bug in jet, NOT in your program. Please report it,\n"
+    errors: "internal compiler error: `jet fmt` would change the syntax tree of `Tests/a.jet`, so the file stays as written; the first difference is in `If`: `x` became `y`\n  --> Tests/a.jet\nThis is a bug in jet, NOT in your program. Please report it,\n"
     assert_eq(fmt_refused_source(errors) ?? "", "Tests/a.jet")
-    assert_eq(fmt_meaning_change(errors) ?? "", "`jet fmt` would change the syntax tree of `tests/a.jet`, so the file stays as written; the first difference is in `If`: `x` became `y`")
-    assert_eq(fmt_meaning_change("Error [jet.X]: no\n  --> tests/b.jet:4:27\n") ?? "none", "none")
+    assert_eq(fmt_meaning_change(errors) ?? "", "`jet fmt` would change the syntax tree of `Tests/a.jet`, so the file stays as written; the first difference is in `If`: `x` became `y`")
+    assert_eq(fmt_meaning_change("Error [jet.X]: no\n  --> Tests/b.jet:4:27\n") ?? "none", "none")
 }
 
 #Test("code frames are the gutter lines a diagnostic shows") {

@@ -342,7 +342,7 @@ sema_public_api_solved_effects: fn(function: Func, functions: [FnBody]) -> Strin
 
 sema_public_api_fn: fn(name: String, function: Func, functions: [FnBody], units: [String:String]) -> PublicAPIItem Never! {
     ret: if function.return_type == .Val(ty) -> " {sema_public_api_type(ty, units)}" else -> ""
-    PublicAPIItem{kind: "fn", name: name.copy(), signature: "fn {name}{sema_public_api_type_params(function.type_params, units)}({sema_public_api_params(function.params, units)}){ret}{sema_public_api_solved_effects(function, functions)}"}
+    PublicAPIItem{kind: "fn", name: name.copy(), signature: "fn {name}{sema_public_api_type_params(function.type_params, units)}({sema_public_api_params(function.params, units)}){sema_public_api_solved_effects(function, functions)}{ret}"}
 }
 
 sema_public_api_methods: fn(owner: String, methods: [Func], functions: [FnBody], units: [String:String], rows: &[PublicAPIItem]) Never! {
@@ -436,7 +436,7 @@ sema_public_api_enum: fn(definition: EnumDef, functions: [FnBody], name: String,
 sema_public_api_trait_method: fn(name: String, method: TraitMethodSig, units: [String:String]) -> String Never! {
     ret: if method.return_type == .Val(ty) -> " {sema_public_api_type(ty, units)}" else -> ""
     effects: if method.declared_effects == .Val(declared) -> sema_public_api_effects(loop entry in declared -> entry.name.copy()) else -> ""
-    "{name}.{method.name}({sema_public_api_params(method.params, units)}){ret}{effects}"
+    "{name}.{method.name}({sema_public_api_params(method.params, units)}){effects}{ret}"
 }
 
 // A trait is its row (name and supertraits) plus one `require` row per

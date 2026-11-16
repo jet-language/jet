@@ -47,7 +47,7 @@ store_hex8: fn(value: Int) -> String Never! {
     String.from_bytes(out) ?? panic("hex digits are ASCII")
 }
 
-store_share_tree_files: fn(verification: &StoreVerification, roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
+store_share_tree_files: fn(verification: &StoreVerification, roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> StoreError! {
     if allow_semantic_xattrs {
         return
     }
@@ -55,7 +55,7 @@ store_share_tree_files: fn(verification: &StoreVerification, roots: HangarRoots,
     store_share_tree_files_unlocked(verification, roots, root, allow_semantic_xattrs)
 }
 
-store_share_tree_files_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
+store_share_tree_files_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> StoreError! {
     store_share_tree_files_unlocked_with_report(verification, roots, root, allow_semantic_xattrs)
 }
 
@@ -94,7 +94,7 @@ store_share_tree_files_unlocked_with_report: fn(verification: &StoreVerification
 }
 
 // Every regular file below `path`, in sorted walk order.
-store_collect_share_candidates: fn(path: String, paths: &[String], infos: &[files.Stat]) StoreError! -[FS]> {
+store_collect_share_candidates: fn(path: String, paths: &[String], infos: &[files.Stat]) -[FS]> StoreError! {
     info: files.stat(path)
     if info.is_symlink {
         return
@@ -112,7 +112,7 @@ store_collect_share_candidates: fn(path: String, paths: &[String], infos: &[file
     infos.push(info)
 }
 
-store_share_file: fn(path: String, info: files.Stat, digest_hex: String, shared: String, used: &Set<String>, report: &SharedCASReport, touched: &Bool) StoreError! -[FS, Env, Time]> {
+store_share_file: fn(path: String, info: files.Stat, digest_hex: String, shared: String, used: &Set<String>, report: &SharedCASReport, touched: &Bool) -[FS, Env, Time]> StoreError! {
     source_len: info.size
     mode: store_clear_write_bits(store_permission_identity(info))
     key: store_shared_cas_key(digest_hex, mode)
@@ -244,7 +244,7 @@ store_files_equal: fn(left: String, right: String) -[FS]> Bool StoreError! {
 }
 
 // Swap `path` for a hardlink to the pooled file, restoring it on failure.
-store_replace_with_shared_link: fn(path: String, shared: String) StoreError! -[FS, Env]> {
+store_replace_with_shared_link: fn(path: String, shared: String) -[FS, Env]> StoreError! {
     parent: files.dirname(path)
     if parent == "" -> return Err(StoreError.Other("shared CAS output has no parent"))
     name: files.basename(path)

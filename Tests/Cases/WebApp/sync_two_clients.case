@@ -1,0 +1,20 @@
+# Two clients of one server, on a device that queues
+# (`app.new(…).offline(.Queue)`). The phone saves two tasks; the test host
+# cuts it off (`app.disconnect`), and its two renames wait in the queue
+# (`app.pending()` is 2) while each call succeeds at once. The desk removes
+# the second task. `app.reconnect("phone")` sends the queue in order: the
+# server commits the first rename and refuses the second (its task is
+# gone), so the phone rolls that write back. It leaves the queue, which is
+# empty after, and the desk reads the first rename and no second task.
+# Same output on O0, O1 and O2.
+fixture: SyncTwoClients.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "phone saved, pending: 0\nphone cut off, pending: 2\ndesk reads: plan, none\nphone reconnected, pending: 0\ndesk reads: plan v2, none\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: == o0
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0

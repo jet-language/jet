@@ -611,7 +611,7 @@ publication_e2604: fn(package: String, version: String, expected: String, actual
     diagnostic_from_registry("E2604", None, "integrity check failed for `{package}` {version}", "expected hash {expected}, got {actual}. The artifact changed after it was locked — this may indicate accidental or deliberate tampering.", "re-run `jet store fetch` after cleaning stale Jetpack hangar entries (`jet clean`). If the problem persists, the upstream source may have been altered; audit the change before proceeding.")
 }
 
-publication_verify_package_integrity: fn(package: LockedPackage, store_entry: String) PublicationDiagnosticError! -[FS]> {
+publication_verify_package_integrity: fn(package: LockedPackage, store_entry: String) -[FS]> PublicationDiagnosticError! {
     actual: foundation_tree_hash(store_entry)
     if actual != package.fingerprint {
         return Err(PublicationDiagnosticError{diagnostic: publication_e2604(package.name, package.version, package.fingerprint, actual)})

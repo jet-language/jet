@@ -111,7 +111,7 @@ line.trim().to_lower())`. Then call `lines.sort()` and loop over the list.
 
 A fallible return type uses `T !(E1 | E2)`; a unit-fallible return uses `!E`.
 The ordinary `T` return uses Jet's implicit error route. An effect arrow declares
-the allowed effects: `load: fn() String -[FS, IO]> { ... }`. Pure code can use
+the allowed effects: `load: fn() -[FS, IO]> String { ... }`. Pure code can use
 `-[]>`. Common effects include `FS`, `IO`, `Net`, `Exec`, `Env`, `Mem.Alloc`,
 `Mem.Rc`, `Panic`, and `Task`.
 

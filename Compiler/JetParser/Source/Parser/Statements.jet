@@ -777,8 +777,12 @@ parser_parse_if_statement: fn(state: &JetParserState) -> Stmt {
         parser_bump(state)
         if parser_if_body_is_arms(state) {
             if {
-                parser_pipe_step_read_count(state) > reads_before -> parser_dispatch_hole_in_pipe_step(state, cond_span)
-                else -> parser_add_error_code(state, "E0992", start.span, "a multi-arm `if` needs a comparison between the subject and `{{`", "`if subject == {{ … }}` (or `<`, `>`, `!=`, `<=`, `>=`) marks value dispatch explicitly, so a plain `if cond {{ … }}` body is always statements", "write `if subject == {{ value -> body }}`")
+                parser_pipe_step_read_count(state) > reads_before -> {
+                    parser_dispatch_hole_in_pipe_step(state, cond_span)
+                }
+                else -> {
+                    parser_add_error_code(state, "E0992", start.span, "a multi-arm `if` needs a comparison between the subject and `{{`", "`if subject == {{ … }}` (or `<`, `>`, `!=`, `<=`, `>=`) marks value dispatch explicitly, so a plain `if cond {{ … }}` body is always statements", "write `if subject == {{ value -> body }}`")
+                }
             }
             return parser_parse_if_arms(state, condition.expr, start.span, BinOp.Eq)
         }

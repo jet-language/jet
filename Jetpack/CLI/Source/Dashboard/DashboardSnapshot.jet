@@ -284,7 +284,7 @@ DashboardOutput: struct {
         DashboardOutput{terminal: false, width: Val(width), frames: [String]{}}
     }
 
-    draw: fn(&self, frame: DashboardFrame, theme: Theme) Never! -[IO, Env]> {
+    draw: fn(&self, frame: DashboardFrame, theme: Theme) -[IO, Env]> Never! {
         width: self.width ?? cli_dashboard_terminal_width()
         text: cli_dashboard_render_frame_width(frame, width, theme)
         if self.terminal -> cli_dashboard_redraw(text) else -> self.frames.push(text)
@@ -515,7 +515,7 @@ cli_dashboard_age_label: fn(timestamp: Int, now: Int) -> String Never! {
     }
 }
 
-cli_dashboard_print_status_summary: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme) Never! -[IO, FS, Env, Exec, Time, Time.Wait]> {
+cli_dashboard_print_status_summary: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time, Time.Wait]> Never! {
     snapshot: cli_dashboard_collect_snapshot(verification, cache)
     stdout_handle := term.stdout()
     stdout_handle.write(cli_dashboard_render_status_summary(snapshot, theme)).drop("a closed stdout cannot take the status summary")

@@ -11,27 +11,27 @@ Rejected: struct {
     message: fn(self) -> String Never! { "rejected {self.n}" }
 }
 
-tick: fn(n: Int) Never! -[Time.Wait, IO]> {
+tick: fn(n: Int) -[Time.Wait, IO]> Never! {
     time.sleep(1ms)
     print("tick {n}")
 }
 
-wait: fn(n: Int) Never! -[Time.Wait]> {
+wait: fn(n: Int) -[Time.Wait]> Never! {
     if n > 0 -> time.sleep(1ms)
 }
 
-check: fn(n: Int) Rejected! -[IO]> {
+check: fn(n: Int) -[IO]> Rejected! {
     if n < 0 -> return Err(Rejected{n: n})
     print("ok {n}")
 }
 
-accept: fn(handler: fn(Int) -[Time.Wait, IO]> Never!, n: Int) Never! -[Time.Wait, IO]> {
+accept: fn(handler: fn(Int) -[Time.Wait, IO]> Never!, n: Int) -[Time.Wait, IO]> Never! {
     handler(n)
 }
 
-accept_wait: fn(handler: fn(Int) -[Time.Wait]> Never!, n: Int) Never! -[Time.Wait]> { handler(n) }
+accept_wait: fn(handler: fn(Int) -[Time.Wait]> Never!, n: Int) -[Time.Wait]> Never! { handler(n) }
 
-accept_checked: fn(handler: fn(Int) -[IO]> Rejected!, n: Int) Rejected! -[IO]> { handler(n) }
+accept_checked: fn(handler: fn(Int) -[IO]> Rejected!, n: Int) -[IO]> Rejected! { handler(n) }
 
 run: fn() {
     accept(tick, 1)

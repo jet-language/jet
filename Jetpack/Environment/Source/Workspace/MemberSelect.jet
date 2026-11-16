@@ -164,7 +164,7 @@ env_dependency_order_packages_checked: fn(resolver: AuthorityResolver, members: 
 // Persist member input hashes after a successful workspace build so the next
 // `--affected` run diffs against them. Best effort, like the action cache: a
 // member that cannot be hashed keeps its previous record.
-env_record_member_input_hashes: fn(root: String, members: [WorkspacePlanMember]) Never! -[FS, Env]> {
+env_record_member_input_hashes: fn(root: String, members: [WorkspacePlanMember]) -[FS, Env]> Never! {
     path: env_member_input_hash_path(root)
     files.create_dir_all(files.dirname(path)).drop("the hash cache directory is best effort")
     existing := env_load_member_input_hashes(root)

@@ -5115,7 +5115,7 @@ and one matrix output. Multiple outputs, `varargin`, duplicate names, and
 non-identifiers are rejected before a bridge is emitted.
 
 **Boundary.** The generated `octave.<lib>` surface accepts a rank-two `Tensor`
-and returns a rank-two `Tensor OctaveError! -[FFI.Octave, GPU]>`. The wire value
+and returns a rank-two `-[FFI.Octave, GPU]> Tensor OctaveError!`. The wire value
 carries exact shape and column-major flat data. Jet checks rank, dimensions,
 width, finiteness, and real numeric output; frames and responses are capped at
 1 MiB. A generation-tagged 32-session supervisor enforces deadlines and

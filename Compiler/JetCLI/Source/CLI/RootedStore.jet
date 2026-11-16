@@ -275,7 +275,7 @@ JetCLIRootedDirectory: struct {
     // or non-file is refused, the staged bytes become visible by one rename,
     // and a durable store flushes the directory. Callers that read-modify-write
     // hold `lock` first.
-    replace: fn(self, name: String, bytes: [U8], mode: Int?) JetCLIReadError! -[FS, Env, Time.Wait]> {
+    replace: fn(self, name: String, bytes: [U8], mode: Int?) -[FS, Env, Time.Wait]> JetCLIReadError! {
         jet_cli_rooted_validate_name(name)
         shown: jet_cli_rooted_join(self.path, name)
         if self.handle.entry_stat(name) == {
@@ -357,7 +357,7 @@ JetCLIRootedDirectory: struct {
         self.handle.lock() ?? return Err(jet_cli_read_error("another codemod holds `{self.path}`"))
     }
 
-    publish_staged: fn(self, temp: String, name: String, destination_id: cli_files.FileID, temp_id: cli_files.FileID) JetCLIReadError! -[FS]> {
+    publish_staged: fn(self, temp: String, name: String, destination_id: cli_files.FileID, temp_id: cli_files.FileID) -[FS]> JetCLIReadError! {
         destination: self.transaction_stat(name)
         staged: self.transaction_stat(temp)
         if destination.id != destination_id || staged.id != temp_id {
@@ -407,7 +407,7 @@ JetCLIRootedDirectory: struct {
 
     // Best-effort removal of a staged name after a failed publication; the
     // original failure is what the caller reports.
-    discard: fn(self, temp: String) Never! -[FS]> { _: self.handle.remove(temp) ?? return }
+    discard: fn(self, temp: String) -[FS]> Never! { _: self.handle.remove(temp) ?? return }
 }
 
 // One listed entry, described without following a link.
@@ -419,7 +419,7 @@ JetCLIRootedEntry: struct {
     size: Int
 }
 
-jet_cli_rooted_fill: fn(writer: &cli_files.FileWriter, bytes: [U8], mode: Int?, durable: Bool) IOError! -[FS, Time.Wait]> {
+jet_cli_rooted_fill: fn(writer: &cli_files.FileWriter, bytes: [U8], mode: Int?, durable: Bool) -[FS, Time.Wait]> IOError! {
     writer.write_bytes(bytes)
     if mode == .Val(bits) -> writer.set_mode(bits)
     if durable -> writer.fsync()

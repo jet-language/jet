@@ -109,19 +109,19 @@ publication_existing_oci_referrer_root: fn(repo: String, subject: String) -[FS, 
     Ok(subject_root)
 }
 
-publication_stage_oci_sbom: fn(repo: String, source: String, name: String, version: String, subject: String) IOError! -[FS, Env, Time]> {
+publication_stage_oci_sbom: fn(repo: String, source: String, name: String, version: String, subject: String) -[FS, Env, Time]> IOError! {
     root: publication_oci_referrer_root(repo, subject)
     lock: publication_load_publish_lock(source)
     sbom: publication_registry_spdx(lock, name, version, subject)
     publication_write_oci_file(files.join(root, PUBLICATION_OCI_PENDING_SBOM), sbom.bytes(), "pending OCI SBOM")
 }
 
-publication_finalize_oci_referrers_for_package: fn(repo: String, name: String, version: String) IOError! -[FS, Env, Time]> {
+publication_finalize_oci_referrers_for_package: fn(repo: String, name: String, version: String) -[FS, Env, Time]> IOError! {
     entry: publication_find_entry(repo, name, version) ?? return
     publication_finalize_oci_referrers(repo, entry)
 }
 
-publication_finalize_oci_referrers: fn(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env, Time]> {
+publication_finalize_oci_referrers: fn(repo: String, entry: PublicationIndexEntry) -[FS, Env, Time]> IOError! {
     artifact: publication_artifact_path(repo, entry.name, entry.version)
     info: if files.stat(artifact) == {
         .Ok(info) -> info
@@ -229,7 +229,7 @@ publication_oci_check_existing: fn(path: String, bytes: [U8], label: String) -[F
     Ok(true)
 }
 
-publication_write_oci_file: fn(path: String, bytes: [U8], label: String) IOError! -[FS, Env, Time]> {
+publication_write_oci_file: fn(path: String, bytes: [U8], label: String) -[FS, Env, Time]> IOError! {
     if bytes.len() > PUBLICATION_MAX_OCI_REFERRER_BYTES {
         return Err(publication_invalid_oci("{label} exceeds the 4 MiB limit"))
     }
@@ -252,7 +252,7 @@ publication_write_oci_file: fn(path: String, bytes: [U8], label: String) IOError
     }
 }
 
-publication_oci_reconcile_winner: fn(authority: FoundationDirectoryAuthority, path: String, bytes: [U8], label: String, error: IOError) IOError! -[FS, Env]> {
+publication_oci_reconcile_winner: fn(authority: FoundationDirectoryAuthority, path: String, bytes: [U8], label: String, error: IOError) -[FS, Env]> IOError! {
     collision: if error == {
         .AlreadyExists(_) -> true
         .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> false
@@ -357,7 +357,7 @@ publication_render_oci_index: fn(subject: String, descriptors: [PublicationOCIDe
     "{pkg_json_render(Dyn.Object(["schemaVersion": Dyn.Int(2), "subject": Dyn.Object(["digest": Dyn.Text(subject.copy())]), "manifests": Dyn.Array(manifests)]))}\n"
 }
 
-publication_verify_oci_referrers: fn(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env]> {
+publication_verify_oci_referrers: fn(repo: String, entry: PublicationIndexEntry) -[FS, Env]> IOError! {
     publication_validate_oci_digest(entry.content_hash)
     root: publication_existing_oci_referrer_root(repo, entry.content_hash) ?? return Err(publication_oci_unavailable(err, "OCI referrer set is unavailable: {err}; restore it from the registry or republish the immutable package"))
     root_authority: foundation_open_directory_authority(root)

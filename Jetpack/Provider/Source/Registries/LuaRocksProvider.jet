@@ -46,7 +46,7 @@ LuaRocksArtifact: struct {
 
 LuaRocksProvider: struct {
     // A locked LuaRocks realization must still match `authority.providers`.
-    validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
+    validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> ProviderError! {
         project: ctx.project_dir ?? return
         locked: pkg_lock_luarocks_realization(project, spec.raw) ?? return
         current: provider_luarocks_cache_authority(ctx)
@@ -243,7 +243,7 @@ LuaRocksResolver: struct {
     specs: [String:LuaRockspec]
     active: [String]
 
-    resolve: fn(&self, name: String, version: String) RegistryError! -[FS, Net, Time.Wait, Env]> {
+    resolve: fn(&self, name: String, version: String) -[FS, Net, Time.Wait, Env]> RegistryError! {
         if self.specs.get(name) == {
             .Val(existing) -> {
                 if existing.version != version {
@@ -399,7 +399,7 @@ LuaRocksOrderWalk: struct {
 
 // Preserve the rockspec and source archive, unpack the validated archive,
 // and copy every mapped module into `share/lua/5.4`.
-provider_luarocks_preserve_and_install: fn(artifact: LuaRocksArtifact, sources: String, lua_dir: String, scratch: String) RegistryError! -[FS]> {
+provider_luarocks_preserve_and_install: fn(artifact: LuaRocksArtifact, sources: String, lua_dir: String, scratch: String) -[FS]> RegistryError! {
     provider_registry_copy(artifact.rockspec_path, files.join(sources, files.basename(artifact.rockspec_path)), "could not preserve LuaRocks source")
     provider_registry_copy(artifact.source_path, files.join(sources, files.basename(artifact.source_path)), "could not preserve LuaRocks source")
     unpack: files.join(scratch, "unpack-{artifact.spec.name}")
@@ -422,7 +422,7 @@ provider_luarocks_preserve_and_install: fn(artifact: LuaRocksArtifact, sources: 
 
 // A rock archive must pass the shared source-archive budget and hold only
 // safe relative paths and no links.
-provider_luarocks_validate_archive: fn(path: String) RegistryError! -[FS]> {
+provider_luarocks_validate_archive: fn(path: String) -[FS]> RegistryError! {
     provider_registry_validate_tar_archive(path, true)
     listing: provider_registry_tar_listing(path, true) ?? return Err(RegistryError.Reason("LuaRocks source is not a readable tar.gz archive"))
     loop entry in listing {
@@ -440,7 +440,7 @@ provider_luarocks_validate_archive: fn(path: String) RegistryError! -[FS]> {
 
 // `lua-path`, `lua-cpath`, and `bin/lua-with-rocks`, which runs the
 // provisioned Lua 5.4 with the output's module trees first.
-provider_luarocks_write_runtime_files: fn(out: String) RegistryError! -[FS, Env]> {
+provider_luarocks_write_runtime_files: fn(out: String) -[FS, Env]> RegistryError! {
     provider_registry_write_text(files.join(out, "lua-path"), "share/lua/5.4/?.lua;share/lua/5.4/?/init.lua\n", "could not write Lua module search paths")
     provider_registry_write_text(files.join(out, "lua-cpath"), "lib/lua/5.4/?.so\n", "could not write Lua module search paths")
     lua: provider_registry_which("lua") ?? return Err(RegistryError.Reason("provisioned Lua 5.4 was not found"))
@@ -488,7 +488,7 @@ provider_luarocks_render_provenance: fn(repository: String, fetch_authority: Str
 
 // `supported_platforms`: an empty list allows every host; `!name` denies a
 // host; positive names allow only those hosts (`unix` covers non-Windows).
-provider_luarocks_ensure_platform_supported: fn(platforms: [String]) RegistryError! -[Env]> {
+provider_luarocks_ensure_platform_supported: fn(platforms: [String]) -[Env]> RegistryError! {
     if platforms.len() == 0 {
         return
     }

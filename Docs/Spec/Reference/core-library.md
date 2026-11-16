@@ -1252,7 +1252,7 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `best_effort()` | `BestEffort` | A record for file operations a script runs best effort, keeping going past one that fails as the shell does. `done.copy_file` (which runs `copy`; a method can't be named `copy`), `copy_dir`, `remove`, `remove_all`, `create_dir_all`, `symlink` and `canonicalize` take their `core.files` namesake's arguments and record a failure in `done.failures` instead of returning it; `remove` and `remove_all` count a path already gone as done (`rm -f`, `rm -rf`), and `canonicalize` gives the path unchanged when it cannot be resolved. `done.failed()` says whether any failed and `done.report()` is one line per failure, so the run reports what failed once. |
 | `read_link(path)` | `String IOError!` | Read a symbolic-link target. |
 | `canonicalize(path, missing_last: Bool{false})` / `absolute(path)` | `String IOError!` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. `missing_last: true` lets the last part be missing, as `readlink -f` does: the parent is resolved and the last name joined to it. |
-| `normalize(path)` / `join_all(parts)` / `resolve(path)` | `String` / `String` / `String IOError! -[FS, Env]>` | Lexical path math as node's `path.normalize`, `path.join` and `path.resolve` do it: `/` separates, empty and `.` segments go, `..` takes the segment before it (a relative path keeps a leading `..`), a trailing slash stays and `""` is `.`. `join_all` joins the non-empty parts, so `join_all(["/a", "/b"])` is `/a/b` where `join("/a", "/b")` is `/b`; `resolve` makes the path absolute against the current directory and drops a trailing slash. No file is read. |
+| `normalize(path)` / `join_all(parts)` / `resolve(path)` | `String` / `String` / `-[FS, Env]> String IOError!` | Lexical path math as node's `path.normalize`, `path.join` and `path.resolve` do it: `/` separates, empty and `.` segments go, `..` takes the segment before it (a relative path keeps a leading `..`), a trailing slash stays and `""` is `.`. `join_all` joins the non-empty parts, so `join_all(["/a", "/b"])` is `/a/b` where `join("/a", "/b")` is `/b`; `resolve` makes the path absolute against the current directory and drops a trailing slash. No file is read. |
 | `walk(root, ignore, skip: [String]{[String]{}})` | `Walk` | Traverse recursively with an optional ignore-file name, lazily: a loop over the `Walk` yields each entry as `WalkEntry IOError!` in path order. An entry whose name is in `skip` is neither yielded nor entered (`find -name NAME -prune`). `.list()` collects them all as `[WalkEntry] IOError!`. |
 | `walk_files(root, ignore, skip:)` | `Walk` | The same walk, keeping regular files only. |
 | `glob(pattern)` | `[String] IOError!` | Return sorted shown paths matching the native byte glob grammar. |
@@ -1771,7 +1771,7 @@ static files, CORS or request ids has no effect.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `app.bind(addr, tls:, deadline:)` | `HTTPServer HTTPError!` | Bind a listener over the app's route table. |
+| `app.bind(addr, tls:, deadline:) -[Net, FS.Read]>` | `HTTPServer HTTPError!` | Bind a listener over the app's route table and the app graph's screens. |
 | `app.serve_once(listener)` | `HTTPError!` | Serve one request for tests and small adapters. |
 | `response(status, body)` | `HTTPResponse` | Construct a text response. |
 | `json(status, body)` | `HTTPResponse` | Encode an `Encode` value as JSON response data. |
@@ -2647,33 +2647,33 @@ run: fn() {
 
 | API | Result | Description |
 | --- | --- | --- |
-| `get(name)` / `set(name, value)` | `String? -[Env]>` / `Unit -[Env]>` | Read or set a process environment value. |
-| `unset(name)` / `vars()` | `Bool EnvError! -[Env]>` / `[String] EnvError! -[Env]>` | Remove a value or return the sorted name snapshot. `vars` exposes names, not values. |
-| `environment()` | `[String: String] -[Env]>` | The process environment as a map; a variable whose name or value is not UTF-8 text is left out, as `get` reads it as unset. |
-| `env_file(path)` / `env_text(text, vars, source: "env text")` | `[String: String] IOError! -[Env, FS.Read]>` / `[String: String] IOError!` | `env_file` is the process environment with the env file at `path` applied over it, as a shell has its variables after `set -a; . path`, read with no shell; no file at `path` leaves the environment as it is. `env_text` is the variables `text` assigns as an env file, each with its value, as `.` sources it in a shell started with no arguments. A line is blank, a `#` comment, or commands that `;` separates, with an optional ` # comment` after them. A command is assignments (`NAME=word`, or `NAME+=word`, which appends), made in turn, or `export` or `readonly` and names, each with an optional `=word` or `+=word`, whose words all expand before any name is assigned; a later assignment to a `readonly` name is an error. A word is one shell word of `'…'` (literal), `"…"` (`\"`, `\\`, `\$`, `` \` `` escaped) and bare text (`\c` is `c`); a `~` that starts it or follows a `:`, alone or before `/` or `:`, is HOME's value, and `$NAME`, `${NAME}`, `${NAME:-word}`, `${NAME-word}`, `${NAME:=word}`, `${NAME=word}` (which also assign NAME), `${NAME:+word}`, `${NAME+word}`, `${NAME:?word}` and `${NAME?word}` expand as the shell expands them. `$NAME` reads an earlier assignment, else the environment (`vars` for `env_text`), else nothing; `$1` to `$9` and `${N}` are unset. Anything else the shell would run or expand (another command, `$(…)`, backticks, `~user`, `$0`, `$#`, `\|`, `&`, `<`, `>`, `(`, `)`, other `${…}` forms), and a `${NAME?word}` on an unset NAME (or `${NAME:?word}` on an unset or empty one), is an `IOError.InvalidInput` naming `path:line` (`source:line`). |
-| `current_dir()` | `String IOError! -[FS, Env]>` | Read the process working directory. |
-| `set_current_dir(path)` | `IOError! -[FS, Env]>` | Change the process working directory. |
-| `home_dir()` / `temp_dir()` | `String? -[Env]>` / `String -[Env]>` | Return platform home or temporary-directory values. |
-| `cache_dir()` / `data_dir()` / `config_dir()` | `String? -[Env, FS.Read]>` | The XDG base directories: `$XDG_CACHE_HOME`, `$XDG_DATA_HOME` or `$XDG_CONFIG_HOME` when set and not empty, else `.cache`, `.local/share` or `.config` under the home directory (`$HOME` when set, else the account's home in `/etc/passwd`, `%USERPROFILE%` on Windows), joined by `files.join_all`. `None` when there is no home directory. |
-| `name()` / `family()` / `arch()` | `String -[Env]>` | Return OS name, OS family, and CPU architecture. |
+| `get(name)` / `set(name, value)` | `-[Env]> String?` / `-[Env]>` | Read or set a process environment value. |
+| `unset(name)` / `vars()` | `-[Env]> Bool EnvError!` / `-[Env]> [String] EnvError!` | Remove a value or return the sorted name snapshot. `vars` exposes names, not values. |
+| `environment()` | `-[Env]> [String: String]` | The process environment as a map; a variable whose name or value is not UTF-8 text is left out, as `get` reads it as unset. |
+| `env_file(path)` / `env_text(text, vars, source: "env text")` | `-[Env, FS.Read]> [String: String] IOError!` / `[String: String] IOError!` | `env_file` is the process environment with the env file at `path` applied over it, as a shell has its variables after `set -a; . path`, read with no shell; no file at `path` leaves the environment as it is. `env_text` is the variables `text` assigns as an env file, each with its value, as `.` sources it in a shell started with no arguments. A line is blank, a `#` comment, or commands that `;` separates, with an optional ` # comment` after them. A command is assignments (`NAME=word`, or `NAME+=word`, which appends), made in turn, or `export` or `readonly` and names, each with an optional `=word` or `+=word`, whose words all expand before any name is assigned; a later assignment to a `readonly` name is an error. A word is one shell word of `'…'` (literal), `"…"` (`\"`, `\\`, `\$`, `` \` `` escaped) and bare text (`\c` is `c`); a `~` that starts it or follows a `:`, alone or before `/` or `:`, is HOME's value, and `$NAME`, `${NAME}`, `${NAME:-word}`, `${NAME-word}`, `${NAME:=word}`, `${NAME=word}` (which also assign NAME), `${NAME:+word}`, `${NAME+word}`, `${NAME:?word}` and `${NAME?word}` expand as the shell expands them. `$NAME` reads an earlier assignment, else the environment (`vars` for `env_text`), else nothing; `$1` to `$9` and `${N}` are unset. Anything else the shell would run or expand (another command, `$(…)`, backticks, `~user`, `$0`, `$#`, `\|`, `&`, `<`, `>`, `(`, `)`, other `${…}` forms), and a `${NAME?word}` on an unset NAME (or `${NAME:?word}` on an unset or empty one), is an `IOError.InvalidInput` naming `path:line` (`source:line`). |
+| `current_dir()` | `-[FS, Env]> String IOError!` | Read the process working directory. |
+| `set_current_dir(path)` | `-[FS, Env]> IOError!` | Change the process working directory. |
+| `home_dir()` / `temp_dir()` | `-[Env]> String?` / `-[Env]> String` | Return platform home or temporary-directory values. |
+| `cache_dir()` / `data_dir()` / `config_dir()` | `-[Env, FS.Read]> String?` | The XDG base directories: `$XDG_CACHE_HOME`, `$XDG_DATA_HOME` or `$XDG_CONFIG_HOME` when set and not empty, else `.cache`, `.local/share` or `.config` under the home directory (`$HOME` when set, else the account's home in `/etc/passwd`, `%USERPROFILE%` on Windows), joined by `files.join_all`. `None` when there is no home directory. |
+| `name()` / `family()` / `arch()` | `-[Env]> String` | Return OS name, OS family, and CPU architecture. |
 | `platform()` / `is_windows()` / `is_unix()` / `is_linux()` / `is_macos()` | platform values `-[Env]>` | Query the environment-derived platform facts. |
-| `executable()` / `username()` | `String -[Env]>` | Return process facts. `executable()` is the running program's path: the built binary, or the script's absolute path under `jet run`; launching it runs the program again on either tier, and every later command word reaches the program as an argument (under `jet run` the relaunch places them after `--`). |
-| `hostname()` | `String -[Env, FS]>` | Return the host name. |
-| `release()` / `version()` | `String -[Env, FS, Exec, Time.Wait]>` | Read operating-system facts; macOS queries run `uname` or `sw_vers`. |
-| `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |
-| `timing_host()` | `TimingHost -[Env]>` | `.Confirmed` when this host's processor vendor confirms that the instructions `timing: .Fixed` values meet run in the same time for every value, else `.Unconfirmed`. Under `policy.harden` a program holding such values refuses to start on an unconfirmed host. |
-| `getuid()` / `geteuid()` / `getgid()` / `getegid()` / `getpgrp()` | `Int -[Env]>` | Return POSIX identity and process-group values where supported. |
-| `getgroups()` | `[Int] -[Env]>` | Return supplementary group IDs. |
-| `user_ids()` / `group_ids()` | `Ids IOError! -[Env]>` | `getresuid` / `getresgid`: the `real`, `effective` and `saved` IDs. |
-| `users()` / `groups()` | `[User] IOError! -[FS.Read]>` / `[Group] IOError! -[FS.Read]>` | Every account of `/etc/passwd` or group of `/etc/group`, in file order. Core reads the file as musl does and asks no other directory service (NSS, LDAP); a line that is not UTF-8, lacks a field, or has an ID outside 0..4294967294 is skipped. A `User` has `name`, `uid`, `gid`, `gecos`, `home` and `shell`; a `Group` has `name`, `gid` and its supplementary `members`. |
-| `user(name)` / `user_by_id(uid)` | `User? IOError! -[FS.Read]>` | The first account with that name or user ID, `None` when there is none. |
-| `group(name)` / `group_by_id(gid)` | `Group? IOError! -[FS.Read]>` | The first group with that name or group ID, `None` when there is none. |
-| `expand(value)` | `String -[Env]>` | Expand `$VAR`, `${VAR}`, and the supported percent form from the environment. |
-| `uptime()` | `Float -[Time, Env, FS]>` | Read system uptime from `/proc/uptime` on Linux. |
-| `loadavg()` / `times()` | `[Float] -[Env]>` | Return load averages or process CPU times. |
+| `executable()` / `username()` | `-[Env]> String` | Return process facts. `executable()` is the running program's path: the built binary, or the script's absolute path under `jet run`; launching it runs the program again on either tier, and every later command word reaches the program as an argument (under `jet run` the relaunch places them after `--`). |
+| `hostname()` | `-[Env, FS]> String` | Return the host name. |
+| `release()` / `version()` | `-[Env, FS, Exec, Time.Wait]> String` | Read operating-system facts; macOS queries run `uname` or `sw_vers`. |
+| `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `-[Env]> Int` | Return process IDs or a logical CPU count of at least one. |
+| `timing_host()` | `-[Env]> TimingHost` | `.Confirmed` when this host's processor vendor confirms that the instructions `timing: .Fixed` values meet run in the same time for every value, else `.Unconfirmed`. Under `policy.harden` a program holding such values refuses to start on an unconfirmed host. |
+| `getuid()` / `geteuid()` / `getgid()` / `getegid()` / `getpgrp()` | `-[Env]> Int` | Return POSIX identity and process-group values where supported. |
+| `getgroups()` | `-[Env]> [Int]` | Return supplementary group IDs. |
+| `user_ids()` / `group_ids()` | `-[Env]> Ids IOError!` | `getresuid` / `getresgid`: the `real`, `effective` and `saved` IDs. |
+| `users()` / `groups()` | `-[FS.Read]> [User] IOError!` / `-[FS.Read]> [Group] IOError!` | Every account of `/etc/passwd` or group of `/etc/group`, in file order. Core reads the file as musl does and asks no other directory service (NSS, LDAP); a line that is not UTF-8, lacks a field, or has an ID outside 0..4294967294 is skipped. A `User` has `name`, `uid`, `gid`, `gecos`, `home` and `shell`; a `Group` has `name`, `gid` and its supplementary `members`. |
+| `user(name)` / `user_by_id(uid)` | `-[FS.Read]> User? IOError!` | The first account with that name or user ID, `None` when there is none. |
+| `group(name)` / `group_by_id(gid)` | `-[FS.Read]> Group? IOError!` | The first group with that name or group ID, `None` when there is none. |
+| `expand(value)` | `-[Env]> String` | Expand `$VAR`, `${VAR}`, and the supported percent form from the environment. |
+| `uptime()` | `-[Time, Env, FS]> Float` | Read system uptime from `/proc/uptime` on Linux. |
+| `loadavg()` / `times()` | `-[Env]> [Float]` | Return load averages or process CPU times. |
 | `exitcode(status)` / `success(status)` | `Int` / `Bool` | Interpret a wait status without an effect. |
-| `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
-| `getpgid(pid)` / `getsid(pid)` | `Int IOError! -[Env]>` | Inspect POSIX process-group or session state. |
+| `sync()` | `-[FS, Env]>` | Flush filesystem buffers. |
+| `getpgid(pid)` / `getsid(pid)` | `-[Env]> Int IOError!` | Inspect POSIX process-group or session state. |
 
 Descriptors and shared memory are owned values: no descriptor number or
 address reaches Jet code, every descriptor is close-on-exec, and each closes
@@ -2684,19 +2684,19 @@ handling its failure; only the end of an access is checked when it runs.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `shared_memory(size: Int(1..1073741824))` | `SharedMemory IOError! -[Env]>` | `size` zeroed bytes (1 B to 1 GiB) of anonymous shared memory (memfd), sealed against shrinking and growing so a peer that maps it can never fault. |
-| `SharedMemory.write(offset: Int(0..1073741824), bytes)` / `.read(offset: Int(0..1073741824), count: Int(0..1073741824))` / `.len()` | `IOError! -[Env]>` / `[U8] IOError! -[Env]>` / `Int` | Copy bytes in or out within bounds. |
-| `SharedMemory.write_pixels(offset: Int(0..1073741824), rgba, stride: Int(4..65536), x, y, width, height: Int(0..16384), format)` | `IOError! -[Env]>` | Copy the `width`×`height` rectangle at `x`, `y` of an RGBA image whose rows are `stride` bytes (a multiple of 4) into the same rectangle of the image at `offset`, converting each pixel to `PixelFormat.XRGB8888` (B, G, R, X in memory) or `.XBGR8888` (R, G, B, X). |
-| `SharedMemory.fill_u32(offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295))` | `IOError! -[Env]>` | Store `count` little-endian copies of the 32-bit `value` from `offset`: a solid run of pixels. |
-| `SharedMemory.load(offset: Int(0..1073741816))` / `.store(offset, value: Int)` / `.compare_exchange(offset, expected: Int, replacement: Int)` | `Int IOError! -[Env]>` / `IOError! -[Env]>` / `Bool IOError! -[Env]>` | Atomically load, store, or compare-and-swap the signed 64-bit word at byte `offset`, which must be a multiple of 8 inside the memory. These word accesses are sequentially consistent across every process mapping the memory, so a `store` publishes the writes made before it to a `load` that reads its value. Plain `read`/`write` give no ordering, so bytes handed between processes are guarded by a word. A misaligned or out-of-bounds offset, or a value outside the signed 64-bit range, is an `IOError`. |
-| `SharedMemory.descriptor()` | `Fd IOError! -[Env]>` | A new descriptor for the memory, to pass to another process. |
-| `Fd.read_at(offset: Int(0..9223372036854775807), max: Int(1..16777216))` / `.size()` / `.duplicate()` | `[U8] IOError! -[Env]>` / `Int IOError! -[Env]>` / `Fd IOError! -[Env]>` | Read at most `max` bytes of a received descriptor's file from `offset` without mapping it (`pread`; fewer at its end), size it, or own a second descriptor for it. |
-| `open_pipe()` | `[Fd] IOError! -[Env]>` | A new pipe: its read end, then its write end. Both block, so either can go to another process (a Wayland paste hands the write end to the copying client). |
-| `open_socket_pair()` | `[Fd] IOError! -[Env]>` | A new connected pair of Unix stream sockets (`socketpair`): each end reads what the other writes. Both block, so either can go to another process. |
-| `open_pseudoterminal()` | `PseudoTerminal IOError! -[Env]>` | A new pseudoterminal, unlocked and with its secondary already open (`posix_openpt`, `unlockpt`, then the secondary). `PseudoTerminal` has `primary: Fd` (the end a terminal emulator or supervisor holds), `secondary: Fd` (the end a program sees as its terminal) and `path: String` (the secondary's `/dev/pts/N`, as `ptsname` names it). Neither end becomes the controlling terminal. |
-| `Fd.read(max: Int(1..16777216), timeout_ns)` | `[U8] IOError! -[Env]>` | At most `max` bytes from a pipe or socket once it has some, waiting at most `timeout_ns` nanoseconds (negative: no limit). Empty means the writer closed its end; a wait that runs out is `.TimedOut`. |
-| `Fd.write(bytes, timeout_ns)` | `Int IOError! -[Env]>` | Writes the first of `bytes`, at most 4096 (`PIPE_BUF`, which a pipe that polls writable takes whole), once there is room, waiting at most `timeout_ns`; gives the count written. A wait that runs out is `.TimedOut`, a closed reader `.Closed`. |
-| `Fd.process_group()` / `.set_process_group(group: Int(1..2147483647))` | `Int IOError! -[Env]>` / `IOError! -[Env]>` | The foreground process group of the terminal the descriptor is open on (`tcgetpgrp`; 0 when it has none), or make `group`, one of this session's process groups, that terminal's foreground group (`tcsetpgrp`). Both fail for a descriptor that is no terminal; reading a secondary, or setting either end, fails unless that terminal is this process's controlling terminal. |
+| `shared_memory(size: Int(1..1073741824))` | `-[Env]> SharedMemory IOError!` | `size` zeroed bytes (1 B to 1 GiB) of anonymous shared memory (memfd), sealed against shrinking and growing so a peer that maps it can never fault. |
+| `SharedMemory.write(offset: Int(0..1073741824), bytes)` / `.read(offset: Int(0..1073741824), count: Int(0..1073741824))` / `.len()` | `-[Env]> IOError!` / `-[Env]> [U8] IOError!` / `Int` | Copy bytes in or out within bounds. |
+| `SharedMemory.write_pixels(offset: Int(0..1073741824), rgba, stride: Int(4..65536), x, y, width, height: Int(0..16384), format)` | `-[Env]> IOError!` | Copy the `width`×`height` rectangle at `x`, `y` of an RGBA image whose rows are `stride` bytes (a multiple of 4) into the same rectangle of the image at `offset`, converting each pixel to `PixelFormat.XRGB8888` (B, G, R, X in memory) or `.XBGR8888` (R, G, B, X). |
+| `SharedMemory.fill_u32(offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295))` | `-[Env]> IOError!` | Store `count` little-endian copies of the 32-bit `value` from `offset`: a solid run of pixels. |
+| `SharedMemory.load(offset: Int(0..1073741816))` / `.store(offset, value: Int)` / `.compare_exchange(offset, expected: Int, replacement: Int)` | `-[Env]> Int IOError!` / `-[Env]> IOError!` / `-[Env]> Bool IOError!` | Atomically load, store, or compare-and-swap the signed 64-bit word at byte `offset`, which must be a multiple of 8 inside the memory. These word accesses are sequentially consistent across every process mapping the memory, so a `store` publishes the writes made before it to a `load` that reads its value. Plain `read`/`write` give no ordering, so bytes handed between processes are guarded by a word. A misaligned or out-of-bounds offset, or a value outside the signed 64-bit range, is an `IOError`. |
+| `SharedMemory.descriptor()` | `-[Env]> Fd IOError!` | A new descriptor for the memory, to pass to another process. |
+| `Fd.read_at(offset: Int(0..9223372036854775807), max: Int(1..16777216))` / `.size()` / `.duplicate()` | `-[Env]> [U8] IOError!` / `-[Env]> Int IOError!` / `-[Env]> Fd IOError!` | Read at most `max` bytes of a received descriptor's file from `offset` without mapping it (`pread`; fewer at its end), size it, or own a second descriptor for it. |
+| `open_pipe()` | `-[Env]> [Fd] IOError!` | A new pipe: its read end, then its write end. Both block, so either can go to another process (a Wayland paste hands the write end to the copying client). |
+| `open_socket_pair()` | `-[Env]> [Fd] IOError!` | A new connected pair of Unix stream sockets (`socketpair`): each end reads what the other writes. Both block, so either can go to another process. |
+| `open_pseudoterminal()` | `-[Env]> PseudoTerminal IOError!` | A new pseudoterminal, unlocked and with its secondary already open (`posix_openpt`, `unlockpt`, then the secondary). `PseudoTerminal` has `primary: Fd` (the end a terminal emulator or supervisor holds), `secondary: Fd` (the end a program sees as its terminal) and `path: String` (the secondary's `/dev/pts/N`, as `ptsname` names it). Neither end becomes the controlling terminal. |
+| `Fd.read(max: Int(1..16777216), timeout_ns)` | `-[Env]> [U8] IOError!` | At most `max` bytes from a pipe or socket once it has some, waiting at most `timeout_ns` nanoseconds (negative: no limit). Empty means the writer closed its end; a wait that runs out is `.TimedOut`. |
+| `Fd.write(bytes, timeout_ns)` | `-[Env]> Int IOError!` | Writes the first of `bytes`, at most 4096 (`PIPE_BUF`, which a pipe that polls writable takes whole), once there is room, waiting at most `timeout_ns`; gives the count written. A wait that runs out is `.TimedOut`, a closed reader `.Closed`. |
+| `Fd.process_group()` / `.set_process_group(group: Int(1..2147483647))` | `-[Env]> Int IOError!` / `-[Env]> IOError!` | The foreground process group of the terminal the descriptor is open on (`tcgetpgrp`; 0 when it has none), or make `group`, one of this session's process groups, that terminal's foreground group (`tcsetpgrp`). Both fail for a descriptor that is no terminal; reading a secondary, or setting either end, fails unless that terminal is this process's controlling terminal. |
 
 Resource limits and usage (D-CORE-RLIMIT1, D-CORE-RLIMIT-NAME1, #5072) apply
 to the running program, and the children it starts afterwards inherit them.
@@ -2710,13 +2710,13 @@ need `Env, Exec`, as `fork()` does.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `cpu_time_limit()` / `set_cpu_time_limit(soft, hard)` | `(soft: Duration?, hard: Duration?) IOError! -[Env]>` / `IOError! -[Env, Exec]>` | CPU time (`RLIMIT_CPU`). |
-| `memory_limit()` / `set_memory_limit(soft, hard)` | `(soft: Int?, hard: Int?) IOError! -[Env]>` / `IOError! -[Env, Exec]>` | Address space (`RLIMIT_AS`), the limit `ProcessSpec.memory_limit` sets for one child. |
+| `cpu_time_limit()` / `set_cpu_time_limit(soft, hard)` | `-[Env]> (soft: Duration?, hard: Duration?) IOError!` / `-[Env, Exec]> IOError!` | CPU time (`RLIMIT_CPU`). |
+| `memory_limit()` / `set_memory_limit(soft, hard)` | `-[Env]> (soft: Int?, hard: Int?) IOError!` / `-[Env, Exec]> IOError!` | Address space (`RLIMIT_AS`), the limit `ProcessSpec.memory_limit` sets for one child. |
 | `open_file_limit()` / `set_open_file_limit(soft, hard)` | as above | Open descriptors (`RLIMIT_NOFILE`). |
 | `core_file_limit()` / `set_core_file_limit(soft, hard)` | as above | Core-file size (`RLIMIT_CORE`); `set_core_file_limit(0, hard)` turns off core dumps. |
 | `stack_limit()` / `set_stack_limit(soft, hard)` | as above | Stack size (`RLIMIT_STACK`). |
-| `usage(of: UsageOf{.Program})` | `ResourceUsage IOError! -[Env]>` | `getrusage`: `user` and `system` CPU time as `Duration`, `peak_memory` in bytes. `.Children` sums every child the program has waited for. |
-| `lock_memory(future: Bool{false})` | `IOError! -[Env]>` | `mlockall(MCL_CURRENT \| MCL_ONFAULT)`, plus `MCL_FUTURE` when `future`: each page stays in RAM from its first touch until the program ends. Past the locked-memory limit without privilege it is an `IOError`. There is no unlock: `munlockall` would also unlock a `Secret`'s pages. |
+| `usage(of: UsageOf{.Program})` | `-[Env]> ResourceUsage IOError!` | `getrusage`: `user` and `system` CPU time as `Duration`, `peak_memory` in bytes. `.Children` sums every child the program has waited for. |
+| `lock_memory(future: Bool{false})` | `-[Env]> IOError!` | `mlockall(MCL_CURRENT \| MCL_ONFAULT)`, plus `MCL_FUTURE` when `future`: each page stays in RAM from its first touch until the program ends. Past the locked-memory limit without privilege it is an `IOError`. There is no unlock: `munlockall` would also unlock a `Secret`'s pages. |
 
 CPU scheduling (`sched(7)`) is a `Scheduling`: `.Normal`, `.Batch`, `.Idle`,
 `.Fifo{priority: p}` or `.RoundRobin{priority: p}`, the last two real time at
@@ -2726,9 +2726,9 @@ setters, and it is POSIX process control under `#Unsafe` like `setpriority`.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `scheduling(pid: Int{0})` | `Scheduling IOError! -[Env]>` | `sched_getscheduler` and `sched_getparam`. A `SCHED_DEADLINE` process is `IOError.Unsupported`; no such process is `IOError.NotFound`. |
-| `set_scheduling(policy, pid: Int{0})` | `IOError! -[Env, Exec]>` | `sched_setscheduler`. A real-time priority outside 1 to 99 is `IOError.InvalidInput`; real time without `CAP_SYS_NICE` or an `RLIMIT_RTPRIO` allowance is `IOError.PermissionDenied`. |
-| `round_robin_interval(pid: Int{0})` | `Duration IOError! -[Env]>` | `sched_rr_get_interval`: the slice a `.RoundRobin` process runs before the next of its priority; zero under `.Fifo`. |
+| `scheduling(pid: Int{0})` | `-[Env]> Scheduling IOError!` | `sched_getscheduler` and `sched_getparam`. A `SCHED_DEADLINE` process is `IOError.Unsupported`; no such process is `IOError.NotFound`. |
+| `set_scheduling(policy, pid: Int{0})` | `-[Env, Exec]> IOError!` | `sched_setscheduler`. A real-time priority outside 1 to 99 is `IOError.InvalidInput`; real time without `CAP_SYS_NICE` or an `RLIMIT_RTPRIO` allowance is `IOError.PermissionDenied`. |
+| `round_robin_interval(pid: Int{0})` | `-[Env]> Duration IOError!` | `sched_rr_get_interval`: the slice a `.RoundRobin` process runs before the next of its priority; zero under `.Fifo`. |
 
 `cpu_time` reads the CPU time of any process and `tree_cpu_time` that of a
 process with its descendants; `set_wall_clock` sets the
@@ -2737,9 +2737,9 @@ readings (`core.time.instant`, stopwatches) do not jump when it is set.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `cpu_time(pid: Int{0})` | `Duration IOError! -[Env]>` | `clock_getcpuclockid` and `clock_gettime`: the user and system time of every thread of process `pid`, this program when 0. No such process, or a pid naming a thread that is not a process, is `IOError.NotFound`; a negative pid is `IOError.InvalidInput`. |
-| `tree_cpu_time(pid: Int{0})` | `Duration IOError! -[Env, FS.Read]>` | `/proc/<pid>/stat` of `pid` (this program when 0) and every live descendant (`/proc/<pid>/task/<tid>/children`): their user and system time plus that of each child one of them has waited for, in whole clock ticks. A descendant whose parent exited without waiting for it is not counted. A harness bounds a child's whole process tree with it: the testkit's step CPU limit reads it. Linux only, else `IOError.Unsupported`; no such process is `IOError.NotFound`; a negative pid is `IOError.InvalidInput`. |
-| `set_wall_clock(time: DateTime)` | `IOError! -[Env]>` | `clock_settime(CLOCK_REALTIME)`. It needs `CAP_SYS_TIME`, otherwise it is `IOError.PermissionDenied`; a time before 1970 is `IOError.InvalidInput`. |
+| `cpu_time(pid: Int{0})` | `-[Env]> Duration IOError!` | `clock_getcpuclockid` and `clock_gettime`: the user and system time of every thread of process `pid`, this program when 0. No such process, or a pid naming a thread that is not a process, is `IOError.NotFound`; a negative pid is `IOError.InvalidInput`. |
+| `tree_cpu_time(pid: Int{0})` | `-[Env, FS.Read]> Duration IOError!` | `/proc/<pid>/stat` of `pid` (this program when 0) and every live descendant (`/proc/<pid>/task/<tid>/children`): their user and system time plus that of each child one of them has waited for, in whole clock ticks. A descendant whose parent exited without waiting for it is not counted. A harness bounds a child's whole process tree with it: the testkit's step CPU limit reads it. Linux only, else `IOError.Unsupported`; no such process is `IOError.NotFound`; a negative pid is `IOError.InvalidInput`. |
+| `set_wall_clock(time: DateTime)` | `-[Env]> IOError!` | `clock_settime(CLOCK_REALTIME)`. It needs `CAP_SYS_TIME`, otherwise it is `IOError.PermissionDenied`; a time before 1970 is `IOError.InvalidInput`. |
 
 `usize_max()` is a pure `U64` constant derived at compile time from the
 selected target's pointer layout (#4483), not from the
@@ -2766,23 +2766,23 @@ whether the call goes through the module alias or a direct import:
 
 | API | Result | Description |
 | --- | --- | --- |
-| `umask(mask)` | `Int -[FS, Env]>` | Set and return the previous creation mask. |
-| `getpriority(who)` | `Int IOError! -[Env]>` | Inspect scheduling priority. |
-| `setpriority(who, priority)` | `IOError! -[Env]>` | Change scheduling priority. |
-| `utime(path, atime, mtime)` | `IOError! -[FS, Env]>` | Change file timestamps. |
+| `umask(mask)` | `-[FS, Env]> Int` | Set and return the previous creation mask. |
+| `getpriority(who)` | `-[Env]> Int IOError!` | Inspect scheduling priority. |
+| `setpriority(who, priority)` | `-[Env]> IOError!` | Change scheduling priority. |
+| `utime(path, atime, mtime)` | `-[FS, Env]> IOError!` | Change file timestamps. |
 | `stop(code)` | never returns `-[Env]>` | Request process termination through the process boundary. |
-| `fork()` / `setsid()` | `Int IOError! -[Env, Exec]>` | Fork or create a process session. Both change the process tree, so callers need `Exec`, like `process.cmd`. |
-| `wait()` / `waitpid(pid, options)` | `Int IOError! -[Env, Time.Wait]>` | Reap a child or selected child. |
-| `kill(pid, signal)` | `IOError! -[Env]>` | Send a signal. |
-| `#Unsafe reset_signal(number)` | `IOError! -[Env]>` | Restore a signal's default action (SIG_DFL), the fault signals included, so the signal raised next takes it; a supervisor re-raising its child's signal uses it before `kill`. |
-| `setuid` / `setgid` / `setpgid` / `setpgrp` / `initgroups` | `IOError! -[Env]>` | Change credentials, groups, or process-group membership. |
-| `set_user_ids(real:, effective:, saved:)` / `set_group_ids(real:, effective:, saved:)` | `IOError! -[Env]>` | `setresuid` / `setresgid` on every thread at once; an omitted ID (`None`) stays. Without `CAP_SETUID` / `CAP_SETGID` each new ID must be one of the current real, effective or saved IDs, else `IOError.PermissionDenied`; an ID outside 0..4294967294 is `IOError.InvalidInput`. `seteuid(id)` is `set_user_ids(effective: id)`. Supplementary groups stay as they are. |
-| `pipe()` / `close_fd(fd)` | `[Int] IOError! -[FS, Env]>` / `Unit -[FS, Env]>` | Create or close raw process descriptors. |
-| `mkfifo(path, mode)` | `IOError! -[FS, Env]>` | Create a named pipe. |
-| `mknod(path, mode, kind, major, minor)` | `IOError! -[FS, Env]>` | Create a `DeviceKind.Character` or `.Block` device file for `major`:`minor` (0..4095 and 0..1048575); only a privileged process may. |
+| `fork()` / `setsid()` | `-[Env, Exec]> Int IOError!` | Fork or create a process session. Both change the process tree, so callers need `Exec`, like `process.cmd`. |
+| `wait()` / `waitpid(pid, options)` | `-[Env, Time.Wait]> Int IOError!` | Reap a child or selected child. |
+| `kill(pid, signal)` | `-[Env]> IOError!` | Send a signal. |
+| `#Unsafe reset_signal(number)` | `-[Env]> IOError!` | Restore a signal's default action (SIG_DFL), the fault signals included, so the signal raised next takes it; a supervisor re-raising its child's signal uses it before `kill`. |
+| `setuid` / `setgid` / `setpgid` / `setpgrp` / `initgroups` | `-[Env]> IOError!` | Change credentials, groups, or process-group membership. |
+| `set_user_ids(real:, effective:, saved:)` / `set_group_ids(real:, effective:, saved:)` | `-[Env]> IOError!` | `setresuid` / `setresgid` on every thread at once; an omitted ID (`None`) stays. Without `CAP_SETUID` / `CAP_SETGID` each new ID must be one of the current real, effective or saved IDs, else `IOError.PermissionDenied`; an ID outside 0..4294967294 is `IOError.InvalidInput`. `seteuid(id)` is `set_user_ids(effective: id)`. Supplementary groups stay as they are. |
+| `pipe()` / `close_fd(fd)` | `-[FS, Env]> [Int] IOError!` / `-[FS, Env]>` | Create or close raw process descriptors. |
+| `mkfifo(path, mode)` | `-[FS, Env]> IOError!` | Create a named pipe. |
+| `mknod(path, mode, kind, major, minor)` | `-[FS, Env]> IOError!` | Create a `DeviceKind.Character` or `.Block` device file for `major`:`minor` (0..4095 and 0..1048575); only a privileged process may. |
 | `atexit(handler)` | `Unit` | Register a `fn()` handler that runs at the explicit process boundary after scope cleanup (D-FAIL-EXIT1). |
 
-`on_interrupt(handler)` (`Unit -[Env]>`) registers a `fn()` handler for SIGINT.
+`on_interrupt(handler)` (`-[Env]>`) registers a `fn()` handler for SIGINT.
 Registration is additive and lasts for the process: it is
 live when the call returns, and nothing unregisters it. The first call installs
 the SIGINT handler, which only counts the signal (async-signal-safe), and starts
@@ -2873,50 +2873,50 @@ run: fn() -[Exec, Time.Wait]> {
 
 | `Sh` method | Returns | Description |
 | --- | --- | --- |
-| `status()` | `Int IOError! -[Exec, Time.Wait]>` | Run with the terminal's stdin, stdout and stderr, as a shell runs a plain line; the exit status, 128 + n after signal n. |
-| `ok()` | `Bool -[Exec, Time.Wait]>` | Run with stdout discarded and stderr passed through (`cmd >/dev/null`); whether it started and exited 0. |
-| `text()` | `String IOError! -[Exec, Time.Wait]>` | Standard output without its trailing newlines, stderr passed through, whatever the status (`$(cmd)`). |
-| `lines()` | `[String] IOError! -[Exec, Time.Wait]>` | The lines of standard output, stderr passed through, whatever the status. |
-| `run()` | `ProcessReceipt IOError! -[Exec, Time.Wait]>` | Run with stdout and stderr captured; the whole receipt. |
-| `spec()` | `ProcessSpec -[Exec]>` | The command's specification, to set a directory, environment, stream policy or limit before running it. |
+| `status()` | `-[Exec, Time.Wait]> Int IOError!` | Run with the terminal's stdin, stdout and stderr, as a shell runs a plain line; the exit status, 128 + n after signal n. |
+| `ok()` | `-[Exec, Time.Wait]> Bool` | Run with stdout discarded and stderr passed through (`cmd >/dev/null`); whether it started and exited 0. |
+| `text()` | `-[Exec, Time.Wait]> String IOError!` | Standard output without its trailing newlines, stderr passed through, whatever the status (`$(cmd)`). |
+| `lines()` | `-[Exec, Time.Wait]> [String] IOError!` | The lines of standard output, stderr passed through, whatever the status. |
+| `run()` | `-[Exec, Time.Wait]> ProcessReceipt IOError!` | Run with stdout and stderr captured; the whole receipt. |
+| `spec()` | `-[Exec]> ProcessSpec` | The command's specification, to set a directory, environment, stream policy or limit before running it. |
 | `extend(items)` | `Sh` | The command with each item of `items` appended as one argv item (`"$@"`). |
 | `args()` | `[String]` | A copy of the argv. |
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `process.args()` | `[String] -[Exec]>` | Return the words after the program name, as the host supplied them. |
-| `process.cmd(argv)` | `ProcessSpec -[Exec]>` | Build a specification from an explicit executable-and-arguments vector. |
-| `process.shell(line)` | `ProcessSpec -[Exec, Env]>` | Explicit shell escape hatch: `sh -c` on Unix-like targets and `cmd /C` on Windows. |
-| `process.run_spec(spec)` | `ProcessReceipt IOError! -[Exec, Time.Wait]>` | Run a specification and return its receipt without treating a nonzero exit as a thrown error. |
-| `process.pipeline(steps)` | `ProcessReceipt IOError! -[Exec, Time.Wait]>` | Run a sequence of specifications and return the pipeline receipt. |
-| `process.run_all(specs, jobs)` | `[Result<ProcessReceipt, IOError>] IOError! -[Exec, Time.Wait]>` | Run every specification through a bounded worker pool, at most `jobs` at once, and return one result per spec in input order. |
-| `process.call(spec)` | `Int IOError! -[Exec, Time.Wait]>` | Run a specification and return its exit code. |
-| `process.capture(spec)` | `ProcessReceipt IOError! -[Exec, Time.Wait]>` | Run with captured output. |
-| `process.check_call(spec)` | `ProcessReceipt IOError! -[Exec, Time.Wait]>` | Run and check the resulting status. |
-| `process.check_output(spec)` | `String IOError! -[Exec, Time.Wait]>` | Run and return captured standard output when the process succeeds. |
+| `process.args()` | `-[Exec]> [String]` | Return the words after the program name, as the host supplied them. |
+| `process.cmd(argv)` | `-[Exec]> ProcessSpec` | Build a specification from an explicit executable-and-arguments vector. |
+| `process.shell(line)` | `-[Exec, Env]> ProcessSpec` | Explicit shell escape hatch: `sh -c` on Unix-like targets and `cmd /C` on Windows. |
+| `process.run_spec(spec)` | `-[Exec, Time.Wait]> ProcessReceipt IOError!` | Run a specification and return its receipt without treating a nonzero exit as a thrown error. |
+| `process.pipeline(steps)` | `-[Exec, Time.Wait]> ProcessReceipt IOError!` | Run a sequence of specifications and return the pipeline receipt. |
+| `process.run_all(specs, jobs)` | `-[Exec, Time.Wait]> [Result<ProcessReceipt, IOError>] IOError!` | Run every specification through a bounded worker pool, at most `jobs` at once, and return one result per spec in input order. |
+| `process.call(spec)` | `-[Exec, Time.Wait]> Int IOError!` | Run a specification and return its exit code. |
+| `process.capture(spec)` | `-[Exec, Time.Wait]> ProcessReceipt IOError!` | Run with captured output. |
+| `process.check_call(spec)` | `-[Exec, Time.Wait]> ProcessReceipt IOError!` | Run and check the resulting status. |
+| `process.check_output(spec)` | `-[Exec, Time.Wait]> String IOError!` | Run and return captured standard output when the process succeeds. |
 | `process.combined_output(receipt: ProcessReceipt)` | `String` | Purely project a receipt's stdout and stderr into one string; use `getoutput(spec)` to run a specification and capture output. |
-| `process.getoutput(spec)` | `String IOError! -[Exec, Time.Wait]>` | Capture output and return it without converting a nonzero exit into an exception. |
-| `process.getstatusoutput(spec)` | `(Int, String) IOError! -[Exec, Time.Wait]>` | Return the exit status and captured output. |
-| `process.stdin_text(spec, text)` | `Unit IOError! -[Exec, Time.Wait]>` | Feed text to a child, close its standard input, wait, and check it. |
+| `process.getoutput(spec)` | `-[Exec, Time.Wait]> String IOError!` | Capture output and return it without converting a nonzero exit into an exception. |
+| `process.getstatusoutput(spec)` | `-[Exec, Time.Wait]> (Int, String) IOError!` | Return the exit status and captured output. |
+| `process.stdin_text(spec, text)` | `-[Exec, Time.Wait]> Unit IOError!` | Feed text to a child, close its standard input, wait, and check it. |
 | `process.check(receipt)` | `Unit IOError!` | Convert a failed receipt to `IOError`, preserving timeout, resource-limit, exit-code, or signal information. |
 | `process.status_ok(receipt)` | `Bool` | Test whether a receipt represents a successful exit. |
 | `process.failed(receipt)` / `process.exited(receipt)` | `Bool` | Inspect failure or normal process exit on a receipt. |
 | `process.exit_status(receipt)` | `Int` | A finished child's status as the shell's `$?` reports it: 124 when its timeout stopped it (as `timeout(1)` does), 128 + n after signal n, else its exit code. `Sh.status()` returns the same number. |
-| `process.exec(argv, env: {"NAME": value})` | `Never -[Exec, IO, Time.Wait]>` | Run `argv` with the terminal's stdin, stdout and stderr and `env` added to the inherited environment, then end the program with the child's `exit_status` (128 + n after signal n; 101 maps to 1, as in `process.exit`): a script's last line `NAME=value cmd args`. A command that cannot start ends the program with 127 after `argv[0]: <error>` on stderr. `env` defaults to none. |
-| `process.current_pid()` | `Int -[Env]>` | Return the current process identifier. |
+| `process.exec(argv, env: {"NAME": value})` | `-[Exec, IO, Time.Wait]> Never` | Run `argv` with the terminal's stdin, stdout and stderr and `env` added to the inherited environment, then end the program with the child's `exit_status` (128 + n after signal n; 101 maps to 1, as in `process.exit`): a script's last line `NAME=value cmd args`. A command that cannot start ends the program with 127 after `argv[0]: <error>` on stderr. `env` defaults to none. |
+| `process.current_pid()` | `-[Env]> Int` | Return the current process identifier. |
 | `process.cwd(spec, path)` | `ProcessSpec` | Builder form that sets the child working directory; there is no zero-argument `process.cwd()`. |
-| `process.env_get(name)` | `String? -[Env]>` | Read one environment variable; environment construction belongs to a `ProcessSpec`. |
-| `process.env_get_or(name, fallback)` | `String -[Env]>` | Read an environment variable with a fallback. |
-| `process.env_nonempty(name)` | `String? -[Env]>` | Read an environment variable that is set and not empty, as shell `${name:-…}` and JavaScript `env[name] \|\| …` read it; `None` otherwise. |
-| `process.env_keys()` | `[String] EnvError! -[Env]>` | List environment-variable names. |
+| `process.env_get(name)` | `-[Env]> String?` | Read one environment variable; environment construction belongs to a `ProcessSpec`. |
+| `process.env_get_or(name, fallback)` | `-[Env]> String` | Read an environment variable with a fallback. |
+| `process.env_nonempty(name)` | `-[Env]> String?` | Read an environment variable that is set and not empty, as shell `${name:-…}` and JavaScript `env[name] \|\| …` read it; `None` otherwise. |
+| `process.env_keys()` | `-[Env]> [String] EnvError!` | List environment-variable names. |
 | `process.env_set(spec, key, value)` | `ProcessSpec` | Builder form that sets one child environment variable. |
-| `process.env_truthy(name)` | `Bool -[Env]>` | Test the conventional truthy environment values. |
-| `process.which(name)` | `String? -[FS, Env]>` | Find an executable using filesystem checks and the host search path. A candidate that is a link counts when its target is a file; `files.which` and `Path.which` search the same way. |
-| `process.exit(code)` | `Never -[Exec.Exit]>` | Terminate the current process at the explicit process boundary. Status 101 is reserved for Jet defects, so `exit(101)` ends the process with the user-error status 1 (S36). Ending its own process is the narrow `Exec.Exit` leaf, so a caller bound to `-[Exec.Exit]>` checks clean without the whole `Exec` root. |
-| `#Unsafe process.exit_unmapped(code)` | `Never -[Exec.Exit]>` | Terminate at the same boundary with `code` unchanged, 101 included; for a tool that reports a Jet defect, such as a compiler's internal error. |
-| `process.fail(code, message)` | `Never -[Exec.Exit, IO, Time.Wait]>` | Write `message` and a newline to stderr, then end as `process.exit(code)` does (101 maps to 1): a script's `echo "$message" >&2; exit $code` in one call. |
-| `process.on_signal(signal)` | `Unit -[Exec]>` | Register the process signal policy for one `ProcessSignal` value: once that signal arrives, the process is cancelled. The entry's waits end without parking (a network wait as `NetError.Cancelled`, a sleep at once) and every live task is cancelled, stopping at its next wait point or at its next loop iteration or recursive call when it never waits, with its cleanup run, so a serving `HTTPServer` returns its report and the program drains to its end (D-FOUND-LIFECYCLE1=A, D-TASK-SLICE1=A). |
-| `process.signals(kinds)` | `SignalSubscription IOError! -[Exec]>` | Take every signal of `kinds` as a value on the subscription's `receiver`, as a shell `trap` does, until `close()`; at most one is pending per kind, and every open subscription that holds a signal receives it. An empty list is `InvalidInput`; a signal the host refuses is `Unsupported` or `Other` with its OS error. |
+| `process.env_truthy(name)` | `-[Env]> Bool` | Test the conventional truthy environment values. |
+| `process.which(name)` | `-[FS, Env]> String?` | Find an executable using filesystem checks and the host search path. A candidate that is a link counts when its target is a file; `files.which` and `Path.which` search the same way. |
+| `process.exit(code)` | `-[Exec.Exit]> Never` | Terminate the current process at the explicit process boundary. Status 101 is reserved for Jet defects, so `exit(101)` ends the process with the user-error status 1 (S36). Ending its own process is the narrow `Exec.Exit` leaf, so a caller bound to `-[Exec.Exit]>` checks clean without the whole `Exec` root. |
+| `#Unsafe process.exit_unmapped(code)` | `-[Exec.Exit]> Never` | Terminate at the same boundary with `code` unchanged, 101 included; for a tool that reports a Jet defect, such as a compiler's internal error. |
+| `process.fail(code, message)` | `-[Exec.Exit, IO, Time.Wait]> Never` | Write `message` and a newline to stderr, then end as `process.exit(code)` does (101 maps to 1): a script's `echo "$message" >&2; exit $code` in one call. |
+| `process.on_signal(signal)` | `-[Exec]>` | Register the process signal policy for one `ProcessSignal` value: once that signal arrives, the process is cancelled. The entry's waits end without parking (a network wait as `NetError.Cancelled`, a sleep at once) and every live task is cancelled, stopping at its next wait point or at its next loop iteration or recursive call when it never waits, with its cleanup run, so a serving `HTTPServer` returns its report and the program drains to its end (D-FOUND-LIFECYCLE1=A, D-TASK-SLICE1=A). |
+| `process.signals(kinds)` | `-[Exec]> SignalSubscription IOError!` | Take every signal of `kinds` as a value on the subscription's `receiver`, as a shell `trap` does, until `close()`; at most one is pending per kind, and every open subscription that holds a signal receives it. An empty list is `InvalidInput`; a signal the host refuses is `Unsupported` or `Other` with its OS error. |
 | `process.signal_number(signal)` | `Int` | The signal's Linux number: `Hup` 1, `Int` 2, `Quit` 3, `Usr1` 10, `Usr2` 12, `Pipe` 13, `Alrm` 14, `Term` 15, `Chld` 17, `Cont` 18, `Tstp` 20, `Ttin` 21, `Ttou` 22, `Winch` 28. |
 | `process.list2cmdline(argv)` | `String` | Format an argument vector for display using Windows command-line quoting rules. |
 | `ProcessSignal` | type | The catchable POSIX signals in signal-number order: `Hup`, `Int`, `Quit`, `Usr1`, `Usr2`, `Pipe`, `Alrm`, `Term`, `Chld`, `Cont`, `Tstp`, `Ttin`, `Ttou`, `Winch`. |
@@ -3585,9 +3585,9 @@ run: fn() {
 
 | Function or method | Returns | Description |
 | --- | --- | --- |
-| `random.seed(value)` | `Unit -[Rand]>` | Seed the ambient deterministic stream. |
+| `random.seed(value)` | `-[Rand]>` | Seed the ambient deterministic stream. |
 | `random.rng(seed)` | `RNG` | Create an explicit deterministic stream. |
-| `random.split(seed)` | `RNG -[Rand]>` | Derive a stream from the ambient stream and a seed. |
+| `random.split(seed)` | `-[Rand]> RNG` | Derive a stream from the ambient stream and a seed. |
 | `random.int(lo, hi)` / `rng.int(lo, hi)` | `Int` | Draw an inclusive integer; reversed bounds return `lo` without a draw. |
 | `random.float()` / `rng.float()` | `Float` | Draw from `[0, 1)`. |
 | `random.float_range(lo, hi)` / `rng.float_range(lo, hi)` | `Float` | Draw from `[lo, hi)`; invalid or reversed bounds return `lo` without a draw. |
@@ -3734,10 +3734,10 @@ the environment-selected value; `default_fidelity()` is the pure value `1.0`.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `perf.fidelity()` | `Float -[Env]>` | Read the selected fidelity. |
+| `perf.fidelity()` | `-[Env]> Float` | Read the selected fidelity. |
 | `perf.default_fidelity()` | `Float` | Return `1.0`. |
-| `perf.override_fidelity(value)` | `PerfError! -[Env]>` | Set fidelity in the inclusive range `[0, 1]`; NaN and out-of-range values fail with `PerfError.OutOfRange(value)`. |
-| `perf.reset_fidelity()` | `Never! -[Env]>` | Restore the default selection. |
+| `perf.override_fidelity(value)` | `-[Env]> PerfError!` | Set fidelity in the inclusive range `[0, 1]`; NaN and out-of-range values fail with `PerfError.OutOfRange(value)`. |
+| `perf.reset_fidelity()` | `-[Env]> Never!` | Restore the default selection. |
 | `perf.of(value)` | `Perf` | Construct a bounded fidelity value; NaN becomes `1`. |
 | `perf.is_full(value)` / `perf.is_low(value)` | `Bool` | Test full fidelity or fidelity below `0.25`. |
 | `perf.scale(value, work)` | `Int` | Scale nonnegative work by fidelity. |
@@ -3944,7 +3944,7 @@ run: fn() {
 | `time.is_leap_year(year)` | `Bool` | Test leap-year status under the proleptic Gregorian calendar. |
 | `time.days_in_month(year, month)` | `Int` | Return the number of days; an invalid month retains the civil calendar's `30`-day default. |
 | `time.period(start, end)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Construct calendar periods. |
-| `time.utc()` / `time.zone(name)` | `Zone` / `Zone TimeError! -[Env, FS.Read]>` | Construct UTC, a numeric-offset zone, or a named IANA TZif zone. |
+| `time.utc()` / `time.zone(name)` | `Zone` / `-[Env, FS.Read]> Zone TimeError!` | Construct UTC, a numeric-offset zone, or a named IANA TZif zone. |
 | `time.utcoffset(zone)` | `Int` | Return the zone offset represented by the zone. |
 | `time.gmtime(seconds)` / `time.ctime(seconds)` / `time.asctime(date_time)` | date or `String` | Convert Unix time or format a date. |
 | `time.time(hour, minute, second)` / `time.local_time(hour, minute, second)` | `LocalTime` | Construct a local time; seconds through `60` can represent an input leap-second shape. |
@@ -3954,12 +3954,12 @@ run: fn() {
 | `time.from_iso_week(year, week, weekday)` / `parse_iso_week_date(text)` | `LocalDate TimeError!` | Convert or parse an ISO week date. |
 | `time.parse(text)` / `parse_time(text)` | `LocalDate TimeError!` / `LocalTime TimeError!` | Parse supported date or time text, including the documented leap-second shape. |
 | `time.parse_rfc3339(text)` | `DateTime TimeError!` | Parse an RFC3339 timestamp with a numeric UTC offset without named-zone lookup. |
-| `time.parse_zoned(text)` | `ZonedDateTime TimeError! -[Env, FS.Read]>` | Parse an RFC9557 date-time with a bracketed IANA zone and a matching UTC offset. |
+| `time.parse_zoned(text)` | `-[Env, FS.Read]> ZonedDateTime TimeError!` | Parse an RFC9557 date-time with a bracketed IANA zone and a matching UTC offset. |
 | `time.zoned_local(date, local_time, zone, disambiguation)` | `ZonedDateTime TimeError!` | Resolve local time in a zone with `compatible`, `earlier`, `later`, or `reject` policy. |
 | `time.now()` / `now_utc()` / `today()` / `start()` | time value `-[Time]>` | Read the host wall clock. |
-| `time.instant()` | `Instant -[Time]>` | Read the monotonic clock as a Time point: `t + 5min` is an `Instant`, `b - a` and `t.elapsed()` are `Duration`s. An `Instant` has no epoch and no fields (D-TIME-INSTANT1=A). |
-| `time.unix_ns()` | `Int -[Time]>` | Wall-clock Unix nanoseconds, for timestamps, nonces, and expiry checks. |
-| `time.sleep(duration)` / `sleep_until(deadline)` | `Unit -[Time]>` | Wait on the host clock. |
+| `time.instant()` | `-[Time]> Instant` | Read the monotonic clock as a Time point: `t + 5min` is an `Instant`, `b - a` and `t.elapsed()` are `Duration`s. An `Instant` has no epoch and no fields (D-TIME-INSTANT1=A). |
+| `time.unix_ns()` | `-[Time]> Int` | Wall-clock Unix nanoseconds, for timestamps, nonces, and expiry checks. |
+| `time.sleep(duration)` / `sleep_until(deadline)` | `-[Time]>` | Wait on the host clock. |
 | `time.add_days(date, days)` | `LocalDate` | Add calendar days. |
 | `time.compare_date(a, b)` / `date_equals(a, b)` | ordering / `Bool` | Compare dates. |
 | `time.duration_as_seconds(duration)` / `elapsed(start)` | `Int` / `Duration` | Convert or measure elapsed time. |
@@ -3967,7 +3967,7 @@ run: fn() {
 | `time.unix_ms(value)` / `unix_seconds(value)` | `Int` | Convert a time value to Unix units. |
 | `time.weekday(value)` / `date.weekday()` | `Int` | Return Sunday `0` through Saturday `6`, as `asctime` and `%U` count. `isoweekday(value)` returns Monday `1` through Sunday `7`, and `calendar.weekday` returns Monday `0` through Sunday `6`. |
 | `time.Clock.new(seed)` | `Clock` | Construct a deterministic manually advanced clock. |
-| `time.Clock.system()` | `Clock -[Time]>` | Construct a clock backed by the host time source. |
+| `time.Clock.system()` | `-[Time]> Clock` | Construct a clock backed by the host time source. |
 | `clock.now()` | `Int` | Read clock milliseconds. |
 | `clock.tick(milliseconds)` / `clock.advance(to_ms)` | `Int` | Advance a manual clock and return its new millisecond value. |
 | `clock.wait(duration)` | `Int` | Advance by whole duration milliseconds and return the new value; this does not park a task. |
@@ -4258,8 +4258,8 @@ rows stream one at a time.
 | `csv.to_string<T: Encode>(rows, formulas)` | `String` | Encode explicit row arrays, typed records, or the array-of-arrays `Dyn` that `csv.parse` returns, so parsed rows round-trip; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. With the default `formulas: .Escape`, a text cell that opens with `=`, `+`, `-`, `@`, a tab or a carriage return and is not a number is written after an apostrophe, so a spreadsheet shows it rather than running it; numeric cells are unchanged and `formulas: .Keep` turns the escape off. `csv.write_dict(rows, formulas)` follows the same rule. |
 | `csv.reader<R: Reader>(source, limits, delimiter, header, skip_blank)` | `CSVReader<R> EncodingError!` | Construct an incremental CSV reader over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. Reader defaults retain the header and blank records. No reader strips an apostrophe, so a cell that opens with one round-trips exactly. |
 | `csv.writer<W: Writer>(target, limits, formulas)` | `CSVWriter<W> EncodingError!` | Construct an incremental CSV writer to any byte sink. The writer escapes formula cells as `csv.to_string` does. |
-| `CSVReader<R>.next()` | `CSVRow? EncodingError! -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. A source read failure is an `IO` error whose cause keeps the `IOError` kind and OS code. |
-| `CSVWriter<W>.write(fields)` / `flush()` / `finish()` | `Unit EncodingError! -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record, a flush or finish, so a flushed sink ends on a whole record. |
+| `CSVReader<R>.next()` | `-[IO]> CSVRow? EncodingError!` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. A source read failure is an `IO` error whose cause keeps the `IOError` kind and OS code. |
+| `CSVWriter<W>.write(fields)` / `flush()` / `finish()` | `-[IO]> Unit EncodingError!` | Write comma-delimited string fields; CRLF is deferred until the next record, a flush or finish, so a flushed sink ends on a whole record. |
 | `CSVRow` | type | Physical line number and parsed string fields. |
 
 ### `core.encoding.toml` — TOML values
@@ -4492,7 +4492,7 @@ run: fn() {
 | `url<T>(url, format, authority, limits)` / `database<T>(query, parameters, authority, limits)` | `DataLoader<T> DataError!` | Build an authority-bound remote or SQL loader. |
 | `value<T>(value, limits)` / `load_default<T>(locator)` / `load<T>(locator, limits)` | `DataLoader<T> DataError!` | Load an owned value or source locator with explicit limits. |
 | `csv<T>(text)` / `json<T>(text)` | `[T] DataError!` | Decode typed CSV or JSON input. |
-| `snapshot(loader)` | `DataSnapshot<T> DataError! -[FS, Net, DB]>` | Materialize a source snapshot. A local file loader snapshots the bytes `core.files.data.read` bound; an unread file loader is a `Bridge` error. |
+| `snapshot(loader)` | `-[FS, Net, DB]> DataSnapshot<T> DataError!` | Materialize a source snapshot. A local file loader snapshots the bytes `core.files.data.read` bound; an unread file loader is a `Bridge` error. |
 | `schema(rows)` | `[DataColumn]` | Inspect the columns of typed rows. |
 | `count(value)` | `Int` | Count rows in a list or materialized query result. |
 | `describe(values: [Float])` | `DataSummary DataError!` | Produce bounded descriptive statistics. |
@@ -4552,10 +4552,10 @@ file.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `read<T>(loader)` | `Unit DataError! -[FS.Read]` | Read a local file loader's file under its limits and bind the bytes for the next `snapshot`; an offline loader with a last-good snapshot reads nothing. A missing file is an `IO` error. |
+| `read<T>(loader)` | `-[FS.Read]> DataError!` | Read a local file loader's file under its limits and bind the bytes for the next `snapshot`; an offline loader with a last-good snapshot reads nothing. A missing file is an `IO` error. |
 | `csv_reader<T>(reader, limits)` / `json_reader<T>(reader, limits)` | `DataStream<T> DataError!` | Decode a typed reader over a `FileReader` under limits. |
-| `status()` | `[DataStatus] -[FS, Env]` | Report native and bridge path, ownership, trust, fallback, and replacement facts. Live R availability reads `PATH` and `JET_DATA_R_BRIDGE`, then checks files. |
-| `require_bridge(provider)` | `Unit DataError! -[FS, Env]` | Fail closed when a requested `py`, `r`, or `gpu` bridge is unavailable; use the same live availability facts as `status`. |
+| `status()` | `-[FS, Env]> [DataStatus]` | Report native and bridge path, ownership, trust, fallback, and replacement facts. Live R availability reads `PATH` and `JET_DATA_R_BRIDGE`, then checks files. |
+| `require_bridge(provider)` | `-[FS, Env]> DataError!` | Fail closed when a requested `py`, `r`, or `gpu` bridge is unavailable; use the same live availability facts as `status`. |
 
 ### `core.data.loader` — source lifecycle
 
@@ -5245,15 +5245,15 @@ frames are the whole window.
 | `Window.width()` / `.height()` / `.scale() -> Float` / `.failure() -> UIError?` / `.checksums() -> [Int]` | facts | The latest frame's size in pixels and pixels per logical unit, why the display ended the frames, and a headless window's per-frame FNV-1a checksums. |
 | `Window.cursor() -> UICursor` / `.set_cursor(cursor: UICursor)` | cursor | How the pointer looks over the window, `.Default` until set: the CSS cursor keywords (`Pointer`, `Text`, `Wait`, `Grab`, `ResizeNWSE`, … in `wp_cursor_shape_v1` order) and `Hidden`. Without `wp_cursor_shape_v1` the compositor keeps its cursor for every shape but `Hidden`. |
 | `Window.set_app_id(app_id: String) -> UIError!` | — | Name the application, reverse-DNS (`"org.example.Notes"`), so the desktop matches its desktop entry for name, icon and grouping; `"dev.jet.app"` until set. `.Invalid` for an empty id or one with a NUL byte. |
-| `Window.set_icon(icon: UIIcon) UIError! -[Env]>` | — | Show `UIIcon{name, images}`: a theme icon name (`""` for none) and `UIIconImage{side, pixels}` images, `side` rows of `side` straight-alpha RGBA pixels, 1 to 1024 a side (`.Size` otherwise). An icon with no name and no images unsets it. Without `xdg_toplevel_icon_v1` the desktop entry's icon shows. |
-| `Window.clipboard_text() -[Env, Net, Time]> String UIError!` / `.set_clipboard_text(text: String) UIError! -[Net, Time]>` | clipboard | Paste and copy through the seat's `wl_data_device`. A paste reads the holder's text in its first type of `text/plain;charset=utf-8`, `UTF8_STRING`, `text/plain`, `TEXT`, `STRING` through a pipe, waiting up to 2 s (`.Protocol` past that or for text that is not UTF-8, `.Size` past 16 MiB), and is `""` when the clipboard is empty or holds no text; the window's own copy comes back without a round trip. A copy offers the text as all five types at the latest input's serial (the compositor takes it only from the focused window) and answers each paste until another program copies. `.Unsupported` without `wl_data_device_manager`; a headless window keeps a clipboard of its own. The web host's clipboard stays `core.ui.host`'s `read_text` / `write_text`. |
-| `Window.set_text_input(area: UIRect?) UIError! -[Net, Time]>` | text input | The program's text field, for the compositor's input method (`zwp_text_input_v3`) to compose into: `area` is the caret's rectangle in pixels, where the input method shows its candidates, and `None` says there is no text field, which disables the text input and ends any composition. Without `zwp_text_input_v3`, and in a headless window, typing comes from the keyboard alone. |
+| `Window.set_icon(icon: UIIcon) -[Env]> UIError!` | — | Show `UIIcon{name, images}`: a theme icon name (`""` for none) and `UIIconImage{side, pixels}` images, `side` rows of `side` straight-alpha RGBA pixels, 1 to 1024 a side (`.Size` otherwise). An icon with no name and no images unsets it. Without `xdg_toplevel_icon_v1` the desktop entry's icon shows. |
+| `Window.clipboard_text() -[Env, Net, Time]> String UIError!` / `.set_clipboard_text(text: String) -[Net, Time]> UIError!` | clipboard | Paste and copy through the seat's `wl_data_device`. A paste reads the holder's text in its first type of `text/plain;charset=utf-8`, `UTF8_STRING`, `text/plain`, `TEXT`, `STRING` through a pipe, waiting up to 2 s (`.Protocol` past that or for text that is not UTF-8, `.Size` past 16 MiB), and is `""` when the clipboard is empty or holds no text; the window's own copy comes back without a round trip. A copy offers the text as all five types at the latest input's serial (the compositor takes it only from the focused window) and answers each paste until another program copies. `.Unsupported` without `wl_data_device_manager`; a headless window keeps a clipboard of its own. The web host's clipboard stays `core.ui.host`'s `read_text` / `write_text`. |
+| `Window.set_text_input(area: UIRect?) -[Net, Time]> UIError!` | text input | The program's text field, for the compositor's input method (`zwp_text_input_v3`) to compose into: `area` is the caret's rectangle in pixels, where the input method shows its candidates, and `None` says there is no text field, which disables the text input and ends any composition. Without `zwp_text_input_v3`, and in a headless window, typing comes from the keyboard alone. |
 | `Window.maximized() -> Bool` / `.fullscreen() -> Bool` / `.set_maximized(maximized: Bool)` / `.set_fullscreen(fullscreen: Bool)` / `.minimize()` | states | The window's states as the display server last configured them, and requests to change them (`xdg_toplevel`'s set/unset maximized and fullscreen, on the output the display server picks, and set_minimized). The display server decides; a new size arrives as `.Resize`, and a minimized window comes back only when the user brings it back. A headless window takes each state at once and keeps its size. Each window has its own connection to the display server, so a program shows several windows by driving each window's `frames()` in its own task. |
 | `Window.frame_stats() -> FrameStats` | stats | `presented`, `missed` (vblanks skipped between consecutive frames), `discarded`, `refresh_ns`, present-to-present `median_ns` / `p99_ns`, `spans` (intervals by refreshes spanned: 1, 2, 3, 4+) and input-to-photon `input_samples` / `input_median_ns` / `input_p99_ns`. |
 | `Frame.index` / `.width` / `.height` / `.scale` / `.time` / `.delta` | fields | The frame's number, the size in pixels to draw at and the pixels per logical unit, and its predicted presentation time and the step since the previous frame's, in seconds. |
 | `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `Compose(UIIMEComposition)`, `PointerMove(x:, y:)` in pixels, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)` in pixels, `Resize(width:, height:)` in pixels, `Focus(Bool)`, `Close`. Keys go through the compositor's XKB keymap (`core.ui.xkb`; a US layout until one arrives), and a held key other than a modifier repeats as further `KeyDown` and `Text` at the compositor's rate after its delay. `Text` is also what an input method commits. `Compose` is its composition in progress (`core.ui.host.ime`'s type: `text`, the caret as a `selection` and the `marked` span in characters), which replaces the previous one until its text is committed. A composition with empty text ends it, and it ends before its committed `Text` arrives. |
-| `Frame.present(pixels: [U8]) UIError! -[Env, Net, Time]>` | — | Show `height` rows of `width` RGBA pixels. |
-| `Frame.present_damage(pixels: [U8], damage: [UIRect]) UIError! -[Env, Net, Time]>` | — | Show `pixels` where only the `damage` rectangles (in pixels) changed since the previous frame. |
+| `Frame.present(pixels: [U8]) -[Env, Net, Time]> UIError!` | — | Show `height` rows of `width` RGBA pixels. |
+| `Frame.present_damage(pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError!` | — | Show `pixels` where only the `damage` rectangles (in pixels) changed since the previous frame. |
 
 Backends expose their own command or event projection through the backend
 handle. The provider/catalog may add interactive node and mount operations,
@@ -5370,7 +5370,7 @@ inside, one on a right or bottom edge is not. The collision checks and the
 | `image_flip_vertical(image)` / `image_flip_horizontal(image)` / `image_rotate_cw(image)` / `image_rotate_ccw(image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
 | `image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | On each pixel's straight color, stored premultiplied again: scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
 | `image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to each pixel's straight red, green and blue, capped at 255; a sum below 0 becomes 1. Or replace every pixel that holds `color` premultiplied, in all four bytes, with `replace`; a clear pixel holds every color of alpha 0. |
-| `load_texture_atlas(path)` | `TextureAtlas -[FS]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte), premultiplied as it loads. A missing or malformed PNG leaves the atlas without a texture. |
+| `load_texture_atlas(path)` | `-[FS]> TextureAtlas` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte), premultiplied as it loads. A missing or malformed PNG leaves the atlas without a texture. |
 | `Image` | type | An RGBA8 image held in memory, premultiplied: `width()`, `height()` and `pixels()` (four `U8` per pixel, row by row, straight, as `Frame.present` takes them). A width of 0 means no image. |
 | `TextureAtlas` / `.name() -> String` / `.loaded() -> Bool` | type | Named regions of one decoded PNG texture; the atlas text's `atlas:` line or its file's stem, and whether the texture decoded. |
 | `Window.load_image_from_screen() -> Image` | image | A copy of the canvas the frames draw on, as last drawn. |
@@ -5528,7 +5528,8 @@ tasks never read or change the process registry. The module source is
 | `remote(service: S, client: String = "") -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. `client` names the client holding it, which a test can cut off (`disconnect`). |
 | `remote_at<S>(address: String, client: String = "") -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. `client` is as for `remote`. |
 | `disconnect(client: String)` | — | The test host cuts client `client` off every server: until `reconnect(client)`, each call through a Remote made for it fails `CallError.Unreachable`, naming the client and the method, and runs nothing on the server. Nothing touches the network, so an offline, catch-up or replay case runs the same each time; the servers and every other client go on. Inside `testing.world` the links are the world's own. A blank name, or one with a control character, panics. |
-| `reconnect(client: String)` | — | Restore the link `disconnect` cut: the client's next call reaches the server. |
+| `reconnect(client: String) -[Net, Time]>` | — | Restore the link `disconnect` cut: the client's next call reaches the server, and the writes it queued meanwhile are sent now, in order (see `graph.offline(.Queue)` below). |
+| `pending() -> Int` | count | The number of writes the device's queue holds, waiting to send; always 0 on a device that doesn't queue. |
 | `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
 | `new_id() -[Rand, Time]> String` | ID | A fresh UUIDv7 as lowercase text: the Unix millisecond it was made, then 74 random bits. A client names a row it creates with it, so a row made offline has its final ID at once; a later ID sorts after it. It panics when the system has no random source. |
 | `as_caller<R>(account: auth.AccountID, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
@@ -5541,6 +5542,7 @@ tasks never read or change the process registry. The module source is
 | `graph.screen(path, view, signed_in: Bool = false) -> App` | graph | Add the screen `view` shows at `path` to the graph, and give back the graph. See below. |
 | `graph.cache<V>(policy: CachePolicy) -> App` | graph | Answer every `#App.Public` endpoint reply of type `V` under `policy`, and give back the graph. See below. |
 | `graph.sitemap(list) -> App` | graph | List the address of each public screen state `list` gives in the served `/sitemap.xml`, and give back the graph. See below. |
+| `graph.head(head) -> App` | graph | Put the metadata `head` gives a screen's state in the `<head>` of that screen's server HTML, and give back the graph. See below. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
@@ -5807,9 +5809,29 @@ Remote of a service the graph doesn't mount posts each call to the
 that `#App.Webhook`, `#App.Every` or an HTTP route marker marks, is E2805
 (`jet.InvalidRoute`), as those answer only the server's `web.App`. A method
 `#App.Job` marks is a job of the graph, as on a served App. The graph's
-rate limits apply only to served endpoints. `graph.offline(.Queue)` records
-that the clients keep their writes while offline (`app.Offline`: `.Off`,
-the default, or `.Queue`).
+rate limits apply only to served endpoints. `graph.offline(.Queue)` makes
+the device keep its writes while offline (`app.Offline`: `.Off`, the
+default, or `.Queue`).
+
+On a device that queues, a call of a method that answers nothing (`fn(…)
+E!` or `fn(…)`) through a Remote that posts (`remote_at`, or the graph's
+Remote of a service) is a write. When its client is
+cut off (`disconnect`), when the client's earlier writes are still queued,
+or when no answer comes, the write joins the device's queue and the call
+succeeds at once; `app.pending()` counts the queue. A write keeps one
+request key however often it is sent, so a server that ran it once answers
+a repeat with the reply it kept. The queue is sent, oldest first, by
+`reconnect(client)` and before each later call through a Remote of that
+client; one task sends a client's queue at a time. A write the server
+commits leaves the queue. A write it refuses (the method's error, or
+`CallError.Invalid`) is rolled back: it leaves the queue, and a notice
+naming the method and the refusal joins the app's notice list, since the
+screen that made it may be gone. No answer, `SignedOut` or
+`UpdateRequired` stops the sending and keeps the write, so an expired
+session holds the queue. A Remote that runs its service directly
+(`remote(service)`) never queues. The queue and the notice list live in
+this process (inside `testing.world`, in the world's own store); they
+don't outlive it yet, on any target.
 
 `graph.screen("/projects/:project/board", board, signed_in: false)` adds a
 screen. `board` is a named function. Each of its parameters that is an
@@ -5817,8 +5839,9 @@ screen. `board` is a named function. Each of its parameters that is an
 declare with `.api<S>` (opening the screen otherwise stops the program).
 Its one other parameter is the screen's state: a struct declared outside
 Core with no type parameters, whose fields each derive `Encode` and
-`Decode`. The view can't fail, and its result derives `Encode`: it is what
-the screen shows. The state is the screen's address. Each `:name` segment
+`Decode`. The view can't fail, and its result is a `ui.Node` tree or
+derives `Encode`: it is what the screen shows. The state is the screen's
+address. Each `:name` segment
 of the path is the field `name`. A field marked `#App.Query` (`#App.Query
 q: String`) goes after `?`. Every other field must be a path segment. A
 path that is not a string literal starting with `/`, a field in neither
@@ -5828,6 +5851,20 @@ another shape, and a state that two screens register are E2820
 caller opens. A renderer walks the graph's screens in the order they were
 added, each with its path, state, query fields, `signed_in` and an opener
 that makes the state from an address's field texts and runs the view.
+
+A served `web.App` answers a GET of each screen's address, unless the
+program routes that path itself. The page is server HTML: a tree's HTML,
+or any other result's text (a string's own text, else its JSON) escaped
+into a paragraph, then the page's resume state
+(`<script type="application/json" id="jet-resume">`), the results of the
+live reads the view made, which the client picks up without running them
+again. An address whose texts make no state is the app's not-found page. A
+signed-in screen is 401 to a request with no session; a request with one
+runs the view acting for its account, and every answer to a request with a
+session, or to a signed-in screen, is `Cache-Control: private, no-store`. A
+view runs as server code, with the effects a server handler has: the
+network and reading files. So `app.bind`, which adds the screens, carries
+`FS.Read` as well as `Net`, as `serve` and `serve_once` do.
 
 `app.url_of(state)` gives the address of the screen whose state is `state`'s
 type. Each path field's value is percent-encoded into its segment, and each
@@ -5881,6 +5918,26 @@ path), and is told the sitemap's address. A program route at either path
 answers it instead. A `list` that takes parameters, or gives no list of
 screen states, is E2810.
 
+`graph.head(head)` gives a screen's pages their metadata. `head` is a named
+function that takes one screen state and gives an `app.Head`, as
+`fn(view: GuideView) -> app.Head`; the last head given for a state holds,
+until `app.new` starts a graph with no heads.
+`Head` is `{title: String, description: String?, image: String?, canonical:
+Bool{true}, index: Bool{true}}`. A served web app's page of the state's
+screen asks it for the state at the page's address and puts in its
+`<head>`: `<title>` (the graph's title with no head), the `description`
+meta tag, a canonical link to the state's `url_of` address at the origin
+the request reached (unless `canonical` is false), and the Open Graph
+(`og:type`, `og:title`, `og:description`, `og:url`, `og:image`) and Twitter
+card (`summary`, or `summary_large_image` with an image) tags, each value
+attribute-escaped. `image` is a URL, a path from the site's root, or a path
+under the app's `/assets/`, by its hashed name when an assets root holds it;
+each becomes an absolute URL. A page is
+`<meta name="robots" content="noindex">` when its head says `index: false`,
+and a signed-in screen's page always is, whatever its head says, as is its
+401 page. A `head` that takes other than one state, a state that is no
+struct declared outside Core, or one that doesn't derive `Decode`, is E2810.
+
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or
 `.Public{max_age: Duration}`. An `#App.Public` endpoint method whose reply
@@ -5917,6 +5974,14 @@ with its `Age`, and does not run the method. Each keep drops the stale
 rows, so the table holds only fresh replies. No cache server runs, and an
 in-memory database shares nothing.
 
+`app.Notice{text:, retry:}` is where a handler's failure goes. A control's
+handler has the type `fn() app.Notice!`, so its error type converts to a
+Notice (`impl TaskError -> app.Notice`). The frame shows the notice beside
+the control, and `retry: true` offers to run the handler again. A notice
+with no control to sit beside, such as a failed background run or a queued
+write refused after its screen closed, joins the app's notice list. The list
+keeps each notice, in order, until it is dismissed. The list lives in one
+process-wide cell, or in the World's own cell inside a deterministic world.
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with
@@ -6696,7 +6761,7 @@ subquery from another table) is refused.
 | `store.table(name: String, key: fn(T) -[]> K) -> Table<K, T>` | table | Name one typed table of `T` rows keyed by the pure `key` function. |
 | `table.get(key: K) -[DB.Read]> T? DBError!` | row | Read the row with that key, or `None`. |
 | `table.add(row: T) -[DB.Read, DB.Write]> T DBError!` / `table.put(row: T) -[DB.Read, DB.Write]> T DBError!` | row | Insert a new row or insert-or-replace one. An `add` whose key is held is `DBError.Exists` when the caller may read the row that holds it and `DBError.Denied` when it may not. |
-| `table.delete(key: K) DBError! -[DB.Read, DB.Write]>` | — | Remove the row with that key, if any. |
+| `table.delete(key: K) -[DB.Read, DB.Write]> DBError!` | — | Remove the row with that key, if any. |
 | `table.query() -[DB.Read]> Query<T> DBError!` | query | Every row the caller may read, in key order, as a `core.data` query, read when it is collected; a filter the compiler writes as SQL narrows what it reads. |
 | `table.guard(policy: fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T>` | table | The table judged by a row policy on every read and write. |
 | `pool(url: String, max: Int) -[DB]> DBPool DBError!` | pool | Create a bounded connection pool (`DBPool` → `DBLease`, `DBPoolReceipt`). |
@@ -6722,7 +6787,7 @@ migration cannot silently replace an applied one.
 
 `begin() -[DB]> DBTransaction DBError!` opens a transaction. A
 `DBTransaction` is `#SingleUse`: every path that keeps it owes one
-`commit() DBError! -[DB]>` or `rollback() DBError! -[DB]>`, each of which
+`commit() -[DB]> DBError!` or `rollback() -[DB]> DBError!`, each of which
 consumes it. Dropping it, or a `return` that leaves with it still open, is
 E0140, and the result of either call is a failure the caller can't ignore.
 A commit that fails rolls the transaction back before it reports the error.
@@ -6910,7 +6975,7 @@ either imports this module.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `query<T>(path, sql)` | `Query<T> ![FieldError] -[FS]>` | Decode typed header-named CSV records and apply the bounded query plan. |
+| `query<T>(path, sql)` | `-[FS]> Query<T> ![FieldError]` | Decode typed header-named CSV records and apply the bounded query plan. |
 
 ### `core.compute` — checked tensors and explicit devices
 

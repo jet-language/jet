@@ -201,22 +201,16 @@ ir_x64_static_int_fits: fn(text: String) -> Bool Never! {
     negative: bytes.len() > 0 && bytes[0] == 45
     first: if negative -> 1 else -> 0
     digits: bytes.len() - first
-    if digits < 19 || bytes[first] == 48 {
-        return false
-    }
+    if digits < 19 || bytes[first] == 48 -> return false
     loop at in first..<bytes.len() {
-        if bytes[at] < 48 || bytes[at] > 57 {
-            return false
-        }
+        if bytes[at] < 48 || bytes[at] > 57 -> return false
     }
     // A 19-digit magnitude up to 2^62 - 1 (2^62 when negative) is an inline Int.
     if digits == 19 {
         bound: (if negative -> "4611686018427387904" else -> "4611686018427387903").bytes()
         at := 0
         loop at < 19 && bytes[first + at] == (Int{bound[at]}) -> at += 1
-        if at == 19 || bytes[first + at] < (Int{bound[at]}) {
-            return false
-        }
+        if at == 19 || bytes[first + at] < (Int{bound[at]}) -> return false
     }
     true
 }
@@ -1197,11 +1191,11 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
                 functions += 1
             }
             last := functions
-            loop last < stems.len() && stems[last].stem == stems[first].stem {
-                last += 1
-            }
+            loop last < stems.len() && stems[last].stem == stems[first].stem -> last += 1
             if last - functions <= functions - first {
-                loop at in functions..<last -> found[stems[at].at] = stems[first + at - functions].at
+                loop at in functions..<last {
+                    found[stems[at].at] = stems[first + at - functions].at
+                }
             }
             first = last
         }

@@ -9128,7 +9128,7 @@ double: fn(n: Int) Int -> n * 2
 origin: fn() Point -> {x: 0, y: 0}
 run: fn() { print(double(21)) }
 
-load: fn(path: String) String -[IO]> {
+load: fn(path: String) -[IO]> String {
     text: files.read(path)?
     text.trim()
 }
@@ -9426,7 +9426,7 @@ handler: fn(Request) -[IO]> Response
 
 Unit stays `run: fn() { }` and `announce: fn() -[IO]> { }`. A fallible unit keeps
 the arrowless form; its error contract precedes an optional effect arrow:
-`save: fn() IOError! -[FS]> { }` (D-FAIL-UNIT1=A). A plain `->` with no type,
+`save: fn() -[FS]> IOError! { }` (D-FAIL-UNIT1=A). A plain `->` with no type,
 and `-> Unit`, are illegal.
 Function types read the same way. Control one-liners (`if c -> x`,
 `loop x in xs -> f(x)`, arm tables) and lambdas keep `->` as the body arrow.

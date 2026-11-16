@@ -471,7 +471,7 @@ case_func: fn(db: &conn.Conn, v: &conn.Vdbe, upper: Bool) Never! {
 }
 
 // randomFunc: a random integer, never -9223372036854775808.
-random_func: fn(v: &conn.Vdbe) Never! -[DB]> {
+random_func: fn(v: &conn.Vdbe) -[DB]> Never! {
     b: os.os_random_bytes(8)
     u := 0
     loop k in 0..<8 -> u += (Int{b[k]}) << (8 * k)
@@ -481,7 +481,7 @@ random_func: fn(v: &conn.Vdbe) Never! -[DB]> {
 }
 
 // randomBlob: N random bytes, at least one.
-random_blob: fn(db: &conn.Conn, v: &conn.Vdbe) Never! -[DB]> {
+random_blob: fn(db: &conn.Conn, v: &conn.Vdbe) -[DB]> Never! {
     n := arg_int64(v, 0)
     if n < 1 -> n = 1
     if !context_size_ok(db, v, n) {
@@ -2499,7 +2499,7 @@ not_supported: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
 // binds them, json() and jsonb(), and the window functions of Window.jet.
 // Any other built-in fails with not_supported. An aggregate's xValue is
 // its xFinalize unless it has its own.
-builtin_call: fn(db: &conn.Conn, v: &conn.Vdbe, method: Int) Never! -[DB]> {
+builtin_call: fn(db: &conn.Conn, v: &conn.Vdbe, method: Int) -[DB]> Never! {
     id: v.fctx.impl_id
     step: method == aux.FN_STEP || method == aux.FN_SFUNC
     inverse: method == aux.FN_INVERSE
@@ -2581,7 +2581,7 @@ PRAGMA_TABLE_INFO_COLUMNS: [String]{"cid", "name", "type", "notnull", "dflt_valu
 
 // sqlite3Pragma: code PRAGMA [schema.]name, PRAGMA [schema.]name=value or
 // PRAGMA [schema.]name(value); minus is nonzero for a '-' before value.
-pragma: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, value: ast.SQLTok, minus: Int) Never! -[DB]> {
+pragma: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, value: ast.SQLTok, minus: Int) -[DB]> Never! {
     cg.get_vdbe(p)
     cg.v_run_only_once(p)
     p.f.n_mem = 2
@@ -2629,7 +2629,7 @@ pragma: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, valu
 // PRAGMA table_info(table) and table_xinfo(table) (i_arg 1): a row for
 // each column of the table: cid, name, type, notnull, dflt_value, pk and,
 // for table_xinfo, hidden.
-pragma_table_info: fn(p: &cg.Parse, a: &ast.AST, table_name: [U8], z_db: [U8]?, i_arg: Int) Never! -[DB]> {
+pragma_table_info: fn(p: &cg.Parse, a: &ast.AST, table_name: [U8], z_db: [U8]?, i_arg: Int) -[DB]> Never! {
     cg.code_verify_named_schema(p, a, z_db)
     t: cat.locate_table(p, a, cat.LOCATE_NOERR, table_name, z_db)
     if t < 0 {

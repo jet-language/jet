@@ -414,7 +414,7 @@ os_bytes_text: fn(bytes: [U8], n: Int) -> String Never! {
 
 // sqlite3OsClose: unixClose (unlock, then closeUnixFile) or nolockClose. A
 // file that is not open is left alone.
-os_close: fn(file: &DBFile) Never! -[DB]> {
+os_close: fn(file: &DBFile) -[DB]> Never! {
     if file.fd < 0 {
         return
     }
@@ -426,7 +426,7 @@ os_close: fn(file: &DBFile) Never! -[DB]> {
 
 // sqlite3OsRead: unixRead (seekAndRead) of `amt` bytes at `offset` into
 // buf[0..<amt]. A short read zero-fills the rest and is IOERR_SHORT_READ.
-os_read: fn(file: &DBFile, buf: &[U8], amt: Int, offset: Int) SQLError! -[DB]> {
+os_read: fn(file: &DBFile, buf: &[U8], amt: Int, offset: Int) -[DB]> SQLError! {
     got: core.db.__vfs_read(file.fd, offset, buf, 0, amt)
     if got == amt -> return Ok()
     if got < 0 {
@@ -443,7 +443,7 @@ os_read: fn(file: &DBFile, buf: &[U8], amt: Int, offset: Int) SQLError! -[DB]> {
 
 // sqlite3OsWrite: unixWrite of data[0..<amt] at `offset`. A short write
 // or ENOSPC is SQLITE_FULL.
-os_write: fn(file: &DBFile, data: [U8], amt: Int, offset: Int) SQLError! -[DB]> {
+os_write: fn(file: &DBFile, data: [U8], amt: Int, offset: Int) -[DB]> SQLError! {
     wrote: core.db.__vfs_write(file.fd, offset, data, 0, amt)
     if wrote >= amt -> return Ok()
     if wrote < 0 && 0 - wrote != OS_ENOSPC {
@@ -455,7 +455,7 @@ os_write: fn(file: &DBFile, data: [U8], amt: Int, offset: Int) SQLError! -[DB]> 
 }
 
 // sqlite3OsTruncate: unixTruncate, rounded up to a whole chunk.
-os_truncate: fn(file: &DBFile, size: Int) SQLError! -[DB]> {
+os_truncate: fn(file: &DBFile, size: Int) -[DB]> SQLError! {
     n := size
     if file.chunk > 0 -> n = ((n + file.chunk - 1) /% file.chunk) * file.chunk
     got: core.db.__vfs_truncate(file.fd, n)
@@ -470,7 +470,7 @@ os_truncate: fn(file: &DBFile, size: Int) SQLError! -[DB]> {
 // (full_fsync; fdatasync is fsync), then once fsync its directory when
 // UNIXFILE_DIRSYNC is set, ignoring a directory that cannot be opened or
 // synced.
-os_sync: fn(file: &DBFile, flags: Int) SQLError! -[DB]> {
+os_sync: fn(file: &DBFile, flags: Int) -[DB]> SQLError! {
     if flags == 0 -> return Ok()
     got: core.db.__vfs_sync(file.fd)
     if got < 0 {
@@ -524,7 +524,7 @@ os_file_size: fn(file: &DBFile) -[DB]> Int SQLError! {
 // write-locks the RESERVED byte. EXCLUSIVE from RESERVED write-locks the
 // PENDING byte (the file is then PENDING) and then the SHARED range; if
 // that fails the file stays PENDING.
-os_lock: fn(file: &DBFile, level: Int) SQLError! -[DB]> {
+os_lock: fn(file: &DBFile, level: Int) -[DB]> SQLError! {
     if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok()
     if file.lock >= level -> return Ok()
     if level == LOCK_SHARED || (level == LOCK_EXCLUSIVE && file.lock == LOCK_RESERVED) {
@@ -573,7 +573,7 @@ os_lock: fn(file: &DBFile, level: Int) SQLError! -[DB]> {
 // a file without locking (nolockUnlock). Going to SHARED read-locks the
 // SHARED range again and unlocks the PENDING and RESERVED bytes; going to
 // NONE unlocks the whole file.
-os_unlock: fn(file: &DBFile, level: Int) SQLError! -[DB]> {
+os_unlock: fn(file: &DBFile, level: Int) -[DB]> SQLError! {
     if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok()
     if file.lock <= level -> return Ok()
     if file.lock > LOCK_SHARED {
@@ -630,7 +630,7 @@ os_set_chunk_size: fn(file: &DBFile, size: Int) Never! { file.chunk = size }
 // SQLITE_FCNTL_SIZE_HINT: fcntlSizeHint. With a chunk size set, grow the
 // file to `size` rounded up to a whole chunk by writing one byte at the end
 // of each new block and at the last byte.
-os_size_hint: fn(file: &DBFile, size: Int) SQLError! -[DB]> {
+os_size_hint: fn(file: &DBFile, size: Int) -[DB]> SQLError! {
     if file.chunk <= 0 -> return Ok()
     current: core.db.__vfs_size(file.fd)
     if current < 0 -> return Err(base.fail(base.IOERR_FSTAT))
@@ -722,7 +722,7 @@ os_device_characteristics: fn(file: &DBFile) -> Int Never! {
 // sqlite3OsDelete: unixDelete. A missing file is IOERR_DELETE_NOENT; with
 // `dir_sync` the directory is then fsynced (a directory that cannot be
 // opened is ignored, one that cannot be synced is IOERR_DIR_FSYNC).
-os_delete: fn(path: String, dir_sync: Bool) SQLError! -[DB]> {
+os_delete: fn(path: String, dir_sync: Bool) -[DB]> SQLError! {
     got: core.db.__vfs_unlink(path)
     if got < 0 {
         if 0 - got == OS_ENOENT -> return Err(base.fail(base.IOERR_DELETE_NOENT))
@@ -758,7 +758,7 @@ DBPath: struct {
 
 // appendOnePathElement: append name (not "." and not empty) to the path,
 // with ".." removing the last element, and follow it when it is a link.
-os_path_append_one: fn(p: &DBPath, name: [U8]) Never! -[DB]> {
+os_path_append_one: fn(p: &DBPath, name: [U8]) -[DB]> Never! {
     n: name.len()
     if name[0] == OS_DOT {
         if n == 1 {
@@ -811,7 +811,7 @@ os_path_append_one: fn(p: &DBPath, name: [U8]) Never! -[DB]> {
 }
 
 // appendAllPathElements: append each '/'-separated element of path.
-os_path_append_all: fn(p: &DBPath, path: [U8]) Never! -[DB]> {
+os_path_append_all: fn(p: &DBPath, path: [U8]) -[DB]> Never! {
     i := 0
     j := 0
     loop {
@@ -1047,7 +1047,7 @@ os_shm_lock: fn(file: &DBFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! 
 
 // sqlite3OsShmUnmap: unixShmUnmap. Close this connection's shared memory,
 // which drops its locks, and with `delete` unlink the -shm file.
-os_shm_unmap: fn(file: &DBFile, delete: Bool) Never! -[DB]> {
+os_shm_unmap: fn(file: &DBFile, delete: Bool) -[DB]> Never! {
     if !file.shm.open {
         return
     }

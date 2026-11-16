@@ -1,11 +1,11 @@
 // A named handler whose row is wider than the parameter's bound is refused.
 use core.time
 
-tick: fn(n: Int) Never! -[Time.Wait, IO]> {
+tick: fn(n: Int) -[Time.Wait, IO]> Never! {
     time.sleep(1ms)
     print("tick {n}")
 }
 
-accept_wait: fn(handler: fn(Int) -[Time.Wait]> Never!, n: Int) Never! -[Time.Wait]> { handler(n) }
+accept_wait: fn(handler: fn(Int) -[Time.Wait]> Never!, n: Int) -[Time.Wait]> Never! { handler(n) }
 
 run: fn() { accept_wait(tick, 1) }

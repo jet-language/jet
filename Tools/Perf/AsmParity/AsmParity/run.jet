@@ -420,7 +420,7 @@ build_jet: fn(o: Options, jet: String, cell: Bench, mode: String, dir: String, l
 }
 
 // `from` copied into `to`, every entry whose path holds `/.jet` left out.
-copy_tree: fn(from: String, to: String) Err! -[FS]> {
+copy_tree: fn(from: String, to: String) -[FS]> Err! {
     files.create_dir_all(to)
     loop entry in files.list_dir(from) {
         source: files.join(from, entry.name)
@@ -436,7 +436,7 @@ copy_tree: fn(from: String, to: String) Err! -[FS]> {
 
 // The steps' working directory emptied, and the input written when it is
 // missing or must be fresh.
-prepare: fn(o: Options, s: Setup) Err! -[Exec, FS, Time.Wait]> {
+prepare: fn(o: Options, s: Setup) -[Exec, FS, Time.Wait]> Err! {
     if s.steps {
         files.remove_all(s.cwd).drop("the first run has no directory to empty")
         files.create_dir_all(s.cwd)

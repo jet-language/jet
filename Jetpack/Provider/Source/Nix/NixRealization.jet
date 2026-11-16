@@ -51,7 +51,7 @@ provider_project_lock_digest: fn(project: String?) -[FS]> String ProviderError! 
 }
 
 // The managed directory and lock must be real (never linked) when present.
-provider_validate_project_lock_layout: fn(project: String) ProviderError! -[FS]> {
+provider_validate_project_lock_layout: fn(project: String) -[FS]> ProviderError! {
     managed: pkg_managed_dir(project)
     if files.stat(managed) == {
         .Ok(info) -> {
@@ -286,7 +286,7 @@ provider_is_local_native: fn(facts: [String:String], provider: String) -> Bool N
 
 // The project lock must not change between Nix identity preparation and
 // Store registration.
-provider_validate_nix_lock_before_store: fn(ctx: ProviderCtx, realized: Realized) ProviderError! -[FS]> {
+provider_validate_nix_lock_before_store: fn(ctx: ProviderCtx, realized: Realized) -[FS]> ProviderError! {
     local_native: provider_is_local_native(realized.producer.facts, realized.producer.provider)
     if realized.producer.provider != "nix" && !local_native {
         return

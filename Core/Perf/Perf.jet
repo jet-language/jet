@@ -33,7 +33,7 @@ fidelity: fn() -[Env]> Float Never! {
 
 default_fidelity: fn() -> Float Never! { 1.0 }
 
-override_fidelity: fn(value: Float) PerfError! -[Env]> {
+override_fidelity: fn(value: Float) -[Env]> PerfError! {
     if core.math.is_nan(value) || value < 0.0 || value > 1.0 {
         return Err(PerfError.OutOfRange(value))
     }
@@ -42,7 +42,7 @@ override_fidelity: fn(value: Float) PerfError! -[Env]> {
     core.perf.__write_bits(core.math.to_bits(rounded) + 1)
 }
 
-reset_fidelity: fn() Never! -[Env]> { core.perf.__write_bits(0) }
+reset_fidelity: fn() -[Env]> Never! { core.perf.__write_bits(0) }
 
 of: fn(fidelity: Float) -> Perf Never! {
     v := fidelity

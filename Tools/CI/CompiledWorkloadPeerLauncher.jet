@@ -339,7 +339,7 @@ status_text: fn(end: ChildEnd) -> String Never! {
 
 // ---- Capability check ----
 
-capability_check: fn() LaunchError! -[FS, Env, Exec, Time, Time.Wait]> {
+capability_check: fn() -[FS, Env, Exec, Time, Time.Wait]> LaunchError! {
     if sys.name() != "linux" {
         return Err(launch_error("unsupported host `{sys.name()}`: native peer isolation is unavailable; it is implemented only on Linux (the Jet runtime's process boundary is Linux-only)"))
     }
@@ -356,7 +356,7 @@ capability_check: fn() LaunchError! -[FS, Env, Exec, Time, Time.Wait]> {
     Ok()
 }
 
-probe_policies: fn(bwrap: String, ip: String, launcher: String, filter: [U8], root: String) LaunchError! -[FS, Env, Exec, Time, Time.Wait]> {
+probe_policies: fn(bwrap: String, ip: String, launcher: String, filter: [U8], root: String) -[FS, Env, Exec, Time, Time.Wait]> LaunchError! {
     filter_path: "{root}/.compiled-workload-peer-seccomp"
     files.write_bytes(filter_path, filter) ?? return Err(launch_error("Linux peer isolation unavailable: seccomp socket filter cannot be staged at `{filter_path}`: {err}"))
     loop choice in ([NetworkPolicy]{NetworkPolicy.Disabled, NetworkPolicy.LoopbackOnly}) {
@@ -629,7 +629,7 @@ loopback_command: fn(args: [String]) -[Exec, IO, Time.Wait]> [String] Never! {
 }
 
 // Seccomp filter mode with no_new_privs, as `bwrap --seccomp` leaves it.
-require_socket_filter: fn() LaunchError! -[FS]> {
+require_socket_filter: fn() -[FS]> LaunchError! {
     status: files.read("/proc/self/status") ?? return Err(launch_error("disabled-network internal runner cannot read its seccomp status: {err}"))
     filtered := false
     no_new_privs := false
@@ -645,7 +645,7 @@ require_socket_filter: fn() LaunchError! -[FS]> {
     Ok()
 }
 
-sweep_namespace: fn(signal: Int) LaunchError! -[FS, Env]> {
+sweep_namespace: fn(signal: Int) -[FS, Env]> LaunchError! {
     own: sys.pid()
     entries: files.list_dir("/proc") ?? return Err(launch_error("Linux peer process tree cannot be enumerated: {err}"))
     loop entry in entries {

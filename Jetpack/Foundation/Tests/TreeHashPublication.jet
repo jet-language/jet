@@ -34,21 +34,21 @@ foundation_publication_test_root: fn(label: String) -[FS, Env]> String Never! {
     root
 }
 
-foundation_publication_test_no_temporary: fn(parent: String) Never! -[FS]> {
+foundation_publication_test_no_temporary: fn(parent: String) -[FS]> Never! {
     entries: files.list_dir(parent) ?? panic("list publication parent")
     loop entry in entries {
         assert(!entry.name.starts_with(".jet-lock-"), "temporary leaked: {entry.path}")
     }
 }
 
-foundation_publication_test_reject: fn(root: String, relative: String, validate: (fn() -[FS, Env]> IOError!)?) Never! -[FS, Env, Time]> {
+foundation_publication_test_reject: fn(root: String, relative: String, validate: (fn() -[FS, Env]> IOError!)?) -[FS, Env, Time]> Never! {
     if foundation_write_file_nofollow_at_root(root, relative, "edited".bytes(), validate) == {
         .Ok(_) -> { panic("unsafe publication succeeded") }
         .Err(_) -> {}
     }
 }
 
-foundation_publication_test_staged: fn(root: String, expected: String) Never! -[FS]> {
+foundation_publication_test_staged: fn(root: String, expected: String) -[FS]> Never! {
     entries: files.list_dir(root) ?? panic("list stage")
     stages := 0
     loop entry in entries {

@@ -104,7 +104,7 @@ foundation_tree_hash: fn(root: String) -[FS]> String Never! {
     }
 }
 
-foundation_collect_tree_files: fn(directory: String, relative_dir: String, root: String, out: &[TreeHashFile], depth: Int, budget: &TreeHashBudget) TreeHashError! -[FS]> {
+foundation_collect_tree_files: fn(directory: String, relative_dir: String, root: String, out: &[TreeHashFile], depth: Int, budget: &TreeHashBudget) -[FS]> TreeHashError! {
     // Internal modules stay hash inputs: changes
     // automatic membership, not explicit imports or source-tree identity.
     entries: if files.list_dir(directory) == {
@@ -152,7 +152,7 @@ foundation_same_file_identity: fn(left: Stat, right: Stat) -> Bool Never! {
 
 // Fold one regular file into the tree hash through a no-follow handle whose
 // identity matches the walk's observation before and after reading.
-foundation_hash_regular_nofollow: fn(path: String, expected: Stat, hasher: &StreamingSHA256, total_bytes: &Int) TreeHashError! -[FS]> {
+foundation_hash_regular_nofollow: fn(path: String, expected: Stat, hasher: &StreamingSHA256, total_bytes: &Int) -[FS]> TreeHashError! {
     reader := files.open(path, links: .Refuse) ?? return Err(TreeHashError.IO{path: path, detail: "{err}"})
     opened: if reader.stat() == {
         .Ok(stat) -> stat
@@ -372,7 +372,7 @@ FoundationPublicationError: struct {
 // after write/fsync, before the final authority checks and descriptor-relative
 // rename; failure removes the stage. None uses the same mechanism without
 // source validation (e.g. a new lock).
-foundation_write_file_nofollow_at_root: fn(root: String, relative: String, contents: [U8], before_rename: (fn() -[FS, Env]> IOError!)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) FoundationPublicationError! -[FS, Env, Time]> {
+foundation_write_file_nofollow_at_root: fn(root: String, relative: String, contents: [U8], before_rename: (fn() -[FS, Env]> IOError!)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) -[FS, Env, Time]> FoundationPublicationError! {
     components: foundation_normal_components(true, relative) ?? return Err(FoundationPublicationError{phase: .PreparePath, error: err})
     if components.len() == 0 {
         return Err(FoundationPublicationError{phase: .PreparePath, error: foundation_io_error(true, relative, "file authority publication path is empty")})
@@ -460,7 +460,7 @@ FoundationFileAuthority: struct {
     // Rust Authority::ensure_paths_current: every held directory and the file
     // are still the objects bound at their paths (path metadata never follows
     // the final link).
-    ensure_paths_current: fn(self) IOError! -[FS]> {
+    ensure_paths_current: fn(self) -[FS]> IOError! {
         loop directory in self.directories {
             current: files.stat(directory.path)
             if !foundation_same_directory(current, directory.handle.stat()) {
@@ -498,7 +498,7 @@ FoundationFileAuthority: struct {
     // content check leaves out the link count: a file renamed over the source
     // path unlinks the held object without changing it, and the path check
     // names that failure as a move.
-    revalidate: fn(self) IOError! -[FS]> {
+    revalidate: fn(self) -[FS]> IOError! {
         held: self.handle.stat()
         if !held.is_file || !foundation_same_file_identity(self.identity, held) {
             return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input changed while it was held")}))
@@ -511,7 +511,7 @@ FoundationFileAuthority: struct {
 
     // Remove only this checked file's binding through its ORIGINAL parent.
     // Used by TUF rollback; a borrowed file authority cannot delete siblings.
-    remove: fn(self, basename: String) IOError! -[FS]> {
+    remove: fn(self, basename: String) -[FS]> IOError! {
         if basename != files.basename(self.relative) {
             return Err(foundation_io_error(true, basename, "file authority removal name does not match its held file"))
         }
@@ -527,7 +527,7 @@ FoundationFileAuthority: struct {
 FoundationDirectoryAuthority: struct {
     priv directories: [FoundationPublicationDirectory]
 
-    revalidate: fn(self) IOError! -[FS]> { foundation_ensure_directories_current(self.directories) }
+    revalidate: fn(self) -[FS]> IOError! { foundation_ensure_directories_current(self.directories) }
 
     // RuntimePolicy keys a session's nested claims by this ORIGINAL root inode.
     identity: fn(self) -[FS]> FileID IOError! {
@@ -553,7 +553,7 @@ FoundationDirectoryAuthority: struct {
         self.directories[self.directories.len() - 1].handle.create(name, if_exists: .Refuse, mode: Val(mode))
     }
 
-    remove: fn(self, name: String) IOError! -[FS]> {
+    remove: fn(self, name: String) -[FS]> IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
         self.directories[self.directories.len() - 1].handle.remove(name)
@@ -571,7 +571,7 @@ FoundationDirectoryAuthority: struct {
         Ok(info)
     }
 
-    rename: fn(self, from: String, to: String, if_exists: RenameIfExists{.Refuse}) IOError! -[FS]> {
+    rename: fn(self, from: String, to: String, if_exists: RenameIfExists{.Refuse}) -[FS]> IOError! {
         foundation_directory_authority_name(from)
         foundation_directory_authority_name(to)
         self.revalidate()
@@ -579,7 +579,7 @@ FoundationDirectoryAuthority: struct {
         self.revalidate()
     }
 
-    remove_tree: fn(self, name: String) IOError! -[FS]> {
+    remove_tree: fn(self, name: String) -[FS]> IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
         foundation_remove_held_tree(self.directories[self.directories.len() - 1].handle, name)
@@ -589,7 +589,7 @@ FoundationDirectoryAuthority: struct {
 
     path: fn(self) -> String Never! { self.directories[self.directories.len() - 1].path }
 
-    fsync: fn(self) IOError! -[FS]> {
+    fsync: fn(self) -[FS]> IOError! {
         self.revalidate()
         self.directories[self.directories.len() - 1].handle.fsync()
         self.revalidate()
@@ -675,7 +675,7 @@ FoundationDirectoryAuthority: struct {
         Ok("sha256-{digest}")
     }
 
-    copy_tree_from: fn(self, source: FoundationDirectoryAuthority, reject_hardlinks: Bool{true}) IOError! -[FS]> {
+    copy_tree_from: fn(self, source: FoundationDirectoryAuthority, reject_hardlinks: Bool{true}) -[FS]> IOError! {
         source.revalidate()
         self.revalidate()
         foundation_copy_held_tree(source.directories[source.directories.len() - 1].handle, self.directories[self.directories.len() - 1].handle, "", reject_hardlinks)
@@ -719,7 +719,7 @@ foundation_held_tree_names: fn(directory: Directory) -[FS]> [String] IOError! {
     Ok(out)
 }
 
-foundation_collect_held_tree: fn(directory: Directory, relative: String, rows: &[FoundationHeldTreeFile], depth: Int, reject_hardlinks: Bool) IOError! -[FS]> {
+foundation_collect_held_tree: fn(directory: Directory, relative: String, rows: &[FoundationHeldTreeFile], depth: Int, reject_hardlinks: Bool) -[FS]> IOError! {
     if depth > MAX_TREE_DEPTH {
         return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("package tree exceeds the maximum directory depth")}))
     }
@@ -757,7 +757,7 @@ foundation_collect_held_tree: fn(directory: Directory, relative: String, rows: &
     }
 }
 
-foundation_copy_held_tree: fn(source: Directory, destination: Directory, relative: String, reject_hardlinks: Bool) IOError! -[FS]> {
+foundation_copy_held_tree: fn(source: Directory, destination: Directory, relative: String, reject_hardlinks: Bool) -[FS]> IOError! {
     names: foundation_held_tree_names(source)
     loop name in names {
         path: if relative == "" -> name else -> files.join(relative, name)
@@ -1016,7 +1016,7 @@ foundation_reopen_held_chain: fn(held: [FoundationPublicationDirectory]) -[FS]> 
 
 // Rust rooted_authority::ensure_directories_current / same_directory.
 // Path metadata only checks binding; all mutation remains handle-relative.
-foundation_ensure_directories_current: fn(directories: [FoundationPublicationDirectory]) IOError! -[FS]> {
+foundation_ensure_directories_current: fn(directories: [FoundationPublicationDirectory]) -[FS]> IOError! {
     loop directory in directories {
         if !foundation_same_directory(files.stat(directory.path), directory.handle.stat()) {
             detail: if directory.publication_parent -> "file authority publication parent moved while it was held" else -> "file authority root moved while it was held"
@@ -1070,7 +1070,7 @@ foundation_io_error_with_cause: fn(error: IOError, cause: String) -> IOError Nev
 
 // Moved from Provider/RemoteCheckout: one descriptor-relative tree remover.
 // Core Directory open/list/unlink leaves remain #3593; no pathname fallback.
-foundation_remove_held_tree: fn(parent: Directory, child: String) IOError! -[FS]> {
+foundation_remove_held_tree: fn(parent: Directory, child: String) -[FS]> IOError! {
     directory: parent.open_directory(child) ?? {
         if err == .NotFound(_) {
             return

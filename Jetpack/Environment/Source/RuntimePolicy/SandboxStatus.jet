@@ -87,7 +87,7 @@ env_enforce_sandbox_policy: fn(theme: Theme, json_output: Bool) -[IO, FS, Env, E
 // The allow-mode capability loss at an executable-action boundary. A lint
 // only: the Store may still satisfy the action from a verified substitute, but
 // a local child must fail with E1275 when no substitute is available.
-env_warn_sandbox_fallback: fn(theme: Theme) Never! -[IO, FS, Env, Exec, Time.Wait]> {
+env_warn_sandbox_fallback: fn(theme: Theme) -[IO, FS, Env, Exec, Time.Wait]> Never! {
     status: env_detect_sandbox()
     if status.level == SandboxLevel.Fallback && env_read_sandbox_policy() == SandboxPolicy.AllowFallback {
         theme.warning_coded("L0205", SANDBOX_FALLBACK_WARNING, status.reason, SANDBOX_FALLBACK_FIX)

@@ -181,7 +181,7 @@ Listing: struct {
 
 run: fn() { main(process.args()) ?? process.fail(1, "stage-index-cache: {err.message}") }
 
-main: fn(args: [String]) StageError! -[Env, Exec, FS, IO, Rand]> {
+main: fn(args: [String]) -[Env, Exec, FS, IO, Rand]> StageError! {
     ensure_descriptor_fs() ?? return Err(err)
     options: parse_args(args) ?? return Err(err)
     if options.mode == {
@@ -383,7 +383,7 @@ target_name_ok: fn(name: String) -> Bool Never! {
 // The descriptor directory a child names its inherited handles through.
 fd_root: fn() -> String Never! { if sys.name() == "linux" -> "/proc/self/fd" else -> "/dev/fd" }
 
-ensure_descriptor_fs: fn() StageError! -[Env, FS]> {
+ensure_descriptor_fs: fn() -[Env, FS]> StageError! {
     if sys.name() == "windows" {
         return Err(failed("secure publication requires POSIX no-follow directory descriptors"))
     }
@@ -560,7 +560,7 @@ wanted: fn(size: Int, total: Int) -> Int Never! {
 }
 
 // The two open files hold the same bytes, and neither changed meanwhile.
-compare_files: fn(source: &files.FileReader, destination: &files.FileReader, limit: Int, label: String) StageError! -[FS]> {
+compare_files: fn(source: &files.FileReader, destination: &files.FileReader, limit: Int, label: String) -[FS]> StageError! {
     source_stat: source.stat() ?? return Err(failed("{label} source cannot be inspected: {err}"))
     destination_stat: destination.stat() ?? return Err(failed("{label} destination cannot be inspected: {err}"))
     if source_stat.size != destination_stat.size {
@@ -594,7 +594,7 @@ compare_files: fn(source: &files.FileReader, destination: &files.FileReader, lim
 }
 
 // The regular files `left` and `right` in `parent` hold the same bytes.
-compare_named: fn(parent: files.Directory, left: String, right: String, limit: Int, label: String) StageError! -[FS]> {
+compare_named: fn(parent: files.Directory, left: String, right: String, limit: Int, label: String) -[FS]> StageError! {
     temporary := open_regular_at(parent, left, "{label} temporary file", limit) ?? return Err(err)
     current := open_regular_at(parent, right, label, limit) ?? return Err(err)
     compare_files(temporary, current, limit, label)
@@ -607,7 +607,7 @@ temporary_name: fn(prefix: String) -[Env, Rand]> String StageError! {
 
 // Remove the file or link `name` this publisher made, unless another entry
 // took the name since (`identity` says which file it made).
-remove_owned: fn(parent: files.Directory, name: String, identity: files.Stat?) Never! -[FS]> {
+remove_owned: fn(parent: files.Directory, name: String, identity: files.Stat?) -[FS]> Never! {
     found: entry_at(parent, name, "temporary file") ?? return
     if found == .Present(stat) {
         if identity == .Val(owned) && !same_identity(stat, owned) {
@@ -647,7 +647,7 @@ fill_bytes: fn(writer: &files.FileWriter, bytes: [U8], label: String) -[FS]> fil
 
 // Move the written `temporary` to `name` without replacing anything. When
 // another publisher already placed `name`, its bytes must equal ours.
-place: fn(parent: files.Directory, temporary: String, name: String, identity: files.Stat, limit: Int, label: String) StageError! -[FS]> {
+place: fn(parent: files.Directory, temporary: String, name: String, identity: files.Stat, limit: Int, label: String) -[FS]> StageError! {
     if parent.rename(temporary, name, if_exists: .Refuse) == {
         .Ok(_) -> {}
         .Err(.AlreadyExists(_)) -> {
@@ -673,7 +673,7 @@ place: fn(parent: files.Directory, temporary: String, name: String, identity: fi
 
 // Publish the open `source` as `name` in `destination` once: an existing
 // file must already hold the same bytes.
-copy_open_file: fn(source: &files.FileReader, destination: files.Directory, name: String, limit: Int, label: String) StageError! -[Env, FS, Rand]> {
+copy_open_file: fn(source: &files.FileReader, destination: files.Directory, name: String, limit: Int, label: String) -[Env, FS, Rand]> StageError! {
     existing: entry_at(destination, name, label) ?? return Err(err)
     if existing == .Present(found) {
         if found.is_symlink -> return Err(failed("{label} destination must not be a symlink"))
@@ -693,7 +693,7 @@ copy_open_file: fn(source: &files.FileReader, destination: files.Directory, name
 }
 
 // Publish `bytes` as `name` in `destination` once.
-write_immutable_bytes: fn(destination: files.Directory, name: String, bytes: [U8], limit: Int, label: String) StageError! -[Env, FS, Rand]> {
+write_immutable_bytes: fn(destination: files.Directory, name: String, bytes: [U8], limit: Int, label: String) -[Env, FS, Rand]> StageError! {
     if bytes.len() == 0 -> return Err(failed("{label} is empty"))
     if bytes.len() > limit -> return Err(failed("{label} exceeds the {limit} byte bound"))
     existing: entry_at(destination, name, label) ?? return Err(err)
@@ -736,7 +736,7 @@ listed: fn(listing: Listing, name: String) -> Bool Never! {
 }
 
 // The listing has not changed since `listing` was taken.
-unchanged: fn(directory: files.Directory, listing: Listing, message: String) StageError! -[FS]> {
+unchanged: fn(directory: files.Directory, listing: Listing, message: String) -[FS]> StageError! {
     after: directory.stat() ?? return Err(failed("{message}: {err}"))
     if !same_snapshot(listing.snapshot, after) -> return Err(failed(message))
     Ok()
@@ -754,13 +754,13 @@ manifest_limit: fn(name: String) -> Int Never! {
     if name == "manifest.json" -> MAX_MANIFEST_BYTES else -> MAX_SIGNATURE_BYTES
 }
 
-validate_auxiliary_index_file: fn(parent: files.Directory, name: String) StageError! -[FS]> {
+validate_auxiliary_index_file: fn(parent: files.Directory, name: String) -[FS]> StageError! {
     reader: open_regular_at(parent, name, "index source {name}", MAX_DECODED_BYTES) ?? return Err(err)
     close(reader)
     Ok()
 }
 
-copy_index_tree: fn(source: files.Directory, destination: files.Directory, label: String, relative: [String], channel: String?) StageError! -[Env, FS, Rand]> {
+copy_index_tree: fn(source: files.Directory, destination: files.Directory, label: String, relative: [String], channel: String?) -[Env, FS, Rand]> StageError! {
     listing: entries_at(source, label) ?? return Err(err)
     in_manifest: manifest_directory(relative, channel)
     has_manifest: listed(listing, "manifest.json") && listed(listing, "manifest.json.sig.json")
@@ -808,7 +808,7 @@ copy_index_tree: fn(source: files.Directory, destination: files.Directory, label
 
 transient: fn(name: String) -> Bool Never! { name.starts_with(".") || name.contains(".partial-") }
 
-copy_cache_tree: fn(source: files.Directory, destination: files.Directory, label: String) StageError! -[Env, FS, Rand]> {
+copy_cache_tree: fn(source: files.Directory, destination: files.Directory, label: String) -[Env, FS, Rand]> StageError! {
     listing: entries_at(source, label) ?? return Err(err)
     loop entry in listing.entries {
         name: entry.name
@@ -828,7 +828,7 @@ copy_cache_tree: fn(source: files.Directory, destination: files.Directory, label
     unchanged(source, listing, "{label} changed during publication")
 }
 
-validate_cache_tree: fn(source: files.Directory, label: String) StageError! -[FS]> {
+validate_cache_tree: fn(source: files.Directory, label: String) -[FS]> StageError! {
     listing: entries_at(source, label) ?? return Err(err)
     loop entry in listing.entries {
         name: entry.name
@@ -847,7 +847,7 @@ validate_cache_tree: fn(source: files.Directory, label: String) StageError! -[FS
     unchanged(source, listing, "{label} changed while it was checked")
 }
 
-validate_index_target_tree: fn(source: files.Directory, label: String, relative: [String], channel: String?) StageError! -[FS]> {
+validate_index_target_tree: fn(source: files.Directory, label: String, relative: [String], channel: String?) -[FS]> StageError! {
     listing: entries_at(source, label) ?? return Err(err)
     in_manifest: manifest_directory(relative, channel)
     has_manifest: listed(listing, "manifest.json") && listed(listing, "manifest.json.sig.json")
@@ -902,7 +902,7 @@ file_limit: fn(kind: Kind, name: String) -> Int Never! {
 }
 
 // `destination` holds exactly the names and bytes of `source`.
-compare_tree: fn(source: files.Directory, destination: files.Directory, kind: Kind, label: String) StageError! -[FS]> {
+compare_tree: fn(source: files.Directory, destination: files.Directory, kind: Kind, label: String) -[FS]> StageError! {
     source_listing: entries_at(source, label) ?? return Err(err)
     destination_listing: entries_at(destination, "{label} destination") ?? return Err(err)
     loop entry in source_listing.entries {
@@ -1222,7 +1222,7 @@ validate_target: fn(item: Dyn, seen: &[String]) -> Target StageError! {
 
 // Each manifest target and its signature sidecar sit under
 // `<revision>/<system>/` in `root` with the lengths and digests it names.
-validate_manifest_targets: fn(root: files.Directory, manifest: Manifest) StageError! -[FS]> {
+validate_manifest_targets: fn(root: files.Directory, manifest: Manifest) -[FS]> StageError! {
     loop target in manifest.targets {
         revision: open_directory_at(root, target.revision, "index target revision", .Refuse) ?? return Err(err)
         system: open_directory_at(revision, target.system, "index target system", .Refuse) ?? return Err(err)
@@ -1275,7 +1275,7 @@ read_manifest_from_path: fn(path: String, channel: String) -[FS]> ManifestInfo S
 }
 
 // `index_root` still holds the manifest `info` read, and every target it names.
-validate_staged_index: fn(index_root: files.Directory, info: ManifestInfo, label: String) StageError! -[FS]> {
+validate_staged_index: fn(index_root: files.Directory, info: ManifestInfo, label: String) -[FS]> StageError! {
     current: read_manifest_from_directories(index_root, info.manifest.channel) ?? return Err(err)
     if current.bytes != info.bytes {
         return Err(failed("{label} manifest changed after it was read"))
@@ -1311,7 +1311,7 @@ generation_number: fn(name: String) -> Int StageError! {
 
 // Refuse a generation below the newest one held, and a second generation
 // with this number but other manifest bytes.
-inspect_generation_history: fn(generations: files.Directory, id: String, generation: Int) StageError! -[FS]> {
+inspect_generation_history: fn(generations: files.Directory, id: String, generation: Int) -[FS]> StageError! {
     listing: entries_at(generations, "publication generations") ?? return Err(err)
     highest := 0
     loop entry in listing.entries {
@@ -1374,7 +1374,7 @@ acquire_lock: fn(root: files.Directory) -[Env, FS]> files.Stat StageError! {
     writer.stat() ?? return Err(failed("publication lock cannot be inspected: {err}"))
 }
 
-release_lock: fn(root: files.Directory, lock: files.Stat) StageError! -[FS]> {
+release_lock: fn(root: files.Directory, lock: files.Stat) -[FS]> StageError! {
     if still_same(root, LOCK_NAME, lock) ?? return Err(err) {
         root.remove(LOCK_NAME) ?? return Err(failed("publication lock cannot be removed: {err}"))
         root.fsync() ?? return Err(failed("publication root cannot be synced: {err}"))
@@ -1382,7 +1382,7 @@ release_lock: fn(root: files.Directory, lock: files.Stat) StageError! -[FS]> {
     Ok()
 }
 
-sync_tree: fn(directory: files.Directory) StageError! -[FS]> {
+sync_tree: fn(directory: files.Directory) -[FS]> StageError! {
     listing: entries_at(directory, "publication generation") ?? return Err(err)
     loop entry in listing.entries {
         if !entry.is_dir -> next
@@ -1397,7 +1397,7 @@ sync_tree: fn(directory: files.Directory) StageError! -[FS]> {
 // made beside `current` and renamed over it from the held root, so a root
 // path swapped after it was opened fails the rename instead of moving the
 // pointer.
-advance_current: fn(root: files.Directory, generations: files.Directory, id: String, generation: Int) StageError! -[Env, FS, Rand]> {
+advance_current: fn(root: files.Directory, generations: files.Directory, id: String, generation: Int) -[Env, FS, Rand]> StageError! {
     existing: current_generation(root, generations) ?? return Err(err)
     if existing == .At(current) {
         if current.id == id -> return Ok()
@@ -1427,7 +1427,7 @@ kind_name: fn(kind: Kind) -> String Never! {
 
 // `final` already holds this generation: it must match `source` exactly.
 // `.Source` also revalidates the whole staged source tree first.
-verify_existing: fn(source: files.Directory, final: files.Directory, info: ManifestInfo, kind: Kind, recheck: Recheck) StageError! -[FS]> {
+verify_existing: fn(source: files.Directory, final: files.Directory, info: ManifestInfo, kind: Kind, recheck: Recheck) -[FS]> StageError! {
     if kind == {
         .Index -> {
             validate_staged_index(source, info, "staged index") ?? return Err(err)
@@ -1443,7 +1443,7 @@ verify_existing: fn(source: files.Directory, final: files.Directory, info: Manif
     }
 }
 
-publish_generation: fn(source: files.Directory, root: files.Directory, generation: Generation, info: ManifestInfo, kind: Kind) StageError! -[Env, FS, Rand]> {
+publish_generation: fn(source: files.Directory, root: files.Directory, generation: Generation, info: ManifestInfo, kind: Kind) -[Env, FS, Rand]> StageError! {
     label: kind_name(kind)
     generations: open_directory_at(root, "generations", "{label} generations", .Create) ?? return Err(err)
     inspect_generation_history(generations, generation.id, generation.generation) ?? return Err(err)
@@ -1465,7 +1465,7 @@ publish_generation: fn(source: files.Directory, root: files.Directory, generatio
 
 // Build the generation under a private name, then move it into place. A
 // publisher that won the race already placed it: its tree must match.
-publish_new_generation: fn(source: files.Directory, generations: files.Directory, generation: Generation, info: ManifestInfo, kind: Kind) StageError! -[Env, FS, Rand]> {
+publish_new_generation: fn(source: files.Directory, generations: files.Directory, generation: Generation, info: ManifestInfo, kind: Kind) -[Env, FS, Rand]> StageError! {
     label: kind_name(kind)
     temporary: temporary_name("generation-{generation.generation}") ?? return Err(err)
     partial: open_directory_at(generations, temporary, "{label} partial generation", .Create) ?? return Err(err)
@@ -1489,7 +1489,7 @@ publish_new_generation: fn(source: files.Directory, generations: files.Directory
     Ok()
 }
 
-publish_endpoint: fn(source: files.Directory, destination: String, generation: Generation, info: ManifestInfo, kind: Kind) StageError! -[Env, FS, Rand]> {
+publish_endpoint: fn(source: files.Directory, destination: String, generation: Generation, info: ManifestInfo, kind: Kind) -[Env, FS, Rand]> StageError! {
     root: open_directory_path(destination, "{kind_name(kind)} publication root", .Create) ?? return Err(err)
     lock: acquire_lock(root) ?? return Err(err)
     if publish_generation(source, root, generation, info, kind) == {
@@ -1501,7 +1501,7 @@ publish_endpoint: fn(source: files.Directory, destination: String, generation: G
     }
 }
 
-publish: fn(options: Options) StageError! -[Env, FS, IO, Rand]> {
+publish: fn(options: Options) -[Env, FS, IO, Rand]> StageError! {
     staging: open_directory_path(options.staging, "staging", .Refuse) ?? return Err(err)
     index: open_directory_at(staging, "index", "staged index root", .Refuse) ?? return Err(err)
     cache: open_directory_at(staging, "cache", "staged cache root", .Refuse) ?? return Err(err)
@@ -1514,7 +1514,7 @@ publish: fn(options: Options) StageError! -[Env, FS, IO, Rand]> {
     Ok()
 }
 
-stage: fn(options: Options) StageError! -[Env, Exec, FS, IO, Rand]> {
+stage: fn(options: Options) -[Env, Exec, FS, IO, Rand]> StageError! {
     producer: open_directory_path(options.index_root, "index root", .Refuse) ?? return Err(err)
     output: open_directory_path(options.output, "output", .Create) ?? return Err(err)
     hangar: open_directory_path(options.hangar_root, "Hangar root", .Refuse) ?? return Err(err)
@@ -1535,7 +1535,7 @@ stage: fn(options: Options) StageError! -[Env, Exec, FS, IO, Rand]> {
     Ok()
 }
 
-stage_index: fn(producer: files.Directory, output: files.Directory, info: ManifestInfo, channel: String) StageError! -[Env, FS, Rand]> {
+stage_index: fn(producer: files.Directory, output: files.Directory, info: ManifestInfo, channel: String) -[Env, FS, Rand]> StageError! {
     producer_targets: open_directory_at(producer, "index-v1", "index target root", .Refuse) ?? return Err(err)
     validate_manifest_targets(producer_targets, info.manifest) ?? return Err(err)
     index: open_directory_at(output, "index", "index publication root", .Create) ?? return Err(err)
@@ -1565,7 +1565,7 @@ create_private_directory: fn(parent: files.Directory, label: String) -[Env, FS, 
 
 // Remove everything below the held `directory`; a subdirectory renamed in
 // meanwhile is left alone.
-remove_tree: fn(directory: files.Directory, label: String) StageError! -[FS]> {
+remove_tree: fn(directory: files.Directory, label: String) -[FS]> StageError! {
     listing: entries_at(directory, label) ?? return Err(err)
     loop entry in listing.entries {
         name: entry.name
@@ -1590,7 +1590,7 @@ remove_tree: fn(directory: files.Directory, label: String) StageError! -[FS]> {
     Ok()
 }
 
-remove_private_directory: fn(parent: files.Directory, name: String, identity: files.Stat) StageError! -[FS]> {
+remove_private_directory: fn(parent: files.Directory, name: String, identity: files.Stat) -[FS]> StageError! {
     scratch: open_directory_at(parent, name, "cache stage scratch", .Refuse) ?? return Err(err)
     remove_tree(scratch, "cache stage scratch") ?? return Err(err)
     close(scratch)
@@ -1603,7 +1603,7 @@ remove_private_directory: fn(parent: files.Directory, name: String, identity: fi
 
 // Run `jetpack hangar cache stage` into a private scratch directory, then
 // copy its checked output into `<output>/cache`.
-stage_cache: fn(output: files.Directory, hangar: files.Directory, jetpack: files.FileReader, options: Options) StageError! -[Env, Exec, FS, Rand]> {
+stage_cache: fn(output: files.Directory, hangar: files.Directory, jetpack: files.FileReader, options: Options) -[Env, Exec, FS, Rand]> StageError! {
     cache: open_directory_at(output, "cache", "cache publication root", .Create) ?? return Err(err)
     parent: open_directory_path(files.join(repo_root(), ".tmp"), "cache stage scratch parent", .Create) ?? return Err(err)
     name: create_private_directory(parent, "cache stage scratch") ?? return Err(err)
@@ -1620,7 +1620,7 @@ stage_cache: fn(output: files.Directory, hangar: files.Directory, jetpack: files
 
 // The child sees the Hangar root at descriptor 3, the scratch directory at
 // 4 and the checked jetpack executable at 5, so neither path is reopened.
-fill_cache: fn(cache: files.Directory, output: files.Directory, hangar: files.Directory, jetpack: files.FileReader, scratch: files.Directory, parent: files.Directory, name: String, identity: files.Stat, options: Options) StageError! -[Env, Exec, FS, Rand]> {
+fill_cache: fn(cache: files.Directory, output: files.Directory, hangar: files.Directory, jetpack: files.FileReader, scratch: files.Directory, parent: files.Directory, name: String, identity: files.Stat, options: Options) -[Env, Exec, FS, Rand]> StageError! {
     root_handle: hangar.duplicate() ?? return Err(failed("Hangar root cannot be passed to jetpack: {err}"))
     scratch_handle: scratch.duplicate() ?? return Err(failed("cache stage scratch cannot be passed to jetpack: {err}"))
     executable: open_regular_path(options.jetpack, "jetpack binary", MAX_EXECUTABLE_BYTES) ?? return Err(err)

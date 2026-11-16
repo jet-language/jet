@@ -234,7 +234,7 @@ cli_read_logs_error: fn(theme: Theme, reason: String) -[IO, Time.Wait]> Int Neve
 
 // U27: after a failed build, open an interactive shell in the preserved,
 // verified build scratch.
-cli_shell_on_failed_build: fn(theme: Theme, roots: HangarRoots, package: String) Never! -[IO, FS, Env, Exec, Time.Wait]> {
+cli_shell_on_failed_build: fn(theme: Theme, roots: HangarRoots, package: String) -[IO, FS, Env, Exec, Time.Wait]> Never! {
     // A missing or unreadable attempt record means there is no shell to open.
     attempt: recipe_debug_latest(roots.hangar_dir(), package) ?? return
     if attempt.status != "failed" || attempt.scratch_dir == "" {

@@ -33,7 +33,7 @@ WebOutputAuthority: struct {
     }
 
     // The member `name` must be present as a regular file with one link.
-    require_file: fn(self, name: String) IOError! -[FS.Read]> {
+    require_file: fn(self, name: String) -[FS.Read]> IOError! {
         web_output_normal_name(name)
         _ := web_output_member(self.directory, self.path, name)
     }
@@ -41,7 +41,7 @@ WebOutputAuthority: struct {
     // Move the member `name` into `destination` under the same name,
     // replacing a regular destination member, and check that the published
     // file is the one that left this directory.
-    rename_file_to: fn(self, name: String, destination: WebOutputAuthority) IOError! -[FS]> {
+    rename_file_to: fn(self, name: String, destination: WebOutputAuthority) -[FS]> IOError! {
         web_output_normal_name(name)
         source: web_output_member(self.directory, self.path, name)
         if web_output_member(destination.directory, destination.path, name) == .Err(error) {
@@ -53,7 +53,7 @@ WebOutputAuthority: struct {
     }
 
     // Remove the member `name`; a missing member is success.
-    remove_file_if_exists: fn(self, name: String) IOError! -[FS]> {
+    remove_file_if_exists: fn(self, name: String) -[FS]> IOError! {
         web_output_normal_name(name)
         web_output_member(self.directory, self.path, name) ?? {
             if err == .NotFound(_) -> return
@@ -87,7 +87,7 @@ WebOutputAuthority: struct {
     }
 
     // Remove the empty child directory `name`; a missing one is success.
-    remove_child_directory: fn(self, name: String) IOError! -[FS]> {
+    remove_child_directory: fn(self, name: String) -[FS]> IOError! {
         web_output_normal_name(name)
         self.directory.remove_directory(name) ?? {
             if err == .NotFound(_) -> return
@@ -117,7 +117,7 @@ web_output_open: fn(out_dir: String, root: String) -[FS, Env]> WebOutputAuthorit
 
 // Make `path` a real directory: an existing link or non-directory is refused,
 // and missing ancestors are created the same way, nearest the root first.
-web_output_ensure_directory: fn(path: String) IOError! -[FS]> {
+web_output_ensure_directory: fn(path: String) -[FS]> IOError! {
     missing := false
     if files.lstat(path) == {
         .Ok(info) -> {
@@ -143,7 +143,7 @@ web_output_ensure_directory: fn(path: String) IOError! -[FS]> {
 // then the staged members move in; on any failure the published members are
 // removed and the backed-up ones restored. Every member is checked before the
 // first move. The caller holds the static-reader publication lock.
-web_output_publish: fn(staging: String, out_dir: String, root: String) IOError! -[FS, Env]> {
+web_output_publish: fn(staging: String, out_dir: String, root: String) -[FS, Env]> IOError! {
     output_root: web_output_open(out_dir, root)
     staging_name: files.basename(staging)
     web_output_normal_name(staging_name)

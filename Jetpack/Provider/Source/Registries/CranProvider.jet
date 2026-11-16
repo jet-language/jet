@@ -36,7 +36,7 @@ CranSourceArtifact: struct {
 
 CranProvider: struct {
     // A locked CRAN realization must still match `authority.providers`.
-    validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
+    validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> ProviderError! {
         project: ctx.project_dir ?? return
         locked: pkg_lock_cran_realization(project, spec.raw) ?? return
         current: provider_cran_cache_authority(ctx)
@@ -384,7 +384,7 @@ provider_cran_closure_hash: fn(artifacts: [CranSourceArtifact]) -> String Never!
 }
 
 // `R CMD INSTALL` one source tarball into the output library.
-provider_cran_install: fn(source: String, library: String) RegistryError! -[Exec, Time.Wait]> {
+provider_cran_install: fn(source: String, library: String) -[Exec, Time.Wait]> RegistryError! {
     spec: process.cmd([String]{"R", "CMD", "INSTALL", "--no-multiarch", "--no-test-load", "--library={library}", source})
         .env("R_LIBS_USER", library)
         .stdout(.Inherit)
@@ -393,7 +393,7 @@ provider_cran_install: fn(source: String, library: String) RegistryError! -[Exec
 }
 
 // `bin/Rscript`: the provisioned Rscript with the output library first.
-provider_cran_write_runtime_wrapper: fn(out: String) RegistryError! -[FS, Env]> {
+provider_cran_write_runtime_wrapper: fn(out: String) -[FS, Env]> RegistryError! {
     rscript: provider_registry_which("Rscript") ?? return Err(RegistryError.Reason("provisioned Rscript was not found"))
     bin: files.join(out, "bin")
     provider_registry_create_dir_all(bin, "could not create R runtime wrapper")

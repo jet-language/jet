@@ -84,7 +84,7 @@ RootWorkspace: struct {
     }
 
     // Remove the private root (Rust `Drop`).
-    remove: fn(self) Never! -[FS]> {
+    remove: fn(self) -[FS]> Never! {
         if !files.lexists(self.path) {
             return
         }
@@ -93,7 +93,7 @@ RootWorkspace: struct {
     }
 }
 
-store_repro_copy_nix_cache_configuration: fn(target: HangarRoots, source: HangarRoots) StoreError! -[FS]> {
+store_repro_copy_nix_cache_configuration: fn(target: HangarRoots, source: HangarRoots) -[FS]> StoreError! {
     relatives: [String]{STORE_NIX_ENDPOINT_CONFIG, STORE_NIX_TRUST_KEY_CONFIG}
     loop relative in relatives {
         source_path: files.join(source.root, relative)
@@ -122,7 +122,7 @@ PreparedRealization: struct {
     attestation: String?
     priv workspaces: [RootWorkspace]
 
-    release: fn(self) Never! -[FS]> {
+    release: fn(self) -[FS]> Never! {
         loop workspace in self.workspaces -> workspace.remove()
     }
 }
@@ -268,7 +268,7 @@ store_repro_request_package: fn(request: RealizeRequest) -> String Never! {
     }
 }
 
-store_repro_check_cancelled: fn(options: IndependentRootOptions) RealizeError! -[FS]> {
+store_repro_check_cancelled: fn(options: IndependentRootOptions) -[FS]> RealizeError! {
     cancelled: options.cancelled ?? return
     if cancelled() {
         return Err(RealizeError.Store(StoreError.Interrupted("independent reproducibility certification cancelled")))
@@ -369,19 +369,19 @@ store_repro_entry_from_realized: fn(verification: &StoreVerification, roots: Han
 
 // Certify one closure batch against one snapshot of the existing projection.
 // Batch registration must not re-read every existing record per candidate.
-store_certify_registrations_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, entries: [StoreEntry]) StoreError! -[FS, Env]> {
+store_certify_registrations_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, entries: [StoreEntry]) -[FS, Env]> StoreError! {
     existing: store_list_unlocked(roots)
     loop entry in entries {
         store_repro_certify_registration(verification, roots, entry, entries, None, existing)
     }
 }
 
-store_certify_registration_unlocked_with_fresh_agreement: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], action_key: String) StoreError! -[FS, Env]> {
+store_certify_registration_unlocked_with_fresh_agreement: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], action_key: String) -[FS, Env]> StoreError! {
     existing: store_list_unlocked(roots)
     store_repro_certify_registration(verification, roots, entry, additional, Val(action_key), existing)
 }
 
-store_repro_certify_registration: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], fresh_action_key: String?, existing: [StoreEntry]) StoreError! -[FS, Env]> {
+store_repro_certify_registration: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], fresh_action_key: String?, existing: [StoreEntry]) -[FS, Env]> StoreError! {
     action_key: store_entry_action_key(entry)
     producer: store_repro_decode_producer(entry)
     fresh_agreement: fresh_action_key == Val((action_key)) && (producer.facts.get("cache.reproducibility") ?? "").starts_with(STORE_REPRO_INDEPENDENT_PREFIX)
@@ -512,12 +512,12 @@ store_reproducibility_blocked: fn(roots: HangarRoots, action_key: String) -[FS]>
 
 // Clear divergence evidence only after the complete promotion boundary has
 // succeeded, so a killed worker or later publication failure stays fail-closed.
-store_clear_reproducibility_report: fn(roots: HangarRoots, action_key: String) StoreError! -[FS, Env, Time]> {
+store_clear_reproducibility_report: fn(roots: HangarRoots, action_key: String) -[FS, Env, Time]> StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_repro_remove_report(roots, action_key)
 }
 
-store_repro_remove_report: fn(roots: HangarRoots, action_key: String) StoreError! -[FS]> {
+store_repro_remove_report: fn(roots: HangarRoots, action_key: String) -[FS]> StoreError! {
     directory: store_repro_report_directory(roots, false) ?? return
     path: store_repro_report_path(directory, action_key)
     info: if files.stat(path) == {
@@ -615,7 +615,7 @@ store_repro_persist_report: fn(roots: HangarRoots, action_key: String, report: S
     Ok(destination)
 }
 
-store_repro_publish_report: fn(directory: String, partial: String, destination: String, report: String) StoreError! -[FS]> {
+store_repro_publish_report: fn(directory: String, partial: String, destination: String, report: String) -[FS]> StoreError! {
     output := files.create(partial, if_exists: .Refuse)
     output.write_bytes(report.bytes())
     output.fsync()
@@ -648,7 +648,7 @@ store_repro_report_directory: fn(roots: HangarRoots, create: Bool) -[FS]> String
     Ok(Val(directory))
 }
 
-store_repro_ensure_directory: fn(path: String, create: Bool) StoreError! -[FS]> {
+store_repro_ensure_directory: fn(path: String, create: Bool) -[FS]> StoreError! {
     info: if files.stat(path) == {
         .Ok(found) -> found
         .Err(error) -> {
@@ -696,7 +696,7 @@ store_repro_report_file_stem: fn(action_key: String) -> String Never! {
     "sha256-{crypto.sha256(raw).hex()}"
 }
 
-store_repro_verify_existing_output: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) StoreError! -[FS, Env]> {
+store_repro_verify_existing_output: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env]> StoreError! {
     actual: store_try_entry_output_hash(verification, roots, entry)
     if actual != entry.envelope.output_hash {
         return Err(store_repro_invalid("existing action output `{entry.id}` is corrupt: expected `{entry.envelope.output_hash}`, got `{actual}`"))

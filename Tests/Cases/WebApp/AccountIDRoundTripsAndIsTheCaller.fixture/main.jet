@@ -20,7 +20,7 @@ tasks_in: fn(store: db.Store) -> db.Table<Int, Task> {
 }
 
 // Stores task `id`, owned by the caller.
-claim: fn(store: db.Store, id: Int, title: String) db.DBError! -[DB.Read, DB.Write]> {
+claim: fn(store: db.Store, id: Int, title: String) -[DB.Read, DB.Write]> db.DBError! {
     _: tasks_in(store).put(Task{id: id, owner: app.caller(), title: title}) ?? return Err(err)
     Ok()
 }

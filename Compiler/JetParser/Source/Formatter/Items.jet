@@ -1347,7 +1347,6 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
         jfmt_fmt_param_list(f, m.params, param_source)
         jfmt_write(f, ")")
         unit_fallible: if m.return_type == .Val(ret) -> jfmt_is_unit_fallible_type(ret) else -> false
-        if unit_fallible && m.return_type == .Val(ret) -> jfmt_fmt_unit_fallible_return(f, ret)
         if m.declared_effects == .Val(effects) {
             source: jfmt_source_effect_row_span_after(f, m.name_span.end)
             jfmt_write(f, " ")
@@ -1359,6 +1358,7 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
             jfmt_write(f, "-[")
             jfmt_write(f, "]>")
         }
+        if unit_fallible && m.return_type == .Val(ret) -> jfmt_fmt_unit_fallible_return(f, ret)
         if !unit_fallible && m.return_type == .Val(ret) {
             if m.declared_effects != None || m.is_pure {
                 jfmt_write(f, " ")
@@ -1889,8 +1889,6 @@ jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
     }
     jfmt_write(f, ")")
     unit_fallible: if func.return_type == .Val(ret) -> jfmt_is_unit_fallible_type(ret) else -> false
-    // The unit error contract precedes effects.
-    if unit_fallible && func.return_type == .Val(ret) -> jfmt_fmt_unit_fallible_return(f, ret)
     has_effect_row: func.declared_effects != None || func.effect_via != None || func.is_pure
     if has_effect_row {
         if func.declared_effects == .Val(effects) {
@@ -1920,6 +1918,8 @@ jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
         jfmt_write(f, " -> ")
         jfmt_fmt_type_at(f, ret, func.return_type_span)
     }
+    // The unit error contract follows the effect row.
+    if unit_fallible && func.return_type == .Val(ret) -> jfmt_fmt_unit_fallible_return(f, ret)
     if func.declared_return_view_provenance == .Val(map) {
         jfmt_fmt_declared_return_view_from(f, map, func.params)
     }
@@ -2720,6 +2720,13 @@ jfmt_fmt_impl: fn(f: &JetFmt, i: ImplDef) {
     if i.delegation_field == .Val(field) {
         jfmt_write(f, " using ")
         jfmt_write(f, field)
+        return
+    }
+    // An empty `impl Name.Effect` block beside its type prints as the
+    // in-body `impl Effect {}` does (jfmt_fmt_effect_impl).
+    empty: i.methods.len() == 0 && i.assoc_type_impls.len() == 0 && i.constants.len() == 0 && i.markers.len() == 0
+    if empty && (i.trait_name ?? "") == "Effect" {
+        jfmt_write(f, " {{}}")
         return
     }
     jfmt_write(f, " {{")

@@ -135,7 +135,7 @@ ColumnFlagWalker: struct {
 // sqlite3ComputeGeneratedColumns: with the ordinary columns of table t in
 // the registers from i_reg_store, compute its STORED and VIRTUAL columns,
 // each after the generated columns it uses.
-compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: Int) Never! -[DB]> {
+compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: Int) -[DB]> Never! {
     table_affinity(p, t, i_reg_store)
     if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_STORED) != 0 {
         last: cg.v_last_addr(p)
@@ -636,7 +636,7 @@ complete_insertion: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx
 // on_error the OR clause (OE_DEFAULT for none); upsert the ON CONFLICT
 // clauses (-1 for none), which this build rejects. The statement owns and
 // deletes its arguments.
-insert: fn(p: &cg.Parse, a: &ast.AST, src: Int, select0: Int, column: Int, on_error: Int, upsert: Int) Never! -[DB]> {
+insert: fn(p: &cg.Parse, a: &ast.AST, src: Int, select0: Int, column: Int, on_error: Int, upsert: Int) -[DB]> Never! {
     select := select0
     list := -1
     if cg.n_err(a) == 0 {
@@ -656,7 +656,7 @@ insert: fn(p: &cg.Parse, a: &ast.AST, src: Int, select0: Int, column: Int, on_er
 }
 
 // The body of sqlite3Insert up to its insert_cleanup label.
-insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, column: Int, on_error: Int, upsert: Int) Never! -[DB]> {
+insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, column: Int, on_error: Int, upsert: Int) -[DB]> Never! {
     t: dl.src_list_lookup(p, a, src)
     if t < 0 {
         return

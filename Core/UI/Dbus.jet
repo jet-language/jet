@@ -297,7 +297,7 @@ send: fn(c: &DbusConnection, message: DbusMessage) -[Net, Time]> Int DbusError! 
 }
 
 // Asks the bus for the signals `rule` matches.
-add_match: fn(c: &DbusConnection, rule: String, timeout_ns: Int) DbusError! -[Net, Time]> {
+add_match: fn(c: &DbusConnection, rule: String, timeout_ns: Int) -[Net, Time]> DbusError! {
     _: call(c, BUS_NAME, BUS_PATH, BUS_NAME, "AddMatch", [DbusValue]{DbusValue.Text(rule)}, timeout_ns) ?? return Err(err)
     Ok()
 }
@@ -327,7 +327,7 @@ signals: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> [DbusMessage] Dbu
 
 // A message that is no reply being waited for: a signal is queued, a call
 // that wants a reply hears that no method is here, and the rest go.
-set_aside: fn(c: &DbusConnection, m: DbusMessage) DbusError! -[Net, Time]> {
+set_aside: fn(c: &DbusConnection, m: DbusMessage) -[Net, Time]> DbusError! {
     if m.kind == .Signal {
         if c.queued.len() >= QUEUE_MAX -> c.queued = c.queued[1..<c.queued.len()].copy()
         c.queued.push(m.copy())
@@ -379,7 +379,7 @@ next_message: fn(c: &DbusConnection) -> DbusMessage? DbusError! {
 }
 
 // Waits until `deadline` for bytes from the bus and adds them to the inbox.
-receive_some: fn(c: &DbusConnection, deadline: Int, what: String) DbusError! -[Net, Time]> {
+receive_some: fn(c: &DbusConnection, deadline: Int, what: String) -[Net, Time]> DbusError! {
     left: deadline - now()
     if left <= 0 -> return Err(DbusError.Timeout("the bus did not answer {what} in time"))
     ready: net.unix_wait(c.stream, left) ?? return Err(DbusError.Connect("waiting for the bus failed: {err}"))
@@ -388,14 +388,14 @@ receive_some: fn(c: &DbusConnection, deadline: Int, what: String) DbusError! -[N
 }
 
 // Reads what the socket holds into the inbox; descriptors are dropped.
-take_bytes: fn(c: &DbusConnection) DbusError! -[Net, Time]> {
+take_bytes: fn(c: &DbusConnection) -[Net, Time]> DbusError! {
     got: net.unix_receive(c.stream, RECEIVE_MAX) ?? return Err(DbusError.Connect("reading from the bus failed: {err}"))
     if got.bytes.len() == 0 -> return Err(DbusError.Closed)
     loop b in got.bytes -> c.inbox.push(b)
     Ok()
 }
 
-send_bytes: fn(c: &DbusConnection, bytes: [U8]) DbusError! -[Net, Time]> {
+send_bytes: fn(c: &DbusConnection, bytes: [U8]) -[Net, Time]> DbusError! {
     net.unix_send(c.stream, bytes, [sys.Fd]{}) ?? return Err(DbusError.Connect("writing to the bus failed: {err}"))
     Ok()
 }
@@ -1041,7 +1041,7 @@ appearance: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAppearan
 
 // Asks the bus for the appearance's SettingChanged signals and for the
 // portal's comings and goings.
-watch_appearance: fn(c: &DbusConnection, timeout_ns: Int) DbusError! -[Net, Time]> {
+watch_appearance: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> DbusError! {
     q: ascii(39)
     add_match(c, "type={q}signal{q},interface={q}{SETTINGS}{q},member={q}SettingChanged{q},path={q}{PORTAL_PATH}{q},arg0={q}{APPEARANCE}{q}", timeout_ns) ?? return Err(err)
     add_match(c, "type={q}signal{q},sender={q}{BUS_NAME}{q},interface={q}{BUS_NAME}{q},member={q}NameOwnerChanged{q},arg0={q}{PORTAL_NAME}{q}", timeout_ns)

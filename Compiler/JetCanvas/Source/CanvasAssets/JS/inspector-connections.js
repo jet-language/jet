@@ -405,7 +405,7 @@
       const defaultExpr = fallback.trim() ? "{" + fallback.trim() + "}" : "";
       return name.trim() + ": " + type.trim() + defaultExpr;
     }).filter((p) => !p.startsWith(":"));
-    return ((fnMeta && fnMeta.name) || nodeTitle || "function") + ": fn(" + params.join(", ") + ")" + ret + functionEffectSuffix(fnMeta, fnMeta && fnMeta.signature);
+    return ((fnMeta && fnMeta.name) || nodeTitle || "function") + ": fn(" + params.join(", ") + ")" + functionEffectSuffix(fnMeta, fnMeta && fnMeta.signature) + ret;
   }
 
   function applyFunctionPins(graph, fnMeta, nodeTitle, retOverride) {
@@ -542,27 +542,43 @@
     const originalSignature = String(fnMeta.signature || "");
     const effect = functionEffectSuffix(fnMeta, originalSignature);
     const ret = fnMeta.returns && fnMeta.returns !== "Void" ? " " + fnMeta.returns : "";
-    return (fnMeta.name || graph.title || "function") + ": fn(" + params + ")" + ret + effect;
+    return (fnMeta.name || graph.title || "function") + ": fn(" + params + ")" + effect + ret;
+  }
+
+  // The effect row follows the parameters' closing `)` and comes before the
+  // result: `name: fn(path: Path) -[FS.Write]> IOError!`.
+  function signatureEffectRow(signature) {
+    const open = signature.indexOf("(", signature.indexOf("fn"));
+    if (open < 0) return null;
+    let depth = 0;
+    for (let at = open; at < signature.length; at++) {
+      if (signature[at] === "(") depth++;
+      else if (signature[at] === ")" && --depth === 0) {
+        const match = /^\s-\[[^\]]*\]>/.exec(signature.slice(at + 1));
+        return { index: at + 1, text: match ? match[0] : "" };
+      }
+    }
+    return null;
   }
 
   function functionEffectSuffix(fnMeta, signature) {
     if (fnMeta && fnMeta.effect_via) return " -[via " + fnMeta.effect_via + "]>";
     if (fnMeta && Array.isArray(fnMeta.effects) && fnMeta.effects.length) return " -[" + fnMeta.effects.join(", ") + "]>";
     if (fnMeta && fnMeta.pure) return " -[]>";
-    const match = String(signature || "").match(/\s-\[[^\]]*\]>\s*$/);
-    return match ? match[0].trimEnd() : "";
+    const row = signatureEffectRow(String(signature || ""));
+    return row ? row.text.trimEnd() : "";
   }
 
   function signatureWithFunctionFacts(fnMeta, values) {
     let signature = String(values.signature || fnMeta.signature || "").trim();
     const pure = String(values.pure || "").trim() === "true";
-    const effect = /\s-\[[^\]]*\]>\s*$/.exec(signature);
+    const row = signatureEffectRow(signature);
     if (pure) {
-      signature = effect
-        ? signature.slice(0, effect.index) + " -[]>"
+      signature = row
+        ? signature.slice(0, row.index) + " -[]>" + signature.slice(row.index + row.text.length)
         : signature + " -[]>";
-    } else if (effect && effect[0].trim() === "-[]>") {
-      signature = signature.slice(0, effect.index).trimEnd();
+    } else if (row && row.text.trim() === "-[]>") {
+      signature = signature.slice(0, row.index) + signature.slice(row.index + row.text.length);
     }
     return signature;
   }

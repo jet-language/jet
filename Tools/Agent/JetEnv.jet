@@ -188,7 +188,7 @@ dev_shell: fn(repo: String, shell: String) -[Env, Exec, FS, IO, Time.Wait]> [Str
     Ok(shell_vars)
 }
 
-build_profile: fn(repo: String, cache: String, key: String, shell: String, profile: String) Err! -[Env, Exec, FS, IO, Time.Wait]> {
+build_profile: fn(repo: String, cache: String, key: String, shell: String, profile: String) -[Env, Exec, FS, IO, Time.Wait]> Err! {
     files.create_dir_all(cache) ?? return Err("cannot create {cache}: {err}")
     snapshot: files.join(cache, "src-{key}")
     // Held until this returns: one builder per key machine-wide.

@@ -160,7 +160,7 @@ services_with_cleanup: fn(error: ServicesError, cleanup: ServicesError!) -> Serv
 
 // Stop a dependency-first selection in reverse. A dependent that cannot be
 // stopped leaves its dependencies untouched and reports the boundary.
-services_down_ordered: fn(host: ServiceHost, project_dir: String, plans: [DevServicePlan], dependency_first: [Int]) ServicesError! -[FS, Env, Exec, Rand, Time, Time.Wait]> {
+services_down_ordered: fn(host: ServiceHost, project_dir: String, plans: [DevServicePlan], dependency_first: [Int]) -[FS, Env, Exec, Rand, Time, Time.Wait]> ServicesError! {
     errors := [String]{}
     position := dependency_first.len() - 1
     loop position >= 0 {
@@ -183,7 +183,7 @@ services_down_ordered: fn(host: ServiceHost, project_dir: String, plans: [DevSer
 }
 
 // Restart one service under its declared bounded restart budget.
-services_restart_one: fn(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
+services_restart_one: fn(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> ServicesError! {
     _: services_restart_ordered_with(host, project_dir, env, [DevServicePlan]{plan}, [Int]{0}, time.duration_seconds(30), services_no_before_start)
 }
 

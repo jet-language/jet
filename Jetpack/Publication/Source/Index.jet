@@ -101,7 +101,7 @@ publication_is_takeover: fn(entries: [PublicationIndexEntry], candidate: Publica
     pinned != candidate.public_key.trim()
 }
 
-publication_validate_takeover: fn(repo: String, entries: [PublicationIndexEntry], candidate: PublicationIndexEntry) PublicationDiagnosticError! -[FS]> {
+publication_validate_takeover: fn(repo: String, entries: [PublicationIndexEntry], candidate: PublicationIndexEntry) -[FS]> PublicationDiagnosticError! {
     if !publication_is_takeover(entries, candidate) {
         return
     }
@@ -286,7 +286,7 @@ publication_with_index_lock: fn<T>(repo: String, name: String, action: fn() -[FS
 
 // The canonical descriptor-relative publisher owns staging/fsync/rename and
 // temporary cleanup; no second pathname publisher. Core authority debt #3593.
-publication_index_atomic_replace: fn(repo: String, path: String, bytes: [U8]) IOError! -[FS, Env, Time]> {
+publication_index_atomic_replace: fn(repo: String, path: String, bytes: [U8]) -[FS, Env, Time]> IOError! {
     parent: files.dirname(path)
     if parent == "" {
         return Err(publication_index_error(.InvalidInput, path, "registry index has no parent"))
@@ -304,7 +304,7 @@ publication_index_atomic_replace: fn(repo: String, path: String, bytes: [U8]) IO
     foundation_write_file_nofollow_at_root(repo, relative, bytes, None) ?? return Err(err.error)
 }
 
-publication_write_index_entry: fn(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env, Time]> {
+publication_write_index_entry: fn(repo: String, entry: PublicationIndexEntry) -[FS, Env, Time]> IOError! {
     publication_validate_index_component(entry.name, "package name")
     publication_validate_index_component(entry.version, "package version")
     _: publication_with_index_lock<Bool>(repo, entry.name, fn() { publication_write_index_entry_locked(repo, entry) })

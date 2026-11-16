@@ -441,7 +441,7 @@ CcProjectInputWalk: struct {
     inputs: [String]
     bytes: Int
 
-    visit: fn(&self, directory: String) CcProjectInputError! -[FS]> {
+    visit: fn(&self, directory: String) -[FS]> CcProjectInputError! {
         entries := files.list_dir(directory) ?? return Err(CcProjectInputError.unreadable("read project inputs in `{directory}`: {err}"))
         entries.sort_by(fn(left: files.DirEntry, right: files.DirEntry) { left.name <=> right.name })
         loop entry in entries {
@@ -476,7 +476,7 @@ CcProjectInputWalk: struct {
 // executable bit through the output file mode. Restore that product property
 // at the driver boundary after both a cache hit and a fresh action. Compile
 // outputs intentionally remain ordinary data files.
-cli_cc_mark_link_outputs_executable: fn(project_root: String, outputs: [String]) CLIToolError! -[FS, Env]> {
+cli_cc_mark_link_outputs_executable: fn(project_root: String, outputs: [String]) -[FS, Env]> CLIToolError! {
     loop output in outputs {
         path: files.join(project_root, output)
         if sys.is_windows() {

@@ -28,19 +28,19 @@ RunLocalsTrace: struct {
     path: String
 
     impl CompilerTraceSink {
-        begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS, Time]> {
+        begin: fn(self, name: String, detail: String, index: Int, total: Int) -[FS, Time]> Never! {
             run_locals_files.append_all(self.path, "> {name} {detail} ({index}/{total})\n") ?? panic("cannot write the trace: {err}")
         }
 
-        begin_item: fn(self, name: String, file: String, item: String) Never! -[FS, Time]> {
+        begin_item: fn(self, name: String, file: String, item: String) -[FS, Time]> Never! {
             run_locals_files.append_all(self.path, "> {name} {item} ({file})\n") ?? panic("cannot write the trace: {err}")
         }
 
-        end: fn(self, name: String, items: Int) Never! -[FS, Time]> {
+        end: fn(self, name: String, items: Int) -[FS, Time]> Never! {
             run_locals_files.append_all(self.path, "< {name} items={items}\n") ?? panic("cannot write the trace: {err}")
         }
 
-        progress: fn(self, name: String, done: Int, total: Int) Never! -[FS, Time]> {
+        progress: fn(self, name: String, done: Int, total: Int) -[FS, Time]> Never! {
             line: if name.starts_with("counters.") -> "{name} = {done}\n" else -> "~ {name} {done}/{total}\n"
             run_locals_files.append_all(self.path, line) ?? panic("cannot write the trace: {err}")
         }

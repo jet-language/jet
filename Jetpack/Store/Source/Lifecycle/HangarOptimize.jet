@@ -190,7 +190,7 @@ store_optimize_cas_pool: fn(verification: &StoreVerification, roots: HangarRoots
 // Rust `hardlink_replace`: replace `file` with a hardlink to `first`. Unix
 // links a temporary name and renames it over `file`; Windows moves `file`
 // aside first and restores it when linking fails.
-store_hardlink_replace: fn(first: String, file: String) StoreError! -[FS, Env]> {
+store_hardlink_replace: fn(first: String, file: String) -[FS, Env]> StoreError! {
     if first == file {
         return
     }
@@ -221,7 +221,7 @@ store_hardlink_replace: fn(first: String, file: String) StoreError! -[FS, Env]> 
 
 // Rust `verify_hangar_object`: re-hash a Hangar object under the Hangar lock
 // with the CAS-peer hardlink law (Hangar-internal peers are accepted).
-store_verify_hangar_object: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
+store_verify_hangar_object: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> IngestError! {
     _hangar_lock: env_acquire_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
     store_verify_hangar_object_unlocked(verification, roots, entry)
 }
@@ -229,7 +229,7 @@ store_verify_hangar_object: fn(verification: &StoreVerification, roots: HangarRo
 // Rust `verify_hangar_object_unlocked`: the closure graph must agree with the
 // record's primary, action key, references and output map; every named
 // output must re-hash to its recorded digest; every reference must exist.
-store_verify_hangar_object_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
+store_verify_hangar_object_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> IngestError! {
     hangar: roots.hangar_dir()
     allow: entry.platform_artifact_kind != ""
     graph: store_lifecycle_closure_graph_unlocked(verification, roots) ?? return Err(IngestError.Invalid(err.message()))

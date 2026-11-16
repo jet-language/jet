@@ -162,7 +162,7 @@ RootBootstrap: struct {
         files.join(files.join(roots_dir, "trust"), "root.bootstrap")
     }
 
-    write: fn(self, roots_dir: String) TrustRootError! -[FS]> {
+    write: fn(self, roots_dir: String) -[FS]> TrustRootError! {
         trust_ensure_trust_dir(roots_dir)
         body: "digest={self.pin_digest}\nversion={self.root_version}\nconsistent_snapshot={self.consistent_snapshot}\n"
         trust_atomic_write(RootBootstrap.path(roots_dir), body.bytes())

@@ -348,7 +348,7 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
 // tree (BUILD_STEP_TRACE_FOLDER) to `traces` as `<action id>-<file>`. A
 // trace is only a record of the run: one that can't be moved is left out of
 // the build's trace, and the build goes on.
-build_keep_step_traces: fn(run: BuildActionRun, traces: String) Never! -[FS]> {
+build_keep_step_traces: fn(run: BuildActionRun, traces: String) -[FS]> Never! {
     folder: files.join(run.sandbox, BUILD_STEP_TRACE_FOLDER)
     entries: files.list_dir(folder) ?? return
     loop entry in entries {
@@ -607,7 +607,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
 // the files, each written on a task of its own, at most one per core at once
 // (build_snapshot_declared_inputs): an action's inputs can be hundreds of
 // megabytes. The error is the one writing them in order meets first.
-build_stage_inputs: fn(sandbox: String, inputs: [ActionInputCapture]) BuildIOError! -[FS, Env]> {
+build_stage_inputs: fn(sandbox: String, inputs: [ActionInputCapture]) -[FS, Env]> BuildIOError! {
     // The inputs before the first whose folder can't be made.
     staged := 0
     folder_failure := BuildIOError?{None}

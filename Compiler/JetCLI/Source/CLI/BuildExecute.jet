@@ -413,7 +413,7 @@ jet_cli_build_step_traces: fn(root: String, trace_sink: JetCLITraceSink?) -[FS]>
 // Splices each trace a step of the batch that just ran left in `folder`
 // (`<action id>-<file>`) into the build's trace as its own process, named by
 // its step (Request.jet jet_cli_trace_splice), and removes the file.
-jet_cli_build_splice_traces: fn(sink: JetCLITraceSink, folder: String, graph: BuildPlanExecution) Never! -[FS]> {
+jet_cli_build_splice_traces: fn(sink: JetCLITraceSink, folder: String, graph: BuildPlanExecution) -[FS]> Never! {
     entries := cli_files.list_dir(folder) ?? return
     entries.sort_by(fn(left, right) { left.name <=> right.name })
     loop entry in entries {

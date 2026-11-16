@@ -468,7 +468,7 @@ pager_reset: fn(p: &Pager) Never! {
 }
 
 // releaseAllSavepoints.
-release_all_savepoints: fn(p: &Pager) Never! -[DB]> {
+release_all_savepoints: fn(p: &Pager) -[DB]> Never! {
     p.savepoints.clear()
     if !p.exclusive_mode || file.file_in_memory(p.sjfd) -> file.file_close(p.sjfd)
     p.n_sub_rec = 0
@@ -482,7 +482,7 @@ add_to_savepoint_bitvecs: fn(p: &Pager, pgno: Int) Never! {
 }
 
 // pager_unlock.
-pager_unlock: fn(p: &Pager) Never! -[DB]> {
+pager_unlock: fn(p: &Pager) -[DB]> Never! {
     p.in_journal = cache.bitvec_none()
     release_all_savepoints(p)
     if p.wal.open {
@@ -573,7 +573,7 @@ pager_end_transaction: fn(p: &Pager, has_super: Bool, commit: Bool) -[DB]> Int N
 }
 
 // pagerUnlockAndRollback.
-pager_unlock_and_rollback: fn(p: &Pager) Never! -[DB]> {
+pager_unlock_and_rollback: fn(p: &Pager) -[DB]> Never! {
     if p.state != PAGER_ERROR && p.state != PAGER_OPEN {
         if p.state >= PAGER_WRITER_LOCKED -> _: pager_rollback(p) else if !p.exclusive_mode {
             _: pager_end_transaction(p, false, false)
@@ -1098,7 +1098,7 @@ database_is_unmoved: fn(p: &Pager) -[DB]> Int Never! {
 
 // sqlite3PagerClose. checkpoint is false for a connection with
 // SQLITE_NoCkptOnClose: the log is then closed without a checkpoint.
-pager_close: fn(p: &Pager, checkpoint: Bool) Never! -[DB]> {
+pager_close: fn(p: &Pager, checkpoint: Bool) -[DB]> Never! {
     p.exclusive_mode = false
     ckpt: checkpoint && database_is_unmoved(p) == base.OK
     sync: p.wal_sync_flags
@@ -1452,7 +1452,7 @@ pager_shared_lock: fn(p: &Pager) -[DB]> Int Never! {
 }
 
 // pagerUnlockIfUnused.
-pager_unlock_if_unused: fn(p: &Pager) Never! -[DB]> {
+pager_unlock_if_unused: fn(p: &Pager) -[DB]> Never! {
     if cache.pcache_ref_count(p.pcache) == 0 -> pager_unlock_and_rollback(p)
 }
 
@@ -1565,7 +1565,7 @@ pager_unref: fn(p: &Pager, s: Int) Never! {
 
 // sqlite3PagerUnrefPageOne: release page 1 and end the read transaction
 // when it was the last reference.
-pager_unref_page_one: fn(p: &Pager, s: Int) Never! -[DB]> {
+pager_unref_page_one: fn(p: &Pager, s: Int) -[DB]> Never! {
     cache.pcache_release(p.pcache, s)
     pager_unlock_if_unused(p)
 }

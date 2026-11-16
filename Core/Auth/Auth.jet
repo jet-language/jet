@@ -470,7 +470,7 @@ priv store_replace: fn(expected: [U8], replacement: &&[U8]) -[DB]> Bool Never! {
 }
 
 /// Register an identity with an already-computed password hash.
-register_user: fn(user_id: String, password_hash: String) Err! -[DB]> {
+register_user: fn(user_id: String, password_hash: String) -[DB]> Err! {
     if !valid_identifier(user_id, 512) -> return Err("user id is invalid")
     if password_hash.trim().len() == 0 || password_hash.len() > 4096 {
         return Err("password hash is invalid")

@@ -2143,7 +2143,7 @@ jfmt_lambda_fn_form: fn(f: JetFmt, lambda: Lambda) -> Bool Never! {
 }
 
 // `fn(params) interface {{ body }}`: the interface is written as a named
-// function's, the unit failure contract before the effect row.
+// function's, the effect row before the unit failure contract.
 jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
     jfmt_write(f, "fn(")
     loop (index, param) in lambda.params {
@@ -2156,13 +2156,13 @@ jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
     }
     jfmt_write(f, ")")
     unit_fallible: if lambda.result == .Val(ret) -> jfmt_is_unit_fallible_type(ret) else -> false
-    if unit_fallible && lambda.result == .Val(ret) -> jfmt_fmt_unit_fallible_return(f, ret)
     if lambda.effects == .Val(effects) {
         jfmt_write(f, " -[")
         row_source: jfmt_source_effect_row_span_after(f, lambda.span.start)
         jfmt_fmt_effect_row(f, effects, row_source)
         jfmt_write(f, "]>")
     }
+    if unit_fallible && lambda.result == .Val(ret) -> jfmt_fmt_unit_fallible_return(f, ret)
     if !unit_fallible && lambda.result == .Val(ret) {
         jfmt_write(f, if lambda.effects == None -> " -> " else -> " ")
         jfmt_fmt_type(f, ret)

@@ -489,7 +489,7 @@ resolve_part_idx_label: fn(p: &cg.Parse, label: Int) Never! {
 
 // constructAutomaticIndex: code the transient index level lv's loop uses,
 // built once from the rows of its table.
-construct_automatic_index: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, wc: Int, not_ready: Int, lv: Int) Never! -[DB]> {
+construct_automatic_index: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, wc: Int, not_ready: Int, lv: Int) -[DB]> Never! {
     addr_init: cg.op0(p, opc.OP_ONCE)
     n_key_col := 0
     src: wi.tab_list
@@ -622,7 +622,7 @@ construct_automatic_index: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, wc: 
 
 // sqlite3ConstructBloomFilter: code the Bloom filter of level i_level0,
 // and of the later levels it may be pulled down to.
-construct_bloom_filter: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, i_level0: Int, not_ready: Int) Never! -[DB]> {
+construct_bloom_filter: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, i_level0: Int, not_ready: Int) -[DB]> Never! {
     saved_idx_epr: p.f.idx_epr
     saved_idx_part_epr: p.f.idx_part_epr
     p.f.idx_epr = -1
@@ -824,7 +824,7 @@ vtab_distinct: fn(info: conn.IndexInfo) -> Int Never! { info.e_distinct }
 
 // sqlite3VtabUsesAllSchemas: read transactions on every schema, or write
 // ones when the statement writes.
-vtab_uses_all_schemas: fn(p: &cg.Parse, a: &ast.AST) Never! -[DB]> {
+vtab_uses_all_schemas: fn(p: &cg.Parse, a: &ast.AST) -[DB]> Never! {
     n_db: p.db.dbs.len()
     loop i in 0..<n_db -> cg.code_verify_schema(p, a, i)
     if p.f.write_mask != 0 {
@@ -2808,7 +2808,7 @@ where_begin: fn(p: &cg.Parse, a: &ast.AST, tab_list: Int, where_e: Int, order_by
 
 // sqlite3WhereEnd: the end of the loops where_begin started, with the
 // table reads of index-only scans moved to their index; wi is freed.
-where_end: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo) Never! -[DB]> {
+where_end: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo) -[DB]> Never! {
     tab_list: wi.tab_list
     i_end: cg.v_current_addr(p)
     n_rj := 0
@@ -3395,7 +3395,7 @@ code_deferred_seek: fn(p: &cg.Parse, wi: &we.WhereInfo, ix: Int, i_cur: Int, i_i
 
 // codeExprOrVector: the first n_reg fields of vector e (or scalar e) into
 // the registers from i_reg.
-code_expr_or_vector: fn(p: &cg.Parse, a: &ast.AST, e: Int, i_reg: Int, n_reg: Int) Never! -[DB]> {
+code_expr_or_vector: fn(p: &cg.Parse, a: &ast.AST, e: Int, i_reg: Int, n_reg: Int) -[DB]> Never! {
     if e >= 0 && ast.is_vector(a, e) {
         if ast.has(a, e, ast.EP_X_IS_SELECT) {
             i_select: ex.code_subselect(p, a, e)
@@ -3428,7 +3428,7 @@ where_apply_partial_index_constraints: fn(a: &ast.AST, wi: &we.WhereInfo, truth0
 
 // filterPullDown: the Bloom filters of the inner levels after i_level,
 // checked now, before the index lookup of level i_level.
-filter_pull_down: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, i_level: Int, addr_nxt: Int, not_ready: Int) Never! -[DB]> {
+filter_pull_down: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, i_level: Int, addr_nxt: Int, not_ready: Int) -[DB]> Never! {
     lv := i_level + 1
     loop lv < wi.n_level {
         k: lv
@@ -3458,7 +3458,7 @@ filter_pull_down: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, i_level: Int,
 
 // Case 1 of sqlite3WhereCodeOneLoopStart: a virtual table scanned with
 // OP_VFilter and OP_VNext.
-code_vtab_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: Int, b_rev: Bool) Never! -[DB]> {
+code_vtab_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: Int, b_rev: Bool) -[DB]> Never! {
     l: wi.levels[lv].w_loop
     n_constraint: wi.loops[l].n_lterm
     i_reg: cg.get_temp_range(p, n_constraint + 2)
@@ -3529,7 +3529,7 @@ code_vtab_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: I
 }
 
 // Case 2: rowid == or IN, one row at a time with OP_SeekRowid.
-code_rowid_eq_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: Int, b_rev: Bool, not_ready: Int) Never! -[DB]> {
+code_rowid_eq_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: Int, b_rev: Bool, not_ready: Int) -[DB]> Never! {
     l: wi.levels[lv].w_loop
     t: wi.loops[l].lterm[0]
     p.f.n_mem += 1
@@ -3556,7 +3556,7 @@ move_op: fn(k: Int) -> Int Never! {
 }
 
 // Case 3: a rowid range.
-code_rowid_range_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: Int, b_rev: Bool, addr_halt: Int) Never! -[DB]> {
+code_rowid_range_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: Int, b_rev: Bool, addr_halt: Int) -[DB]> Never! {
     l: wi.levels[lv].w_loop
     ws: wi.loops[l].ws_flags
     addr_brk: wi.levels[lv].addr_brk
@@ -3837,7 +3837,7 @@ code_index_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: 
 // Case 5: the OR of separately indexed terms, each a sub-WHERE whose rows
 // call the loop body as a subroutine once each (a RowSet, or an ephemeral
 // index for a WITHOUT ROWID table, skips the repeats).
-code_multi_or_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: Int, si: Int) Never! -[DB]> {
+code_multi_or_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: Int, si: Int) -[DB]> Never! {
     l: wi.levels[lv].w_loop
     t_tab: a.items[si].tab
     cov := -1
@@ -4131,7 +4131,7 @@ code_one_loop_start: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, n
 // sqlite3WhereRightJoinLoop: the loop over the rows of the right table of
 // RIGHT JOIN level lv that matched no row, run through the interior
 // subroutine with every table to its left a NULL row.
-right_join_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int) Never! -[DB]> {
+right_join_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int) -[DB]> Never! {
     rj: wi.levels[lv].rj
     l: wi.levels[lv].w_loop
     si: ast.src_item(a, wi.tab_list, wi.levels[lv].i_from)

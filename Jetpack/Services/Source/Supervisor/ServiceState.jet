@@ -192,7 +192,7 @@ services_supervisor_failure: fn(project_dir: String, plan: DevServicePlan) -[FS]
 // launch, and an initialized data directory regains its marker. The rename
 // therefore needs no fsync, and a loaded disk never stretches a supervisor's
 // publication.
-services_write_atomic: fn(path: String, contents: [U8]) IOError! -[FS, Env]> {
+services_write_atomic: fn(path: String, contents: [U8]) -[FS, Env]> IOError! {
     parent: files.dirname(path)
     directory: if parent == "" -> "." else -> parent
     files.create_dir_all(directory)
@@ -204,7 +204,7 @@ services_write_atomic: fn(path: String, contents: [U8]) IOError! -[FS, Env]> {
     }
 }
 
-services_replace_through: fn(temporary: String, path: String, contents: [U8]) IOError! -[FS]> {
+services_replace_through: fn(temporary: String, path: String, contents: [U8]) -[FS]> IOError! {
     writer := files.create(temporary, if_exists: .Refuse)
     writer.write_bytes(contents)
     close(writer)
@@ -218,7 +218,7 @@ services_remove_quiet: fn(path: String) -[FS]> {
 }
 
 // Remove a state file, treating only a missing file as success.
-services_remove_existing: fn(path: String) IOError! -[FS]> {
+services_remove_existing: fn(path: String) -[FS]> IOError! {
     if files.remove(path) == .Err(error) {
         if !services_is_not_found(error) -> return Err(error)
     }
@@ -347,7 +347,7 @@ services_lifecycle_for: fn(authority: ServiceAuthority, generation: Int, phase: 
     }
 }
 
-services_write_lifecycle: fn(dir: String, facts: LifecycleFacts) IOError! -[FS, Env]> {
+services_write_lifecycle: fn(dir: String, facts: LifecycleFacts) -[FS, Env]> IOError! {
     encoded := "version=1\nbackend={facts.backend}\ngeneration={facts.generation}\nphase={facts.phase.as_str()}\ncontainment={facts.containment}\nrecovery={facts.recovery}\n"
     if facts.pid == .Val(pid) -> encoded = "{encoded}pid={pid}\n"
     if facts.unit == .Val(unit) -> encoded = "{encoded}unit={unit}\n"

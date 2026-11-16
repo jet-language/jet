@@ -176,7 +176,7 @@ CacheReceipt: struct {
         Ok(CacheReceipt{role: role, witness: witness, provenance: provenance, version: version, issued_unix: issued_unix, expires_unix: expires_unix, signature: signature})
     }
 
-    verify: fn(self, key: TrustKey, clock: TrustedClock) TrustRootError! -[Time]> {
+    verify: fn(self, key: TrustKey, clock: TrustedClock) -[Time]> TrustRootError! {
         if trust_blank_or_multiline(self.role) {
             return Err(TrustRootError.CacheReceiptInvalid{detail: "cache receipt role is empty or contains a newline"})
         }
@@ -308,7 +308,7 @@ trust_read_cache_key_pin: fn(path: String, role: String) -[FS]> String TrustRoot
 
 // Pin a cache role's signing identity on first use. Existing pins are
 // immutable; rotating the key needs an explicit host-side rebind.
-trust_pin_cache_key: fn(roots_dir: String, role: String, key: TrustKey) TrustRootError! -[FS]> {
+trust_pin_cache_key: fn(roots_dir: String, role: String, key: TrustKey) -[FS]> TrustRootError! {
     path: trust_cache_key_pin_path(roots_dir, role)
     trust_ensure_trust_dir(roots_dir)
     expected: trust_cache_key_fingerprint(key)
@@ -333,7 +333,7 @@ trust_pin_cache_key: fn(roots_dir: String, role: String, key: TrustKey) TrustRoo
 }
 
 // Verify a cache role against its existing host pin.
-trust_verify_pinned_cache_key: fn(roots_dir: String, role: String, key: TrustKey) TrustRootError! -[FS]> {
+trust_verify_pinned_cache_key: fn(roots_dir: String, role: String, key: TrustKey) -[FS]> TrustRootError! {
     path: trust_cache_key_pin_path(roots_dir, role)
     expected: trust_cache_key_fingerprint(key)
     actual: trust_read_cache_key_pin(path, role)
@@ -380,7 +380,7 @@ trust_state_body: fn(lines: [String]) -> String Never! {
 }
 
 // Revoke one builder identity in host-owned trust state.
-trust_revoke_cache_builder: fn(roots_dir: String, builder: String) TrustRootError! -[FS]> {
+trust_revoke_cache_builder: fn(roots_dir: String, builder: String) -[FS]> TrustRootError! {
     if trust_blank_or_multiline(builder) {
         return Err(TrustRootError.CacheReceiptInvalid{detail: "cache builder identity is empty or contains a newline"})
     }
@@ -404,7 +404,7 @@ trust_cache_identity_allowlist_path: fn(roots_dir: String, directory: String, ro
     Ok(files.join(files.join(files.join(roots_dir, "trust"), directory), "{role}.allow"))
 }
 
-trust_allow_cache_identity: fn(roots_dir: String, directory: String, role: String, identity: String, label: String) TrustRootError! -[FS]> {
+trust_allow_cache_identity: fn(roots_dir: String, directory: String, role: String, identity: String, label: String) -[FS]> TrustRootError! {
     if trust_blank_or_multiline(identity) {
         return Err(TrustRootError.CacheReceiptInvalid{detail: "{label} identity is empty or contains a newline"})
     }
@@ -426,7 +426,7 @@ trust_is_cache_identity_allowed: fn(roots_dir: String, directory: String, role: 
 
 // Add one immutable builder identity to a shared cache role's allowlist.
 // The first publication is the explicit write-grant boundary.
-trust_allow_cache_builder: fn(roots_dir: String, role: String, builder: String) TrustRootError! -[FS]> {
+trust_allow_cache_builder: fn(roots_dir: String, role: String, builder: String) -[FS]> TrustRootError! {
     trust_allow_cache_identity(roots_dir, "cache-builders", role, builder, "cache builder")
 }
 
@@ -436,7 +436,7 @@ trust_is_cache_builder_allowed: fn(roots_dir: String, role: String, builder: Str
 
 // Witness policy is separate from builder identity: the bytes may be built
 // by one identity and attested by another.
-trust_allow_cache_witness: fn(roots_dir: String, role: String, witness: String) TrustRootError! -[FS]> {
+trust_allow_cache_witness: fn(roots_dir: String, role: String, witness: String) -[FS]> TrustRootError! {
     trust_validate_receipt_witness(witness)
     trust_allow_cache_identity(roots_dir, "cache-witnesses", role, witness, "cache receipt witness")
 }
@@ -454,7 +454,7 @@ trust_ensure_trust_dir: fn(roots_dir: String) -[FS]> String TrustRootError! {
     Ok(dir)
 }
 
-trust_ensure_real_dir: fn(path: String, not_real: String, parents: Bool) TrustRootError! -[FS]> {
+trust_ensure_real_dir: fn(path: String, not_real: String, parents: Bool) -[FS]> TrustRootError! {
     if files.stat(path) == {
         .Ok(metadata) -> {
             if metadata.is_symlink || !metadata.is_dir {
@@ -471,7 +471,7 @@ trust_ensure_real_dir: fn(path: String, not_real: String, parents: Bool) TrustRo
 }
 
 // Durable replacement of a trusted-state file.
-trust_atomic_write: fn(path: String, body: [U8]) TrustRootError! -[FS]> {
+trust_atomic_write: fn(path: String, body: [U8]) -[FS]> TrustRootError! {
     if files.dirname(path) == "" {
         return Err(TrustRootError.IO{detail: "trusted state path has no parent directory"})
     }

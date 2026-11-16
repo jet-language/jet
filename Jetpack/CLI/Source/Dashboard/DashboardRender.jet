@@ -49,14 +49,14 @@ cli_dashboard_screen_leave_sequence: fn() -> String Never! {
     "{esc}{DASHBOARD_SCREEN_SHOW_CURSOR}{esc}{DASHBOARD_SCREEN_LEAVE_CODES}"
 }
 
-cli_dashboard_write_stdout: fn(text: String) Never! -[IO]> {
+cli_dashboard_write_stdout: fn(text: String) -[IO]> Never! {
     out := term.stdout()
     out.write(text).drop("a closed stdout cannot take the dashboard")
     out.flush().drop("a closed stdout cannot take the dashboard")
 }
 
 // Clear the screen and draw one frame from the top-left corner.
-cli_dashboard_redraw: fn(frame: String) Never! -[IO]> {
+cli_dashboard_redraw: fn(frame: String) -[IO]> Never! {
     esc: terminal_esc()
     cli_dashboard_write_stdout("{esc}{DASHBOARD_CLEAR_HOME}{esc}{DASHBOARD_CURSOR_HOME}{frame}")
 }

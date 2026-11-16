@@ -46,7 +46,7 @@ SignalSubscription: struct {
 impl SignalSubscription {
     // Ends the subscription: a signal no other subscription holds takes its
     // earlier effect again, and `receiver` ends once its pending signals are read.
-    close: fn(self) Never! -[Exec]> { rt.signal_close(self.id) }
+    close: fn(self) -[Exec]> Never! { rt.signal_close(self.id) }
 }
 
 // Takes the signals of `kinds` until the subscription closes, as a shell
@@ -144,7 +144,7 @@ Sh: struct {
         Error: Never
         Hole: String
 
-        check: fn(_text: String) Never! -[]> { return Ok() }
+        check: fn(_text: String) -[]> Never! { return Ok() }
 
         encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
 
@@ -210,7 +210,7 @@ check: fn(receipt: ProcessReceipt) IOError! {
     )
 }
 
-stdin_text: fn(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> {
+stdin_text: fn(spec: ProcessSpec, text: String) -[Exec, Time.Wait]> IOError! {
     child: spec.stdin(.Stream).spawn()
     child.stdin.write_bytes(text.bytes())
     child.stdin.close()
@@ -362,7 +362,7 @@ exit_unmapped: fn(code: Int) -[Exec.Exit]> Never Never! {
 /// parking (a network wait as `NetError.Cancelled`, a sleep at once) and every
 /// live task is cancelled, so a serving `HTTPServer` returns its report and
 /// the program drains to its end. `signals` takes a signal as a value instead.
-on_signal: fn(signal: ProcessSignal) Never! -[Exec]> {
+on_signal: fn(signal: ProcessSignal) -[Exec]> Never! {
     id: rt.signal_open(true)
     added: core.process.__signal_add(id, signal_number(signal), signal)
     if !added.available -> panic("core.process.on_signal: signals are unsupported on this host")

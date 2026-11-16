@@ -155,7 +155,7 @@ jet_cli_import_attach_evidence: fn(plan: &JetCLIImportPlan) JetCLIImportPlanErro
 // Rust `persist_evidence_report_for_inputs`: the encoded report under
 // `.jet/evidence/<sha256>.json` of the selected project root, indexed as
 // protected evidence for the source digest.
-jet_cli_import_persist_evidence: fn(report: EvidenceReport, target_inputs_sha256: String) JetCLIReadError! -[FS, Env, Time]> {
+jet_cli_import_persist_evidence: fn(report: EvidenceReport, target_inputs_sha256: String) -[FS, Env, Time]> JetCLIReadError! {
     report_id: report.identity.report_id
     if report_id == "" || report_id.contains("/") || report_id.contains("\\") || report_id == "." || report_id == ".." {
         return Err(jet_cli_read_error("evidence report has an unsafe id `{report_id}`"))
@@ -179,7 +179,7 @@ JetCLIImportWrite: struct {
 
 // One generated file (or the report) against the editable target and the
 // stored baseline (Rust `apply_plan`'s write/conflict table).
-jet_cli_import_stage: fn(mode: JetCLIImportMode, target: String, baseline: String, contents: String, writes: &[JetCLIImportWrite], conflicts: &[String]) Never! -[FS.Read]> {
+jet_cli_import_stage: fn(mode: JetCLIImportMode, target: String, baseline: String, contents: String, writes: &[JetCLIImportWrite], conflicts: &[String]) -[FS.Read]> Never! {
     existing: jet_cli_import_existing(target)
     prior: jet_cli_import_existing(baseline)
     if mode != JetCLIImportMode.DryRun {

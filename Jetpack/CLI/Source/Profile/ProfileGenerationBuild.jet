@@ -112,7 +112,7 @@ PackageGenerationStage: struct {
         Ok(PackageGenerationStage{path: path})
     }
 
-    publish: fn(self, destination: String) CLIError! -[FS]> { files.rename(self.path, destination) }
+    publish: fn(self, destination: String) -[FS]> CLIError! { files.rename(self.path, destination) }
 
     impl Close {
         close: fn(&&self) -[FS]> {
@@ -453,7 +453,7 @@ cli_collect_output_nodes: fn(lease: &CacheLease, package: String) -[FS]> [Packag
     Ok(nodes)
 }
 
-cli_collect_output_nodes_inner: fn(lease: &CacheLease, prefix: String, package: String, nodes: &[PackageOutputNode]) CLIError! -[FS]> {
+cli_collect_output_nodes_inner: fn(lease: &CacheLease, prefix: String, package: String, nodes: &[PackageOutputNode]) -[FS]> CLIError! {
     names := [String]{}
     loop entry in lease.list_output(prefix) -> names.push(entry.name)
     names.sort()
@@ -496,7 +496,7 @@ cli_collect_output_nodes_inner: fn(lease: &CacheLease, prefix: String, package: 
 
 // Materialize the selected nodes under the generation root, in path order.
 // File bytes stream from the handle each package's lease holds.
-cli_copy_package_projection: fn(root: String, selected: [String:PackageOutputNode], realized: &[RealizedProfilePackage]) CLIError! -[FS, Env]> {
+cli_copy_package_projection: fn(root: String, selected: [String:PackageOutputNode], realized: &[RealizedProfilePackage]) -[FS, Env]> CLIError! {
     paths := selected.keys().to_list()
     paths.sort()
     loop relative in paths {
@@ -541,7 +541,7 @@ cli_safe_projection_path: fn(root: String, relative: String) -> String CLIError!
     Ok(files.join(root, relative))
 }
 
-cli_ensure_projection_parent: fn(path: String) CLIError! -[FS]> {
+cli_ensure_projection_parent: fn(path: String) -[FS]> CLIError! {
     parent: files.dirname(path)
     if parent == "" -> return Err(CLIError.Other("profile projection has no parent"))
     files.create_dir_all(parent)
@@ -549,7 +549,7 @@ cli_ensure_projection_parent: fn(path: String) CLIError! -[FS]> {
 
 // Copy one regular file from its lease, keep its permission bits, and prove
 // the copy still has the digest the node recorded.
-cli_copy_projection_file: fn(lease: &CacheLease, relative: String, destination: String, expected: String) CLIError! -[FS, Env]> {
+cli_copy_projection_file: fn(lease: &CacheLease, relative: String, destination: String, expected: String) -[FS, Env]> CLIError! {
     info: lease.output_entry(relative)
     if info.is_symlink || !info.is_file {
         return Err(CLIError.Other("profile projection source is not a regular file"))
@@ -562,7 +562,7 @@ cli_copy_projection_file: fn(lease: &CacheLease, relative: String, destination: 
 }
 
 // Remove every abandoned `.generation-<n>.partial` stage.
-cli_cleanup_package_generation_stages: fn(directory: String) CLIError! -[FS]> {
+cli_cleanup_package_generation_stages: fn(directory: String) -[FS]> CLIError! {
     removed := false
     loop entry in files.list_dir(directory) {
         inner: cli_strip_prefix(entry.name, PACKAGE_PROFILE_STAGE_PREFIX) ?? next

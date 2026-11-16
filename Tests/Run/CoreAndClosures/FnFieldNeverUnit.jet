@@ -14,15 +14,15 @@ Hook: struct {
 
     recording: fn() -> Hook Never! { Hook{events: [String]{}, react: ignore} }
 
-    observe: fn(&self, path: String, stage: Stage) Never! -[IO]> {
+    observe: fn(&self, path: String, stage: Stage) -[IO]> Never! {
         self.events.push(path.copy())
         self.react(path, stage)
     }
 }
 
-ignore: fn(path: String, stage: Stage) Never! -[IO]> {}
+ignore: fn(path: String, stage: Stage) -[IO]> Never! {}
 
-announce: fn(path: String, stage: Stage) Never! -[IO]> {
+announce: fn(path: String, stage: Stage) -[IO]> Never! {
     if stage == {
         .Node -> { print("node {path}") }
         .Leaf -> print("leaf {path}")
@@ -38,7 +38,7 @@ notify: fn(react: fn(Int) Never!, n: Int) Never! { react(n) }
 
 skip: fn(n: Int) Never! {}
 
-tally: fn(n: Int) Never! -[IO]> { print("tally {n}") }
+tally: fn(n: Int) -[IO]> Never! { print("tally {n}") }
 
 run: fn() {
     quiet := Hook.recording()

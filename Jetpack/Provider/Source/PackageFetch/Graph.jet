@@ -161,7 +161,7 @@ pkg_fetch_existing_provenance: fn(resolver: PackageFetchResolver, name: String, 
     package.provenance
 }
 
-pkg_fetch_resolve: fn(verification: &StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: &PackageFetchResolver, name: String, spec: DepSpec, parent: String, chain: [String]) PackageFetchError! -[FS, Env, Exec, Net, Time, Time.Wait]> {
+pkg_fetch_resolve: fn(verification: &StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: &PackageFetchResolver, name: String, spec: DepSpec, parent: String, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchError! {
     if resolver.nodes.get(name) == .Val(existing) {
         if resolver.versions.get(name) == .Val(previous) {
             pkg_fetch_check_version(name, previous, existing.package.version, chain)
@@ -208,7 +208,7 @@ pkg_fetch_resolve: fn(verification: &StoreVerification, roots: HangarRoots, cont
 
 // A path dependency `name` declared by the non-root package at `parent` must
 // stay below it, lexically and after resolving links.
-pkg_fetch_path_escape: fn(name: String, path: String, absolute: String, parent: String) PackageFetchError! -[FS]> {
+pkg_fetch_path_escape: fn(name: String, path: String, absolute: String, parent: String) -[FS]> PackageFetchError! {
     if path.starts_with("/") || !foundation_paths.is_relative_to(foundation_paths.of(absolute), foundation_paths.of(parent)) {
         return Err(pkg_fetch_error("E1223", "path dependency `{name}` escapes its parent package", "the path `{path}` resolves outside `{parent}`", "use a relative path below the declaring package directory"))
     }

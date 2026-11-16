@@ -321,7 +321,7 @@ pkg_ada_gnat_runtime_dir: fn() -[FS, Env, Exec, Time.Wait]> String ForeignBindEr
     Err(ForeignBindError.Source("the provisioned GNAT runtime library directory was not found"))
 }
 
-pkg_ada_run: fn(argv: [String], cwd: String?, tool: String) ForeignBindError! -[Exec, Time.Wait]> {
+pkg_ada_run: fn(argv: [String], cwd: String?, tool: String) -[Exec, Time.Wait]> ForeignBindError! {
     output: pkg_ada_capture(argv, cwd, tool)
     if (Int{output[0]}) == 0 {
         return

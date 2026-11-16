@@ -156,7 +156,7 @@ module.exports = grammar({
 
     // ── Declarations ─────────────────────────────────────────────────────────
     // Every declaration is `name: value` (D-DECL-COLON1=A).
-    // `name: fn<T>(params) -> Ret E! -[Effects]> { body }`; a signature with no
+    // `name: fn<T>(params) -[Effects]> Ret E! { body }`; a signature with no
     // body (trait methods) or an extern `= "symbol"` ends at the first
     // non-signature element. `fn(Int) -> Int` is the anonymous function type.
     // A marker template (`expand: fn(self, target: Target) { … }`) emits its

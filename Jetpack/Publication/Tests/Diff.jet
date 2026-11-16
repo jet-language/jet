@@ -264,8 +264,8 @@ publication_diff_test_entry: fn(version: String, yanked: Bool) -> PublicationInd
 }
 
 #Test("publication diff treats published capability effect dimension and trait signatures as opaque bytes") {
-    old: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: Account, amount: Int) Int -[]>"), publication_diff_test_function("report", "fn report() Int -[]>"), publication_diff_test_function("bench.report", "fn bench.report() -[]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Length, .Linear>>(value: &&Q) Q -[]>"), publication_diff_test_item("trait", "Render", "trait Render {{ draw: fn(self) -[IO]> Int }}")}
-    new: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: &Account, amount: Int) Int -[]>"), publication_diff_test_function("report", "fn report() Int -[IO]>"), publication_diff_test_function("bench.report", "fn bench.report() -[IO]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Time, .Linear>>(value: &&Q) Q -[]>"), publication_diff_test_item("trait", "Render", "trait Render {{ draw: fn(self) -[GPU]> Int }}")}
+    old: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: Account, amount: Int) -[]> Int"), publication_diff_test_function("report", "fn report() -[]> Int"), publication_diff_test_function("bench.report", "fn bench.report() -[]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Length, .Linear>>(value: &&Q) -[]> Q"), publication_diff_test_item("trait", "Render", "trait Render {{ draw: fn(self) -[IO]> Int }}")}
+    new: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: &Account, amount: Int) -[]> Int"), publication_diff_test_function("report", "fn report() -[IO]> Int"), publication_diff_test_function("bench.report", "fn bench.report() -[IO]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Time, .Linear>>(value: &&Q) -[]> Q"), publication_diff_test_item("trait", "Render", "trait Render {{ draw: fn(self) -[GPU]> Int }}")}
     changes: publication_diff_public_api(old, new)
     assert_eq(changes.len(), 5)
     loop index in 0..<old.len() {
@@ -301,9 +301,9 @@ publication_diff_test_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> 
     assert_eq(publication_diff_test_breaks([shape, circle], [shape, circle, square]), ["Shape.Square"])
     assert_eq(publication_diff_test_breaks([], [shape, circle, square]).len(), 0)
     draw: publication_diff_test_item("trait", "Draw", "trait Draw")
-    paint: publication_diff_test_item("require", "Draw.paint", "require Draw.paint(self) Int -[IO]>")
+    paint: publication_diff_test_item("require", "Draw.paint", "require Draw.paint(self) -[IO]> Int")
     output: publication_diff_test_item("require", "Draw.Output", "require Draw.Output: type")
-    describe: publication_diff_test_item("fn", "Draw.describe", "fn Draw.describe(self) String -[]> = _")
+    describe: publication_diff_test_item("fn", "Draw.describe", "fn Draw.describe(self) -[]> String = _")
     assert_eq(publication_diff_test_breaks([draw, paint], [draw, paint, output]), ["Draw.Output"])
     assert_eq(publication_diff_test_breaks([draw, paint], [draw, paint, describe]).len(), 0)
     assert_eq(publication_diff_test_breaks([draw, paint, describe], [draw, paint]), ["Draw.describe"])
@@ -312,11 +312,11 @@ publication_diff_test_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> 
 }
 
 #Test("publication api diff effect rows may narrow but never widen") {
-    io_net: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[IO, Net]>")
-    io: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[IO]>")
-    pure: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[]>")
-    open: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[*]>")
-    retyped: publication_diff_test_function("fetch", "fn fetch(url: String) Int Never! -[IO]>")
+    io_net: publication_diff_test_function("fetch", "fn fetch(url: String) -[IO, Net]> String Never!")
+    io: publication_diff_test_function("fetch", "fn fetch(url: String) -[IO]> String Never!")
+    pure: publication_diff_test_function("fetch", "fn fetch(url: String) -[]> String Never!")
+    open: publication_diff_test_function("fetch", "fn fetch(url: String) -[*]> String Never!")
+    retyped: publication_diff_test_function("fetch", "fn fetch(url: String) -[IO]> Int Never!")
     assert_eq(publication_diff_test_breaks([io_net], [io]).len(), 0)
     assert_eq(publication_diff_test_breaks([io_net], [pure]).len(), 0)
     assert_eq(publication_diff_test_breaks([open], [io]).len(), 0)
@@ -386,7 +386,7 @@ publication_diff_test_may_break: fn(old: String, new: String) -> Bool Never! {
 }
 
 #Test("publication api snapshot rows keep each line as its signature") {
-    snapshot: pkg_capability_snapshot_parse("api_version = 4\npackage = geo\npublished_version = 1.0.0\nfn area(s: Shape) Float Never! -[]>\nfield Point.x: Int\nstruct Point<T: Ord> {{ .. }}\nvariant Shape.Circle(Float)\nrequire Draw.paint(self) Int -[IO]>\n") ?? panic("snapshot")
+    snapshot: pkg_capability_snapshot_parse("api_version = 4\npackage = geo\npublished_version = 1.0.0\nfn area(s: Shape) -[]> Float Never!\nfield Point.x: Int\nstruct Point<T: Ord> {{ .. }}\nvariant Shape.Circle(Float)\nrequire Draw.paint(self) Int -[IO]>\n") ?? panic("snapshot")
     items: publication_api_snapshot_items(snapshot)
     assert_eq(loop item in items -> "{item.kind}|{item.name}", ["field|Point.x", "fn|area", "require|Draw.paint", "struct|Point", "variant|Shape.Circle"])
     assert_eq(items[0].signature, "field Point.x: Int")

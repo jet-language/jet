@@ -261,7 +261,7 @@ process_join: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Int Never! {
 
 // innerLoopLoadRow: the result columns of s into the registers from
 // reg_result.
-inner_loop_load_row: fn(p: &cg.Parse, a: &ast.AST, s: Int, reg_result: Int, ecel_flags: Int) Never! -[DB]> {
+inner_loop_load_row: fn(p: &cg.Parse, a: &ast.AST, s: Int, reg_result: Int, ecel_flags: Int) -[DB]> Never! {
     elist: a.selects[s].elist
     _: ex.expr_code_expr_list(p, a, elist, reg_result, 0, ecel_flags)
 }
@@ -280,7 +280,7 @@ make_sorter_record: fn(p: &cg.Parse, a: &ast.AST, sort: SortCtx, s: Int, reg_bas
 // the sorter. reg_orig_data is the unpacked row when the record holds all
 // of it, else 0; n_prefix_reg the registers before reg_data free for the
 // sort key.
-push_onto_sorter: fn(p: &cg.Parse, a: &ast.AST, sort: &SortCtx, s: Int, reg_data: Int, reg_orig_data: Int, n_data: Int, n_prefix_reg: Int) Never! -[DB]> {
+push_onto_sorter: fn(p: &cg.Parse, a: &ast.AST, sort: &SortCtx, s: Int, reg_data: Int, reg_orig_data: Int, n_data: Int, n_prefix_reg: Int) -[DB]> Never! {
     b_seq: if sort.sort_flags.bit_and(SORTFLAG_USE_SORTER) == 0 -> 1 else -> 0
     ob: sort.order_by
     n_expr: ast.list_len(a, ob)
@@ -414,7 +414,7 @@ fix_distinct_open_eph: fn(p: &cg.Parse, a: ast.AST, e_tnct_type: Int, i_val: Int
 // selectInnerLoop: the body of the loop over the rows of SELECT s: its
 // result row, from the table src_tab when that is not negative, through
 // `sort` (when it has an ORDER BY) and `distinct` to `dest`.
-select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &SortCtx, distinct: DistinctCtx, dest: &cg.SelectDest, i_continue: Int, i_break: Int) Never! -[DB]> {
+select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &SortCtx, distinct: DistinctCtx, dest: &cg.SelectDest, i_continue: Int, i_break: Int) -[DB]> Never! {
     has_distinct: distinct.e_tnct_type
     has_sort: sort.order_by >= 0
     e_dest: dest.e_dest
@@ -952,7 +952,7 @@ result_set_of_select: fn(p: &cg.Parse, a: &ast.AST, s0: Int, aff: Int) -[DB]> In
 // computeLimitRegisters: the LIMIT counter (iLimit), and the OFFSET
 // counter (iOffset) with LIMIT+OFFSET after it, of SELECT s, once; a LIMIT
 // of 0 jumps to i_break.
-compute_limit_registers: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_break: Int) Never! -[DB]> {
+compute_limit_registers: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_break: Int) -[DB]> Never! {
     if a.selects[s].ilimit != 0 {
         return
     }
@@ -1027,7 +1027,7 @@ multi_select_order_by_key_info: fn(p: &cg.Parse, a: &ast.AST, s: Int, n_extra: I
 // generateWithRecursiveQuery: a WITH RECURSIVE query, s being the
 // recursive terms and its priors the setup query, through a Queue table
 // of rows still to output and, for UNION, a Distinct table of every row.
-generate_with_recursive_query: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) Never! -[DB]> {
+generate_with_recursive_query: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Never! {
     src: a.selects[s].src
     n_col: ast.list_len(a, a.selects[s].elist)
     if a.selects[s].win >= 0 {
@@ -2115,7 +2115,7 @@ PropagateConstWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
@@ -2813,7 +2813,7 @@ ExpanderWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { true }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
             select_pop_with(a, s)
         }
 
@@ -2822,7 +2822,7 @@ ExpanderWalker: struct {
 }
 
 // sqlite3SelectExpand: SELECT s and its subqueries expanded.
-select_expand: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {
+select_expand: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
     if a.ctx.has_compound {
         cw := ConvertCompoundWalker{unused: 0}
         _: ast.walk_select<ConvertCompoundWalker>(cw, a, s)
@@ -2849,7 +2849,7 @@ TypeInfoWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { true }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
             select_add_subquery_type_info(p, a, s)
         }
 
@@ -2877,7 +2877,7 @@ select_add_subquery_type_info: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! {
 
 // sqlite3SelectPrep: SELECT s expanded, its names resolved (in outer_nc,
 // -1 for none) and its subqueries' column types set.
-select_prep: fn(p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {
+select_prep: fn(p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {
     if p.db.malloc_failed {
         return
     }
@@ -2903,7 +2903,7 @@ select_prep: fn(p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> 
 
 // analyzeAggFuncArgs: the columns the arguments (and ORDER BY and FILTER)
 // of the aggregate functions of AggInfo ai use, under NameContext nc.
-analyze_agg_func_args: fn(p: &cg.Parse, a: &ast.AST, ai: Int, nc: Int) Never! -[DB]> {
+analyze_agg_func_args: fn(p: &cg.Parse, a: &ast.AST, ai: Int, nc: Int) -[DB]> Never! {
     p.ncs[nc].nc_flags = p.ncs[nc].nc_flags.bit_or(ast.NC_IN_AGG_FUNC)
     loop i in 0..<p.aggs[ai].funcs.len() {
         e: p.aggs[ai].funcs[i].f_expr
@@ -2920,7 +2920,7 @@ analyze_agg_func_args: fn(p: &cg.Parse, a: &ast.AST, ai: Int, nc: Int) Never! -[
 // optimizeAggregateUseOfIndexedExpr: the AggInfo columns past the
 // accumulator ones recomputed, the sorter wide enough for the indexed
 // expressions.
-optimize_aggregate_use_of_indexed_expr: fn(p: &cg.Parse, a: &ast.AST, s: Int, ai: Int, nc: Int) Never! -[DB]> {
+optimize_aggregate_use_of_indexed_expr: fn(p: &cg.Parse, a: &ast.AST, s: Int, ai: Int, nc: Int) -[DB]> Never! {
     n_acc: p.aggs[ai].n_accumulator
     loop p.aggs[ai].cols.len() > n_acc -> _: p.aggs[ai].cols.pop()
     if p.aggs[ai].n_sorting_column > 0 {
@@ -2965,14 +2965,14 @@ IdxEprRefWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
 
 // aggregateConvertIndexedExprRefToColumn.
-aggregate_convert_indexed_expr_ref_to_column: fn(p: &cg.Parse, a: &ast.AST, ai: Int) Never! -[DB]> {
+aggregate_convert_indexed_expr_ref_to_column: fn(p: &cg.Parse, a: &ast.AST, ai: Int) -[DB]> Never! {
     w := IdxEprRefWalker{unused: 0}
     cg.walk_push(p, w, 0)
     loop i in 0..<p.aggs[ai].funcs.len() {
@@ -2991,7 +2991,7 @@ assign_aggregate_registers: fn(p: &cg.Parse, ai: Int) Never! {
 
 // resetAccumulator: the accumulator registers set to NULL, with the
 // DISTINCT and ORDER BY tables of the aggregates opened.
-reset_accumulator: fn(p: &cg.Parse, a: &ast.AST, ai: Int) Never! -[DB]> {
+reset_accumulator: fn(p: &cg.Parse, a: &ast.AST, ai: Int) -[DB]> Never! {
     n_reg: p.aggs[ai].funcs.len() + p.aggs[ai].cols.len()
     if n_reg == 0 {
         return
@@ -3037,7 +3037,7 @@ reset_accumulator: fn(p: &cg.Parse, a: &ast.AST, ai: Int) Never! -[DB]> {
 
 // finalizeAggFunctions: OP_AggFinal for each aggregate, after the deferred
 // OP_AggStep calls, in ORDER BY order, of an ORDER BY aggregate.
-finalize_agg_functions: fn(p: &cg.Parse, a: &ast.AST, ai: Int) Never! -[DB]> {
+finalize_agg_functions: fn(p: &cg.Parse, a: &ast.AST, ai: Int) -[DB]> Never! {
     loop i in 0..<p.aggs[ai].funcs.len() {
         f: p.aggs[ai].funcs[i].copy()
         list: a.exprs[f.f_expr].x
@@ -3082,7 +3082,7 @@ finalize_agg_functions: fn(p: &cg.Parse, a: &ast.AST, ai: Int) Never! -[DB]> {
 // updateAccumulator: the accumulators of AggInfo ai updated from the
 // current row; with reg_acc (and no min() or max()) the accumulator
 // columns load only while reg_acc holds 0.
-update_accumulator: fn(p: &cg.Parse, a: &ast.AST, reg_acc: Int, ai: Int, e_distinct_type: Int) Never! -[DB]> {
+update_accumulator: fn(p: &cg.Parse, a: &ast.AST, reg_acc: Int, ai: Int, e_distinct_type: Int) -[DB]> Never! {
     if cg.n_err(a) != 0 {
         return
     }
@@ -3233,14 +3233,14 @@ HavingToWhereWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
 
 // havingToWhere.
-having_to_where: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {
+having_to_where: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
     w := HavingToWhereWalker{unused: 0}
     cg.walk_push(p, w, s)
     _: cg.pwalk_expr(p, a, a.selects[s].having)
@@ -3459,7 +3459,7 @@ simplify_from_term: fn(p: &cg.Parse, a: &ast.AST, s: Int, i: Int, is_agg: Bool, 
 // The code of subquery FROM term i (item si, SELECT sub) of SELECT s: a
 // co-routine, a reuse of a CTE's or an earlier term's materialization, or
 // a materialization into the term's ephemeral table.
-code_from_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i: Int, si: Int, sub: Int) Never! -[DB]> {
+code_from_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i: Int, si: Int, sub: Int) -[DB]> Never! {
     tab_list: a.selects[s].src
     t: a.items[si].tab
     if from_clause_term_can_be_coroutine(p, a, tab_list, i, a.selects[s].sel_flags) {

@@ -86,7 +86,7 @@ Repo: struct {
 
     /// The tree of `commit` written into `dir`, created first
     /// (`git archive COMMIT | tar -x -C DIR`).
-    export: fn(self, commit: String, dir: String) IOError! -[Exec, Time.Wait, FS.Write]> {
+    export: fn(self, commit: String, dir: String) -[Exec, Time.Wait, FS.Write]> IOError! {
         core.files.create_dir_all(dir)
         receipt: core.process.pipeline([ProcessSpec]{self.spec(Sh{"git archive {commit}"}), Sh{"tar -x -C {dir}"}.spec()})
         core.process.check(receipt)
@@ -177,7 +177,7 @@ priv internal: module {
 
     // The files under `root` (below `rel`) not in `tracked`, `skip`
     // directories and directory symlinks not entered.
-    git_extra: fn(root: String, rel: String, tracked: Set<String>, skip: [String], found: &[Drift]) Never! -[FS.Read]> {
+    git_extra: fn(root: String, rel: String, tracked: Set<String>, skip: [String], found: &[Drift]) -[FS.Read]> Never! {
         loop entry in core.files.list_dir(core.files.join(root, rel)) ?? [] {
             path: if rel == "" -> entry.name.copy() else -> "{rel}/{entry.name}"
             if {

@@ -4,6 +4,7 @@ use {
 }
 
 TEN: #run 10
+
 THIRD: #run { TEN / 3 }
 
 #Codable
@@ -40,7 +41,9 @@ Rational: struct {
     }
 
     impl Equatable {
-        equal: fn(self, rhs: Rational) -> Bool { self.numerator * rhs.denominator == rhs.numerator * self.denominator }
+        equal: fn(self, rhs: Rational) -> Bool {
+            self.numerator * rhs.denominator == rhs.numerator * self.denominator
+        }
     }
 
     impl Comparable {
@@ -80,7 +83,9 @@ ScaledDecimal: struct {
 
     impl Add {
         add: fn(self, rhs: ScaledDecimal) -> ScaledDecimal {
-            if self.scale == rhs.scale -> return ScaledDecimal{coefficient: self.coefficient + rhs.coefficient, scale: self.scale}
+            if self.scale == rhs.scale {
+                return ScaledDecimal{coefficient: self.coefficient + rhs.coefficient, scale: self.scale}
+            }
             if self.scale > rhs.scale {
                 factor := 1
                 power_index := 0
@@ -102,7 +107,9 @@ ScaledDecimal: struct {
 
     impl Sub {
         sub: fn(self, rhs: ScaledDecimal) -> ScaledDecimal {
-            if self.scale == rhs.scale -> return ScaledDecimal{coefficient: self.coefficient - rhs.coefficient, scale: self.scale}
+            if self.scale == rhs.scale {
+                return ScaledDecimal{coefficient: self.coefficient - rhs.coefficient, scale: self.scale}
+            }
             if self.scale > rhs.scale {
                 factor := 1
                 power_index := 0
@@ -240,12 +247,9 @@ largest: fn<T: Comparable>(values: [T]) -> T? {
 
 million_money: fn() -> Money {
     total := Money{cents: 0}
-    loop i in 0..<1_000_000 {
-        total += Money{cents: i % 100}
-    }
+    loop i in 0..<1_000_000 -> total += Money{cents: i % 100}
     return total
 }
-
 
 run: fn() {
     first: rational(2, 4) ?? panic("first")

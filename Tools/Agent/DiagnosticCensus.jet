@@ -253,7 +253,7 @@ census_keeps: fn(kind: CensusFiles, path: String) -> Bool Never! {
 
 // Every file under `directory` that `kind` keeps, skipping dot directories
 // and any directory `skip` names.
-census_walk: fn(directory: String, skip: [String], kind: CensusFiles, out: &[String]) DiagnosticCensusError! -[FS]> {
+census_walk: fn(directory: String, skip: [String], kind: CensusFiles, out: &[String]) -[FS]> DiagnosticCensusError! {
     if !files.exists(directory) -> return Ok()
     entries: files.list_dir(directory) ?? return Err(census_fail("cannot list {directory}: {err}"))
     loop child in entries {

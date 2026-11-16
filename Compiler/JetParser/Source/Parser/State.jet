@@ -641,6 +641,13 @@ parser_describe_token: fn(state: JetParserState, token: Token) -> String Never! 
 
 parser_expect: fn(state: &JetParserState, kind: Int, context: String) -> Token {
     if parser_current_kind(state) == kind -> return parser_bump(state)
+    span: parser_current(state).span
+    parser_report_expected(state, context)
+    parser_synthetic_token(kind, span)
+}
+
+// The generic parse error at the current token, naming what belongs there.
+parser_report_expected: fn(state: &JetParserState, context: String) {
     token: parser_current(state)
     found: parser_describe_token(state, token)
     parser_add_error(
@@ -650,7 +657,6 @@ parser_expect: fn(state: &JetParserState, kind: Int, context: String) -> Token {
         "the parser needs the expected token to keep the surrounding syntax unambiguous",
         "write the expected token here",
     )
-    parser_synthetic_token(kind, token.span)
 }
 
 parser_expect_name: fn(state: &JetParserState, context: String) -> Token {

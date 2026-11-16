@@ -39,7 +39,7 @@ pkg_seal_tuple_table: fn(path: String) -[FS]> SealTupleTable IOError! {
     Ok(SealTupleTable{node_count: tuples.len(), digest: "sha256-{pkg_sha256_hex(table)}"})
 }
 
-pkg_seal_collect_tuples: fn(path: String, relative: String, tuples: &[SealTuple]) IOError! -[FS]> {
+pkg_seal_collect_tuples: fn(path: String, relative: String, tuples: &[SealTuple]) -[FS]> IOError! {
     info: files.stat(path)
     if info.is_symlink || info.is_file {
         kind: if info.is_symlink -> U8{108} else -> U8{102}

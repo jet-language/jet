@@ -149,7 +149,7 @@ NixFallbackIdentity: struct {
 
     // Re-hash and re-read the recorded executable before a later Jetpack-only
     // run. A changed binary or version cannot reuse the import.
-    verify_executable: fn(self) NixError! -[FS, Env, Exec, Time.Wait]> {
+    verify_executable: fn(self) -[FS, Env, Exec, Time.Wait]> NixError! {
         inspected: nix_fallback_inspect_executable(self.executable)
         if inspected.path != self.executable || inspected.sha256 != self.executable_sha256 || inspected.version != self.version {
             return Err(NixError.Fallback("recorded Nix executable identity no longer matches the installed executable"))

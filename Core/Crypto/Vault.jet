@@ -372,13 +372,13 @@ commit_rotate: fn<T>(write: &&VaultWrite<T>, plan: &&MutationPlan<T>) -[Secret]>
     }
 }
 
-commit_retire: fn<T>(write: &&VaultWrite<T>, plan: &&MutationPlan<T>) VaultError! -[Secret]> {
+commit_retire: fn<T>(write: &&VaultWrite<T>, plan: &&MutationPlan<T>) -[Secret]> VaultError! {
     #Unsafe("vault typed retirement commit provider boundary") {
         return vault.commit_retire<T>(write.move(), plan)
     }
 }
 
-commit_revoke: fn<T>(write: &&VaultWrite<T>, plan: &&MutationPlan<T>) VaultError! -[Secret]> {
+commit_revoke: fn<T>(write: &&VaultWrite<T>, plan: &&MutationPlan<T>) -[Secret]> VaultError! {
     #Unsafe("vault typed revocation commit provider boundary") {
         return vault.commit_revoke<T>(write.move(), plan)
     }

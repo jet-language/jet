@@ -15,7 +15,7 @@ sys: module {
     // (whether it was set). IR lowers both onto the program's logical
     // environment (RuntimeRoutes.jet IR_ENVIRONMENT_ROUTES), as every
     // environment call.
-    #Import(c) priv env_set: fn(name: String, value: String) EnvError! -[Env]> = "jet_std_env_try_set"
+    #Import(c) priv env_set: fn(name: String, value: String) -[Env]> EnvError! = "jet_std_env_try_set"
 
     #Import(c) priv env_remove: fn(name: String) -[Env]> Bool EnvError! = "jet_std_env_unset"
 
@@ -47,7 +47,7 @@ sys: module {
     #Import(c) priv fd_process_group: fn(token: Int) -[Env]> Int IOError! = "jet_sys_fd_process_group_raw"
 
     // Makes `group` the foreground process group of the terminal `token` holds.
-    #Import(c) priv fd_set_process_group: fn(token: Int, group: Int) IOError! -[Env]> = "jet_sys_fd_set_process_group_raw"
+    #Import(c) priv fd_set_process_group: fn(token: Int, group: Int) -[Env]> IOError! = "jet_sys_fd_set_process_group_raw"
 
     // A new pipe's two tokens, packed as bytes.
     #Import(c) priv fd_pipe: fn() -[Env]> [U8] IOError! = "jet_sys_fd_pipe_raw"
@@ -71,26 +71,26 @@ sys: module {
     #Import(c) priv shared_create: fn(size: Int) -[Env]> Int IOError! = "jet_sys_shared_create_raw"
 
     // Writes `data` at byte `offset` of the shared memory `token`.
-    #Import(c) priv shared_write: fn(token: Int, offset: Int, data: [U8]) IOError! -[Env]> = "jet_sys_shared_write_raw"
+    #Import(c) priv shared_write: fn(token: Int, offset: Int, data: [U8]) -[Env]> IOError! = "jet_sys_shared_write_raw"
 
     // Writes the `columns` by `rows` pixels of `data` (`stride` bytes a row)
     // at `left`, `top` of the pixel buffer at byte `offset` of the shared
     // memory `token`, in the byte order `order`.
-    #Import(c) priv shared_write_pixels: fn(token: Int, offset: Int, data: [U8], stride: Int, left: Int, top: Int, columns: Int, rows: Int, order: Int) IOError! -[Env]> = "jet_sys_shared_write_pixels_raw"
+    #Import(c) priv shared_write_pixels: fn(token: Int, offset: Int, data: [U8], stride: Int, left: Int, top: Int, columns: Int, rows: Int, order: Int) -[Env]> IOError! = "jet_sys_shared_write_pixels_raw"
 
     // `count` bytes from byte `offset` of the shared memory `token`.
     #Import(c) priv shared_read: fn(token: Int, offset: Int, count: Int) -[Env]> [U8] IOError! = "jet_sys_shared_read_raw"
 
     // Sets `count` bytes from byte `offset` of the shared memory `token` to
     // `value`.
-    #Import(c) priv shared_fill: fn(token: Int, offset: Int, count: Int, value: Int) IOError! -[Env]> = "jet_sys_shared_fill_raw"
+    #Import(c) priv shared_fill: fn(token: Int, offset: Int, count: Int, value: Int) -[Env]> IOError! = "jet_sys_shared_fill_raw"
 
     // The 8-byte word at byte `offset` of the shared memory `token`, read
     // atomically (SeqCst).
     #Import(c) priv shared_load: fn(token: Int, offset: Int) -[Env]> Int IOError! = "jet_sys_shared_load_raw"
 
     // Stores `value` atomically (SeqCst) in the 8-byte word at byte `offset`.
-    #Import(c) priv shared_store: fn(token: Int, offset: Int, value: Int) IOError! -[Env]> = "jet_sys_shared_store_raw"
+    #Import(c) priv shared_store: fn(token: Int, offset: Int, value: Int) -[Env]> IOError! = "jet_sys_shared_store_raw"
 
     // 1 when the word at byte `offset` held `expected` and now holds
     // `replacement`, else 0 (SeqCst).
@@ -108,7 +108,7 @@ sys: module {
     #Import(c) priv service_entropy: fn(count: Int) -[Rand]> [U8]? = "jet_random_os_entropy"
 
     // Makes `path` the working directory, or an Err with the reason.
-    #Import(c) priv set_current_dir: fn(path: String) Err! -[Env]> = "jet_sys_set_current_dir_raw"
+    #Import(c) priv set_current_dir: fn(path: String) -[Env]> Err! = "jet_sys_set_current_dir_raw"
 
     // The host OS's name and its CPU architecture.
     #Import(c) priv name: fn() -[Env]> String = "jet_std_os_name"

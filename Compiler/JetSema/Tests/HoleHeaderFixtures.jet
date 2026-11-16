@@ -97,9 +97,15 @@ hole_header_expect: fn(failures: &[String], source: String, code: String, what: 
         return
     }
     found: errors[0]
-    if found.code != code -> failures.push("wanted {code}, found {found.code}: {found.what} in {source}")
-    if !found.what.contains(what) -> failures.push("{code} says `{found.what}`, wanted `{what}` in {source}")
-    if !found.fix.contains(fix) -> failures.push("{code} fix says `{found.fix}`, wanted `{fix}` in {source}")
+    if found.code != code {
+        failures.push("wanted {code}, found {found.code}: {found.what} in {source}")
+    }
+    if !found.what.contains(what) {
+        failures.push("{code} says `{found.what}`, wanted `{what}` in {source}")
+    }
+    if !found.fix.contains(fix) {
+        failures.push("{code} fix says `{found.fix}`, wanted `{fix}` in {source}")
+    }
     if applied == "" {
         if found.edit != None -> failures.push("{code} has an edit it should only show in {source}")
         return

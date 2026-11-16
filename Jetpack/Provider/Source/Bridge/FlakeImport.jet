@@ -91,7 +91,7 @@ provider_last_segment: fn(item: String) -> String Never! {
     if segment == "" -> item else -> segment
 }
 
-provider_add_catalog_json: fn(path: String, names: &[String]) Never! -[FS]> {
+provider_add_catalog_json: fn(path: String, names: &[String]) -[FS]> Never! {
     text: files.read(path) ?? return
     if json.parse(text) == {
         .Ok(value) -> { provider_add_catalog_value(value, names) }
@@ -136,7 +136,7 @@ provider_add_catalog_value: fn(value: Dyn, names: &[String]) Never! {
 }
 
 // Fixture files named `<source>-<name>.<ext>` for the Nix source aliases.
-provider_add_fixture_catalog_names: fn(dir: String, names: &[String]) Never! -[FS]> {
+provider_add_fixture_catalog_names: fn(dir: String, names: &[String]) -[FS]> Never! {
     entries: files.list_dir(dir) ?? return
     loop entry in entries {
         info: files.stat(entry.path) ?? next
@@ -274,7 +274,7 @@ provider_sorted_unique_gaps: fn(gaps: [ImportGap]) -> [ImportGap] Never! {
 }
 
 // JT0101: one unmappable input and its nearest catalog candidate.
-provider_report_import_gap: fn(file: String, gap: ImportGap) Never! -[IO]> {
+provider_report_import_gap: fn(file: String, gap: ImportGap) -[IO]> Never! {
     item: provider_one_line(gap.item)
     candidate: provider_one_line(gap.candidate)
     diagnostic: diagnostic_from_registry(
@@ -378,7 +378,7 @@ provider_import_nixpkgs_channel: fn(graph: FlakeGraph) -> LockedSourceChannel? N
 }
 
 // Write `env.jet` through a temporary sibling and a rename.
-provider_write_import_env: fn(dir: String, contents: String) ProviderReason! -[FS, Env]> {
+provider_write_import_env: fn(dir: String, contents: String) -[FS, Env]> ProviderReason! {
     path: files.join(dir, ENV_FILE)
     temporary: files.join(dir, ".env.jet.import.{sys.pid()}.tmp")
     if provider_write_then_rename(temporary, path, contents) == {
@@ -390,7 +390,7 @@ provider_write_import_env: fn(dir: String, contents: String) ProviderReason! -[F
     }
 }
 
-provider_write_then_rename: fn(temporary: String, path: String, contents: String) IOError! -[FS]> {
+provider_write_then_rename: fn(temporary: String, path: String, contents: String) -[FS]> IOError! {
     writer := files.create(temporary)
     writer.write_bytes(contents.bytes())
     writer.fsync()

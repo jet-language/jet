@@ -120,7 +120,7 @@ usage: fn() -[Exec, IO]> Never {
     process.fail(2, "usage: jet Tools/Agent/CompilerPackages.jet [--root DIR] packages|sources [ENTRY]\n       jet Tools/Agent/CompilerPackages.jet [--root DIR] roots|inputs\n       jet Tools/Agent/CompilerPackages.jet [--root DIR] select FILE...\n       jet Tools/Agent/CompilerPackages.jet [--root DIR] identity\n       jet Tools/Agent/CompilerPackages.jet [--root DIR] unblock FILE...|-\n       jet Tools/Agent/CompilerPackages.jet [--root DIR] unit|unit-inputs [ENTRY]...")
 }
 
-command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Exec, FS, IO, Time.Wait]> {
+command: fn(root: String, name: String, args: [String]) -[Env, Exec, FS, IO, Time.Wait]> PackagesError! {
     out := term.stdout()
     if name == {
         "packages" -> {
@@ -226,7 +226,7 @@ package_tree: fn(repo: String, directory: String) -[FS]> [String] PackagesError!
     found
 }
 
-walk_tree: fn(repo: String, directory: String, found: &[String]) PackagesError! -[FS]> {
+walk_tree: fn(repo: String, directory: String, found: &[String]) -[FS]> PackagesError! {
     listed: files.list_dir(files.join(repo, directory)) ?? return Err(PackagesError{message: "`{directory}` cannot be listed: {err}"})
     names := [String]{}
     loop entry in listed -> names.push(entry.name)
@@ -347,7 +347,7 @@ compiler_packages: fn(repo: String, entry: String) -[FS]> [Package] PackagesErro
     packages
 }
 
-visit_package: fn(repo: String, directory: String, packages: &[Package], visiting: &[String]) PackagesError! -[FS]> {
+visit_package: fn(repo: String, directory: String, packages: &[Package], visiting: &[String]) -[FS]> PackagesError! {
     manifest: files.read(files.join(repo, "{directory}/package.jet")) ?? return Err(PackagesError{message: "{directory}/package.jet cannot be read: {err}"})
     name: quoted_line(manifest, "name")
     if name == "" -> return Err(PackagesError{message: "{directory}/package.jet names no package"})

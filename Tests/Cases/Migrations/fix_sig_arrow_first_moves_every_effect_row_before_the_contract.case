@@ -1,0 +1,22 @@
+# The registered sig-arrow1 plan (toolchain a0.0.45) rewrites every
+# error-first signature as arrow-first: the effect row moves before the error
+# contract, and no unit result is written after the arrow. It does so for a
+# named function, a `Never!` contract, a union contract, a generic function, a
+# function type in a parameter and in a field, a parameter list over several
+# lines, a trait slot and its impl method, a lambda, a comment, a quoted
+# program in a string and a Markdown file's fence and code spans. Signatures
+# that are already arrow-first, or that have no effect row, stay. The old
+# program is kept as `before.old`, read as a Jet source through
+# `--source-list`, since the old order is not Jet. A second run finds nothing
+# left to rewrite.
+fixture: FixSigArrowFirst/Input
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- sig-arrow1 --write guide.md --source-list sources.txt
+exit: 0
+stdout: = "EDIT guide.md 3\nEDIT before.old 13\nTOTAL 16 sites in 2 files\n"
+file: before.old = FixSigArrowFirst/before.out
+file: guide.md = FixSigArrowFirst/guide.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- sig-arrow1 --write guide.md --source-list sources.txt
+exit: 0
+stdout: = "TOTAL 0 sites in 0 files\n"
+file: before.old = FixSigArrowFirst/before.out
+file: guide.md = FixSigArrowFirst/guide.out
