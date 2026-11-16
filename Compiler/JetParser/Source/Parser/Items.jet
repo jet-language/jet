@@ -108,7 +108,6 @@ use {
         TOKEN_IDENT,
         TOKEN_INT,
         TOKEN_KW_COPY,
-        TOKEN_KW_EFFECT,
         TOKEN_KW_ELSE,
         TOKEN_KW_ENUM,
         TOKEN_KW_EXTERN,
@@ -334,10 +333,6 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
         }
         token.kind == TOKEN_KW_IMPL -> return ParsedItemOrImport{item: Val(parser_parse_impl(state, modifiers)), handled: true}
         token.kind == TOKEN_KW_MODULE -> return ParsedItemOrImport{item: Val(parser_parse_module(state, modifiers)), handled: true}
-        token.kind == TOKEN_KW_EFFECT -> {
-            parser_refuse_effect_word(state)
-            return ParsedItemOrImport{item: None, handled: true}
-        }
         token.kind == TOKEN_KW_EXTERN -> return ParsedItemOrImport{item: Val(parser_parse_extern_rust(state)), handled: true}
     }
     ParsedItemOrImport{item: None, handled: false}

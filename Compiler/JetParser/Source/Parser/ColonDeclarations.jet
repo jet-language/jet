@@ -11,7 +11,7 @@
 //
 // Which `name: fn(…)` is a function depends on the brace it sits in, which the
 // pass tracks as one frame per open delimiter:
-// - At file scope and in module, impl, trait, derive, extern, tag and effect
+// - At file scope and in module, impl, trait, derive and extern
 //   bodies, it is always a function or a required signature. At file and
 //   module scope the item parser reads an unmarked one without a body as a
 //   function type (parser_function_type_alias).
@@ -125,7 +125,7 @@ parser_colon_word: fn(kind: Int) -> Bool Never! {
 
 // The declaration keywords a colon head may carry.
 parser_colon_head_keyword: fn(kind: Int) -> Bool Never! {
-    kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_EFFECT
+    kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_MODULE
 }
 
 // The head kind of a `#loop` or `#if` statement.
@@ -137,7 +137,7 @@ PARSER_COLON_HEAD_COMPTIME_BLOCK: -2
 parser_colon_body_frame: fn(head: Int, frame: Int) -> Int Never! {
     if head == TOKEN_KW_STRUCT || head == TOKEN_KW_ENUM -> return PARSER_COLON_FRAME_SHAPE
     if head == TOKEN_KW_MODULE -> return PARSER_COLON_FRAME_MODULE
-    if head == TOKEN_KW_IMPL || head == TOKEN_KW_TRAIT || head == TOKEN_KW_EXTERN || head == TOKEN_KW_EFFECT {
+    if head == TOKEN_KW_IMPL || head == TOKEN_KW_TRAIT || head == TOKEN_KW_EXTERN {
         return PARSER_COLON_FRAME_CONTAINER
     }
     if head == PARSER_COLON_HEAD_COMPTIME_BLOCK && (frame == PARSER_COLON_FRAME_MODULE || frame == PARSER_COLON_FRAME_CONTAINER) {

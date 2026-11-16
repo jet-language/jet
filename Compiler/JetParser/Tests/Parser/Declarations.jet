@@ -1,6 +1,6 @@
 use {
     jet_foundation.[MARKER_SOURCE_SITES, Marker, MarkerDecl, Span, TextEdit, expr_span]
-    jet_parser.[jet_format_source, jfmt_check_parse_accepts, parser_marker_placement_edits]
+    jet_parser.[jet_format_source, jfmt_check_parse_accepts, parse_source_layout, parser_marker_placement_edits]
 }
 
 marker_test_decl: fn(source: String) -> MarkerDecl {
@@ -755,4 +755,78 @@ Pixel: struct {
         "E0943",
     )
     assert(diagnostic.edit != None)
+}
+
+#Test("an_effect_impl_beside_its_type_joins_the_type") {
+    source: `Audit: struct {}
+
+impl Audit.Effect {
+    parent: Log.Audit
+}
+
+Ledger: enum {
+    Read
+    Post
+}
+
+impl Ledger.Effect {
+    irreversible: fn(self) -> Bool { self == .Post }
+}
+`
+    program: parser_test_program(source)
+    names := [String]{}
+    loop item in program.items {
+        if item == {
+            .Struct(definition) -> names.push("struct {definition.name}")
+            .Enum(definition) -> names.push("enum {definition.name}")
+            .EffectDecl(declaration) -> names.push("effect {declaration.name} {declaration.irreversible}")
+            .Impl(definition) -> names.push("impl {definition.type_name}")
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> names.push("other")
+        }
+    }
+    assert_eq(names, [String]{"struct Audit", "effect Audit false", "enum Ledger", "effect Ledger true", "effect Ledger.Read false", "effect Ledger.Post true"})
+    program.items[0] == .Struct(audit) ?? panic("the effect struct comes first")
+    declared: audit.effect_impl ?? panic("the outside block joins `Audit`")
+    parent: declared.parent ?? panic("the outside block keeps its `parent`")
+    assert_eq(parent.name, "Log.Audit")
+    layout: parse_source_layout(source.bytes()).program
+    assert_eq(layout.items.len(), 4)
+    layout.items[1] == .Impl(written) ?? panic("the layout parse keeps the block where it is written")
+    assert_eq(written.type_name, "Audit")
+    assert_eq(parser_test_stable(source), source)
+}
+
+#Test("an_effect_impl_beside_its_type_keeps_the_effect_contract") {
+    twice: parser_test_diagnostic(
+        parser_test_errors(
+            `Audit: struct {
+    impl Effect {}
+}
+
+impl Audit.Effect {}
+`,
+        ),
+        "E0908",
+    )
+    assert(twice.what.contains("second `impl Effect` block"))
+    method: parser_test_diagnostic(
+        parser_test_errors(
+            `Audit: struct {}
+
+impl Audit.Effect {
+    undo: fn(self) -> Bool { true }
+}
+`,
+        ),
+        "E0907",
+    )
+    assert(method.what.contains("`undo` is not a method of `Effect`"))
+    elsewhere: parser_test_program(
+        `impl Audit.Effect {
+    irreversible: fn(self) -> Bool { true }
+}
+`,
+    )
+    elsewhere.items[0] == .Impl(kept) ?? panic("a block whose type is declared elsewhere stays an impl")
+    assert_eq(kept.type_name, "Audit")
 }

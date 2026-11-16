@@ -2576,10 +2576,13 @@ FS: enum {
 ```
 
 An `FS.Read` call inside `#Transact` is allowed; an `FS.Write` call is E0746.
-An effect is a type with an `impl Effect` block; `effect` is not a declaration
-word. A `Log.Audit: effect` line is E0003, and its fix declares
-`Audit: struct { impl Effect { parent: Log } }`, a package effect that is a
-kind of `Log` (see the package-effect paragraph after the E0757 entries).
+An effect is a type that implements `Effect`, in its body or in an
+`impl Name.Effect { … }` block beside it in the same file, which joins the
+type as if the body held it; a second block is E0908. `effect` is not a
+declaration word: a `Log.Audit: effect` line is the ordinary E0003 parse
+error, and `Audit: struct {}` with `impl Audit.Effect { parent: Log }`
+declares a package effect that is a kind of `Log` (see the package-effect
+paragraph after the E0757 entries).
 
 A root that has declared leaves is closed: the Prelude's own leaves
 (`FS.Read`) and an effect family's cases (`Query.Read`) are the only dotted

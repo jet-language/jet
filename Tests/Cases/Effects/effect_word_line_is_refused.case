@@ -1,10 +1,11 @@
-# A `Log.Audit: effect` line declares nothing: it is E0003, and its fix
-# declares the package effect as a type that names `Log` as its parent.
+# `effect` is no declaration word: a package effect is a type with an
+# `impl Effect` block. A `Log.Audit: effect` line fails to parse like any
+# line Jet does not spell, with no teaching diagnostic.
 fixture: Fixtures/EffectWord
 env: NO_COLOR=1
 step: jet check main.jet
 exit: nonzero
-stderr: ~ "E0003" # the line is refused
-stderr: ~ "`Log.Audit: effect` declares no effect" # the report quotes the line
-stderr: ~ "impl Effect" # the fix declares a type with an `impl Effect` block
-stderr: ~ "parent: Log" # that names `Log` as its parent
+stderr: ~ "--> main.jet:1:" # the line is refused
+stderr: ~ "jet-lang.dev/e/E0003" # the ordinary parse code
+stderr: !~ "declares no effect" # no report for the old word
+stderr: !~ "impl Effect" # no fix teaches the type form

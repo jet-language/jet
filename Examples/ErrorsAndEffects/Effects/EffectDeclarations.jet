@@ -1,15 +1,32 @@
-// An effect is a type with an `impl Effect` block. `Audit` is a package
+// An effect is a type that implements `Effect`, in its body or in an
+// `impl Name.Effect` block beside it in the same file. `Audit` is a package
 // effect, a kind of the Prelude's `Log`, so `audit` names `Audit` in its row
 // and a caller that denies `Log` cannot call it.
-Audit: struct {
-    impl Effect {
-        parent: Log
-    }
+Audit: struct {}
+
+impl Audit.Effect {
+    parent: Log
+}
+
+// An enum's cases are a closed family of effects: a row names one case, as
+// `post` does, or the whole family. A posted entry stays posted, so
+// `irreversible` says `Post` can't be rolled back.
+Ledger: enum {
+    Read
+    Post
+}
+
+impl Ledger.Effect {
+    irreversible: fn(self) -> Bool { self == .Post }
 }
 
 audit: fn() -[Audit]> {}
 
+post: fn() -[Ledger.Post]> {}
+
 run: fn() {
     audit()
     print("audited")
+    post()
+    print("posted")
 }

@@ -61,7 +61,6 @@ use {
         TOKEN_HASH,
         TOKEN_IDENT,
         TOKEN_INT,
-        TOKEN_KW_EFFECT,
         TOKEN_KW_ENUM,
         TOKEN_KW_EXTERN,
         TOKEN_KW_FN,
@@ -106,7 +105,7 @@ use {
 }
 
 parse_source: fn(source: [U8]) -> ParseResult {
-    parser_parse_lexed_lines(lex(source), source, parser_line_starts(source), false)
+    parser_join_effect_impls(parse_source_layout(source))
 }
 
 // Embedded Core library sources are vetted stdlib internals: they may spell
@@ -114,19 +113,31 @@ parse_source: fn(source: [U8]) -> ParseResult {
 // embedded-Core path and compiler-generated call arguments (core.testing
 // histories, #6410) parse this way; a user file never does.
 parse_generated_source: fn(source: [U8]) -> ParseResult {
+    parser_join_effect_impls(parse_generated_layout(source))
+}
+
+// The program as written, for the formatter: an `impl Name.Effect` block
+// outside its type stays where it is written instead of joining the type
+// (parser_join_effect_impls).
+parse_source_layout: fn(source: [U8]) -> ParseResult {
+    parser_parse_lexed_lines(lex(source), source, parser_line_starts(source), false)
+}
+
+// parse_source_layout lexed as parse_generated_source.
+parse_generated_layout: fn(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source), false)
 }
 
 // The parse entry points take the caller's tokens: they move into the parser
 // instead of being copied.
 parse_lexed: fn(lexed: &&Lexed) -> ParseResult {
-    parser_parse_lexed_lines(lexed, [U8]{}, [Int]{}, false)
+    parser_join_effect_impls(parser_parse_lexed_lines(lexed, [U8]{}, [Int]{}, false))
 }
 
 // Parse just the supplied token slice with its aggregate source available for
 // canonical source-dependent diagnostics. REPL turns never reparse old tokens.
 parse_lexed_with_source: fn(lexed: &&Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
-    parser_parse_lexed_lines(lexed, source, line_starts, false)
+    parser_join_effect_impls(parser_parse_lexed_lines(lexed, source, line_starts, false))
 }
 
 // parse_lexed_with_source on the admitted compiler threads: a large source
@@ -136,7 +147,7 @@ parse_lexed_with_source: fn(lexed: &&Lexed, source: [U8], line_starts: [Int]) ->
 // then an item head, delimiters nesting within every run), where the cut
 // scan itself runs in parallel; `[0, tokens.len()]` scans on this thread.
 parse_lexed_with_source_threads: fn(lexed: &&Lexed, source: [U8], line_starts: [Int], runs: [Int], threads: CompilerThreads) -> ParseResult {
-    parser_parse_lexed_lines_threads(lexed, source, line_starts, runs, false, threads)
+    parser_join_effect_impls(parser_parse_lexed_lines_threads(lexed, source, line_starts, runs, false, threads))
 }
 
 // Parse a Jetpack config surface (Rust `parse_config_with_source`): the
@@ -144,7 +155,20 @@ parse_lexed_with_source_threads: fn(lexed: &&Lexed, source: [U8], line_starts: [
 // as the typed environment read `source` stays available
 // for config values whose spelling is not a general Jet expression.
 parse_config_with_source: fn(lexed: &&Lexed, source: [U8]) -> ParseResult {
-    parser_parse_lexed_lines(lexed, source, parser_line_starts(source), true)
+    parser_join_effect_impls(parser_parse_lexed_lines(lexed, source, parser_line_starts(source), true))
+}
+
+// A parsed file with every `impl Name.Effect` block written outside its type
+// joined to the type (parser_attach_effect_impls), once the whole file is
+// read: a chunked parse sees the type and the block in different chunks.
+parser_join_effect_impls: fn(input: &&ParseResult) -> ParseResult {
+    result := input.move()
+    if !parser_effect_impls_outside(result.program.items) -> return result
+    diagnostics := result.diagnostics.move()
+    items: parser_attach_effect_impls(result.program.items, diagnostics)
+    result.program.items = items
+    result.diagnostics = diagnostics.move()
+    result
 }
 
 // The lexed tokens move into the parser state (field moves reset the field,
@@ -251,7 +275,7 @@ parse_tokens: fn(tokens: [Token], tables: TokenTables) -> ParseResult {
     }
     owned_tables := tables.copy()
     prepared := parser_prepare_tokens(tokens.copy(), owned_tables)
-    parser_parse_prepared(prepared, [Diagnostic]{}, source_end, [Int]{}, [U8]{}, false, owned_tables)
+    parser_join_effect_impls(parser_parse_prepared(prepared, [Diagnostic]{}, source_end, [Int]{}, [U8]{}, false, owned_tables))
 }
 
 // Fence expansion runs before parsing. A fence error stops the
@@ -1503,7 +1527,7 @@ parser_pub_use_ahead: fn(state: &JetParserState) -> Bool Never! {
 }
 
 parser_is_item_keyword: fn(kind: Int) -> Bool Never! {
-    kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_USE || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_EFFECT || kind == TOKEN_KW_EXTERN
+    kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_USE || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_EXTERN
 }
 
 // + owner ruling (2026-09-30): an immutable module binding
