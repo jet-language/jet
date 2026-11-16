@@ -59,7 +59,6 @@ use jet_foundation.[
     body_each_expr_child,
     body_each_stmt_child,
     body_node,
-    compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_failure_text,
     compiler_threads_partition,
@@ -802,7 +801,9 @@ sema_check_registered_locate_diagnostics: fn(environment: SemaScopeEnvironment, 
 // held before was demanded then. The functions are read on up to `threads`
 // threads (sema_core_demand_read), and their names demanded here in module
 // order, each module's functions before its call-site facts, as one thread
-// would.
+// would. The calls of the bodies that join the wave are read on the
+// threads too (sema_core_demand_callees), once every key named so far is
+// demanded, and name their callees in the order the bodies joined.
 sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult], read_functions: &[Int], read_facts: &[Int], names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int], host_hooks: SemaHostHookAccess?, threads: CompilerThreads) {
     loop read_functions.len() < modules.len() -> read_functions.push(0)
     loop read_facts.len() < modules.len() -> read_facts.push(0)
@@ -816,9 +817,14 @@ sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphMo
             sema_core_stand_in_bind(graph, host_hooks, valued, full, keys)
             loop key in valued -> sema_core_stand_in_full(graph, key, true, names)
             loop key in full -> sema_core_stand_in_full(graph, key, false, names)
-            loop key in valued -> sema_core_demand_key(graph, key, names, wave, affected)
-            loop key in full -> sema_core_demand_key(graph, key, names, wave, affected)
-            loop key in keys -> sema_core_demand_key(graph, key, names, wave, affected)
+            joined := [SemaCoreDemandJoin]{}
+            loop key in valued -> sema_core_demand_key(graph, key, names, wave, affected, joined)
+            loop key in full -> sema_core_demand_key(graph, key, names, wave, affected, joined)
+            loop key in keys -> sema_core_demand_key(graph, key, names, wave, affected, joined)
+            callees := sema_core_demand_callees(graph, joined, threads)
+            loop part_index in 0..<callees.len() {
+                compiler_transfer_rows<String>(names.keys, callees[part_index])
+            }
         }
         parts := sema_core_demand_read(modules, read_functions, threads)
         loop part_index in 0..<parts.len() {
@@ -845,14 +851,12 @@ sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphMo
 // about as much per node as starting a thread costs per few thousand.
 SEMA_CORE_DEMAND_READ_NODES_PER_THREAD: 32768
 
-// One thread's demand read: the unread functions of modules `first` on, one
-// list per module (`functions`, moved out of the module and back), each
-// module's first unread function (`from`) and how many it read (`counts`),
-// and the names the functions hold in walk order (`reads`), each module's
-// ending at `ends`.
+// One thread's demand read: the modules `first..<last`, each module's
+// first unread function (`from`) and how many it read (`counts`), and the
+// names the functions hold in walk order (`reads`), each module's ending
+// at `ends`.
 SemaCoreDemandPart: struct {
     first: Int
-    functions: [[FnBody]]
     from: [Int]
     counts: [Int]
     reads: SemaCoreDemandReads
@@ -890,11 +894,10 @@ sema_core_demand_reads_new: fn() -> SemaCoreDemandReads Never! {
 sema_core_demand_reads_end: fn(reads: &SemaCoreDemandReads) Never! { reads.conversions.reverse() }
 
 // Reads the functions of `modules` from `read_functions` on, in consecutive
-// module parts, one per admitted thread, weighed by their body nodes. A
-// part's functions move to its thread and back, so none is copied and its
-// thread reads no table. Returns the parts in module order, every module
-// in one.
-sema_core_demand_read: fn(modules: &[SemaGraphModuleResult], read_functions: [Int], threads: CompilerThreads) -> [SemaCoreDemandPart] {
+// module parts, one per admitted thread, weighed by their body nodes. Every
+// thread reads the modules in place. Returns the parts in module order,
+// every module in one.
+sema_core_demand_read: fn(modules: [SemaGraphModuleResult], read_functions: [Int], threads: CompilerThreads) -> [SemaCoreDemandPart] {
     weights := [Int]{}
     work := 0
     loop module_index in 0..<modules.len() {
@@ -907,72 +910,41 @@ sema_core_demand_read: fn(modules: &[SemaGraphModuleResult], read_functions: [In
     }
     workers: compiler_threads_admit(threads, modules.len(), work, SEMA_CORE_DEMAND_READ_NODES_PER_THREAD, 0, 0)
     if workers <= 1 {
-        whole := sema_core_demand_part_new(0)
-        loop module_index in 0..<modules.len() {
-            from: read_functions[module_index]
-            count: modules[module_index].functions.len() - from
-            loop position in from..<from + count {
-                sema_core_demand_body_reads(modules[module_index].functions[position], whole.reads)
-            }
-            whole.from.push(from)
-            whole.counts.push(count)
-            whole.ends.push(whole.reads.names.len())
-        }
-        sema_core_demand_reads_end(whole.reads)
-        return [SemaCoreDemandPart]{whole.move()}
+        return [SemaCoreDemandPart]{sema_core_demand_read_part(modules, read_functions, 0, modules.len())}
     }
-    bounds: compiler_threads_partition(weights, workers)
-    parts := [SemaCoreDemandPart]{}
-    loop part_index in 0..<workers {
-        part := sema_core_demand_part_new(bounds[part_index])
-        loop module_index in bounds[part_index]..<bounds[part_index + 1] {
-            part.functions.push(compiler_take_rows<FnBody>(modules[module_index].functions))
-            part.from.push(read_functions[module_index])
-        }
-        parts.push(part.move())
-    }
-    done := sema_core_demand_read_parts(parts)
-    loop part_index in 0..<done.len() {
-        first: done[part_index].first
-        loop at in 0..<done[part_index].functions.len() {
-            compiler_transfer_rows<FnBody>(modules[first + at].functions, done[part_index].functions[at])
-        }
-    }
-    done
+    sema_core_demand_read_parts(modules, read_functions, compiler_threads_partition(weights, workers), 0)
 }
 
-sema_core_demand_part_new: fn(first: Int) -> SemaCoreDemandPart Never! {
-    SemaCoreDemandPart{first: first, functions: [[FnBody]]{}, from: [Int]{}, counts: [Int]{}, reads: sema_core_demand_reads_new(), ends: [Int]{}}
-}
-
-// Reads `parts` (sema_core_demand_read_part), in part order: the last part
-// on its own thread, the ones before it the same way, and the first on
-// this one.
-sema_core_demand_read_parts: fn(parts: &&[SemaCoreDemandPart]) -> [SemaCoreDemandPart] Never! {
-    rest := parts.move()
-    last: rest.pop() ?? return rest
-    if rest.len() == 0 {
-        rest.push(sema_core_demand_read_part(last.move()))
-        return rest
-    }
+// Reads parts `at..<bounds.len() - 1` (sema_core_demand_read_part), in
+// part order: the first part on its own thread, the ones after it the same
+// way, and the last on this one.
+sema_core_demand_read_parts: fn(modules: [SemaGraphModuleResult], read_functions: [Int], bounds: [Int], at: Int) -> [SemaCoreDemandPart] Never! {
     done := [SemaCoreDemandPart]{}
+    if at + 1 >= bounds.len() -> return done
+    if at + 2 == bounds.len() {
+        done.push(sema_core_demand_read_part(modules, read_functions, bounds[at], bounds[at + 1]))
+        return done
+    }
     task.group sema_core_demand_read_threads {
-        head: task sema_core_demand_read_part(last.move())
-        done = sema_core_demand_read_parts(rest.move())
+        head: task sema_core_demand_read_part(modules, read_functions, bounds[at], bounds[at + 1])
+        rest := sema_core_demand_read_parts(modules, read_functions, bounds, at + 1)
         done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        compiler_transfer_rows<SemaCoreDemandPart>(done, rest)
     }
     done
 }
 
-// One part's read: each module's functions from its first unread one.
-sema_core_demand_read_part: fn(part: &&SemaCoreDemandPart) -> SemaCoreDemandPart Never! {
-    read := part.move()
-    loop at in 0..<read.functions.len() {
-        count: read.functions[at].len() - read.from[at]
-        loop position in read.from[at]..<read.functions[at].len() {
-            sema_core_demand_body_reads(read.functions[at][position], read.reads)
+// One part's read: modules `first..<last`, each from its first unread
+// function.
+sema_core_demand_read_part: fn(modules: [SemaGraphModuleResult], read_functions: [Int], first: Int, last: Int) -> SemaCoreDemandPart Never! {
+    read := SemaCoreDemandPart{first: first, from: [Int]{}, counts: [Int]{}, reads: sema_core_demand_reads_new(), ends: [Int]{}}
+    loop module_index in first..<last {
+        from: read_functions[module_index]
+        loop position in from..<modules[module_index].functions.len() {
+            sema_core_demand_body_reads(modules[module_index].functions[position], read.reads)
         }
-        read.counts.push(count)
+        read.from.push(from)
+        read.counts.push(modules[module_index].functions.len() - from)
         read.ends.push(read.reads.names.len())
     }
     sema_core_demand_reads_end(read.reads)
@@ -1001,11 +973,11 @@ sema_core_demand_apply: fn(reads: &SemaCoreDemandReads, start: Int, end: Int, de
 }
 
 // Demands the deferred body `key` names; a call at type arguments names its
-// generic declaration.
-sema_core_demand_key: fn(graph: &SemaRegistrationGraph, key: String, names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int]) {
-    sema_core_demand_add(graph, key, names, wave, affected)
+// generic declaration. The bodies that join the wave go to `joined`.
+sema_core_demand_key: fn(graph: &SemaRegistrationGraph, key: String, names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int], joined: &[SemaCoreDemandJoin]) {
+    sema_core_demand_add(graph, key, names, wave, affected, joined)
     template: sema_core_demand_template_key(key)
-    if template != key -> sema_core_demand_add(graph, template, names, wave, affected)
+    if template != key -> sema_core_demand_add(graph, template, names, wave, affected, joined)
 }
 
 // Reads the Core seal of a run that may bind to the Core image
@@ -1049,9 +1021,9 @@ sema_core_demand_defers: fn(graph: SemaRegistrationGraph, keys: [String]) -> Boo
 }
 
 // A deferred body not yet checked joins the wave, or waits as a stand-in
-// (sema_core_stand_in_wait). One that joins names its syntax's calls
-// (sema_core_demand_callees).
-sema_core_demand_add: fn(graph: &SemaRegistrationGraph, key: String, names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int]) {
+// (sema_core_stand_in_wait). One that joins goes to `joined`, whose
+// syntax's calls name more (sema_core_demand_callees).
+sema_core_demand_add: fn(graph: &SemaRegistrationGraph, key: String, names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int], joined: &[SemaCoreDemandJoin]) {
     if graph.core_checked.get(key) != None {
         return
     }
@@ -1062,8 +1034,21 @@ sema_core_demand_add: fn(graph: &SemaRegistrationGraph, key: String, names: &Sem
     }
     wave[key] = true
     if !affected.contains(module_index) -> affected.push(module_index)
-    sema_core_demand_callees(graph, key, module_index, names)
+    row: sema_registration_callable_row(graph, key) ?? return
+    joined.push(SemaCoreDemandJoin{row: row, module_index: module_index})
 }
+
+// A deferred body that joined a wave (sema_core_demand_add): its callable
+// row, and the module whose scope resolves its calls.
+SemaCoreDemandJoin: struct {
+    row: SemaRegistrationCallableRow
+    module_index: Int
+}
+
+// The fewest joined bodies whose calls a thread reads: reading one body's
+// calls and resolving them costs about as much as starting a thread costs
+// per few dozen.
+SEMA_CORE_DEMAND_CALLEES_PER_THREAD: 64
 
 // The calls a function's syntax makes by name, read before its check
 // (sema_core_demand_calls_func): `plain` holds each `name(…)` call's name,
@@ -1081,22 +1066,60 @@ SemaCoreDemandQualified: struct {
     name: String
 }
 
-// Names, into `names.keys`, the deferred bodies not yet checked that
-// function `key` (a deferred body of module `module_index` joining a wave)
-// calls by name: a call its module scope resolves to a function
-// (sema_registration_lookup_name_at), or an `alias.name(…)` call of a module
-// it imports (sema_registration_lookup_qualified). Its own check would name
-// each of them (sema_core_demand_body_keys) and the next wave would check
-// them; named here, they join this wave, and their calls in turn. A name a
-// local of the function shadows is left to the check, and so are method
-// calls, function values, and what a compile-time branch or block, an
-// `#Impure` or `#AssumeDet` body or a switched statement calls
+// The keys of the deferred bodies not yet checked that the bodies of
+// `joined` call by name (sema_core_demand_join_callees), each body's in
+// order and the bodies in `joined`'s order, in consecutive parts read on up
+// to `threads` threads. The graph is only read until every part is done.
+sema_core_demand_callees: fn(graph: SemaRegistrationGraph, joined: [SemaCoreDemandJoin], threads: CompilerThreads) -> [[String]] {
+    workers: compiler_threads_admit(threads, joined.len(), joined.len(), SEMA_CORE_DEMAND_CALLEES_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        return [[String]]{sema_core_demand_callees_part(graph, joined, 0, joined.len())}
+    }
+    weights: loop _ in joined -> 1
+    sema_core_demand_callees_parts(graph, joined, compiler_threads_partition(weights, workers), 0)
+}
+
+// The callees of parts `at..<bounds.len() - 1` (sema_core_demand_callees_part),
+// in part order: the first part on its own thread, the ones after it the
+// same way, and the last on this one.
+sema_core_demand_callees_parts: fn(graph: SemaRegistrationGraph, joined: [SemaCoreDemandJoin], bounds: [Int], at: Int) -> [[String]] Never! {
+    done := [[String]]{}
+    if at + 1 >= bounds.len() -> return done
+    if at + 2 == bounds.len() {
+        done.push(sema_core_demand_callees_part(graph, joined, bounds[at], bounds[at + 1]))
+        return done
+    }
+    task.group sema_core_demand_callee_threads {
+        head: task sema_core_demand_callees_part(graph, joined, bounds[at], bounds[at + 1])
+        rest := sema_core_demand_callees_parts(graph, joined, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        compiler_transfer_rows<[String]>(done, rest)
+    }
+    done
+}
+
+// The callees of the bodies `joined[first..<last]`, in order.
+sema_core_demand_callees_part: fn(graph: SemaRegistrationGraph, joined: [SemaCoreDemandJoin], first: Int, last: Int) -> [String] Never! {
+    found := [String]{}
+    loop at in first..<last -> sema_core_demand_join_callees(graph, joined[at], found)
+    found
+}
+
+// Names, into `found`, the deferred bodies not yet checked that `join` (a
+// deferred body joining a wave) calls by name: a call its module scope
+// resolves to a function (sema_registration_lookup_name_at), or an
+// `alias.name(…)` call of a module it imports
+// (sema_registration_lookup_qualified). Its own check would name each of
+// them (sema_core_demand_body_keys) and the next wave would check them;
+// named here, they join this wave, and their calls in turn. A name a local
+// of the function shadows is left to the check, and so are method calls,
+// function values, and what a compile-time branch or block, an `#Impure`
+// or `#AssumeDet` body or a switched statement calls
 // (sema_core_demand_calls_stmt): the check decides which of those it
 // reaches.
-sema_core_demand_callees: fn(graph: SemaRegistrationGraph, key: String, module_index: Int, names: &SemaCoreDemandNames) Never! {
-    row: sema_registration_callable_row(graph, key) ?? return
+sema_core_demand_join_callees: fn(graph: SemaRegistrationGraph, join: SemaCoreDemandJoin, found: &[String]) Never! {
     calls := SemaCoreDemandCalls{plain: [String]{}, qualified: [SemaCoreDemandQualified]{}, locals: [NamedSpan]{}}
-    if row == {
+    if join.row == {
         .Function(owner_module, index) -> {
             sema_core_demand_calls_func(graph.modules[owner_module].functions[index].declaration, calls)
         }
@@ -1108,20 +1131,21 @@ sema_core_demand_callees: fn(graph: SemaRegistrationGraph, key: String, module_i
         }
         .Foreign(_, _) -> {}
     }
-    identity: graph.modules[module_index].module_identity
+    identity: graph.modules[join.module_index].module_identity
     loop name in calls.plain {
-        resolved: sema_registration_lookup_name_at(graph, module_index, identity, name) ?? next
-        sema_core_demand_callee(graph, resolved, name, calls.locals, names)
+        resolved: sema_registration_lookup_name_at(graph, join.module_index, identity, name) ?? next
+        sema_core_demand_callee(graph, resolved, name, calls.locals, found)
     }
     loop call in calls.qualified {
         resolved: sema_registration_lookup_qualified(graph, identity, call.alias, call.name) ?? next
-        sema_core_demand_callee(graph, resolved, call.alias, calls.locals, names)
+        sema_core_demand_callee(graph, resolved, call.alias, calls.locals, found)
     }
 }
 
-// Names the deferred body `resolved` is, if it is one not yet checked and
-// `written`, the name the call wrote, is no local of the calling function.
-sema_core_demand_callee: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, written: String, locals: [NamedSpan], names: &SemaCoreDemandNames) Never! {
+// Names, into `found`, the deferred body `resolved` is, if it is one not
+// yet checked and `written`, the name the call wrote, is no local of the
+// calling function.
+sema_core_demand_callee: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, written: String, locals: [NamedSpan], found: &[String]) Never! {
     if sema_resolved_kind(graph, resolved) != SymbolKind.Function {
         return
     }
@@ -1134,7 +1158,7 @@ sema_core_demand_callee: fn(graph: SemaRegistrationGraph, resolved: SemaRegistra
             return
         }
     }
-    names.keys.push(callee)
+    found.push(callee)
 }
 
 // The calls of function `declaration` (SemaCoreDemandCalls): none for a
