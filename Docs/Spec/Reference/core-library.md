@@ -5832,8 +5832,15 @@ screen that made it may be gone. No answer, `SignedOut` or
 `UpdateRequired` stops the sending and keeps the write, so an expired
 session holds the queue. A Remote that runs its service directly
 (`remote(service)`) never queues. The queue and the notice list live in
-this process (inside `testing.world`, in the world's own store); they
-don't outlive it yet, on any target.
+the device store, so a native restart finds them as the run left them:
+each is one file, `<data>/<package>/app.queue` and `app.notices`, where
+`<data>` is `$XDG_DATA_HOME`, else `~/.local/share`, and `<package>` is
+the entry package's name (the entry file's stem without a manifest). Each
+change is written through atomically (a temporary file, fsync, rename,
+fsync of the directory) before the call that made it goes on. Inside
+`testing.world` they are the world's own store, and in a test build
+(`jet test`) one process-wide cell. The web target keeps them in this
+process only, for now.
 
 `graph.screen("/projects/:project/board", board, signed_in: false)` adds a
 screen. `board` is a named function. Each of its parameters that is an
@@ -5983,8 +5990,9 @@ the control, and `retry: true` offers to run the handler again. A notice
 with no control to sit beside, such as a failed background run or a queued
 write refused after its screen closed, joins the app's notice list, which
 `app.notices()` reads. The list keeps each notice, in order, until it is
-dismissed. The list lives in one process-wide cell, or in the World's own
-cell inside a deterministic world.
+dismissed. It lives where the write queue does: the device store on a
+native target, which keeps it across restarts, or the World's own cell
+inside a deterministic world.
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with

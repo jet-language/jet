@@ -1,0 +1,44 @@
+# A device that queues (`app.new(…).offline(.Queue)`) keeps its write queue
+# and notice list in the device store, a file per store under the platform
+# data directory and the app's package name (`main` for main.jet), so a
+# restart finds them as the run left them. The first run leaves a refused
+# rename's notice and a queued rename of task 1, a write that answers
+# nothing; the second run of the same program prints the same queue and
+# notice list, then sends the queued rename to the server, which commits
+# it, and the queue's file is empty after. Each tier keeps its own data
+# directory: the same output on O0, O1 and O2.
+fixture: DeviceStoreKeepsQueueAndNotices.fixture
+env: NO_COLOR=1
+step o0: jet run -A -O0 main.jet
+env: XDG_DATA_HOME={work}/o0
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: = "before restart\npending: 1\nnotice: The server refused `rename`, so it was undone: {\"Missing\":2}\n"
+file: o0/main/app.queue ~ "plan v2" # the queued rename is on the device
+file: o0/main/app.notices ~ "The server refused `rename`" # and so is the notice
+step o0_restart: jet run -A -O0 main.jet
+env: XDG_DATA_HOME={work}/o0
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: = "after restart\npending: 1\nnotice: The server refused `rename`, so it was undone: {\"Missing\":2}\nphone reconnected, pending: 0\ndesk reads: plan v2\n"
+file: o0/main/app.queue empty # the sent rename left the device's queue
+step o1: jet run -A -O1 main.jet
+env: XDG_DATA_HOME={work}/o1
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: == o0
+step o1_restart: jet run -A -O1 main.jet
+env: XDG_DATA_HOME={work}/o1
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: == o0_restart
+step o2: jet run -A -O2 main.jet
+env: XDG_DATA_HOME={work}/o2
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: == o0
+step o2_restart: jet run -A -O2 main.jet
+env: XDG_DATA_HOME={work}/o2
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: == o0_restart

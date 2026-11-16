@@ -395,9 +395,13 @@ Notice: struct {
 // The app's notice list holds the notices that have no control to sit
 // beside: a failed background run, a queued write refused after its screen
 // closed. The frame shows the list on every screen and keeps each notice
-// until it is dismissed. The list lives in one process-wide cell, or in
-// the World's own cell inside a deterministic world, as length-prefixed
-// fields: each notice's text, then "1" or "0" for its retry.
+// until it is dismissed. The list lives in the device store, so it outlasts
+// a restart (`jet.runtime.web` device_load/device_replace: a file under the
+// platform data directory and the app's package name, written through
+// atomically); inside a deterministic world it is the World's own cell, and
+// in a program with no device store (a test build) one process-wide cell.
+// It is kept as length-prefixed fields: each notice's text, then "1" or "0"
+// for its retry.
 NoticeCell: struct {
     bytes: [U8]
 }
@@ -408,11 +412,15 @@ NOTICE_STORE: "app.notices"
 
 notice_cell_load: fn() -> [U8] {
     if world_rt.world_store_load(NOTICE_STORE) == .Val(bytes) -> return bytes
+    if rt_web.device_load(NOTICE_STORE) == .Val(bytes) -> return bytes
     NOTICE_CELL.bytes
 }
 
 notice_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
     if world_rt.world_store_replace(NOTICE_STORE, expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    if rt_web.device_replace(NOTICE_STORE, expected, replacement) == .Val(replaced) {
         return replaced
     }
     cell := NOTICE_CELL.guard_edit()
@@ -615,20 +623,26 @@ priv QueuedWrite: struct {
     key: String
 }
 
-// The queue lives in one process-wide cell, or in the World's own cell
-// `app.queue` inside a deterministic world, as length-prefixed fields: each
-// write's client, address, "1" or "0" for local, method, body and key.
+// The queue lives where the notice list does (NoticeCell): in the device
+// store, so a restart finds it as the run left it; in the World's own cell
+// `app.queue` inside a deterministic world; else one process-wide cell. It
+// is kept as length-prefixed fields: each write's client, address, "1" or
+// "0" for local, method, body and key.
 priv QUEUE_CELL: Shared{LiveCell{bytes: [U8]{}}}
 
 priv QUEUE_STORE: "app.queue"
 
 priv queue_load: fn() -> [U8] Never! {
     if world_rt.world_store_load(QUEUE_STORE) == .Val(bytes) -> return bytes
+    if rt_web.device_load(QUEUE_STORE) == .Val(bytes) -> return bytes
     QUEUE_CELL.bytes
 }
 
 priv queue_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool Never! {
     if world_rt.world_store_replace(QUEUE_STORE, expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    if rt_web.device_replace(QUEUE_STORE, expected, replacement) == .Val(replaced) {
         return replaced
     }
     cell := QUEUE_CELL.guard_edit()
