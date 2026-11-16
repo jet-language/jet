@@ -551,3 +551,9 @@ readiness probe (`ready: tcp(port_of(PORT))`), a package generation's
 integration argument (`[dev_certificate]`, `mcp: [repo_server]`) stays a
 name, and a secret input that is not a named reference is refused without
 ever being computed.
+
+A workspace index's `members:` value (`members: PKGS`,
+`[member("hello")]`) is computed the same way, with the index file's own
+module values and `fn`s; `find("./dir")` and `[]` are read as written, and a
+value that reads a build-time input (`embed_file`, `find`, `fetch`) is still
+E2104.

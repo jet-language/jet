@@ -38,7 +38,6 @@ use {
         CtValue,
         Diagnostic,
         Expr,
-        Func,
         Item,
         ModuleDecl,
         Span,
@@ -244,34 +243,24 @@ envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, rol
         return Err(EnvModelEvalError{diagnostic: pkg_e0995_no_workspace_module()})
     }
 
-    // The comptime context a `members:` expression evaluates against: every
-    // top-level `fn` (callable) and every top-level `const`/`#run`
-    // binding (referenceable), evaluated in source order so a later binding
-    // can build on an earlier one. This lets `members:` compose a sibling
-    // `PACKAGES: […]` or call a local helper `fn`, not only inline
-    // literals and the `find("./dir")` fast path.
-    funcs := [String:Func]{}
-    loop item in program.items {
-        if item == {
-            .Func(func) -> funcs[func.name] = func
-            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-        }
+    // A `members:` expression is computed with the workspace file's own
+    // top-level `fn`s and module values (envmodel_compute_values), so it can
+    // compose a sibling `PACKAGES: […]` or call a local helper `fn`, not only
+    // inline literals and the `find("./dir")` fast path.
+    scope := ModuleEvalScope{base_dir: base_dir, source: eval_src, funcs: envmodel_collect_funcs(program.items), values: [Int:CtValue]{}}
+    constants: envmodel_module_constants(program.items, [String:CtValue]{})
+    value_plan := envmodel_value_program(eval_src, [String:CtValue]{})
+    loop expr in workspace_module.members {
+        envmodel_workspace_plan_members(value_plan, expr, constants.globals)
     }
-    globals := [String:CtValue]{}
-    loop item in program.items {
-        if item == {
-            .Const(constant) -> {
-                globals[constant.name] = comptime_evaluate(constant.value, src, funcs, base_dir, globals) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
-            }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-        }
-    }
+    computed: envmodel_compute_values(program.items, scope, [String:CtValue]{}, value_plan, constants)
+    scope.values = computed.values
 
     // Evaluate each `members:` expression (typically just one).
     members := [WorkspacePlanMember]{}
     comptime_inputs := [ComptimeInput]{}
     loop expr in workspace_module.members {
-        evaluated: envmodel_workspace_eval_members_expr(expr, src, base_dir, resolver, funcs, globals)
+        evaluated: envmodel_workspace_eval_members_expr(expr, resolver, scope)
         comptime_inputs.extend(evaluated.inputs)
         loop member_path in evaluated.paths {
             identity: envmodel_workspace_validate_member_path(member_path.path, resolver, members, Val(member_path.span))
@@ -435,11 +424,37 @@ WorkspaceMembersValue: struct {
     inputs: [ComptimeInput]
 }
 
+// Plan a `members:` expression that is computed: not a `find(…)` call, not
+// `[]`, and reading no build-time input (see envmodel_workspace_eval_members_expr).
+envmodel_workspace_plan_members: fn(plan: &EnvValueProgram, expr: Expr, globals: [String:CtValue]) EnvModelEvalError! {
+    if expr == .Call(call, _) && call.name == BUILTIN_FIND {
+        return
+    }
+    if expr == .ListLit(items, _, _) && items.len() == 0 {
+        return
+    }
+    if envmodel_workspace_locked_input(expr) != None {
+        return
+    }
+    envmodel_value_plan(plan, expr, [String:String]{}, globals)
+}
+
+// The first build-time input (`embed_file`, `embed_bytes`, `find`, `fetch`)
+// `expr` calls, which the workspace lock cannot record yet.
+envmodel_workspace_locked_input: fn(expr: Expr) -> (name: String, span: Span)? Never! {
+    loop site in comptime_walk_calls(expr) {
+        if site.name == "embed_file" || site.name == "embed_bytes" || site.name == BUILTIN_FIND || site.name == "fetch" {
+            return Val((name: site.name, span: site.span))
+        }
+    }
+    None
+}
+
 // Evaluate one `members:` expression to relative package directory paths plus
 // any Tier-1 comptime inputs it recorded. `find("./dir")` is the fast path (no
-// comptime inputs); anything else evaluates through the Compiler's comptime
-// path against the workspace file's top-level `fn`s and `const`s.
-envmodel_workspace_eval_members_expr: fn(expr: Expr, src: String, base_dir: String, resolver: AuthorityResolver, funcs: [String:Func], globals: [String:CtValue]) -[FS, Env, Exec, Time.Wait]> WorkspaceMembersValue EnvModelEvalError! {
+// comptime inputs); anything else is the value the compiler computed with the
+// workspace file's top-level `fn`s and module values.
+envmodel_workspace_eval_members_expr: fn(expr: Expr, resolver: AuthorityResolver, scope: ModuleEvalScope) -[FS, Env, Exec, Time.Wait]> WorkspaceMembersValue EnvModelEvalError! {
     // Fast path: workspace `find("./dir")` scans for package directories. This
     // manifest helper is separate from comptime `find(glob) -> [String]`,
     // which records matched file hashes for ordinary Jet comptime bindings.
@@ -458,8 +473,7 @@ envmodel_workspace_eval_members_expr: fn(expr: Expr, src: String, base_dir: Stri
         }
         arg: call.args[0]
         // A non-literal `find` argument (e.g. `find(base + "/pkgs")`) is a
-        // computed path: it falls through to the comptime evaluator, which
-        // resolves the argument against `globals`/`funcs` before scanning.
+        // computed path, which the lock can't record: E2104 below.
         if envmodel_workspace_literal_string(arg.expr) == .Val(dir) {
             scan_dir: envmodel_workspace_validate_find_scan_dir(dir, resolver, span)
             arg_span: expr_span(arg.expr)
@@ -477,18 +491,16 @@ envmodel_workspace_eval_members_expr: fn(expr: Expr, src: String, base_dir: Stri
         return Ok(WorkspaceMembersValue{paths: [WorkspaceMemberPath]{}, inputs: [ComptimeInput]{}})
     }
 
-    // General case: evaluate through comptime and expect a list of strings.
-    // The workspace lock records every Tier-1 input (`embed_file`,
-    // `embed_bytes`, `find`, `fetch`) the expression reads and
-    // the comptime bridge does not report its reads yet, so an expression
-    // that reaches one is refused rather than locked without its inputs.
+    // General case: the computed value, a list of strings. The workspace
+    // lock records every Tier-1 input (`embed_file`, `embed_bytes`, `find`,
+    // `fetch`) the expression reads, and computing it does not report its
+    // reads yet, so an expression that reaches one is refused rather than
+    // locked without its inputs.
     span: expr_span(expr)
-    loop site in comptime_walk_calls(expr) {
-        if site.name == "embed_file" || site.name == "embed_bytes" || site.name == BUILTIN_FIND || site.name == "fetch" {
-            return Err(envmodel_error("E2104", "`members:` reads the build-time input `{site.name}`, which the workspace lock cannot record yet", "the workspace lock pins every file or URL a `members:` expression reads, and this evaluator does not report those reads", "list the member paths directly, or use the `find(\"./dir\")` fast path", Val(site.span)))
-        }
+    if envmodel_workspace_locked_input(expr) == .Val(site) {
+        return Err(envmodel_error("E2104", "`members:` reads the build-time input `{site.name}`, which the workspace lock cannot record yet", "the workspace lock pins every file or URL a `members:` expression reads, and this evaluator does not report those reads", "list the member paths directly, or use the `find(\"./dir\")` fast path", Val(site.span)))
     }
-    value: comptime_evaluate(expr, src, funcs, base_dir, globals) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
+    value: envmodel_value_of(expr, scope)
     paths := [WorkspaceMemberPath]{}
     loop path in envmodel_workspace_string_list(value, span) {
         paths.push(WorkspaceMemberPath{path: path, span: span})

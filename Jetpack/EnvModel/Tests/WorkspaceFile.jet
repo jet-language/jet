@@ -185,6 +185,26 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
     files.remove_all(tmp) ?? panic("scratch cleanup")
 }
 
+#Test("members and module values are the compilers in any order") {
+    // The module values are computed as one program, so `PKGS` may read a
+    // value declared after it and after the workspace module.
+    tmp: envmodel_test_workspace_dir("compiled-order")
+    envmodel_test_write_package(tmp, "pkgs/a", "name: \"a\"\n")
+    envmodel_test_write_package(tmp, "pkgs/b", "name: \"b\"\n")
+    plan: envmodel_workspace_evaluate("workspace: module {{\n    members: PKGS\n}}\nPKGS: [\"{{ROOT}}/a\", \"{{ROOT}}/b\"]\nROOT: \"./pkgs\"\n", tmp) ?? panic("the members evaluate: {err.diagnostic.code} {err.diagnostic.what}")
+    assert_eq(envmodel_test_member_paths(plan), [String]{"./pkgs/a", "./pkgs/b"})
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("a members value the compilers refuse is at its call") {
+    src: "member: fn(name: String) -> String {{ return \"./pkgs/{{name}}\" }}\nworkspace: module {{\n    members: [member(1)]\n}}\n"
+    error: envmodel_test_eval_error(src)
+    rendered: envmodel_test_render("workspace.jet", src, error)
+    assert_eq(error.code, "E0112")
+    assert(!rendered.contains("ENVMODEL_VALUE"), rendered)
+    assert(rendered.contains("--> workspace.jet:3:"), rendered)
+}
+
 #Test("e0995 no workspace module") {
     assert_eq(envmodel_test_eval_error("dev: module {{ env.dev: Env{{ packages: [] }} }}\n").code, "E0995")
 }

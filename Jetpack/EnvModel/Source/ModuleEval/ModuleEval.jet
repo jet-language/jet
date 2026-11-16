@@ -168,45 +168,67 @@ ComputedValues: struct {
     values: [Int:CtValue]
 }
 
-// Resolve the module values and every value written in an environment field
-// before any namespace field runs: every immutable `NAME: value`, with or
-// without `#run`, as the compiler computes every one while building, and each
-// field value as a generated module value (ValueProgram.jet). A plain literal
-// is its own value. Otherwise the sibling compiler checks the source's own
-// declarations, the generated values and the environment schema's types
-// (`Prompt`, `Lang`, …) as one program and computes every value at once
-// (module_values_evaluate): a typed value, a cycle, an impure `#run` or any
-// other refusal is the compiler's own, at its span in this source. A value
-// the environment can't read as data (a function, say) is refused at its
-// name. The environment reads stay readable beside the module values.
-envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, environment_globals: [String:CtValue]) -> ComputedValues EnvModelEvalError! {
-    names := [String]{}
-    name_spans := [Span]{}
-    literals := [CtValue?]{}
+// The source's module values: every immutable `NAME: value`, with or without
+// `#run`, its name and span, and the values of those written as plain
+// literals, beside the environment reads.
+ModuleConstants: struct {
+    names: [String]
+    spans: [Span]
+    globals: [String:CtValue]
+    all_plain: Bool
+}
+
+envmodel_module_constants: fn(items: [Item], environment_globals: [String:CtValue]) -> ModuleConstants Never! {
+    constants := ModuleConstants{names: [String]{}, spans: [Span]{}, globals: environment_globals, all_plain: true}
     loop item in items {
         if item == .Const(definition) {
             if !definition.mutable {
-                names.push(definition.name.removeprefix(COMPTIME_MARK))
-                name_spans.push(definition.name_span)
-                literals.push(jet_config_plain_literal(definition.value))
+                name: definition.name.removeprefix(COMPTIME_MARK)
+                constants.spans.push(definition.name_span)
+                if jet_config_plain_literal(definition.value) == {
+                    .Val(value) -> { constants.globals[name] = value }
+                    .None -> { constants.all_plain = false }
+                }
+                constants.names.push(name)
             }
         }
     }
-    globals := environment_globals
-    all_plain := true
-    loop (index, name) in names {
-        if literals[index] == {
-            .Val(value) -> { globals[name] = value }
-            .None -> { all_plain = false }
-        }
-    }
+    constants
+}
+
+// Resolve the module values and every value written in an environment field
+// before any namespace field runs, as envmodel_compute_values does.
+envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, environment_globals: [String:CtValue]) -> ComputedValues EnvModelEvalError! {
+    constants: envmodel_module_constants(items, environment_globals)
     plan := envmodel_value_program(scope.source, environment_globals)
     loop item in items {
         if item == .Module(decl) {
-            if decl.auto_discovered -> envmodel_plan_module_values(plan, decl, globals, names)
+            if decl.auto_discovered {
+                envmodel_plan_module_values(plan, decl, constants.globals, constants.names)
+            }
         }
     }
-    if all_plain && !plan.needed -> return Ok(ComputedValues{globals: globals, values: plan.known})
+    Ok(envmodel_compute_values(items, scope, environment_globals, plan, constants))
+}
+
+// Compute the module values of `items` and every value `plan` generated:
+// every module value, as the compiler computes every one while building, and
+// each planned value as a generated module value (ValueProgram.jet). A plain
+// literal is its own value. Otherwise the sibling compiler checks the
+// source's own declarations, the generated values and the environment
+// schema's types (`Prompt`, `Lang`, …) as one program and computes every
+// value at once (module_values_evaluate): a typed value, a cycle, an impure
+// `#run` or any other refusal is the compiler's own, at its span in this
+// source. A value the environment can't read as data (a function, say) is
+// refused at its name. The environment reads stay readable beside the module
+// values.
+envmodel_compute_values: fn(items: [Item], scope: ModuleEvalScope, environment_globals: [String:CtValue], plan: EnvValueProgram, constants: ModuleConstants) -> ComputedValues EnvModelEvalError! {
+    names: constants.names
+    name_spans: constants.spans
+    globals := constants.globals
+    if constants.all_plain && !plan.needed {
+        return Ok(ComputedValues{globals: globals, values: plan.known})
+    }
     first: if name_spans.len() > 0 -> name_spans[0] else -> plan.first ?? Span{start: 0, end: 0}
     program: module_values_program(items, scope.source, environment_globals, plan.parts.join("")) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
     outcome: module_values_evaluate(program.text, scope.base_dir) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(first), "the module values could not be evaluated: {err.detail}")})
