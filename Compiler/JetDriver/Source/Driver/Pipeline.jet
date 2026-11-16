@@ -1713,6 +1713,15 @@ jet_driver_comptime_prefetched: fn(index: &JetDriverComptimeRunIndex, node: Int,
 jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, index: &JetDriverComptimeRunIndex, memory_plan: &[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], prechecks: [SemaComptimeItemCheck?], threads: CompilerThreads) -> Int {
     jet_driver_comptime_prefetch_clear(index)
     if !jet_driver_comptime_prefetches(threads) -> return 0
+    // A waiting check one of whose waits has landed is made again, as the
+    // closure that reaches it would make it (jet_driver_comptime_function_closure),
+    // so the walk makes it and follows it.
+    loop node in 0..<index.nodes.len() {
+        row: index.waiting_at[node]
+        if row >= 0 && jet_driver_comptime_any_available(available, index.waiting_functions[row].waiting_dependencies) {
+            index.waiting_at[node] = -1
+        }
+    }
     seen := [Int:Bool]{}
     seeds: jet_driver_comptime_prefetch_seeds(programs[0], index, prechecks, seen)
     if seeds.len() == 0 -> return 0
@@ -2485,6 +2494,32 @@ jet_driver_comptime_holds_run_site: fn(checked_functions: [SemaComptimeFunctionR
     false
 }
 
+// Moves the values computed ahead (SemaComptimeItemSource.ahead) out of
+// `pending` when it holds any other item, keeping the order of each, and
+// returns them for the next pass. So they are checked in a pass with no
+// other item pending, after the module values they may read have landed:
+// their closures' function checks then wait on nothing, and the pass's
+// prefetch makes them all on the compiler threads. Checked in an earlier
+// pass, a closure that waits on a module value is checked again the next
+// pass, one function at a time on the lead thread.
+jet_driver_comptime_hold_ahead: fn(pending: &[SemaComptimeItemSource]) -> [SemaComptimeItemSource] Never! {
+    held := [SemaComptimeItemSource]{}
+    others: loop source in pending {
+        if !source.ahead {
+            break true
+        }
+    } ?? false
+    if !others -> return held
+    kept := [SemaComptimeItemSource]{}
+    pending.reverse()
+    loop {
+        source: pending.pop() ?? break
+        if source.ahead -> held.push(source) else -> kept.push(source)
+    }
+    pending = kept
+    held
+}
+
 // Whether `batch` holds one of the items `keys`.
 jet_driver_comptime_batch_holds: fn(batch: JetDriverComptimeBatch, keys: [String]) -> Bool Never! {
     loop key in keys {
@@ -3198,6 +3233,9 @@ jet_driver_comptime_run: fn(
         next_pending := [SemaComptimeItemSource]{}
         wait_rows := [JetDriverComptimeWaitRow]{}
         made_progress := false
+        // Values computed ahead wait for a pass with no other item pending
+        // (jet_driver_comptime_hold_ahead).
+        held: jet_driver_comptime_hold_ahead(pending)
         // The values that landed last pass join the graph before the pass
         // (each item's turn applies them first anyway), so the pass's item
         // checks can be made ahead of it on the compiler threads; an item
@@ -3696,6 +3734,7 @@ jet_driver_comptime_run: fn(
             sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
             return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
         }
+        next_pending.extend(held)
         pending = next_pending
     }
     // Values that landed in the last pass join the program's graph, which
