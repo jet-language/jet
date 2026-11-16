@@ -35,6 +35,10 @@ use {
     jet_pkg_model.[pkg_bytes_text]
 }
 
+// The schema's identity function a list or map literal that would read as a
+// type passes through (envmodel_value_reads_as_type).
+ENVMODEL_VALUE_WHOLE: "envmodel_value"
+
 // One run of the generated text and the source bytes it stands for. A copy
 // maps byte for byte; any other text stands for the whole span.
 EnvValueSegment: struct {
@@ -269,6 +273,21 @@ envmodel_value_extent: fn(plan: EnvValueProgram, expr: Expr) -> Span Never! {
     Span{start: start, end: end}
 }
 
+// Whether `expr`, copied after a module-level `NAME: `, would read as a type
+// alias: a name or path, or a one-element list or one-entry map of them
+// (`[PORT]`, `[KEY: VALUE]`).
+envmodel_value_reads_as_type: fn(expr: Expr) -> Bool Never! {
+    if expr == .Ident(name, _, _) -> return !name.starts_with("$")
+    if expr == .Field(base, _, _, _) -> return envmodel_value_reads_as_type(base)
+    if expr == .ListLit(values, _, _) {
+        return values.len() == 1 && envmodel_value_reads_as_type(values[0])
+    }
+    if expr == .MapLit(entries, _, _) {
+        return entries.len() == 1 && envmodel_value_reads_as_type(entries[0].key) && envmodel_value_reads_as_type(entries[0].value)
+    }
+    false
+}
+
 // One generated value computing `expr`, passed through `expect` unless it is
 // empty. `name` is the generated name a sibling field reads ("" for a fresh
 // one), and `label_span` the span its declaration stands for.
@@ -282,7 +301,11 @@ envmodel_value_leaf: fn(plan: &EnvValueProgram, expr: Expr, expect: String, name
         .None -> plan.needed = true
     }
     generated: if name == "" -> envmodel_value_name(plan) else -> name
-    head: if expect == "" -> "{generated}: " else -> "{generated}: {expect}("
+    wrap := expect
+    if wrap == "" && (expr == .ListLit(_, _, _) || expr == .MapLit(_, _, _)) && envmodel_value_reads_as_type(expr) {
+        wrap = ENVMODEL_VALUE_WHOLE
+    }
+    head: if wrap == "" -> "{generated}: " else -> "{generated}: {wrap}("
     envmodel_value_append(plan, head, label_span)
     sites := [(span: Span, text: String)]{}
     loop site in comptime_walk_identifiers(expr) {
@@ -311,7 +334,7 @@ envmodel_value_leaf: fn(plan: &EnvValueProgram, expr: Expr, expect: String, name
         cursor = site.span.end
     }
     envmodel_value_copy(plan, cursor, extent.end)
-    tail: if expect == "" -> "\n" else -> ")\n"
+    tail: if wrap == "" -> "\n" else -> ")\n"
     envmodel_value_append(plan, tail, extent)
     plan.leaves[span.start] = generated
     plan.labels[generated] = pkg_bytes_text(plan.source, label_span.start, label_span.end)

@@ -529,3 +529,10 @@ environment syntax; only the values inside them go to the compiler, so
 with a `d`/`day`/`days`, `h`/`hour`/`hours`, `m`/`min`/`minute`/`minutes` or
 `s`/`sec`/`second`/`seconds` suffix) is a `SecretMaxAge` of that many
 seconds, saturating at the largest `Int`.
+
+An image's field values are computed the same way: `expose: ports()`,
+`env_vars: ["PORT": "{PORT}"]`, `health:`, `entrypoint:`, `user:`, `files:`
+and `services:` are module values of the source, and so is the reference in
+`base: oci("debian:{DEBIAN}")`. `kind: .Oci`, `from:`, `format:` and
+`target:` stay names. A value of the wrong shape (`expose: "8080"`) is still
+E1269 at the field.

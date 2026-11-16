@@ -245,7 +245,7 @@ envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, env
     }
 }
 
-// Plan the values written in the environment fields of `decl`.
+// Plan the values written in the environment and image fields of `decl`.
 envmodel_plan_module_values: fn(plan: &EnvValueProgram, decl: ModuleDecl, globals: [String:CtValue]) EnvModelEvalError! {
     loop contribution in decl.contributions {
         if contribution.value == {
@@ -254,8 +254,9 @@ envmodel_plan_module_values: fn(plan: &EnvValueProgram, decl: ModuleDecl, global
                     envmodel_plan_env_contribution(plan, value, globals)
                 }
             }
-            .Env(lit) -> envmodel_plan_env_fields(plan, lit.fields, globals)
-            .System(_) | .Image(_) | .Fleet(_) | .VMTest(_) | .Profile(_) | .Perf(_) -> {}
+            .Env(lit) -> { envmodel_plan_env_fields(plan, lit.fields, globals) }
+            .Image(lit) -> envmodel_plan_image(plan, lit, globals)
+            .System(_) | .Fleet(_) | .VMTest(_) | .Profile(_) | .Perf(_) -> {}
         }
     }
 }
@@ -297,9 +298,7 @@ envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalSco
                 reads: envmodel_environment_reads(pkg_bytes_text(source_bytes, contribution.span.start, contribution.span.end))
                 envmodel_file_env_capture(capture, contribution.path, reads, services, environment_contributions, entries)
             }
-            .Image(lit) -> {
-                images.push(envmodel_evaluate_image(contribution.path, lit, scope, globals))
-            }
+            .Image(lit) -> { images.push(envmodel_evaluate_image(contribution.path, lit, scope)) }
             .Profile(lit) -> {
                 package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, globals, decl.name))
             }
