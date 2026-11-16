@@ -1,15 +1,16 @@
 // The runtime exports that answer from the process they run in, whatever
 // effect row they declare: the running task's identity and cancel state, the
 // process id, whether a standard stream is a terminal, the active World's
-// store cells, the UI host provider's live state, and the platform family,
-// module loader, path syntax and SIMD width of the machine the program runs
-// on. A value computed while building would hold the compiler's own answer (a
-// cross build would bake the build machine's platform into the image), so
-// sema never computes a call that reaches one while compiling, a module value
-// included (sema_comptime_call_facts_impurity). Listing a read here, not
-// giving it a row, keeps it out of its callers' declared rows and package
-// ceilings: a Core store kept in the World, or a UI service, does not take on
-// a new effect.
+// store cells, the device store's cells, the UI host provider's live state,
+// and the platform family, module loader, path syntax and SIMD width of the
+// machine the program runs on. A value computed while building would hold the
+// compiler's own answer (a cross build would bake the build machine's
+// platform into the image), so sema never computes a call that reaches one
+// while compiling, a module value included
+// (sema_comptime_call_facts_impurity). Listing a read here, not giving it a
+// row, keeps it out of its callers' declared rows and package ceilings: a
+// Core store kept in the World or on the device, or a UI service, does not
+// take on a new effect.
 RuntimeOnlyRead: struct {
     symbol: String
     // What the export reads, as the refusal names it.
@@ -29,6 +30,8 @@ RUNTIME_ONLY_READS: #run { [RuntimeOnlyRead]{
     RuntimeOnlyRead{symbol: "jet_mod_os_raw", reads: "the OS name of the machine the program runs on"},
     RuntimeOnlyRead{symbol: "jet_rt_world_store_load", reads: "the active World's store cells"},
     RuntimeOnlyRead{symbol: "jet_rt_world_store_replace", reads: "the active World's store cells"},
+    RuntimeOnlyRead{symbol: "jet_rt_device_load", reads: "the device store's cells"},
+    RuntimeOnlyRead{symbol: "jet_rt_device_replace", reads: "the device store's cells"},
     RuntimeOnlyRead{symbol: "jet_compute_simd_lanes", reads: "the f32 SIMD width of the CPU the program runs on"},
     RuntimeOnlyRead{symbol: "jet_ui_host_capability", reads: "the UI host provider's live state"},
     RuntimeOnlyRead{symbol: "jet_ui_host_clipboard_get", reads: "the UI host provider's live state"},

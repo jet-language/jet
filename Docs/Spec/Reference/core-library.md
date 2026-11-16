@@ -2654,7 +2654,8 @@ run: fn() {
 | `current_dir()` | `-[FS, Env]> String IOError!` | Read the process working directory. |
 | `set_current_dir(path)` | `-[FS, Env]> IOError!` | Change the process working directory. |
 | `home_dir()` / `temp_dir()` | `-[Env]> String?` / `-[Env]> String` | Return platform home or temporary-directory values. |
-| `cache_dir()` / `data_dir()` / `config_dir()` | `-[Env, FS.Read]> String?` | The XDG base directories: `$XDG_CACHE_HOME`, `$XDG_DATA_HOME` or `$XDG_CONFIG_HOME` when set and not empty, else `.cache`, `.local/share` or `.config` under the home directory (`$HOME` when set, else the account's home in `/etc/passwd`, `%USERPROFILE%` on Windows), joined by `files.join_all`. `None` when there is no home directory. |
+| `cache_dir()` / `config_dir()` | `-[Env, FS.Read]> String?` | The XDG base directories: `$XDG_CACHE_HOME` or `$XDG_CONFIG_HOME` when set and not empty, else `.cache` or `.config` under the home directory (`$HOME` when set, else the account's home in `/etc/passwd`, `%USERPROFILE%` on Windows), joined by `files.join_all`. `None` when there is no home directory. |
+| `data_dir()` | `-[Env, FS.Read]> String?` | The user's application data directory, where a program keeps what it saves for itself: on Linux and other Unix systems `$XDG_DATA_HOME` when set and not empty, else `.local/share` under the home directory; on macOS `Library/Application Support` under the home directory; on Windows `%LOCALAPPDATA%` when set and not empty, else `AppData/Local` under the home directory. The home directory is read as `cache_dir` reads it. `None` when there is none. |
 | `name()` / `family()` / `arch()` | `-[Env]> String` | Return OS name, OS family, and CPU architecture. |
 | `platform()` / `is_windows()` / `is_unix()` / `is_linux()` / `is_macos()` | platform values `-[Env]>` | Query the environment-derived platform facts. |
 | `executable()` / `username()` | `-[Env]> String` | Return process facts. `executable()` is the running program's path: the built binary, or the script's absolute path under `jet run`; launching it runs the program again on either tier, and every later command word reaches the program as an argument (under `jet run` the relaunch places them after `--`). |
@@ -5530,6 +5531,7 @@ tasks never read or change the process registry. The module source is
 | `disconnect(client: String)` | — | The test host cuts client `client` off every server: until `reconnect(client)`, each call through a Remote made for it fails `CallError.Unreachable`, naming the client and the method, and runs nothing on the server. Nothing touches the network, so an offline, catch-up or replay case runs the same each time; the servers and every other client go on. Inside `testing.world` the links are the world's own. A blank name, or one with a control character, panics. |
 | `reconnect(client: String) -[Net, Time]>` | — | Restore the link `disconnect` cut: the client's next call reaches the server, and the writes it queued meanwhile are sent now, in order (see `graph.offline(.Queue)` below). |
 | `pending() -> Int` | count | The number of writes the device's queue holds, waiting to send; always 0 on a device that doesn't queue. |
+| `notices() -> [Notice]` | notices | The app's notice list, oldest first: the notices with no control to sit beside, each kept until it is dismissed (see `app.Notice` below). |
 | `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
 | `new_id() -[Rand, Time]> String` | ID | A fresh UUIDv7 as lowercase text: the Unix millisecond it was made, then 74 random bits. A client names a row it creates with it, so a row made offline has its final ID at once; a later ID sorts after it. It panics when the system has no random source. |
 | `as_caller<R>(account: auth.AccountID, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
@@ -5979,9 +5981,10 @@ handler has the type `fn() app.Notice!`, so its error type converts to a
 Notice (`impl TaskError -> app.Notice`). The frame shows the notice beside
 the control, and `retry: true` offers to run the handler again. A notice
 with no control to sit beside, such as a failed background run or a queued
-write refused after its screen closed, joins the app's notice list. The list
-keeps each notice, in order, until it is dismissed. The list lives in one
-process-wide cell, or in the World's own cell inside a deterministic world.
+write refused after its screen closed, joins the app's notice list, which
+`app.notices()` reads. The list keeps each notice, in order, until it is
+dismissed. The list lives in one process-wide cell, or in the World's own
+cell inside a deterministic world.
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with

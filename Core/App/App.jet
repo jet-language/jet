@@ -292,10 +292,6 @@ Remote: struct<S> {
     __arg: fn<A: Encode>(self, value: A) -> String Never! {
         live_json.to_string<A>(value) ?? "null"
     }
-
-    // `failure` as an error of the call; the compiler's `fail` binds it, so
-    // the method's error type takes it through its conversion.
-    __raise: fn<R>(self, failure: CallError) -> R CallError! { Err(failure) }
 }
 
 // A call that `direct` runs on `service`, the service a Remote holds, as one
@@ -333,6 +329,10 @@ CallError: enum {
     Invalid([FieldError])
     SignedOut
     UpdateRequired
+
+    // This failure as an error of the call; the compiler's `fail` binds it,
+    // so the method's error type takes it through its conversion.
+    __raise: fn<R>(self) -> R CallError! { Err(self) }
 }
 
 // No answer: the server is down or unreachable, or its reply was not one
@@ -434,23 +434,24 @@ __keep_notice: fn(notice: Notice) {
     }
 }
 
-// The app's notice list, oldest first.
-__notices: fn() -> [Notice] { notice_decode(notice_cell_load()) }
+// The app's notice list, oldest first: the notices with no control to sit
+// beside, each kept until it is dismissed.
+notices: fn() -> [Notice] { notice_decode(notice_cell_load()) }
 
 // Removes the notice at position `at` of the app's notice list; nothing
 // when there is none.
 __dismiss: fn(at: Int) {
     loop {
         seen: notice_cell_load()
-        notices: notice_decode(seen)
-        if at < 0 || at >= notices.len() {
+        listed: notice_decode(seen)
+        if at < 0 || at >= listed.len() {
             return
         }
         kept := [U8]{}
-        loop index in 0..<notices.len() {
+        loop index in 0..<listed.len() {
             if index == at -> next
-            live_put(kept, notices[index].text)
-            live_put(kept, if notices[index].retry -> "1" else -> "0")
+            live_put(kept, listed[index].text)
+            live_put(kept, if listed[index].retry -> "1" else -> "0")
         }
         if notice_cell_replace(seen, kept) {
             return
@@ -461,20 +462,20 @@ __dismiss: fn(at: Int) {
 // The notices of an encoded list; malformed bytes are an empty list.
 notice_decode: fn(raw: [U8]) -> [Notice] {
     fields: live_fields(raw) ?? return [Notice]{}
-    notices := [Notice]{}
+    listed := [Notice]{}
     at := 0
     loop at + 1 < fields.len() {
-        notices.push(Notice{text: fields[at], retry: fields[at + 1] == "1"})
+        listed.push(Notice{text: fields[at], retry: fields[at + 1] == "1"})
         at += 2
     }
-    notices
+    listed
 }
 
 #Test("a kept notice stays in the app's notice list, in order, until it is dismissed") {
-    before: __notices().len()
+    before: notices().len()
     __keep_notice(Notice{text: "Couldn't sync the board.", retry: true})
     __keep_notice(Notice{text: "That task no longer exists."})
-    kept: __notices()
+    kept: notices()
     assert_eq(kept.len(), before + 2)
     assert_eq(kept[before].text, "Couldn't sync the board.")
     assert(kept[before].retry, "the first notice offers a retry")
@@ -482,7 +483,7 @@ notice_decode: fn(raw: [U8]) -> [Notice] {
     assert(!kept[before + 1].retry, "a notice offers no retry unless it says so")
     __dismiss(before)
     __dismiss(kept.len())
-    left: __notices()
+    left: notices()
     assert_eq(left.len(), before + 1)
     assert_eq(left[before].text, "That task no longer exists.")
 }
@@ -2262,12 +2263,6 @@ App: struct {
         Val(live_json.decode<V>("{{{parts.join(",")}}}") ?? return None)
     }
 
-    // Runs `run` with `state`, and gives its text; None for no state.
-    __opened: fn<V>(self, state: V?, run: fn(V) -[Net, FS.Read]> String Never!) -[Net, FS.Read]> String? Never! {
-        if state == .Val(made) -> return Val(run(made))
-        None
-    }
-
     // The HTML of what a screen's view shows when it is no node tree: its
     // text (a string's own text, any other value's JSON), escaped, as a
     // paragraph. A view that gives a tree shows the tree's HTML (`__html`).
@@ -3017,8 +3012,8 @@ priv RouteTestService: struct {}
 // it makes the state from the address's texts, and shows its project and
 // filter.
 priv route_test_open: fn(graph: App, fields: [String:String]) -[Net, FS.Read]> String? Never! {
-    made: graph.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{graph.__address_json<String>(fields, "project"), graph.__address_json<String>(fields, "q")})
-    graph.__opened<RouteTestBoard>(made, fn(state: RouteTestBoard) { graph.__view_html<String>("{state.project} <{state.q}>") })
+    state: graph.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{graph.__address_json<String>(fields, "project"), graph.__address_json<String>(fields, "q")}) ?? return None
+    Val(graph.__view_html<String>("{state.project} <{state.q}>"))
 }
 
 #Test("the app graph opens each screen at its state's address, with the graph's Remotes") {

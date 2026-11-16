@@ -165,7 +165,7 @@ runtime_binding_name: fn(row: RuntimeInterfaceRow) -> String Never! {
     assert_eq(violations.join("\n"), "")
 }
 
-#Test("every run-time-only read names a runtime export, and the running task, process, terminal, World store, UI provider and platform are among them") {
+#Test("every run-time-only read names a runtime export, and the running task, process, terminal, World store, device store, UI provider and platform are among them") {
     loop row in RUNTIME_ONLY_READS {
         assert(runtime_c_export(row.symbol), "RUNTIME_ONLY_READS names `{row.symbol}`, which no runtime export defines")
     }
@@ -179,6 +179,8 @@ runtime_binding_name: fn(row: RuntimeInterfaceRow) -> String Never! {
         "term.stderr_terminal",
         "testing.world_store_load",
         "testing.world_store_replace",
+        "web.device_load",
+        "web.device_replace",
         "mod.supported",
         "mod.os",
         "sys.simd_lanes",

@@ -442,10 +442,11 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
 
 // `remote.__call<R, E>(method, args, direct, fail)` for an endpoint method
 // that fails with `E`, or `remote.__write<E>(…)` when `R` is `Unit`: `fail`
-// binds the transport's `CallError` raised as an `R CallError!`, so it
-// converts to `E` as any propagated error does. `raised_return` is the
-// method's `R E!` once more, for `__raise<R>`; `hidden` prefixes the
-// closure's names.
+// raises the transport's `CallError` as an `R CallError!` through its own
+// `__raise<R>`, so the closure captures nothing (the Remote stays usable
+// after the call), and the error converts to `E` as any propagated error
+// does. `raised_return` is the method's `R E!` once more, for `__raise<R>`;
+// `hidden` prefixes the closure's names.
 sema_app_remote_fallible: fn(remote: String, hidden: String, wire: &&[CallArg], ok: Type, failure: Type, raised_return: Type, span: Span) -> Expr Never! {
     failure_name: "{hidden}_failure"
     raised_name: "{hidden}_raised"
@@ -453,7 +454,7 @@ sema_app_remote_fallible: fn(remote: String, hidden: String, wire: &&[CallArg], 
         raised_return == .Result(success, _) -> success
         else -> Type.Named{name: "Unit"}
     }
-    raise: sema_app_remote_method_call(remote, SEMA_APP_REMOTE_RAISE, [Type]{raised_ok}, [CallArg]{sema_http_mount_arg(sema_app_remote_ident(failure_name, span), span)}, span)
+    raise: sema_app_remote_method_call(failure_name, SEMA_APP_REMOTE_RAISE, [Type]{raised_ok}, [CallArg]{}, span)
     fail_body: [Stmt]{Stmt.Val{binding: ast_binding(raised_name, span, false, raise, None)}, Stmt.Expr{expr: Expr.Ok{value: sema_app_remote_ident(raised_name, span), span: span, id: AST_NODE_GENERATED}}}
     fail: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: failure_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: fail_body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
     filled := wire.move()

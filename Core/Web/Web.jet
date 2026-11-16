@@ -1237,18 +1237,16 @@ priv ScreenTestInbox: struct {
 // The board screen's opener, as the compiler lowers `.screen`: its view
 // shows the board and the tab the address gives.
 priv screen_test_board_open: fn(graph: calls.App, fields: [String:String]) -> String? Never! {
-    made: graph.__address_state<ScreenTestBoard>([String]{"board", "tab"}, [String?]{graph.__address_json<String>(fields, "board"), graph.__address_json<String>(fields, "tab")})
-    graph.__opened<ScreenTestBoard>(made, fn(state: ScreenTestBoard) { graph.__view_html<String>("{state.board} <{state.tab}>") })
+    state: graph.__address_state<ScreenTestBoard>([String]{"board", "tab"}, [String?]{graph.__address_json<String>(fields, "board"), graph.__address_json<String>(fields, "tab")}) ?? return None
+    Val(graph.__view_html<String>("{state.board} <{state.tab}>"))
 }
 
 // The inbox screen's opener: its view shows the box and the caller it acts
 // for.
 priv screen_test_inbox_open: fn(graph: calls.App, fields: [String:String]) -> String? Never! {
-    made: graph.__address_state<ScreenTestInbox>([String]{"box"}, [String?]{graph.__address_json<String>(fields, "box")})
-    graph.__opened<ScreenTestInbox>(made, fn(state: ScreenTestInbox) {
-        caller: calls.maybe_caller() ?? auth.AccountID.from_string("no one")
-        graph.__view_html<String>("{state.box} for {caller.raw()}")
-    })
+    state: graph.__address_state<ScreenTestInbox>([String]{"box"}, [String?]{graph.__address_json<String>(fields, "box")}) ?? return None
+    caller: calls.maybe_caller() ?? auth.AccountID.from_string("no one")
+    Val(graph.__view_html<String>("{state.box} for {caller.raw()}"))
 }
 
 #Test("a screen's address answers a GET with the page its view shows there and the page's resume state, 401 when only a signed-in caller opens it, and 404 when the address makes no state") {

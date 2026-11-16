@@ -41,7 +41,9 @@ use jet_foundation.[
     ModuleID,
     NamedSpan,
     NodeKind,
+    OrFallback,
     Span,
+    Stmt,
     Type,
     TypedLitBody,
     ast_binding,
@@ -480,14 +482,16 @@ sema_app_remote_service: fn(graph: SemaRegistrationGraph, ty: Type, module_ident
 }
 
 // A screen's opener, as `App.__screen` takes it:
-// `fn(graph, fields) { graph.__opened<V>(made, fn(state) { shown }) }`,
-// where `made` is the state `V` made from the address's field texts
-// `fields` (`sema_app_state_made`), and `shown` the HTML of what the view
-// gives: `view(…).__html()` when it gives a node tree (`text` empty), else
+// `fn(graph, fields) { state: made ?? return None; Val(shown) }`, where
+// `made` is the state `V` made from the address's field texts `fields`
+// (`sema_app_state_made`), and `shown` the HTML of what the view gives:
+// `view(…).__html()` when it gives a node tree (`text` empty), else
 // `graph.__view_html<N>(view(…))`, `N` what it gives (`text`'s one type).
 // `view` is the written view, called with its parameters in order, each
 // Remote one the graph's Remote of its service (`services`,
-// `App.__remote<S>`) and the state one the state.
+// `App.__remote<S>`) and the state one the state. The view runs in the
+// opener's own body, so it has the opener's unbounded effects
+// (`sema_app_screen_callback`): no inner callback bounds its Remotes' calls.
 sema_app_screen_opener: fn(view: Expr, services: [(ty: Type, key: String)?], state_ty: Type, text: [Type], found: SemaAppState, graph: SemaRegistrationGraph, span: Span) -> Expr Never! {
     graph_name: "__jet_app_graph_{span.start}"
     fields_name: "__jet_app_fields_{span.start}"
@@ -503,10 +507,15 @@ sema_app_screen_opener: fn(view: Expr, services: [(ty: Type, key: String)?], sta
         else -> Expr.CallValue{callee: view.copy(), args: view_args, span: span, id: AST_NODE_GENERATED}  // copy: the written argument keeps its expression
     }
     shown: if text.len() == 0 -> sema_app_member_call(called, "__html", [Type]{}, [CallArg]{}, span) else -> sema_app_member_call(sema_app_ident(graph_name, span), "__view_html", text, [CallArg]{sema_app_arg(called, AccessConvention.Read, span)}, span)
-    run: sema_app_lambda([LambdaParam]{sema_app_lambda_param(state_name, None, span)}, shown, span)
-    made: sema_app_state_made(sema_app_ident(graph_name, span), found, state_ty.copy(), fields_name, graph, span)
-    opened: sema_app_member_call(sema_app_ident(graph_name, span), "__opened", [Type]{state_ty}, [CallArg]{sema_app_arg(made, AccessConvention.Read, span), sema_app_arg(run, AccessConvention.Read, span)}, span)
-    sema_app_lambda([LambdaParam]{sema_app_lambda_param(graph_name, None, span), sema_app_lambda_param(fields_name, None, span)}, opened, span)
+    made: sema_app_state_made(sema_app_ident(graph_name, span), found, state_ty, fields_name, graph, span)
+    none: Expr.Absent{span: span, id: AST_NODE_GENERATED}
+    state: Expr.OrFallback{value: made, fallback: OrFallback.Return{value: Val(none), span: span}, is_option: true, span: span, id: AST_NODE_GENERATED}
+    body: [Stmt]{
+        Stmt.Val{binding: ast_binding(state_name, span, false, state, None)},
+        Stmt.Expr{expr: Expr.Present{value: shown, span: span, id: AST_NODE_GENERATED}},
+    }
+    params: [LambdaParam]{sema_app_lambda_param(graph_name, None, span), sema_app_lambda_param(fields_name, None, span)}
+    Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Block{body: body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
 }
 
 // The state `state_ty` made from the address field texts `fields_name` by

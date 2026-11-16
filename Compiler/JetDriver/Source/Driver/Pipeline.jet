@@ -833,12 +833,7 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
             package_manifest = package.manifest_path ?? ""
         }
     }
-    if package_name.len() == 0 {
-        segments: request.authorized_sources.entry_path.split("/").to_list()
-        file: segments[segments.len() - 1]
-        package_name = if file.ends_with(".jet") -> file.slice(0, file.len() - 4) else -> file
-    }
-    if package_name.len() == 0 -> package_name = "script"
+    package_name = jet_driver_package_name(package_name, request.authorized_sources.entry_path)
     if package_version.len() == 0 -> package_version = "0.0.0"
     host_os := ""
     if request.host_facts.active_os == .Val(raw_os) -> host_os = jet_driver_host_os_key(raw_os)
@@ -870,6 +865,19 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
         package_markers: package_markers.move(),
         package_manifest: package_manifest,
     }
+}
+
+// The entry package's name: the manifest's `declared` name, else the entry
+// file's stem, else `script`.
+jet_driver_package_name: fn(declared: String, entry_path: String) -> String Never! {
+    name := declared
+    if name.len() == 0 {
+        segments: entry_path.split("/").to_list()
+        file: segments[segments.len() - 1]
+        name = if file.ends_with(".jet") -> file.slice(0, file.len() - 4) else -> file
+    }
+    if name.len() == 0 -> name = "script"
+    name
 }
 
 // Each declared setting's value for `profile`: the effective writer of its
