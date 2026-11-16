@@ -11,32 +11,61 @@ use jet_foundation.[
     type_name,
 ]
 
-// The parameter types the property-test runner can synthesize inputs for: the
-// scalar value types plus `[T]`, `T?` and fixed lists of a generatable element.
-sema_property_param_generatable: fn(ty: Type) -> Bool Never! {
+// Why the property-test runner can't synthesize values of `ty`, written in
+// the module row `module_index`, or None when it can: the scalar value types,
+// `[T]`, `T?` and fixed lists of a generatable element, and a struct with no
+// type parameters and no `validate` block whose stored fields all are.
+// `seen` are the structs being generated around this one; each call leaves
+// it as it found it.
+sema_property_param_ungeneratable: fn(graph: SemaRegistrationGraph, module_index: Int, ty: Type, seen: &[String]) -> String? Never! {
     if ty == {
-        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> true
-        .List(inner) -> sema_property_param_generatable(inner)
-        .Option(inner) -> sema_property_param_generatable(inner)
-        .FixedList(elem, _) -> sema_property_param_generatable(elem)
-        .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> None
+        .List(inner) -> sema_property_param_ungeneratable(graph, module_index, inner, seen)
+        .Option(inner) -> sema_property_param_ungeneratable(graph, module_index, inner, seen)
+        .FixedList(elem, _) -> sema_property_param_ungeneratable(graph, module_index, elem, seen)
+        .Named(name) -> sema_property_struct_ungeneratable(graph, module_index, ty, name, seen)
+        .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val("`{type_name(ty)}` has no generator")
     }
 }
 
+// sema_property_param_ungeneratable for the type `ty` that names `name`.
+sema_property_struct_ungeneratable: fn(graph: SemaRegistrationGraph, module_index: Int, ty: Type, name: String, seen: &[String]) -> String? Never! {
+    row: sema_type_resolve_nominal_row_at(graph, ty, module_index) ?? return Val("`{name}` has no generator")
+    key: "{row.module_index}:{row.row}"
+    if seen.contains(key) -> return Val("`{name}` holds itself")
+    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+        if item == .Struct(definition) {
+            if definition.type_params.len() > 0 -> return Val("`{name}` has type parameters")
+            if definition.validate_span != None -> return Val("`{name}` validates its values")
+            seen.push(key)
+            loop field in definition.fields {
+                if field.computed != None -> next
+                reason: sema_property_param_ungeneratable(graph, row.module_index, field.ty, seen) ?? next
+                _ := seen.pop()
+                return Val("`{name}.{field.name}`: {reason}")
+            }
+            _ := seen.pop()
+            return None
+        }
+    }
+    Val("`{name}` is not a struct")
+}
+
 // E0613 (Rust `property_param_unsupported`): one row per parameter of a
-// parameterized `#Test fn` whose type has no automatic generator, reported
-// before the test body's own diagnostics.
-sema_property_param_diagnostics: fn(test: TestDef) -> [Diagnostic] Never! {
+// parameterized `#Test fn` in the module row `module_index` whose type has
+// no automatic generator, reported before the test body's own diagnostics.
+sema_property_param_diagnostics: fn(graph: SemaRegistrationGraph, module_index: Int, test: TestDef) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     loop parameter in test.params {
-        if sema_property_param_generatable(parameter.ty) -> next
+        seen := [String]{}
+        reason: sema_property_param_ungeneratable(graph, module_index, parameter.ty, seen) ?? next
         diagnostics.push(
             sema_error(
                 "E0613",
                 parameter.ty_span,
                 "a property test can't generate values of type `{type_name(parameter.ty)}`",
-                "a parameterized `#Test fn` is a property test: Jet generates inputs from each parameter's type, but this type has no built-in generator",
-                "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" {{ … }}` block and construct the value yourself",
+                "a parameterized `#Test fn` is a property test: Jet generates inputs from each parameter's type, and {reason}",
+                "use a generatable type (Int, Float, Bool, String, Char, a sized integer, a list/optional of those, or a struct of them), or write a plain `#Test \"name\" {{ … }}` block and construct the value yourself",
             ),
         )
     }

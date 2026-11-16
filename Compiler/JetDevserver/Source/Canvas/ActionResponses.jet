@@ -6,7 +6,7 @@ use {
         span_json,
     ]
     jet_foundation.[
-        Diagnostic, Span, TextEdit, diagnostic_is_warning, diagnostic_render_all, diagnostic_source_column, diagnostic_source_line, diagnostic_source_position,
+        DIAGNOSTIC_LINT, Diagnostic, Span, TextEdit, diagnostic_render_all, diagnostic_source_column, diagnostic_source_line, diagnostic_source_position,
         diagnostic_source_texts, foundation_byte_text,
     ]
     jet_lsp.[LSPChecker]
@@ -243,7 +243,7 @@ query_diagnostics_error: fn(path: String, src: String, diags: [Diagnostic]) -> S
 diagnostics_json: fn(path: String, src: String, diags: [Diagnostic]) -> String Never! {
     sources := diagnostic_source_texts()
     reports: loop diagnostic in diags -> {
-        severity: if diagnostic_is_warning(diagnostic) -> "warning" else -> "error"
+        severity: if diagnostic.severity == DIAGNOSTIC_LINT -> "warning" else -> "error"
         position: if diagnostic.span == .Val(span) -> {
             at: diagnostic_source_position(sources, diagnostic.origin, src)
             "\"line\":{diagnostic_source_line(sources.texts[at], span.start)},\"col\":{diagnostic_source_column(sources.texts[at], span.start)},\"span\":{{\"start\":{span.start},\"end\":{span.end}}}"

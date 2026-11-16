@@ -1301,14 +1301,52 @@ type_name: fn(ty: Type) -> String Never! {
     }
 }
 
-// (Rust `AST::union_member_tag`): the tag a union pattern arm
-// names for one member. Rust spells a declared member by its own name, so
-// every nominal reads without its module qualifier (`module::LocalDate` is
-// `LocalDate`); a compound spelling is sanitized into an identifier
-// (`[String]` is `M__String_`). A named case is tagged by its name.
+// (Rust `AST::union_member_tag`): a union member's own tag. Rust spells a
+// declared member by its own name, so every nominal reads without its
+// module qualifier (`module::LocalDate` is `LocalDate`); a compound spelling
+// is sanitized into an identifier (`[String]` is `M__String_`). A named case
+// is tagged by its name. Two members may share it; the tag an arm names is
+// type_union_member_tag_in.
 type_union_member_tag: fn(ty: Type) -> String Never! {
     if ty == .Case(name, _) -> return name.copy()
     type_union_member_tag_name(type_name(type_unqualified_nominals(ty)))
+}
+
+// The tag a union pattern arm names for member `ty` of the union `members`:
+// its own tag (type_union_member_tag), unless two different members share
+// that tag, as two types of one name from different modules do
+// (`geo.Point | map.Point`). Each such member is then tagged by its full
+// identity (type_union_member_identity_tag), so no two members of one union
+// share a tag. Every site that names a union member's variant (layout,
+// boxing, arms, coverage) reads its tag here.
+type_union_member_tag_in: fn(members: [Type], ty: Type) -> String Never! {
+    own: type_union_member_tag(ty)
+    first := -1
+    loop (index, member) in members {
+        if type_union_member_tag(member) != own -> next
+        if first < 0 -> first = index
+        if !type_identity_equal(members[first], member) -> return type_union_member_identity_tag(ty)
+    }
+    own
+}
+
+// `ty`'s full spelling, module identities included, as an identifier after
+// `I_`: letters and digits stay, and every other byte is `_` and its two hex
+// digits, so two spellings never give one tag.
+type_union_member_identity_tag: fn(ty: Type) -> String Never! {
+    hex: "0123456789abcdef".bytes()
+    bytes := [U8]{73, 95}
+    loop byte in type_name(ty).bytes() {
+        value := Int{byte}
+        if (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) {
+            bytes.push(byte)
+        } else {
+            bytes.push(U8{95})
+            bytes.push(hex[value /% 16])
+            bytes.push(hex[value % 16])
+        }
+    }
+    String.from_bytes(bytes) ?? "I_"
 }
 
 // The value a union member's variant carries: a named case carries its

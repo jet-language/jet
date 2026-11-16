@@ -394,6 +394,17 @@ App: struct {
         self.copy()
     }
 
+    // An `#App.Every` method of `app.mount(service)` (sema lowers each
+    // here): schedule `name` runs `run` at each minute the cron line `cron`
+    // allows, from when a server first serves the app (`__on_serve`). The
+    // schedule waits in a cell of its own, which the start empties, so a
+    // second start finds nothing to start.
+    __every: fn(self, name: String, cron: String, run: &&fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
+        waiting: Shared{[AppSchedule]{AppSchedule{name: name.copy(), cron: cron.copy(), run: run.move()}}}
+        http_server.__on_serve(app_table(self), fn() { app_schedules_start(waiting) })
+        self.copy()
+    }
+
     // `app.get(path, handler)` and its sibling verbs, `app.custom(method,
     // path, handler)` and each marked method of `app.mount(value)` land here
     // with the route's checked contract (sema lowers each). `at` is the
@@ -1415,8 +1426,11 @@ priv AppWebhook: struct {
 // body, as one transaction (`app_transacted`) that records the delivery's ID
 // (`app_webhook_delivery`): 200 with its reply, 500 when it fails, which
 // rolls it back, 422 with the field errors when the body is no JSON the
-// method takes, or 200 `{"repeated":<ID>}` when it has run already.
+// method takes, or 200 `{"repeated":<ID>}` when it has run already. Both
+// methods run as the system (`calls.callers`), as no account calls them.
 priv app_webhook_response: fn(hook: AppWebhook, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    calls.callers.begin_system()
+    defer calls.callers.end()
     unsigned: app_json(401, app_error_json("`{request.path}` takes only deliveries signed with its key"))
     values := [String]{}
     loop name in hook.params { values.push(app_json_string(request.param(name) ?? "")) }
@@ -1482,6 +1496,25 @@ priv AppTraced: struct {
 priv app_traced: fn(app: App, pattern: String, method: String) Never! {
     guard := app.__state.guard_edit()
     guard.value.traced.push(AppTraced{pattern: pattern, method: method})
+}
+
+// One `#App.Every` method of a mounted service, waiting for a server to
+// serve the app: its schedule's name (`<service module>.<Service>.<method>`),
+// its cron line, and the call sema builds that runs it.
+priv AppSchedule: struct {
+    name: String
+    cron: String
+    run: fn(RemoteArgs) -> String [FieldError]!
+}
+
+// Starts the schedules `waiting` holds (`calls.schedules`), each once: it
+// takes each out, so a later start finds none.
+priv app_schedules_start: fn(waiting: Shared<[AppSchedule]>) Never! {
+    guard := waiting.guard_edit()
+    loop {
+        schedule: guard.value.remove(0, .Slot) ?? return
+        calls.schedules.start(schedule.name, schedule.cron, schedule.run)
+    }
 }
 
 // An endpoint's method: the last segment of its row's path.
@@ -2653,16 +2686,18 @@ priv openapi_route_json: fn(route: OpenAPIRoute) -> String Never! {
     assert(bad_route.starts_with("invalid HTTP route `/a/*rest/b`: "))
 }
 
-#Test("a webhook delivery runs only when it is signed with its key") {
+#Test("a webhook delivery runs only when it is signed with its key, as the system") {
     hook: AppWebhook{
         signature: Signature.GitHub,
         params: [String]{"project"},
         key: fn(args: RemoteArgs) {
+            assert(calls.callers.system())
             project: args.__take<String>(0) ?? return Err(err)
             if project != "jet" -> return Ok(None)
             Ok(Val("It's a Secret to Everybody"))
         },
         answer: fn(args: RemoteArgs) {
+            assert(calls.callers.system())
             project: args.__take<String>(0) ?? return Err(err)
             greeting: args.__take<String>(1) ?? return Err(err)
             Ok(args.__reply_value<String>("{project}: {greeting}"))
@@ -2677,6 +2712,7 @@ priv openapi_route_json: fn(route: OpenAPIRoute) -> String Never! {
     assert_eq(app_webhook_test_status(hook, "other", signed, body), 401)
     unparsed: "hi"
     assert_eq(app_webhook_test_status(hook, "jet", "sha256={crypto.hex_encode(crypto.hmac_sha256(secret.bytes(), unparsed.bytes()))}", unparsed), 422)
+    assert(!calls.callers.system())
 }
 
 // The status `hook` answers a delivery of `body` to `/hooks/{project}`

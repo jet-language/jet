@@ -3549,9 +3549,8 @@ UnusedLocalBinding: struct {
     impl Diagnostic {
         code: "L0101"
         severity: .Lint
-        tier: .Tidy
         lint_name: "unused_local_binding"
-        meaning: "An unused local binding is dead code and may hide a missed use"
+        meaning: "An unused local binding is dead code and may hide a missed use (warning)"
         detail: true
         structured_fix: .SourceEdit
         no_fix: None
@@ -3600,9 +3599,8 @@ UnusedImport: struct {
     impl Diagnostic {
         code: "L0103"
         severity: .Lint
-        tier: .Tidy
         lint_name: "unused_import"
-        meaning: "An unused import adds dead name and dependency surface"
+        meaning: "An unused import adds dead name and dependency surface (warning)"
         detail: true
         structured_fix: .SourceEdit
         no_fix: None
@@ -6446,11 +6444,10 @@ UnreachableDispatchArm: struct {
         code: "L0301"
         meaning: "A dispatch arm an earlier arm already covers"
         severity: .Lint
-        tier: .Tidy
         lint_name: "unreachable_dispatch_arm"
         no_fix: .Ambiguous
 
-        what: fn(self) -> String { "Unreachable dispatch pattern arm" }
+        what: fn(self) -> String { "Unreachable dispatch pattern arm (lint)" }
 
         why: fn(self) -> String {
             "Arms are tried in order, and an earlier arm already covers every value this one could match"
@@ -6506,13 +6503,12 @@ GoneFailureArm: struct {
         code: "L0304"
         meaning: "An `.Err(.Member(…))` arm for a failure type that can no longer reach its subject"
         severity: .Lint
-        tier: .Tidy
         lint_name: "gone_failure_arm"
         structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
 
-        what: fn(self) -> String { "This arm names a failure type its subject can no longer fail with" }
+        what: fn(self) -> String { "This arm names a failure type its subject can no longer fail with (lint)" }
 
         why: fn(self) -> String {
             "A failure union holds only the failure types that can still reach it, so an arm for any other type never runs"
@@ -22617,10 +22613,10 @@ ServerOnlyMethodMarkedEndpoint: struct {
     impl Diagnostic {
         code: "E2819"
         safety_class: .Soundness
-        safety_reason: "A job, a webhook or a signing key that an endpoint marker also marks would be called by any client directly: a job outside the call that queued it and as that client rather than the system, a webhook without its sender's signature, a signing key by anyone who asks for it."
+        safety_reason: "A job, a schedule, a webhook or a signing key that an endpoint marker also marks would be called by any client directly: a job outside the call that queued it and as that client rather than the system, a schedule off its clock, a webhook without its sender's signature, a signing key by anyone who asks for it."
         expert_path: "none: an endpoint method that does its own work and queues the job with `app.enqueue` gives clients the call"
         stage: [.Compile]
-        meaning: "A method marked both server-only (`#App.Job`, `#App.Webhook`, `#App.SigningKey`) and as an endpoint (`#App.SignedIn`, `#App.Public`)"
+        meaning: "A method marked both server-only (`#App.Job`, `#App.Every`, `#App.Webhook`, `#App.SigningKey`) and as an endpoint (`#App.SignedIn`, `#App.Public`)"
         detail: true
 
         what: fn(self) -> String {
@@ -22628,7 +22624,7 @@ ServerOnlyMethodMarkedEndpoint: struct {
         }
 
         why: fn(self) -> String {
-            "A job runs after the call that queued it commits, as the system; a webhook runs for a sender that signs its deliveries; a signing key gives the key that checks them. Only the server runs each, so no client may call one through `app.Remote`."
+            "A job runs after the call that queued it commits, as the system; a schedule runs on its clock, as the system; a webhook runs for a sender that signs its deliveries; a signing key gives the key that checks them. Only the server runs each, so no client may call one through `app.Remote`."
         }
 
         fix: fn(self) -> String {

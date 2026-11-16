@@ -30,6 +30,9 @@
 // - Exposure: each method a route marker makes an endpoint, under the marker
 //   as written (sema's `endpoint`, HttpMount.jet). An unmarked method is
 //   no endpoint.
+// - Rights: each method a server-only app marker runs as the system (a job,
+//   a schedule, a webhook and its signing key), under the marker as written
+//   (sema's `system_run`, HttpMount.jet). No row policy limits the system.
 // - Context: the task context fields and keys each function's own body
 //   reads (`context.<field>`, `context.get(key)`). Reading the context is
 //   no effect, so the function's effect row never shows it.
@@ -40,7 +43,7 @@ use {
 }
 
 // The choice kinds the report lists, in order; a kind with no row says none.
-JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining", "collection", "copies", "placement", "exposure", "context"}
+JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining", "collection", "copies", "placement", "exposure", "rights", "context"}
 
 // One automatic choice: its kind, the function it was made in, and what was
 // chosen with its reason.
@@ -193,6 +196,19 @@ jet_cli_exposure_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
     }
 }
 
+// The rights choices of the program's own `functions`, at the function's
+// line: each method a server-only app marker runs as the system, with the
+// marker.
+jet_cli_rights_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+    loop function in functions {
+        if function.synthetic || function.system_run == "" || module_is_core(function.module_identity) {
+            next
+        }
+        choice: jet_cli_function_choice("rights", function, "runs as the system under `{function.system_run}`: no row policy limits its queries")
+        if !jet_cli_choice_seen(out, choice) -> out.push(choice)
+    }
+}
+
 // The context choices of the program's own `functions`, at the function's
 // line: the context fields and keys the body reads, in the order it first
 // reads them. `context.scratch` names where values are made, as an
@@ -291,6 +307,7 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             jet_cli_copy_choices(inputs.functions, choices)
             jet_cli_placement_choices(inputs.functions, choices)
             jet_cli_exposure_choices(inputs.functions, choices)
+            jet_cli_rights_choices(inputs.functions, choices)
             jet_cli_context_choices(inputs.functions, choices)
             if inputs.entry_key != None {
                 threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}

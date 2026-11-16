@@ -1,0 +1,8 @@
+Error [jet.PatternTypeMismatch]: Pattern `Point` names more than one member of `geo2.Point | map2.Point`
+  --> tests/ui/union_arm_names_two_members/run.jet:10:9
+    |
+ 10 |         .Point(_) -> print("a point")
+    |         ^^^^^^^^^
+ Why: The union holds 2 types named `Point`, and an arm names a member by its type's name alone
+ Fix: Make each a named case of the union, as in `Point1(geo2.Point) | Point2(map2.Point)`, and match the case: `.Point1(p) -> …`
+More: jet-lang.dev/e/E0305

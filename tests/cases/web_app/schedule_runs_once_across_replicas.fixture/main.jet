@@ -1,0 +1,86 @@
+// Two replicas of one app, each with its own handle on the same store, as
+// two servers have. Each mounts a schedule that counts its runs in the store
+// on each leap day, at midnight UTC. When the replicas start, the latest
+// leap day is a run no server made, so it runs once at start-up, on one
+// replica: the store records the run in the run's own transaction, and the
+// other replica finds it recorded and drops its run. Run again, as after a
+// restart, the store has the run, so it runs on neither.
+use {
+    app
+    db: core.db
+    time: core.time
+    web: core.web
+}
+
+#Codable
+Count: struct {
+    name: String
+    runs: Int
+}
+
+#Error
+BoardError: enum {
+    Failed(String)
+}
+
+counts_in: fn(store: db.Store) -> db.Table<String, Count> {
+    store.table("counts", key: fn(count: Count) { count.name })
+}
+
+// The schedule's runs counted so far.
+runs_now: fn(counts: db.Table<String, Count>) -[DB.Read]> Int BoardError! {
+    if counts.get("leap_day") == {
+        .Val(count) -> Ok(count.runs)
+        .None -> Ok(0)
+        .Err(failure) -> Err(BoardError.Failed(failure.message()))
+    }
+}
+
+Board: struct {
+    store: db.Store
+    // How often this replica's schedule ran, whether its run counted or
+    // was dropped.
+    tries: Shared<Int>
+
+    // Counts a run, at midnight UTC on each leap day.
+    #App.Every(cron: "0 0 29 2 *") leap_day: fn(self) -> Int BoardError! {
+        counted: self.count_run()
+        tried := self.tries.guard_edit()
+        tried.value += 1
+        counted
+    }
+
+    // Counts a run, and gives the count.
+    count_run: fn(self) -[DB.Read, DB.Write]> Int BoardError! {
+        counts: counts_in(self.store)
+        runs: (runs_now(counts) ?? return Err(err)) + 1
+        _: counts.put(Count{name: "leap_day", runs: runs}) ?? return Err(BoardError.Failed(err.message()))
+        Ok(runs)
+    }
+}
+
+// The tries `replica` made so far.
+tries_of: fn(replica: Shared<Int>) -> Int { replica.guard_read().value }
+
+// Binds a replica and serves it on a task of its own; serving starts its
+// schedule. The program ends without stopping it.
+start_replica: fn(tries: Shared<Int>) {
+    server: web.app().mount(Board{store: db.open("board.db"), tries: tries}).bind("127.0.0.1:0") ?? panic("bind a replica")
+    serving: task { server.serve() }
+    serving.detach()
+}
+
+run: fn() {
+    first: Shared{0}
+    second: Shared{0}
+    start_replica(first.copy())
+    start_replica(second.copy())
+    loop {
+        if tries_of(first) > 0 && tries_of(second) > 0 -> break
+        time.sleep(10ms)
+    }
+    // The replica whose run counted commits after its try.
+    time.sleep(200ms)
+    runs: runs_now(counts_in(db.open("board.db"))) ?? panic("the count reads")
+    print("leap day runs: {runs}")
+}

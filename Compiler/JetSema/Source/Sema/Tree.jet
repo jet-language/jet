@@ -188,7 +188,7 @@ tree_pattern_key_identity: fn(key: TExpr, context: SemaCheckContext) -> String? 
             .Bool(flag) -> Val("bool:{flag}")
             .Char(character) -> Val("char:{character}")
             .Enum(owner, variant, _) -> Val("enum:{owner}:{variant}")
-            .Float(_, _) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Present(_) | .Failed(_) | .Unit -> None
+            .Float(_, _) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> None
         }
         .Local(_) | .InlineBlock(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> None
     }
@@ -817,6 +817,9 @@ TFunc: struct {
     // The app endpoint marker or route marker that makes the method an
     // endpoint, as written, or "" (FnBody.endpoint).
     endpoint: String{""}
+    // The server-only app marker that runs the method as the system, as
+    // written, or "" (FnBody.system_run).
+    system_run: String{""}
     // The jet_builtins role a Core function fills, or "" (FnBody.role).
     role: String{""}
     visibility: TVisibility

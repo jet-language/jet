@@ -1,16 +1,13 @@
-# Port of tests/pkg.rs:2480-2539; both original phases kept. An unused local
-# is now a tidy error, so the first build lists it and fails before its effect
-# summary instead of warning.
+# Port of tests/pkg.rs:2480-2539; both original phases and all predicates retained.
 # PENDING-GRAMMAR(batch-four): mkdir.
 fixture: fixtures/minimal
 mkdir: store
 env: JET_PACKAGE_STORE_DIR={work}/store
 copy: {root}/tests/cases/pkg/fixtures/sources/unused.txt run.jet
 step: jet build run.jet
-exit: nonzero
-stderr: ~ "Error [jet.UnusedLocalBinding]" # a tidy error fails jet build
+exit: 0
 stderr: ~ "L0101" # original predicate
-stderr: !~ "effects:" # the failed build ends before its effect summary
+stderr: ~ "effects:" # original predicate
 stderr: !~ "E1293" # original predicate
 copy: {root}/tests/cases/pkg/fixtures/manifests/unused-deny.txt package.jet
 step: jet build run.jet

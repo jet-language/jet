@@ -1,11 +1,17 @@
-// Must fail: a client calls the service's job through its Remote, which
-// offers only the endpoints.
+// Must fail: a client calls the service's job and its schedule through its
+// Remote, which offers only the endpoints.
 use app
 
 Crew: struct {
     #App.SignedIn add_task: fn(self, title: String) -> Int Never! { title.len() }
 
     #App.Job tell_assignee: fn(self, id: Int) -> Int Never! { id }
+
+    #App.Every(cron: "0 8 * * *") remind: fn(self) -> Int Never! { 1 }
 }
 
-steal: fn(crew: app.Remote<Crew>) -> Int app.CallError! { crew.tell_assignee(1) }
+steal: fn(crew: app.Remote<Crew>) -> Int app.CallError! {
+    _: crew.tell_assignee(1)
+    _: crew.remind()
+    Ok(0)
+}

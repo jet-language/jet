@@ -638,6 +638,13 @@ is E0112. Only the value widens: a `&` parameter takes exactly its union type,
 and a list, optional or other container of the smaller union is not one of the
 larger (D-ALT-SUBSET1=A).
 
+A union member is the type itself, never its name: `geo.Point | map.Point`,
+two types named `Point` from different modules, holds two members, and each
+value keeps the member it was built as. An arm names a member by its type's
+name, so a `.Point` arm over that union names neither member (E0305); only an
+`else` reaches them, and a table over such a union keeps its `else` without
+E0641. To match each, make them named cases (`Geo(geo.Point) | Map(map.Point)`).
+
 A union member may be a named case, written exactly as inside an enum:
 `temp: Celsius(Float) | Fahrenheit(Float)`. Inside a union, `Name(T)` is a
 named case and a bare name is always a type, so named cases mix with type
@@ -1644,9 +1651,8 @@ needs a declared conversion (E2402). A catch-all `.Err(e)` arm over a union
 that holds `Err` binds `e` the same way, as an `Err`; over a union without
 `Err`, `e` is the union. An arm `.Err(.T(…))` for a type `T` that is not
 a member of the union can never match, since nothing that fails with `T`
-reaches the value any more. It is the tidy error L0304, which fails
-`jet check` and `jet build` but never `jet run`; the table is checked without
-it, and its edit deletes the arm. A name that is no type stays E0305.
+reaches the value any more. It is the lint L0304, the table is checked
+without it, and its edit deletes the arm. A name that is no type stays E0305.
 
 A conversion from a generic error type names the type bare, as an impl of a
 generic type does (`impl Err.From(Unsent)`), and applies to every instantiation:
@@ -3814,11 +3820,9 @@ defaults and per-profile, service, provider, and `require` decisions. An absent
 Lock-backed provenance reports integrity, transparency, publisher, and
 build-attestation facts; present evidence is labeled `verified` or `recorded`,
 and integrity failures remain **E1204**. Lints warn by default, while
-`package.jet` policy can deny named lints and produce **E1293**; a tidy error
-(an unused import or local, an unreachable arm) never stops `jet run`,
-`jet dev` or `jet test`, and fails `jet check` and `jet build`. Host policy
+`package.jet` policy can deny named lints and produce **E1293**. Host policy
 can narrow but not widen that rule
-(I1, I8, D-BOUND-PROV1, D-LINTPOLICY1=A, D-NO-WARNINGS1=A, D-JPK-POLICYSURFACE1).
+(I1, I8, D-BOUND-PROV1, D-LINTPOLICY1=A, D-JPK-POLICYSURFACE1).
 
 Once a package is realized, realize-class operations can reuse it with
 `--offline`. Network-class operations reject `--offline`; a missing local
@@ -5312,8 +5316,10 @@ and runs them. (S43, D-CASING1)
 
 A top-level `#Test name: fn(p: T, ...) { ... }` is a property test. Each
 parameter type must be generatable: `Int`, a sized integer, an inline range,
-`Float`, `Float32`, `Bool`, `Char`, `String`, or a list, fixed list, or
-optional of a generatable type; any other type reports E0613. `jet test` runs
+`Float`, `Float32`, `Bool`, `Char`, `String`, a list, fixed list, or
+optional of a generatable type, or a non-generic, unvalidated struct whose
+stored fields are all generatable and which does not hold itself; any other type reports E0613,
+whose reason names the field that has no generator. `jet test` runs
 the body on 200 generated cases, each behind the same unwind boundary as a
 claim; the generated grade, `jet test --grade=generated`, runs each property
 on `--iterations=<n>` cases instead (1000 when unset) from the base seed
@@ -5340,6 +5346,20 @@ law: `precondition`, `partitions` (each parameter as `name: Type`),
 body calls), `sink` (a runtime stop of the body), `shrink_rule`, `seed` and
 `rejected`.
 (D-TEST1)
+
+A `#Test name: fn(a: Self, ...) { ... }` inside a trait body is a law of the
+trait: a property every implementation must keep, such as Equatable's
+`reflexive` (`assert(a == a)`) and `symmetric`, and Comparable's
+`agrees_with_equal` and `reverses`. A law with no parameter is a parse error.
+`jet test` runs every law against every impl of its trait written in the
+package under test (a derived impl is not run), as a property test named
+`Trait.law for Type` on generated values of the implementing type, so a broken
+impl fails the run with the law's name and the shrunk inputs. An impl whose
+type is not generatable, or whose operator compares with another type, lists
+each law as a skipped test named `Trait.law for Type, not checked: <reason>`.
+`#Waive(law, "reason")` written above an impl skips that one law for it,
+listed as `Trait.law for Type, waived: <reason>`; the reason is required.
+(D-CORE-LAWS1)
 
 For an explicit file, `jet test <file.jet>` builds one generated AOT harness for
 that file. Each claim runs behind a process-local unwind boundary, and the

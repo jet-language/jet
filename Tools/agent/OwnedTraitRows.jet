@@ -98,6 +98,12 @@ TraitMethod: struct {
     default_source: String{""}
 }
 
+// One `#Test name: fn(…) {` law as written, header and body, at no indent.
+TraitLaw: struct {
+    name: String
+    source: String
+}
+
 // One `Name: trait` block as written.
 TraitSource: struct {
     name: String
@@ -107,6 +113,7 @@ TraitSource: struct {
     facts: [TraitFact]
     associated: [String]
     methods: [TraitMethod]
+    laws: [TraitLaw]
 }
 
 TextFile: struct {
@@ -203,6 +210,7 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
         facts := [TraitFact]{}
         associated := [String]{}
         methods := [TraitMethod]{}
+        laws := [TraitLaw]{}
         member_indent: "{indent}    "
         loop index < lines.len() && lines[index] != "{indent}}}" {
             member: lines[index]
@@ -240,6 +248,33 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
                     }
                     associated.push(declared.groups[0].copy())
                 }
+                body.starts_with("#Test ") && body.ends_with(" {{") -> {
+                    head: body.remove_prefix("#Test ").partition(": fn(")
+                    if head.sep == "" || METHOD_NAME.match(head.head) == None {
+                        return Err(rows_fail("line {index}: {context}: a law is `#Test name: fn(a: Self) {{`, found `{body}`"))
+                    }
+                    loop law in laws {
+                        if law.name == head.head {
+                            return Err(rows_fail("line {index}: {context}: the law `{head.head}` is declared twice"))
+                        }
+                    }
+                    written := [String]{body.copy()}
+                    close: "{member_indent}}}"
+                    loop index < lines.len() && lines[index] != close {
+                        inner: lines[index]
+                        index += 1
+                        if inner.trim() != "" && !inner.starts_with("{member_indent}    ") {
+                            return Err(rows_fail("line {index}: {context}: a law's body sits one level in from its `#Test`, found `{inner}`"))
+                        }
+                        written.push(inner.remove_prefix(member_indent))
+                    }
+                    if index >= lines.len() {
+                        return Err(rows_fail("line {index}: {context}: the law `{head.head}` is not closed"))
+                    }
+                    index += 1
+                    written.push("}}")
+                    laws.push(TraitLaw{name: head.head.copy(), source: written.join("\n")})
+                }
                 METHOD_OPEN.match(body) != None && !body.ends_with(" {{") -> methods.push(parse_method(body, "line {index}: {context}") ?? return Err(err))
                 METHOD_OPEN.match(body) != None -> {
                     method := parse_method(body.remove_suffix(" {{"), "line {index}: {context}") ?? return Err(err)
@@ -261,7 +296,7 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
                     method.default_source = written.join("\n")
                     methods.push(method)
                 }
-                true -> return Err(rows_fail("line {index}: {context}: expected a fact column, `Name: type` or `name: fn(…)`, found `{body}`"))
+                true -> return Err(rows_fail("line {index}: {context}: expected a fact column, `Name: type`, `name: fn(…)` or `#Test name: fn(…) {{`, found `{body}`"))
             }
         }
         if index >= lines.len() -> return Err(rows_fail("line {start}: {context} is not closed"))
@@ -271,7 +306,7 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
                 return Err(rows_fail("line {start}: {context} is declared twice"))
             }
         }
-        traits.push(TraitSource{name: name, line: start, literal: group != "", facts: facts, associated: associated, methods: methods})
+        traits.push(TraitSource{name: name, line: start, literal: group != "", facts: facts, associated: associated, methods: methods, laws: laws})
     }
     if group != "" -> return Err(rows_fail("`module {group}` is not closed"))
     if traits.len() == 0 -> return Err(rows_fail("{SOURCE_PATH} declares no trait"))
@@ -293,10 +328,11 @@ render_type: fn(text: String, context: String) -> String OwnedTraitRowsError! {
     }
     if text.starts_with("[") && text.ends_with("]") {
         body: text.remove_prefix("[").remove_suffix("]")
-        pair: body.partition(": ")
+        // `jet fmt` writes a map type `[K:V]`, with no space after the colon.
+        pair: body.partition(":")
         if pair.sep != "" && pair.head.split("[").to_list().len() == pair.head.split("]").to_list().len() {
-            key: render_type(pair.head, context) ?? return Err(err)
-            value: render_type(pair.tail, context) ?? return Err(err)
+            key: render_type(pair.head.trim(), context) ?? return Err(err)
+            value: render_type(pair.tail.trim(), context) ?? return Err(err)
             return Ok("Type.Map{{key: {key}, key_span: None, value: {value}}}")
         }
         element: render_type(body, context) ?? return Err(err)
@@ -493,7 +529,12 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
             contract = "OwnedContract.Methods{{methods: [OwnedMethod]{{\n{lines.join("")}    }}, associated: {quoted(source.associated)}, shares: {shares}}}"
         }
     }
-    Ok("    OwnedTrait{{name: \"{source.name}\", local: {flag(source, "local")}, bare_bound: {flag(source, "bare_bound")}, raw_return: {flag(source, "raw_return")}, contract: {contract}, operators: {quoted(words(source, "operators"))}, commutative: {flag(source, "commutative")}, requires: {quoted(words(source, "requires"))}, auto_derive: {flag(source, "auto_derive")}, auto_derive_family: {optional_text(source, "auto_derive_family")}, bundle: {flag(source, "bundle")}, through_elements: {flag(source, "through_elements")}}},")
+    laws := ""
+    if source.laws.len() > 0 {
+        rendered: loop law in source.laws -> "OwnedLaw{{name: \"{law.name}\", source: \"{jet_text(law.source)}\"}}"
+        laws = ", laws: [OwnedLaw]{{{rendered.join(", ")}}}"
+    }
+    Ok("    OwnedTrait{{name: \"{source.name}\", local: {flag(source, "local")}, bare_bound: {flag(source, "bare_bound")}, raw_return: {flag(source, "raw_return")}, contract: {contract}, operators: {quoted(words(source, "operators"))}, commutative: {flag(source, "commutative")}, requires: {quoted(words(source, "requires"))}, auto_derive: {flag(source, "auto_derive")}, auto_derive_family: {optional_text(source, "auto_derive_family")}, bundle: {flag(source, "bundle")}, through_elements: {flag(source, "through_elements")}{laws}}},")
 }
 
 declared: fn(traits: [TraitSource], name: String) -> Bool Never! {

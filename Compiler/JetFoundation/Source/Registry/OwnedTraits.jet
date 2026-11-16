@@ -86,6 +86,16 @@ OwnedTrait: struct {
     bundle: Bool
     // A list, map, option or union has it when its elements do.
     through_elements: Bool
+    // Its laws, as Traits.jet writes them (TraitDef.laws).
+    laws: [OwnedLaw]{[OwnedLaw]{}}
+}
+
+// One law of an owned trait: its name and the whole `#Test name: fn(…) { … }`
+// as written, which `jet test` parses for each implementing type
+// (TraitLaws.jet).
+OwnedLaw: struct {
+    name: String
+    source: String
 }
 
 owned_trait: fn(name: String) -> OwnedTrait? Never! {

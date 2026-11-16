@@ -52,6 +52,7 @@ use {
         symbol_key_text,
         symbol_none,
         type_name,
+        type_union_member_tag,
         foundation_named_type,
         foundation_byte_text,
         ModuleID,
@@ -252,7 +253,7 @@ sema_prelude_conversion_body: fn(source: Type, leaf: String) -> String Never! {
     if source == .Union(members) {
         arms := ""
         loop member in members {
-            member_tag: sema_pattern_union_tag(member)
+            member_tag: sema_pattern_union_tag(members, member)
             arms = if member_tag == "Err" -> "{arms}        .Err(inner) -> inner\n" else -> "{arms}        .{member_tag}(member) -> Err(\"{{member}}\")\n"
         }
         return "    converted: if self == {{\n{arms}    }}\n    return converted\n"
@@ -321,7 +322,7 @@ sema_catch_all_err_rewrite: fn(subject: Expr, name: String, name_span: Span, pat
                 argument: CallArg{convention: AccessConvention.Read, expr: shown, span: name_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
                 value = Expr.Call{call: Call{name: "Err", name_span: name_span, type_args: [Type]{}, args: [CallArg]{argument}}, id: AST_NODE_GENERATED}
             }
-            test: Expr.PatternTest{subject: Expr.Ident{name: "{hidden}", span: name_span, id: AST_NODE_GENERATED}, pattern: Pattern.Variant{variant: sema_pattern_union_tag(members[position]), bindings: [PatSlot]{PatSlot.Bind{name: "{payload}", span: name_span}}, leading_dot: true, span: name_span}, span: name_span, id: AST_NODE_GENERATED}
+            test: Expr.PatternTest{subject: Expr.Ident{name: "{hidden}", span: name_span, id: AST_NODE_GENERATED}, pattern: Pattern.Variant{variant: sema_pattern_union_tag(members, members[position]), bindings: [PatSlot]{PatSlot.Bind{name: "{payload}", span: name_span}}, leading_dot: true, span: name_span}, span: name_span, id: AST_NODE_GENERATED}
             chain = Expr.If{cond: test, then_body: [Stmt]{}, then_value: value, else_body: [Stmt]{}, else_value: chain, span: name_span, id: AST_NODE_GENERATED}
             position -= 1
         }
@@ -368,8 +369,10 @@ sema_gone_failure_arm: fn(cond: Expr, scopes: SemaScopeTable, environment: SemaS
             return None
         }
         if failure == .Union(members) {
+            // A name a member's own tag spells, even one two members share,
+            // is no gone failure.
             loop member in members {
-                if sema_pattern_union_tag(member) == name -> return None
+                if type_union_member_tag(sema_pattern_unwrap_tags(member)) == name -> return None
             }
             if sema_pattern_flat_union_owner(failure, name, environment, program, sema_pattern_span(pattern)) != None {
                 return None

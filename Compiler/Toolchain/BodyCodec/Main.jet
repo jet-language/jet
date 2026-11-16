@@ -532,9 +532,11 @@ write_struct: fn(out: &CodecOut, name: String, shape: CodecShape) Never! {
     function: name.lower()
     lines := [String]{}
     if shape.fields.len() == 0 {
-        lines.push("body_codec_put_{function}: fn(_: &BodyCodecOut, _: {name}) Never! {{}}")
+        // Each unused parameter keeps a name of its own: two parameters
+        // may not publish one label (E0770), `_` included.
+        lines.push("body_codec_put_{function}: fn(_out: &BodyCodecOut, _value: {name}) Never! {{}}")
         lines.push("")
-        lines.push("body_codec_get_{function}: fn(_: [U8], _: &BodyCodecIn) -> {name} Never! {{ {name}{{}} }}")
+        lines.push("body_codec_get_{function}: fn(_bytes: [U8], _input: &BodyCodecIn) -> {name} Never! {{ {name}{{}} }}")
         out.blocks.push(lines.join("\n"))
         return
     }

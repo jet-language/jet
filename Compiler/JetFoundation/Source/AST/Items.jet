@@ -650,6 +650,10 @@ TraitDef: struct {
     markers: [Marker]{[Marker]{}}
     // `#FX(…)` above the trait, or an `#FX: (…)` line in its body.
     cap: ModuleCap?{None}
+    // The trait's laws, each `#Test name: fn(a: Self, …) { … }` in its body.
+    // `jet test` runs each one as a property of every type in the package
+    // under test that implements the trait, with `Self` that type.
+    laws: [TestDef]{[TestDef]{}}
 }
 
 // One trait constant requirement. `ty` is written in the trait's module;

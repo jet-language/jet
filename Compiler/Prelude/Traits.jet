@@ -41,6 +41,11 @@
 // the body as its own method, which calls the impl's other methods. A default
 // never calls a method that has a default itself, so no pair of defaults can
 // call each other forever.
+//
+// A `#Test name: fn(a: Self, …) { … }` is a law: `jet test` runs it on
+// generated values of every type in the package under test that implements
+// the trait, with `Self` that type. An impl that breaks a law on purpose
+// writes `#Waive(law, "reason")`.
 
 // `a + b`.
 Add: trait {
@@ -97,6 +102,12 @@ Equatable: trait {
     auto_derive: Bool{true}
     Rhs: type
     equal: fn(self, rhs: Rhs) -> Bool Never!
+    #Test reflexive: fn(a: Self) {
+        assert(a == a)
+    }
+    #Test symmetric: fn(a: Self, b: Self) {
+        assert((a == b) == (b == a))
+    }
 }
 
 // `a <=> b` and the orderings `<`, `>`, `<=`, `>=`.
@@ -109,6 +120,12 @@ Comparable: trait {
     bundle: Bool{true}
     Rhs: type
     compare: fn(self, rhs: Rhs) -> Ordering Never!
+    #Test agrees_with_equal: fn(a: Self, b: Self) {
+        assert((a.compare(b) == .Equal) == (a == b))
+    }
+    #Test reverses: fn(a: Self, b: Self) {
+        assert((a < b) == (b > a))
+    }
 }
 
 // The one value that decides `==`, ordering, Map lookup and Set membership.

@@ -111,6 +111,8 @@ JFMT_MEMBER_EFFECT_IMPL: 11
 
 JFMT_MEMBER_MARKER: 12
 
+JFMT_MEMBER_LAW: 13
+
 JetFmtMember: struct {
     kind: Int
     index: Int
@@ -1290,6 +1292,9 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
     loop index in 0..<t.methods.len() {
         members.push(JetFmtMember{kind: JFMT_MEMBER_METHOD, index: index, start: t.methods[index].span.start})
     }
+    loop index in 0..<t.laws.len() {
+        members.push(JetFmtMember{kind: JFMT_MEMBER_LAW, index: index, start: t.laws[index].span.start})
+    }
     jfmt_push_marker_members(members, t.markers)
     loop member in jfmt_sort_members(members) {
         if member.kind == JFMT_MEMBER_MARKER {
@@ -1301,6 +1306,12 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
             jfmt_emit_leading_declaration(f, member.start)
             jfmt_write(f, t.assoc_types[member.index].name)
             jfmt_write(f, ": type")
+            jfmt_newline(f)
+            next
+        }
+        if member.kind == JFMT_MEMBER_LAW {
+            jfmt_emit_leading_declaration(f, member.start)
+            jfmt_fmt_test(f, t.laws[member.index])
             jfmt_newline(f)
             next
         }

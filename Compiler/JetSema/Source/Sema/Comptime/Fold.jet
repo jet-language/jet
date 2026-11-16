@@ -8,7 +8,8 @@
 // lists, map literals (each key a scalar, payload-free enum case or struct of
 // them, no key repeated), struct literals (sema has already filled each omitted field's
 // default), enum constructors with positional or named payloads, `Val(x)` and
-// `None`, constants that already landed, and integer, Float and Bool arithmetic
+// `None`, constants that already landed, named functions read as values, and
+// integer, Float and Bool arithmetic
 // and comparison over them. It reads the same checked facts evaluation does: a
 // `T.reflect().layout` read is the LayoutInfo sema computed for the selected target (a
 // CtLit) and `.size` its field; `x ?? panic(..)` on a present value is that
@@ -42,6 +43,7 @@ use jet_foundation.[
     TComptimeReport,
     TComptimeValue,
     TUnaryOp,
+    SymbolKind,
     SymbolTable,
     Type,
     body_type_id,
@@ -50,6 +52,7 @@ use jet_foundation.[
     name_intern,
     name_table,
     symbol_key,
+    symbol_kind_name,
 ]
 
 // The fold over `program`'s run table.
@@ -126,7 +129,15 @@ sema_comptime_fold_node: fn(tree: BodyTree, expression: Int, kind: NodeKind, exp
             selected: sema_comptime_fold_condition(tree, cond, values, symbols) ?? return None
             return sema_comptime_fold(tree, if selected -> then_value else -> else_value, values, symbols)
         }
-        .ConstRef(symbol) -> return sema_comptime_fold_landed(values, symbol_key(symbols, tree.symbols, symbol))
+        .ConstRef(symbol) -> {
+            key: symbol_key(symbols, tree.symbols, symbol)
+            // A named function read as a value (`f: double`) is the function
+            // itself: the program makes its value where it reads it.
+            if expression_ty == .Fn(_, _, _, _, _, _) && key.starts_with("{symbol_kind_name(SymbolKind.Function)}:") {
+                return Val(TComptimeValue.Function{key: key})
+            }
+            return sema_comptime_fold_landed(values, key)
+        }
         // Copying a constant's value is that value.
         .Clone(value, _) | .ExplicitCopy(value) -> return sema_comptime_fold(tree, value, values, symbols)
         .StructLit(fields) -> {
@@ -317,7 +328,7 @@ sema_comptime_fold_data: fn(value: TComptimeValue) -> Bool Never! {
         .Failed(report) -> {
             if report == .Told(inner) -> return sema_comptime_fold_data(inner)
         }
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Unit -> {}
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Unit | .Function(_) -> {}
     }
     true
 }
@@ -358,7 +369,7 @@ sema_comptime_fold_from_bytes: fn(tree: BodyTree, value: Int, values: [SemaCompt
                     }
                 }
             }
-            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return None
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> return None
         }
         decoded: String.from_bytes(bytes) ?? return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "UTF8Error"}}})
         return Val(TComptimeValue.Present{value: TComptimeValue.String{value: decoded}})
@@ -412,7 +423,7 @@ sema_comptime_fold_key: fn(value: TComptimeValue) -> TComptimeKey? Never! {
             }
             Val(TComptimeKey.Struct{type_name: type_name, fields: keys})
         }
-        .Float(_, _) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit -> None
+        .Float(_, _) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> None
     }
 }
 

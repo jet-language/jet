@@ -725,7 +725,7 @@ sema_fact_value_detail: fn(value: TComptimeValue, read: FactRead) -> TComptimeVa
     kind_name := ""
     if kind == {
         .Enum(_, variant, _) -> kind_name = variant
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Present(_) | .Failed(_) | .Unit -> return None
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> return None
     }
     if Val(kind_name) != fact_read_reflection_kind(read) -> return None
     if sema_fact_read_is_plane(read) -> return Val(value)
@@ -767,7 +767,7 @@ sema_fact_reflected_read: fn(value: TComptimeValue, read: FactRead) -> TComptime
     owner := ""
     if value == {
         .Struct(type_name, _) -> owner = type_name
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return None
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> return None
     }
     facts: sema_fact_struct_field(value, "facts")
     if owner == "FactInfo" -> return sema_fact_info_detail(value, read)
@@ -1064,7 +1064,7 @@ sema_fact_prepared_expr: fn(value: TComptimeValue, ty: Type, span: Span, environ
     }
     kind: if value == {
         .String(text) -> TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> TExprKind.CtLit{value: value}
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> TExprKind.CtLit{value: value}
     }
     sema_tree_node(ty, kind.move(), span)
 }
@@ -1256,7 +1256,7 @@ sema_fact_declared_value: fn(value: TComptimeValue) -> TComptimeValue Never! {
         .List(values) -> return TComptimeValue.List{values: loop item in values -> sema_fact_declared_value(item)}
         .Present(inner) -> return TComptimeValue.Present{value: sema_fact_declared_value(inner)}
         // copy: a scalar leaf of the read producer value; the caller keeps the original
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Failed(_) | .Unit -> return value.copy()
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Failed(_) | .Unit | .Function(_) -> return value.copy()
     }
 }
 

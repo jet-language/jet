@@ -103,7 +103,7 @@ use {
         checked_symbol_local,
         type_identity_equal,
         type_name,
-        type_union_member_tag,
+        type_union_member_tag_in,
         measure_literal_value,
         SwitchArm,
         CORE_SOURCE_OWNED_ROWS,
@@ -2133,7 +2133,7 @@ sema_expr_unit_concrete_value: fn(value: TExpr, scopes: SemaScopeTable, context:
             if comptime_value == {
                 .Int(number) -> return Val(approx(number))
                 .Float(number, _) -> return Val(number)
-                .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {}
+                .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {}
             }
         }
         .Unary(op, operand) -> {
@@ -6716,7 +6716,7 @@ sema_expr_copy_fork_union: fn(subject: Expr, members: [Type], depth: Int, span: 
     member: "__fork_member{depth}"
     arms := [SwitchArm]{}
     loop member_type in members {
-        test: Expr.PatternTest{subject: subject.copy(), pattern: Pattern.Variant{variant: type_union_member_tag(member_type), bindings: [PatSlot]{PatSlot.Bind{name: member.copy(), span: span}}, leading_dot: true, span: span}, span: span, id: AST_NODE_GENERATED}
+        test: Expr.PatternTest{subject: subject.copy(), pattern: Pattern.Variant{variant: type_union_member_tag_in(members, member_type), bindings: [PatSlot]{PatSlot.Bind{name: member.copy(), span: span}}, leading_dot: true, span: span}, span: span, id: AST_NODE_GENERATED}
         copied: sema_expr_copy_fork_part(sema_expr_copy_fork_name(member, span), span)
         value: if member_type == .Case(case_name, _) -> Expr.EnumLit{type_name: "", variant: case_name.copy(), variant_span: None, args: [EnumLitArg]{EnumLitArg.Positional{value: copied}}, leading_dot: true, span: span, id: AST_NODE_GENERATED} else -> copied
         write: Stmt.Assign{target: LValue.Local{name: made.copy(), name_span: span}, op: None, op_span: span, value: value}

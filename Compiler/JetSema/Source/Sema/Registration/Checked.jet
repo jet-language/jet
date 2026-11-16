@@ -4104,14 +4104,14 @@ sema_checked_runtime_tvalue_supported: fn(definition: ConstDef, value: TComptime
             loop item in values {
                 if item == {
                     .Int(_) -> {}
-                    .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return false
+                    .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> return false
                 }
             }
             true
         }
         // A computed [U8] lands as its bytes (JetEval Values.jet).
         .Bytes(_) -> !definition.mutable
-        .BigInt(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> false
+        .BigInt(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> false
     }
 }
 

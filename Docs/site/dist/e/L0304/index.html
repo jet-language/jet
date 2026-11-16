@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>L0304 — Jet diagnostic</title>
-<meta name="description" content="This arm names a failure type its subject can no longer fail with">
+<meta name="description" content="This arm names a failure type its subject can no longer fail with (lint)">
 <meta property="og:title" content="L0304 — Jet diagnostic">
-<meta property="og:description" content="This arm names a failure type its subject can no longer fail with">
+<meta property="og:description" content="This arm names a failure type its subject can no longer fail with (lint)">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,35 +25,35 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>L0304</h1>
-<p>This arm names a failure type its subject can no longer fail with</p>
+<p>This arm names a failure type its subject can no longer fail with (lint)</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">This arm names a failure type its subject can no longer fail with</p>
+<p class="diag-copy what" data-registry-field="what">This arm names a failure type its subject can no longer fail with (lint)</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">A failure union holds only the failure types that can still reach it, so an arm for any other type never runs</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Delete the arm.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>L0304</code>: <code>tests/ui/failure_arm_cannot_arrive.stderr</code>.</p>
-<pre class="diag">Error [jet.GoneFailureArm]: Arm `LookupError` can never match — `LookupError` can no longer reach this value
-  --&gt; tests/ui/failure_arm_cannot_arrive.jet:21:9
+<p>First UI snapshot mentioning <code>L0304</code>: <code>tests/ui/failure_union_gone_member_arm.stderr</code>.</p>
+<pre class="diag">Warning [jet.GoneFailureArm]: Arm `LookupError` can never match — `LookupError` can no longer reach this value
+  --&gt; tests/ui/failure_union_gone_member_arm.jet:21:9
     |
- 21 |         .Err(.LookupError(_)) -&gt; { print(&quot;no such record&quot;) }
+ 21 |         .Err(.LookupError(_)) -&gt; &quot;no such person&quot;
     |         ^^^^^^^^^^^^^^^^^^^^^
  Why: A failure union holds only the failure types that can still reach it, and `LookupError` is no longer one of them
  Fix: Delete this arm
 More: jet-lang.dev/e/L0304
 
-Error [jet.PatternTypeMismatch]: Pattern `Vanished` doesn&#39;t belong to `Err | LoadError`
-  --&gt; tests/ui/failure_arm_cannot_arrive.jet:22:14
+Warning [jet.GoneFailureArm]: Arm `LookupError` can never match — `LookupError` can no longer reach this value
+  --&gt; tests/ui/failure_union_gone_member_arm.jet:32:9
     |
- 22 |         .Err(.Vanished(_)) -&gt; { print(&quot;vanished&quot;) }
-    |              ^^^^^^^^^^^^
- Why: Union pattern arms name one member type of the subject union
- Fix: Use one of the subject union member types
-More: jet-lang.dev/e/E0305
+ 32 |         .Err(.LookupError(_)) -&gt; { print(&quot;no such person&quot;) }
+    |         ^^^^^^^^^^^^^^^^^^^^^
+ Why: A failure union holds only the failure types that can still reach it, and `LookupError` is no longer one of them
+ Fix: Delete this arm
+More: jet-lang.dev/e/L0304
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

@@ -442,7 +442,8 @@ ir_static_word: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row:
             }
             return None
         }
-        .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Unit -> return None
+        // A function value's closure box is made in code (ir_function_value).
+        .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Unit | .Function(_) -> return None
     }
 }
 
@@ -609,7 +610,7 @@ ir_static_fill: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, o
             ir_static_put(s, object, offset + 16, IRStaticWord{word: 0, target: ir_intern_bytes(m, bytes)}, 8)
             return true
         }
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return false
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> return false
     }
 }
 

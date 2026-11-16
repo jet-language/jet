@@ -36,6 +36,7 @@ use jet_foundation.[
     diagnostic_registry_row,
     checked_symbol_local,
     type_name,
+    module_text,
     ModuleID,
 ]
 
@@ -88,6 +89,9 @@ SEMA_APP_WEBHOOK_MARKER: "Webhook"
 
 SEMA_APP_SIGNING_KEY_MARKER: "SigningKey"
 
+// The app marker of a schedule's method.
+SEMA_APP_EVERY_MARKER: "Every"
+
 // Whether `marker`, written in module `module_identity`, is the app module's
 // marker `name`.
 sema_app_marker_is: fn(marker: Marker, name: String, graph: SemaRegistrationGraph, module_identity: ModuleID) -> Bool {
@@ -99,10 +103,10 @@ sema_app_marker_is: fn(marker: Marker, name: String, graph: SemaRegistrationGrap
     graph.modules[module_index].module_name == SEMA_APP_MARKER_MODULE && declaration.name == name
 }
 
-// The app markers that keep a method on the server: a job, a webhook and a
-// webhook's signing key. None is an endpoint, so no endpoint marker may mark
-// a method one of them marks.
-SEMA_APP_SERVER_ONLY_MARKERS: [String]{SEMA_APP_JOB_MARKER, SEMA_APP_WEBHOOK_MARKER, SEMA_APP_SIGNING_KEY_MARKER}
+// The app markers that keep a method on the server: a job, a schedule, a
+// webhook and a webhook's signing key. None is an endpoint, so no endpoint
+// marker may mark a method one of them marks.
+SEMA_APP_SERVER_ONLY_MARKERS: [String]{SEMA_APP_JOB_MARKER, SEMA_APP_EVERY_MARKER, SEMA_APP_WEBHOOK_MARKER, SEMA_APP_SIGNING_KEY_MARKER}
 
 // E2819 when an endpoint marker marks `func`, a method a server-only app
 // marker also marks, both written in module `module_identity`.
@@ -163,28 +167,53 @@ sema_app_marker_checked: fn(marker: Marker, at: Int, expected: Type, environment
 // `module_identity`, as written (`#App.SignedIn`,
 // `#Server.Get("/orders/:id")`), for `jet inspect choices`
 // (FnBody.endpoint); "" when no app endpoint marker or route marker marks
-// it. An argument that is no plain String literal shows as `…`.
+// it.
 sema_function_endpoint: fn(func: Func, graph: SemaRegistrationGraph, module_identity: ModuleID) -> String {
     loop marker in func.markers {
         if !sema_app_endpoint_marker(marker, graph, module_identity) && sema_http_route_marker_verb(marker, graph, module_identity) == None {
             next
         }
-        if marker.args.len() == 0 -> return "#{marker.name}"
-        args := [String]{}
-        loop argument in marker.args {
-            text := "…"
-            if argument == .Expr(value) {
-                if value == .Str(parts, _, _) {
-                    if parts.len() == 1 {
-                        if parts[0] == .Lit(literal) -> text = "\"{literal}\""
-                    }
-                }
-            }
-            args.push(text)
-        }
-        return "#{marker.name}({args.join(", ")})"
+        return sema_marker_written(marker)
     }
     ""
+}
+
+// The server-only app marker that runs method `func` as the system, written
+// in module `module_identity`, as written (`#App.Job`,
+// `#App.Every(cron: "0 8 * * *")`), for `jet inspect choices`
+// (FnBody.system_run); "" when none marks it. A job, a schedule, a webhook
+// and a webhook's signing key run as the system, which no row policy limits.
+sema_function_system_run: fn(func: Func, graph: SemaRegistrationGraph, module_identity: ModuleID) -> String {
+    loop marker in func.markers {
+        loop name in SEMA_APP_SERVER_ONLY_MARKERS {
+            if sema_app_marker_is(marker, name, graph, module_identity) {
+                return sema_marker_written(marker)
+            }
+        }
+    }
+    ""
+}
+
+// `marker` as written, its arguments included: an argument that is no plain
+// String literal shows as `…`, and a labeled one keeps its label.
+sema_marker_written: fn(marker: Marker) -> String {
+    if marker.args.len() == 0 -> return "#{marker.name}"
+    args := [String]{}
+    loop (index, argument) in marker.args {
+        text := "…"
+        if argument == .Expr(value) {
+            if value == .Str(parts, _, _) {
+                if parts.len() == 1 {
+                    if parts[0] == .Lit(literal) -> text = "\"{literal}\""
+                }
+            }
+        }
+        if index < marker.arg_labels.len() {
+            if marker.arg_labels[index] == .Val(label) -> text = "{label.name}: {text}"
+        }
+        args.push(text)
+    }
+    "#{marker.name}({args.join(", ")})"
 }
 
 // `app.Remote<S>`, the app module's client of a service, and the methods
@@ -573,6 +602,17 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                         }
                         break
                     }
+                    // A schedule runs on its cron line once the App serves.
+                    loop marker in method.markers {
+                        if !sema_app_marker_is(marker, SEMA_APP_EVERY_MARKER, graph, method_module) {
+                            next
+                        }
+                        schedule: sema_app_mount_schedule(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, method, method_module, marker, span, environment, program, scopes, state, tail_store, context, diagnostics)
+                        if schedule == .Val(value) {
+                            body.push(TStmt.ExprStmt{value: value, span: span})
+                        }
+                        break
+                    }
                     loop marker in method.markers {
                         verb: sema_http_route_marker_verb(marker, graph, method_module) ?? next
                         if method.params.len() == 0 || method.params[0].name != "self" || method.params[0].convention != AccessConvention.Read || method.type_params.len() != 0 {
@@ -753,6 +793,94 @@ sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, meth
     params: sema_call_http_static_tree_arg(sema_call_http_core_string(joined, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: joined}}, span: span, id: AST_NODE_GENERATED}, span))
     answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, "__webhook", 4, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     sema_call_http_mux_source_call(mux, "__webhook", [TCallArg]{path, signature, params, key, answer}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+}
+
+// The schedule method `method` of the mounted value `value_name`, of the
+// service `service`, runs at each minute the cron line of its `#App.Every`
+// `marker` allows, from when the App `mux` serves, through its `__every`.
+// As a job's call does, the run calls the method and replies `{"err":...}`
+// when it failed (`sema_app_job_statements`). The method takes only
+// read-only `self`, and the line is a static String in the grammar the app
+// module's scheduler reads (E2805 otherwise). The generated code is the
+// mount call's, at `span`.
+sema_app_mount_schedule: fn(mux: TExpr, value_name: String, service: String, method: Func, method_module: ModuleID, marker: Marker, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    graph: program.registration_graph ?? return None
+    if !sema_app_mount_concrete(method) || method.params.len() != 1 {
+        diagnostics.push(sema_error("E2805", marker.span, "schedule method `{method.name}` needs read-only self, no other parameters and a concrete signature", "the scheduler calls a schedule's method at each due minute, with nothing to pass it", "write `{method.name}: fn(self)` without method type parameters"))
+        return None
+    }
+    // The marker's own check reports a missing argument.
+    cron_at: sema_app_marker_arg_at(marker, "cron", 0) ?? return None
+    cron: sema_app_marker_string(marker, cron_at, environment, program, scopes) ?? {
+        diagnostics.push(sema_error("E2805", sema_app_marker_span(marker, cron_at), "a schedule's cron line must be a static String", "a schedule's cron line is checked while building", "use a literal or compile-time String constant"))
+        return None
+    }
+    if sema_app_cron_error(cron) == .Val(reason) {
+        diagnostics.push(sema_error("E2805", sema_app_marker_span(marker, cron_at), "`{cron}` is not a cron line: {reason}", "a schedule runs at each minute its cron line allows, in UTC, and the line is checked while building", "write five fields, the minute (0-59), hour (0-23), day of the month (1-31), month (1-12) and day of the week (0-7), each `*`, a number, a range `a-b` or a list of those, each optionally stepped, as in `0 8 * * 1-5`"))
+        return None
+    }
+    name: "{module_text(graph.module_table, method_module)}.{service}.{method.name}"
+    name_arg: sema_call_http_static_tree_arg(sema_call_http_core_string(name, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: name}}, span: span, id: AST_NODE_GENERATED}, span))
+    cron_arg: sema_call_http_static_tree_arg(sema_call_http_core_string(cron, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: cron}}, span: span, id: AST_NODE_GENERATED}, span))
+    args_name: "__jet_http_schedule_args_{span.start}"
+    statements: sema_app_job_statements(args_name, value_name, method, method_module, span, graph, environment)
+    run: sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__every", 2, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    sema_call_http_mux_source_call(mux, "__every", [TCallArg]{name_arg, cron_arg, run}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+}
+
+// Why `text` is not a cron line, in the grammar the app module's scheduler
+// reads (`Every`); None when it is one.
+sema_app_cron_error: fn(text: String) -> String? {
+    fields := [String]{}
+    loop part in text.split(" ") {
+        if part != "" -> fields.push(part)
+    }
+    if fields.len() != 5 -> return Val("it has {fields.len()} fields, not 5")
+    loop (index, field) in fields {
+        // The field's name, and the values it allows.
+        allowed: if index == {
+            0 -> (name: "minute", low: 0, high: 59)
+            1 -> (name: "hour", low: 0, high: 23)
+            2 -> (name: "day of the month", low: 1, high: 31)
+            3 -> (name: "month", low: 1, high: 12)
+            else -> (name: "day of the week", low: 0, high: 7)
+        }
+        if !sema_app_cron_field_valid(field, allowed.low, allowed.high) {
+            return Val("its {allowed.name} field `{field}` is not `*`, a number from {allowed.low} to {allowed.high}, a range of those or a list of these, each optionally stepped")
+        }
+    }
+    None
+}
+
+// Whether the cron field `text` allows values from `low` to `high` only:
+// a list of `*`, numbers and ranges `a-b`, each optionally stepped (`/n`).
+sema_app_cron_field_valid: fn(text: String, low: Int, high: Int) -> Bool {
+    loop item in text.split(",") {
+        stepped: item.split("/").to_list()
+        if stepped.len() > 2 -> return false
+        if stepped.len() == 2 {
+            step: sema_app_cron_number(stepped[1]) ?? return false
+            if step < 1 -> return false
+        }
+        if stepped[0] == "*" -> next
+        bounds: stepped[0].split("-").to_list()
+        if bounds.len() > 2 -> return false
+        first: sema_app_cron_number(bounds[0]) ?? return false
+        last := first
+        if bounds.len() == 2 -> last = sema_app_cron_number(bounds[1]) ?? return false
+        if first < low || last > high || first > last -> return false
+    }
+    true
+}
+
+// The number `text` writes, of one or two digits; None otherwise.
+sema_app_cron_number: fn(text: String) -> Int? {
+    if text.len() == 0 || text.len() > 2 -> return None
+    loop byte in text.bytes() {
+        n: Int{byte}
+        if n < 48 || n > 57 -> return None
+    }
+    Val(Int.parse(text) ?? return None)
 }
 
 // The checked key callback of the webhook `method`, whose path parameters

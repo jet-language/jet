@@ -2113,9 +2113,11 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     effect_scope: effect_scope_descriptor(func.name, owner_key, func.params.len() > 0 && func.params[0].name == "path", written_row)
     endpoint := ""
+    system_run := ""
     role := ""
     if program.registration_graph == .Val(graph) {
         endpoint = sema_function_endpoint(func, graph, module_identity)
+        system_run = sema_function_system_run(func, graph, module_identity)
         role = sema_core_role(func.markers, graph, module_identity)
     }
     built := TFunc{
@@ -2130,6 +2132,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         web_bucket: None,
         web_marker: func.web_marker,
         endpoint: endpoint,
+        system_run: system_run,
         role: role,
         visibility: visibility,
         foreign: None,
@@ -3850,7 +3853,7 @@ sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, progr
     if program.registration_graph == .Val(graph) {
         if graph.modules[module_index].program.items[item_index] == .Test(test) {
             if sema_check_module_tests(graph, module_index) && test.name != None && !sema_check_unusable_body(graph, sema_check_test_key(module_text(graph.module_table, graph.modules[module_index].module_identity), test.span)) {
-                loop diagnostic in sema_property_param_diagnostics(test) {
+                loop diagnostic in sema_property_param_diagnostics(graph, module_index, test) {
                     module_result.diagnostics.push(diagnostic)
                 }
                 checked_test: sema_check_test_function(test, environment, program, scopes, host_hooks)

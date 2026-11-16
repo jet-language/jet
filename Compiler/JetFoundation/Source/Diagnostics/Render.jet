@@ -33,10 +33,8 @@ diagnostic_theme_bold: fn(color: Bool, text: String) -> String Never! {
     diagnostic_theme_paint(color, DIAGNOSTIC_THEME_BOLD, text)
 }
 
-// A warning paints in the warning color, and an error or a tidy error in the
-// error color (diagnostic_is_warning).
-diagnostic_theme_severity: fn(color: Bool, diagnostic: Diagnostic, text: String) -> String Never! {
-    if diagnostic_is_warning(diagnostic) {
+diagnostic_theme_severity: fn(color: Bool, severity: Int, text: String) -> String Never! {
+    if severity == DIAGNOSTIC_LINT {
         return diagnostic_theme_paint(color, DIAGNOSTIC_THEME_WARN, text)
     }
     diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ERROR, text)
@@ -281,7 +279,7 @@ diagnostic_push_snippet: fn(out: &[U8], diagnostic: Diagnostic, color: Bool, fil
     if avail > 0 && caret_len > avail -> caret_len = avail
     pad: " ".repeat(pad_width)
     // Color only the caret glyphs, not the leading pad (keeps columns).
-    marks: diagnostic_theme_severity(color, diagnostic, "^".repeat(caret_len))
+    marks: diagnostic_theme_severity(color, diagnostic.severity, "^".repeat(caret_len))
     if {
         message == .Val(label_text) -> {
             diagnostic_push_text(out, "    | {pad}{marks} {diagnostic_escape_terminal_text(label_text)}\n")
@@ -337,7 +335,7 @@ diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String,
     what: diagnostic_escape_terminal_text(diagnostic.what)
     why: diagnostic_escape_terminal_text(diagnostic.why)
     fix: diagnostic_escape_terminal_text(diagnostic.fix)
-    label: diagnostic_theme_severity(color, diagnostic, if diagnostic_is_warning(diagnostic) -> "Warning" else -> "Error")
+    label: if diagnostic.severity == DIAGNOSTIC_LINT -> diagnostic_theme_severity(color, diagnostic.severity, "Warning") else -> diagnostic_theme_severity(color, diagnostic.severity, "Error")
     out := [U8]{}
     diagnostic_push_text(out, "{label} [{diagnostic_display_name(diagnostic.code)}]: {what}\n")
     if diagnostic.span != None || diagnostic.labels.len() > 0 {

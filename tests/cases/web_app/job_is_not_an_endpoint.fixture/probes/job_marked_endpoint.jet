@@ -1,10 +1,13 @@
-// Must fail: an endpoint marker marks a job, a webhook and a signing key,
-// each of which only the server runs.
+// Must fail: an endpoint marker marks a job, a schedule, a webhook and a
+// signing key, each of which only the server runs.
 use app
 
 Crew: struct {
     #[App.Job, App.Public]
     tell_assignee: fn(self, id: Int) -> Int Never! { id }
+
+    #[App.Every(cron: "0 8 * * *"), App.SignedIn]
+    remind: fn(self) -> Int Never! { 1 }
 
     #[App.SignedIn, App.Webhook(path: "/hooks/:project", signature: app.Signature.GitHub, key: "webhook_secret")]
     on_event: fn(self, project: String, event: String) -> Int Never! { project.len() + event.len() }

@@ -160,6 +160,7 @@ body_codec_put_program: fn(out: &BodyCodecOut, value: Program) Never! {
     body_codec_put_list_approuteroot(out, value.app_route_roots)
     body_codec_put_opt_modulecap(out, value.file_cap)
     body_codec_put_list_string(out, value.entry_locals)
+    body_codec_put_asttables(out, value.tables)
 }
 
 body_codec_get_program: fn(bytes: [U8], input: &BodyCodecIn) -> Program Never! {
@@ -182,7 +183,8 @@ body_codec_get_program: fn(bytes: [U8], input: &BodyCodecIn) -> Program Never! {
     f16: body_codec_get_list_approuteroot(bytes, input)
     f17: body_codec_get_opt_modulecap(bytes, input)
     f18: body_codec_get_list_string(bytes, input)
-    Program{imports: f0, items: f1, script_body: f2, block_spans: f3, fenced_statements: f4, web_target_ceiling: f5, no_prelude: f6, default_target: f7, html_path: f8, policy_declarations: f9, user_policy_declarations: f10, applied_rules: f11, rule_facts: f12, else_arms: f13, used_import_names: f14, debug_sites: f15, app_route_roots: f16, file_cap: f17, entry_locals: f18}
+    f19: body_codec_get_asttables(bytes, input)
+    Program{imports: f0, items: f1, script_body: f2, block_spans: f3, fenced_statements: f4, web_target_ceiling: f5, no_prelude: f6, default_target: f7, html_path: f8, policy_declarations: f9, user_policy_declarations: f10, applied_rules: f11, rule_facts: f12, else_arms: f13, used_import_names: f14, debug_sites: f15, app_route_roots: f16, file_cap: f17, entry_locals: f18, tables: f19}
 }
 
 body_codec_put_opt_inlineversion: fn(out: &BodyCodecOut, value: InlineVersion?) Never! {
@@ -6278,6 +6280,18 @@ body_codec_get_list_traitmethodsig: fn(bytes: [U8], input: &BodyCodecIn) -> [Tra
     values
 }
 
+body_codec_put_list_testdef: fn(out: &BodyCodecOut, values: [TestDef]) Never! {
+    body_codec_put_count(out, values.len())
+    loop value in values -> body_codec_put_testdef(out, value)
+}
+
+body_codec_get_list_testdef: fn(bytes: [U8], input: &BodyCodecIn) -> [TestDef] Never! {
+    count: body_codec_get_count(bytes, input, 1)
+    values := [TestDef]{}
+    loop _ in 0..<count -> values.push(body_codec_get_testdef(bytes, input))
+    values
+}
+
 body_codec_put_traitdef: fn(out: &BodyCodecOut, value: TraitDef) Never! {
     body_codec_put_span(out, value.span)
     body_codec_put_bool(out, value.is_pub)
@@ -6290,6 +6304,7 @@ body_codec_put_traitdef: fn(out: &BodyCodecOut, value: TraitDef) Never! {
     body_codec_put_list_traitmethodsig(out, value.methods)
     body_codec_put_list_marker(out, value.markers)
     body_codec_put_opt_modulecap(out, value.cap)
+    body_codec_put_list_testdef(out, value.laws)
 }
 
 body_codec_get_traitdef: fn(bytes: [U8], input: &BodyCodecIn) -> TraitDef Never! {
@@ -6304,7 +6319,8 @@ body_codec_get_traitdef: fn(bytes: [U8], input: &BodyCodecIn) -> TraitDef Never!
     f8: body_codec_get_list_traitmethodsig(bytes, input)
     f9: body_codec_get_list_marker(bytes, input)
     f10: body_codec_get_opt_modulecap(bytes, input)
-    TraitDef{span: f0, is_pub: f1, is_package_pub: f2, name: f3, name_span: f4, supertraits: f5, assoc_types: f6, constants: f7, methods: f8, markers: f9, cap: f10}
+    f11: body_codec_get_list_testdef(bytes, input)
+    TraitDef{span: f0, is_pub: f1, is_package_pub: f2, name: f3, name_span: f4, supertraits: f5, assoc_types: f6, constants: f7, methods: f8, markers: f9, cap: f10, laws: f11}
 }
 
 body_codec_put_traitconstdecl: fn(out: &BodyCodecOut, value: TraitConstDecl) Never! {
@@ -6357,6 +6373,41 @@ body_codec_get_traitmethodsig: fn(bytes: [U8], input: &BodyCodecIn) -> TraitMeth
     f11: body_codec_get_list_marker(bytes, input)
     f12: body_codec_get_list_modulecap(bytes, input)
     TraitMethodSig{name: f0, name_span: f1, type_params: f2, params: f3, return_type: f4, span: f5, default_body: f6, is_pure: f7, declared_effects: f8, return_view_provenance: f9, declared_return_view_provenance: f10, markers: f11, module_caps: f12}
+}
+
+body_codec_put_testdef: fn(out: &BodyCodecOut, value: TestDef) Never! {
+    body_codec_put_span(out, value.span)
+    body_codec_put_opt_string(out, value.name)
+    body_codec_put_opt_expr(out, value.name_expr)
+    body_codec_put_opt_expr(out, value.faults_expr)
+    body_codec_put_list_string(out, value.faults)
+    body_codec_put_opt_expr(out, value.expected_fail_expr)
+    body_codec_put_bool(out, value.expected_fail)
+    body_codec_put_span(out, value.marker_name_span)
+    body_codec_put_opt_string(out, value.name_prefix)
+    body_codec_put_span(out, value.name_span)
+    body_codec_put_list_param(out, value.params)
+    body_codec_put_opt_span(out, value.fn_keyword_span)
+    body_codec_put_list_stmt(out, value.body)
+    body_codec_put_list_contractclause(out, value.pre)
+}
+
+body_codec_get_testdef: fn(bytes: [U8], input: &BodyCodecIn) -> TestDef Never! {
+    f0: body_codec_get_span(bytes, input)
+    f1: body_codec_get_opt_string(bytes, input)
+    f2: body_codec_get_opt_expr(bytes, input)
+    f3: body_codec_get_opt_expr(bytes, input)
+    f4: body_codec_get_list_string(bytes, input)
+    f5: body_codec_get_opt_expr(bytes, input)
+    f6: body_codec_get_bool(bytes, input)
+    f7: body_codec_get_span(bytes, input)
+    f8: body_codec_get_opt_string(bytes, input)
+    f9: body_codec_get_span(bytes, input)
+    f10: body_codec_get_list_param(bytes, input)
+    f11: body_codec_get_opt_span(bytes, input)
+    f12: body_codec_get_list_stmt(bytes, input)
+    f13: body_codec_get_list_contractclause(bytes, input)
+    TestDef{span: f0, name: f1, name_expr: f2, faults_expr: f3, faults: f4, expected_fail_expr: f5, expected_fail: f6, marker_name_span: f7, name_prefix: f8, name_span: f9, params: f10, fn_keyword_span: f11, body: f12, pre: f13}
 }
 
 body_codec_put_tagdef: fn(out: &BodyCodecOut, value: TagDef) Never! {
@@ -6699,41 +6750,6 @@ body_codec_put_outputcallableauthority: fn(out: &BodyCodecOut, value: OutputCall
 body_codec_get_outputcallableauthority: fn(bytes: [U8], input: &BodyCodecIn) -> OutputCallableAuthority Never! {
     body_codec_skip_tag(bytes, input, 1)
     OutputCallableAuthority.SafeJet
-}
-
-body_codec_put_testdef: fn(out: &BodyCodecOut, value: TestDef) Never! {
-    body_codec_put_span(out, value.span)
-    body_codec_put_opt_string(out, value.name)
-    body_codec_put_opt_expr(out, value.name_expr)
-    body_codec_put_opt_expr(out, value.faults_expr)
-    body_codec_put_list_string(out, value.faults)
-    body_codec_put_opt_expr(out, value.expected_fail_expr)
-    body_codec_put_bool(out, value.expected_fail)
-    body_codec_put_span(out, value.marker_name_span)
-    body_codec_put_opt_string(out, value.name_prefix)
-    body_codec_put_span(out, value.name_span)
-    body_codec_put_list_param(out, value.params)
-    body_codec_put_opt_span(out, value.fn_keyword_span)
-    body_codec_put_list_stmt(out, value.body)
-    body_codec_put_list_contractclause(out, value.pre)
-}
-
-body_codec_get_testdef: fn(bytes: [U8], input: &BodyCodecIn) -> TestDef Never! {
-    f0: body_codec_get_span(bytes, input)
-    f1: body_codec_get_opt_string(bytes, input)
-    f2: body_codec_get_opt_expr(bytes, input)
-    f3: body_codec_get_opt_expr(bytes, input)
-    f4: body_codec_get_list_string(bytes, input)
-    f5: body_codec_get_opt_expr(bytes, input)
-    f6: body_codec_get_bool(bytes, input)
-    f7: body_codec_get_span(bytes, input)
-    f8: body_codec_get_opt_string(bytes, input)
-    f9: body_codec_get_span(bytes, input)
-    f10: body_codec_get_list_param(bytes, input)
-    f11: body_codec_get_opt_span(bytes, input)
-    f12: body_codec_get_list_stmt(bytes, input)
-    f13: body_codec_get_list_contractclause(bytes, input)
-    TestDef{span: f0, name: f1, name_expr: f2, faults_expr: f3, faults: f4, expected_fail_expr: f5, expected_fail: f6, marker_name_span: f7, name_prefix: f8, name_span: f9, params: f10, fn_keyword_span: f11, body: f12, pre: f13}
 }
 
 body_codec_put_list_externfn: fn(out: &BodyCodecOut, values: [ExternFn]) Never! {
@@ -8361,3 +8377,7 @@ body_codec_get_approutefile: fn(bytes: [U8], input: &BodyCodecIn) -> AppRouteFil
     f1: body_codec_get_bool(bytes, input)
     AppRouteFile{path: f0, has_page: f1}
 }
+
+body_codec_put_asttables: fn(_out: &BodyCodecOut, _value: ASTTables) Never! {}
+
+body_codec_get_asttables: fn(_bytes: [U8], _input: &BodyCodecIn) -> ASTTables Never! { ASTTables{} }

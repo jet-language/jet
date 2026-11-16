@@ -1,26 +1,31 @@
-# Jobs are server-only. `app.endpoints<Crew>()` lists the methods that
-# `#App.SignedIn` or `#App.Public` marks, so it never names the job, the
-# webhook, its signing key or the unmarked helper. A client call to the job
-# through `app.Remote<Crew>` is E2812, and an endpoint marker on a job, a
-# webhook or a signing key is E2819.
+# Jobs and schedules are server-only. `app.endpoints<Crew>()` lists the
+# methods that `#App.SignedIn` or `#App.Public` marks, so it never names the
+# job, the schedule, the webhook, its signing key or the unmarked helper. A
+# client call to the job or the schedule through `app.Remote<Crew>` is
+# E2812, and an endpoint marker on a job, a schedule, a webhook or a signing
+# key is E2819.
 fixture: job_is_not_an_endpoint.fixture
 env: NO_COLOR=1
 step: jet run main.jet
 exit: 0
-stdout: = "endpoints: add_task, status\nadd_task: endpoint\nstatus: endpoint\ntell_assignee: server-only\non_event: server-only\nwebhook_secret: server-only\nnext_id: server-only\n"
+stdout: = "endpoints: add_task, status\nadd_task: endpoint\nstatus: endpoint\ntell_assignee: server-only\nremind: server-only\non_event: server-only\nwebhook_secret: server-only\nnext_id: server-only\n"
 
 step: jet check probes/client_calls_job.jet
 exit: nonzero
 stderr: ~ "`app.Remote<Crew>` has no endpoint `tell_assignee`: the method is server-only." # the client's call of the job
-stderr: ~ "client_calls_job.jet:11:64" # at the call
-stderr: ~ "1 problem found" # only that call
+stderr: ~ "client_calls_job.jet:14:13" # at the job's call
+stderr: ~ "`app.Remote<Crew>` has no endpoint `remind`: the method is server-only." # the client's call of the schedule
+stderr: ~ "client_calls_job.jet:15:13" # at the schedule's call
+stderr: ~ "2 problems found" # only those calls
 
 step: jet check probes/job_marked_endpoint.jet
 exit: nonzero
 stderr: ~ "`tell_assignee` is marked `#App.Job`, which keeps it on the server, and `#App.Public`, which makes it an endpoint." # a public job
 stderr: ~ "job_marked_endpoint.jet:6:16" # at the endpoint marker
+stderr: ~ "`remind` is marked `#App.Every`, which keeps it on the server, and `#App.SignedIn`, which makes it an endpoint." # a signed-in schedule
+stderr: ~ "job_marked_endpoint.jet:9:37" # at the endpoint marker
 stderr: ~ "`on_event` is marked `#App.Webhook`, which keeps it on the server, and `#App.SignedIn`, which makes it an endpoint." # a signed-in webhook
-stderr: ~ "job_marked_endpoint.jet:9:7" # at the endpoint marker
+stderr: ~ "job_marked_endpoint.jet:12:7" # at the endpoint marker
 stderr: ~ "`webhook_secret` is marked `#App.SigningKey`, which keeps it on the server, and `#App.Public`, which makes it an endpoint." # a public signing key
-stderr: ~ "job_marked_endpoint.jet:12:23" # at the endpoint marker
-stderr: ~ "3 problems found" # one per method
+stderr: ~ "job_marked_endpoint.jet:15:23" # at the endpoint marker
+stderr: ~ "4 problems found" # one per method

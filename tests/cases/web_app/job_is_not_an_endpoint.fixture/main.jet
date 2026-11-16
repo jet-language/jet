@@ -1,5 +1,6 @@
-// A service with two endpoints, a job, a webhook with its signing key and an
-// unmarked helper. `app.endpoints<Crew>()` lists only the two endpoints.
+// A service with two endpoints, a job, a schedule, a webhook with its
+// signing key and an unmarked helper. `app.endpoints<Crew>()` lists only the
+// two endpoints.
 use app
 
 Crew: struct {
@@ -17,6 +18,9 @@ Crew: struct {
     // The job `add_task` queues; only the server runs it.
     #App.Job tell_assignee: fn(self, id: Int) -> Int Never! { id }
 
+    // A schedule; only the server runs it, each morning.
+    #App.Every(cron: "0 8 * * *") remind: fn(self) -> Int Never! { 1 }
+
     // The webhook a tracker posts to, and its signing key.
     #App.Webhook(path: "/hooks/:project", signature: app.Signature.GitHub, key: "webhook_secret") on_event: fn(self, project: String, event: String) -> Int Never! {
         project.len() + event.len()
@@ -31,7 +35,7 @@ Crew: struct {
 run: fn() {
     endpoints: app.endpoints<Crew>()
     print("endpoints: {endpoints.join(", ")}")
-    names: [String]{"add_task", "status", "tell_assignee", "on_event", "webhook_secret", "next_id"}
+    names: [String]{"add_task", "status", "tell_assignee", "remind", "on_event", "webhook_secret", "next_id"}
     loop name in names {
         print("{name}: {if endpoints.contains(name) -> "endpoint" else -> "server-only"}")
     }

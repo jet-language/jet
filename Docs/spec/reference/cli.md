@@ -1680,6 +1680,11 @@ a route marker makes an endpoint, at its line, under the marker as written,
 for example ``exposure: app.jet:12 in order: endpoint under
 `#Server.Get("/orders/:id")`: the marker serves it; without it the method is
 no endpoint``. A method with no row is no endpoint.
+Rights: each method a server-only app marker runs as the system, which no
+row policy limits (`#App.Job`, `#App.Every`, `#App.Webhook` and
+`#App.SigningKey`), at its line, under the marker as written, for example
+``rights: app.jet:20 in remind: runs as the system under `#App.Every(cron:
+"0 8 * * *")`: no row policy limits its queries``.
 Context: the task context fields and keys each function's own body reads
 (`context.<field>`, `context.get(key)`), at its line, in the order it first
 reads them, for example ``context: main.jet:3 in tick: reads `deadline`,

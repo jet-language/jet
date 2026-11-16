@@ -87,12 +87,21 @@ sema_call_enqueue: fn(alias: String, args: [CallArg], span: Span, expected: Type
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(lowered_value, expected, environment, program, diagnostics)}
 }
 
-// The function a queued job runs: `fn(args) { a_1: args.__take<T_1>(0) …;
-// value: service.method(a_1, …) ?? return Ok(args.__reply_err<E>(err));
-// Ok(args.__ran(value)) }`. A method error that doesn't encode replies
-// `__failed`, a bare failure.
+// The function a queued job runs: `fn(args) { …sema_app_job_statements }`,
+// which keeps `service_name`, a copy of the service.
 sema_app_job_run: fn(service_name: String, method: Func, method_module: ModuleID, span: Span, graph: SemaRegistrationGraph, environment: SemaScopeEnvironment) -> Expr Never! {
     args_name: "__jet_job_{span.start}_args"
+    statements: sema_app_job_statements(args_name, service_name, method, method_module, span, graph, environment)
+    takes: [NamedSpan]{NamedSpan{name: service_name, span: span}}
+    Expr.Lambda{lambda: Lambda{take_names: takes, params: [LambdaParam]{LambdaParam{name: args_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: statements}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
+}
+
+// The body of a function of `args_name` that runs the job or schedule
+// `method` on the service `service_name`: `a_1: args.__take<T_1>(0) …;
+// value: service.method(a_1, …) ?? return Ok(args.__reply_err<E>(err));
+// Ok(args.__ran(value))`. A method error that doesn't encode replies
+// `__failed`, a bare failure.
+sema_app_job_statements: fn(args_name: String, service_name: String, method: Func, method_module: ModuleID, span: Span, graph: SemaRegistrationGraph, environment: SemaScopeEnvironment) -> [Stmt] Never! {
     statements := [Stmt]{}
     reads := [CallArg]{}
     loop index in 1..<method.params.len() {
@@ -121,8 +130,7 @@ sema_app_job_run: fn(service_name: String, method: Func, method_module: ModuleID
     }
     ran: sema_app_remote_method_call(args_name, "__ran", [Type]{value_type}, [CallArg]{sema_http_mount_arg(sema_app_remote_ident(value_name, span), span)}, span)
     statements.push(Stmt.Expr{expr: Expr.Ok{value: ran, span: span, id: AST_NODE_GENERATED}})
-    takes: [NamedSpan]{NamedSpan{name: service_name, span: span}}
-    Expr.Lambda{lambda: Lambda{take_names: takes, params: [LambdaParam]{LambdaParam{name: args_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: statements}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
+    statements
 }
 
 // An `enqueue` that is not one call of an `#App.Job` method of its service:

@@ -1,0 +1,104 @@
+// A board whose notes table has a row policy that lets no caller read a
+// note. The schedule and the webhook run as the system, which no policy
+// limits, so each reads the note; code that acts for no one reads nothing.
+// `jet inspect choices` lists the job, the schedule, the webhook and its
+// signing key as runs of the system, and the endpoint as none.
+use {
+    app
+    crypto: core.crypto
+    db: core.db
+    hex: core.encoding.hex
+    http: core.http
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+#Codable
+Note: struct {
+    name: String
+    text: String
+}
+
+// The notes, as written before any policy judges them.
+plain_notes: fn(store: db.Store) -> db.Table<String, Note> {
+    store.table("notes", key: fn(note: Note) { note.name })
+}
+
+// No caller may read or write a note.
+closed: fn(note: Note, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    Ok(false)
+}
+
+// The notes, judged by `closed`.
+notes: fn(store: db.Store) -> db.Table<String, Note> { plain_notes(store).guard(closed) }
+
+// The welcome note's text, as the task's caller may read it.
+read_welcome: fn(store: db.Store) -[DB.Read]> String {
+    if notes(store).get("welcome") == {
+        .Val(note) -> note.text
+        .None -> "nothing"
+        .Err(failure) -> failure.message()
+    }
+}
+
+Board: struct {
+    store: db.Store
+    secret: String
+    seen: Shared<[String]>
+
+    // A signed-in caller reads the note, which the policy refuses.
+    #App.SignedIn welcome: fn(self) -> String { read_welcome(self.store) }
+
+    // A job the board could queue.
+    #App.Job remind: fn(self, name: String) -> Int Never! { name.len() }
+
+    // Reads the note at midnight UTC on each leap day: the latest one runs
+    // when the board starts.
+    #App.Every(cron: "0 0 29 2 *") leap_day: fn(self) -> Int Never! {
+        self.saw("schedule")
+        1
+    }
+
+    // Reads the note on each delivery GitHub signs.
+    #App.Webhook(path: "/hooks/:project", signature: app.Signature.GitHub, key: "webhook_secret") on_event: fn(self, project: String, event: String) -> Int Never! {
+        self.saw("webhook")
+        project.len() + event.len()
+    }
+
+    #App.SigningKey webhook_secret: fn(self, project: String) -> String? { Val(self.secret.copy()) }
+
+    // Records what `who` read of the note.
+    saw: fn(self, who: String) -[DB.Read]> {
+        text: read_welcome(self.store)
+        self.seen.guard_edit().value.push("{who} read: {text}")
+    }
+}
+
+// How many runs recorded what they read.
+seen_count: fn(seen: Shared<[String]>) -> Int { seen.guard_read().value.len() }
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    store: db.open_memory()
+    _: plain_notes(store).put(Note{name: "welcome", text: "hello crew"}) ?? panic("the note writes")
+    print("no one read: {read_welcome(store)}")
+    secret: "It's a Secret to Everybody"
+    seen: Shared{[String]{}}
+    served: web.app().mount(Board{store: store.copy(), secret: secret, seen: seen})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task { served.serve_once(listener) }
+    // The schedule's start-up run reads first, alone on the store.
+    loop {
+        if seen_count(seen) > 0 -> break
+        time.sleep(10ms)
+    }
+    body: "\"opened\""
+    mac: hex.encode(crypto.hmac_sha256(secret.bytes(), body.bytes()))
+    signed: http.headers_set(http.headers(), "X-Hub-Signature-256", "sha256={mac}")
+    answer: http.send_request(http.request_with(.Post, "http://{addr}/hooks/jet", signed, http.body_text(body)))
+    serving.join()
+    print("webhook answered {answer.status}")
+    lines: seen.guard_read().value
+    loop line in lines -> print(line)
+}

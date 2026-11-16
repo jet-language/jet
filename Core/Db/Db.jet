@@ -1341,10 +1341,11 @@ priv db_waited: fn() -> DBError Never! {
 // statement there. A store that stays busy past the connection's wait
 // (another connection holds its write lock) refuses the call, and every
 // later statement of the attempt fails at once; the framework then runs the
-// call again. A webhook's call records its delivery's ID in the transaction
-// it begins (`db_delivered`); when the store has run that delivery already,
-// the call is repeated, every later statement of it fails at once, and the
-// framework rolls it back and drops the delivery.
+// call again. A webhook's call records its delivery's ID, and a schedule's
+// call its due run, in the transaction it begins (`db_ran`); when the store
+// has run that delivery or that run already, the call is repeated, every
+// later statement of it fails at once, and the framework rolls it back and
+// drops it.
 priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
     if driver_closed(held.driver) -> return Err(db_closed())
     if call == 0 -> return Ok()
@@ -1359,8 +1360,7 @@ priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
     held.open = held.began
     held.call = call
     app.transactions.join(call, fn(commit: Bool) { db_end(state, commit) }, db_outbox(state))
-    delivery: app.transactions.delivery(call) ?? return Ok()
-    if db_delivered(held.driver, delivery) == {
+    if db_ran(held.driver, call) == {
         .Ok(ran) -> {
             if !ran -> return Ok()
             app.transactions.repeat(call)
@@ -1374,7 +1374,37 @@ priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
 }
 
 priv db_repeated: fn() -> DBError Never! {
-    db_error("the webhook's delivery has run already, so it is dropped")
+    db_error("the call's delivery or scheduled run has run already, so it is dropped")
+}
+
+// Whether the store has run call `call` already, as the webhook delivery
+// (`db_delivered`) or the schedule's run (`db_scheduled`) it is; when not,
+// records it in the call's transaction. False for any other call.
+priv db_ran: fn(driver: &DBDriver, call: Int) -> Bool DBError! {
+    if app.transactions.delivery(call) == .Val(delivery) -> return db_delivered(driver, delivery)
+    if app.transactions.tick(call) == .Val(tick) -> return db_scheduled(driver, tick)
+    Ok(false)
+}
+
+// Whether the store has recorded a run of `tick`'s schedule due when it is
+// or later; when not, records `tick` as the schedule's latest run, in the
+// open transaction. The table `__jet_schedules` keeps one row per schedule.
+// A rollback forgets it with the rest of the run, so a failed run is run
+// again when a server starts while it is still the latest due.
+priv db_scheduled: fn(driver: &DBDriver, tick: app.CallTick) -> Bool DBError! {
+    _: __driver_execute(driver, "CREATE TABLE IF NOT EXISTS __jet_schedules (name TEXT PRIMARY KEY, due INTEGER NOT NULL)", [DBValue]{}) ?? return Err(err)
+    if __driver_query_one(driver, "SELECT due FROM __jet_schedules WHERE name = ?", [DBValue]{.Text(tick.schedule.copy())}) == {
+        .Ok(found) -> {
+            if found == .Val(row) {
+                if row.get("due") == .Val(.Int(due)) {
+                    if due >= tick.due -> return Ok(true)
+                }
+            }
+        }
+        .Err(failure) -> return Err(failure)
+    }
+    _: __driver_execute(driver, "INSERT OR REPLACE INTO __jet_schedules (name, due) VALUES (?, ?)", [DBValue]{.Text(tick.schedule.copy()), .Int(tick.due)}) ?? return Err(err)
+    Ok(false)
 }
 
 // A store keeps the ID of each webhook delivery it has run this long, in
@@ -1535,6 +1565,40 @@ priv call_deliver: fn(counts: Table<Int, CallCount>, id: String, at: Int, count:
     assert_eq(call_count(counts), 6)
     assert(!call_deliver(counts, "d-1", came + DB_DELIVERY_KEPT + 1, 7, true))
     assert_eq(call_count(counts), 7)
+}
+
+// One run of schedule `schedule`, due at second `due`, that writes `count`
+// to `counts`; whether the store had recorded that run, or a later one.
+priv call_schedule: fn(counts: Table<Int, CallCount>, schedule: String, due: Int, count: Int, commit: Bool) -> Bool {
+    call: app.transactions.begin() ?? panic("no call is open")
+    app.transactions.schedule(call, app.CallTick{schedule: schedule, due: due})
+    if counts.put(CallCount{id: 1, count: count}) == {
+        .Ok(_) -> {}
+        .Err(failure) -> assert(app.transactions.repeated(call), failure.message())
+    }
+    repeated: app.transactions.repeated(call)
+    assert(app.transactions.end(call, commit))
+    repeated
+}
+
+#Test("a schedule's run records itself in its transaction, and a store drops a run of a time it has run, or run past") {
+    store: open_memory()
+    counts: call_counts(store)
+    _: counts.put(CallCount{id: 1, count: 0}) ?? panic("the first row")
+    // A run that rolls back records nothing, so it runs again.
+    assert(!call_schedule(counts, "s.remind", 600, 1, false))
+    assert_eq(call_count(counts), 0)
+    assert(!call_schedule(counts, "s.remind", 600, 2, true))
+    assert_eq(call_count(counts), 2)
+    // That run, or an earlier one, is dropped; a later one runs.
+    assert(call_schedule(counts, "s.remind", 600, 3, true))
+    assert(call_schedule(counts, "s.remind", 540, 4, true))
+    assert_eq(call_count(counts), 2)
+    assert(!call_schedule(counts, "s.remind", 660, 5, true))
+    assert_eq(call_count(counts), 5)
+    // Each schedule keeps its own latest run.
+    assert(!call_schedule(counts, "s.sweep", 600, 6, true))
+    assert_eq(call_count(counts), 6)
 }
 
 // How many jobs the store's outbox keeps, and each one's runs and last error.

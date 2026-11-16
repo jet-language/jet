@@ -3,7 +3,7 @@
 // clears the URIs the previous one wrote that no longer have any.
 use {
     lsp_diag_term: core.term
-    jet_foundation.[Diagnostic, Span, diagnostic_cause_matches, diagnostic_is_warning, foundation_json_quote]
+    jet_foundation.[Diagnostic, Span, DIAGNOSTIC_LINT, diagnostic_cause_matches, foundation_json_quote]
 }
 
 // One framed JSON-RPC message: its header counts bytes, not characters.
@@ -116,7 +116,7 @@ lsp_publish_diagnostics: fn(uri: String, src: String, version: Int?, diagnostics
 }
 
 lsp_diagnostic_json: fn(diagnostic: Diagnostic, src: String, uri: String, diagnostics: [Diagnostic]) -> String Never! {
-    severity: if diagnostic_is_warning(diagnostic) -> 2 else -> 1
+    severity: if diagnostic.severity == DIAGNOSTIC_LINT -> 2 else -> 1
     range: if diagnostic.span == {
         .Val(span) -> lsp_byte_span_to_range(src, lsp_clamped_span(src, span))
         .None -> lsp_full_document_range(src)

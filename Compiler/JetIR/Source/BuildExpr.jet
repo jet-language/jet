@@ -8900,6 +8900,7 @@ ir_comptime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TCom
             return ir_fail_slot(b, span, "failed constant of {ir_type_name(ty)}")
         }
         .Unit -> return ir_fail_slot(b, span, "constant value {ir_comptime_name(value)}")
+        .Function(key) -> return ir_function_value(m, p, b, ty, key, span)
     }
 }
 
@@ -9035,7 +9036,7 @@ ir_comptime_default_err: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type,
     metadata_value: ir_comptime_field(fields, "__jet___memo_error_metadata") ?? return error
     metadata: if metadata_value == {
         .Struct(_, rows) -> rows
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {
             return ir_fail_slot(b, span, "default Err metadata constant {ir_comptime_name(metadata_value)}")
         }
     }
@@ -9049,7 +9050,7 @@ ir_comptime_default_err: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type,
     if ir_comptime_field(metadata, "details") == .Val(.Present(details_value)) {
         details: if details_value == {
             .Struct(_, rows) -> rows
-            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {
                 return ir_fail_slot(b, span, "default Err details constant {ir_comptime_name(details_value)}")
             }
         }
@@ -9101,7 +9102,7 @@ ir_comptime_err_word: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, a
 ir_comptime_err_rows: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, at: Int, stride: Int, items: TComptimeValue, texts: [String], number: String?, span: Span) Never! {
     rows: if items == {
         .List(values) -> values
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {
             return ir_fail(b, span, "default Err metadata rows {ir_comptime_name(items)}")
         }
     }
@@ -9110,7 +9111,7 @@ ir_comptime_err_rows: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, a
     loop (index, item) in rows {
         fields: if item == {
             .Struct(_, values) -> values
-            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {
                 return ir_fail(b, span, "default Err metadata row {ir_comptime_name(item)}")
             }
         }

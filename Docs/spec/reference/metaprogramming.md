@@ -61,6 +61,14 @@ cover literal and arithmetic constants, Core math, parsing, and collection
 construction. [`comptime_table.jet`](../../../Examples/Metaprogramming/Comptime/ComptimeTable.jet)
 computes a list once and prints the baked value from `run: fn()`.
 
+A module value may hold named functions as values, such as
+`OPS: [Op]{Op{name: "double", f: double}}` with `f: fn(Int) -> Int`. A
+`#run` that calls through it while building calls the same functions the
+program calls at run time
+([`comptime_record_of_function_values`](../../../tests/cases/comptime_core_pure_parity/comptime_record_of_function_values.case)).
+The program makes each function value where it reads the module value, so
+such a value is never placed in static data.
+
 `@if` performs compile-time selection. The selected arm is type-checked and
 emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See

@@ -1,0 +1,22 @@
+# A job, a schedule, a webhook and its signing-key method run as the system,
+# which no row policy limits, since no account calls them. The fixture's
+# notes table has a policy that refuses every caller. Code that acts for no
+# one reads no note, while the schedule's start-up run and a signed webhook
+# delivery each read it. `jet inspect choices` lists each of those methods
+# under its marker, written as in the source, and lists no such row for the
+# signed-in endpoint.
+fixture: system_runs_are_listed_by_inspect_choices.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "no one read: nothing\nwebhook answered 200\nschedule read: hello crew\nwebhook read: hello crew\n"
+
+step: jet inspect choices main.jet
+exit: 0
+stdout: ~ "rights: main.jet:54 in remind: runs as the system under `#App.Job`: no row policy limits its queries" # the job
+stdout: ~ "rights: main.jet:58 in leap_day: runs as the system under `#App.Every(cron: \"0 0 29 2 *\")`: no row policy limits its queries" # the schedule, with its cron
+stdout: ~ "rights: main.jet:64 in on_event: runs as the system under `#App.Webhook(path: \"/hooks/:project\", signature: …, key: \"webhook_secret\")`: no row policy limits its queries" # the webhook, a non-literal argument elided
+stdout: ~ "rights: main.jet:69 in webhook_secret: runs as the system under `#App.SigningKey`: no row policy limits its queries" # the signing-key method
+stdout: ~ "exposure: main.jet:51 in welcome: endpoint under `#App.SignedIn`" # the endpoint is exposed
+stdout: !~ " in welcome: runs as the system" # and runs as its caller

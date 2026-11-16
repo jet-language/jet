@@ -140,7 +140,7 @@ sema_call_memory_compiletime_int: fn(expression: Expr, checked: TExpr, environme
     if comptime_value == .Val(value) {
         number: if value == {
             .Int(number) -> Val(number)
-            .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> None
+            .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> None
         }
         if number != None -> return number
     }
@@ -267,7 +267,7 @@ sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg],
                                     }
                                     size_value = if body_value.value == {
                                         .Int(number) -> Val(number)
-                                        .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {
+                                        .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {
                                             diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
                                             return SemaMethodSpecialCheck{handled: true, value: None}
                                         }
