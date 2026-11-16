@@ -125,7 +125,7 @@ shows what the strict rule produces at scale:
 |Language|Rule|
 |---|---|
 |Rust|`match` must be exhaustive; `_` is always allowed. Clippy's `wildcard_enum_match_arm`, which flags `_`, is an opt-in restriction lint. None of the scanned crates turns it on, and hyper turns it off explicitly. One crate warns on the narrower `match_wildcard_for_single_variants`.|
-|Rust libraries|`#[non_exhaustive]` (16,458 uses in the scanned crates) forces downstream code to write `_`, so that a library can add a case without breaking its users.|
+|Rust libraries|`#[non_exhaustive]` forces downstream code to write `_`, so that a library can add a case without breaking its users. Leaving out one generated crate (`linux-raw-sys`, 14,502 marks), 1,315 of 6,559 public enums (20%) carry it, in 230 crates; among enums named `…Error` or `…Kind` it is 27%. The other 80% stay closed, and adding a case to one is a major version.|
 |Swift|`switch` must be exhaustive; `default` is allowed; `@unknown default` covers future cases of non-frozen library enums.|
 |Kotlin|`when` on an enum must be exhaustive, statements included since 1.7; `else` is allowed.|
 |Java 21|Switch expressions and pattern switches must be exhaustive; `default` is allowed; classic switch statements need not be exhaustive.|
@@ -154,7 +154,9 @@ that does is an opt-in lint. Jet's E0641 is already stricter than all of them.
    often: tokens, opcodes, syntax nodes, error kinds.
 5. **Library enums.** If every multi-case branch must list the cases, adding a
    case to a published package's enum breaks every user's build. Rust and
-   Swift added `#[non_exhaustive]` and `@unknown default` for this.
+   Swift added `#[non_exhaustive]` and `@unknown default` for this: the
+   author opts an enum in as open, which Rust authors do for a fifth of
+   public enums.
 
 An error plus a `jet fix` that writes the missing cases fits finding 3's short
 rests, and costs the writer nothing. The measured annoyance is the long rest
