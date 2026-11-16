@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108383,
+    "rev": 108389,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26810,6 +26810,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T04:36:13.702Z"
+        },
+        {
+          "n": 17,
+          "text": "Type identity and dispatch across a loaded library: a value whose type a loaded .jetlib declares keeps one TypeId in the host and the library, so type tables, trait-value dispatch and reflection give the same answer on each side, and a type the host never saw reaches else, not a wrong arm (D-LIB-DYNTRUST1; raised by the D-PRIM-ANY1 ballot's plugin job, claim L13). Proof: a cases row that loads a .jetlib with its own type, passes a value of that type to the host and back, and prints the same identity and dispatch result on each side.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T04:23:02.415Z"
         }
       ],
       "refs": [
@@ -26833,14 +26842,14 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-09-12T12:54:04.168Z",
-      "updated": "2026-11-15T04:36:16.178Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T04:23:02.415Z",
+      "updatedBy": "Main",
       "workOrder": 103,
       "claimedAt": "2026-11-13T01:49:14.801Z",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 16
+      "criteriaLastN": 17
     },
     {
       "id": "c0xb6zik",
@@ -82960,6 +82969,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c15 receipt for the core-interface step (p201 → p202 batch compilers, Tools/perf/core-interface/run.jet, 11 warm and 5 cold runs, CPUs 8-15, receipt at $JET_SCRATCH_ROOT/lanes/Main/c15-p201-p202/receipt.md):\n- hello jet run peak: 36.2 → 29.9 MB warm, 35.9 → 29.9 MB cold;\n- rcc check: 534.8 → 475.0 ms, 309.9 → 302.6 MB;\n- rcc run: 657.7 → 636.2 ms, 290.5 → 278.4 MB;\n- cold major faults: down 20-35% on every row;\n- every wall ratio is between x0.89 and x1.02.\nThe one WORSE verdict is built-in summarize run user+sys 385.6 → 398.0 ms (+3%), with wall x0.97 and the named-tree arm of the same program improved, so it reads as noise.\nLoad gate: a loaded body costs 28-85 µs against 4-7 µs to check one from text (x12-x20 on rcc and summarize; the from-text sample is 2-83 bodies), so the gate's one-tenth target is far from met. That is G11 speed work, filed on #6759."
+        },
+        {
           "at": "2026-11-11",
           "by": "Main",
           "text": "HELD by owner order 2026-11-11 (no small optimizations until the language is mostly stable; architecture and regression fixes go first, per #5479 c5-c8). These criteria stay open and unworked: c1 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c2 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c3 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c)."
@@ -83120,7 +83134,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T00:45:29.538Z",
-      "updated": "2026-11-16T02:13:41.526Z",
+      "updated": "2026-11-16T04:17:49.929Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -96015,12 +96029,12 @@
         },
         {
           "n": 9,
-          "text": "A float literal entering a trait value (an argument, a list item or a binding) compiles and keeps its Float type on O0, O1 and O2, whether or not Float implements the trait: with the impl it boxes, and without it sema gives E0905, as String and Int do. Today any float literal entering a trait value is an internal compiler error, even with impl Float.Shown {} (r4, r4b, r4c), while a Float returned from a typed function works (r4e) (D-PRIM-ANY1 reviews on p201 and p202; probes in $JET_SCRATCH_ROOT/lanes/AnyReview2/probes and $JET_SCRATCH_ROOT/lanes/AnyBallot/probes b9-b9d). Proof: a cases row on each tier plus the E0905 UI snapshot.",
+          "text": "A float literal entering a trait value (an argument, a trait-bounded variadic part, a list item or a binding) compiles and keeps its Float type on O0, O1 and O2, whether or not Float implements the trait: with the impl it boxes, and without it sema gives E0905, as String and Int do. Today any float literal entering a trait value is an internal compiler error, even with impl Float.Shown {} (r4, r4b, r4c), while a Float returned from a typed function works (r4e). Also, a float literal as a ...Printable variadic argument gives a wrong E0904 'No trait named Printable is in scope' (f5, every tier, p202), while a returned Float there runs (f4). Probes: $JET_SCRATCH_ROOT/lanes/AnyReview2/probes and $JET_SCRATCH_ROOT/lanes/AnyBallot/probes (b9-b9d, f3-f5). Proof: a cases row for each entry form on each tier plus the E0905 UI snapshot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T04:01:34.823Z"
+          "at": "2026-11-16T04:23:03.474Z"
         }
       ],
       "refs": [],
@@ -96031,7 +96045,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:54:36.252Z",
-      "updated": "2026-11-16T04:01:34.824Z",
+      "updated": "2026-11-16T04:23:03.474Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -98089,6 +98103,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T01:13:11.231Z"
+        },
+        {
+          "n": 24,
+          "text": "A body loaded from precompiled Core costs at most a tenth of checking it from text. Today it costs 28-85 µs per load against 4-7 µs per text check (x12-x20 on rcc and summarize, p202 core-interface receipt, $JET_SCRATCH_ROOT/lanes/Main/c15-p201-p202/receipt.md). Find where the load time goes (decode, interning, fact rebuild) and fix it in the general load path. Proof: Tools/perf/core-interface/run.jet shows Load/check ≤ x0.10 on rcc check and run.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T04:17:52.924Z"
         }
       ],
       "refs": [],
@@ -98101,9 +98124,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-16T04:08:38.808Z",
+      "updated": "2026-11-16T04:17:52.924Z",
       "updatedBy": "Main",
-      "criteriaLastN": 23
+      "criteriaLastN": 24
     },
     {
       "id": "c0on083p",
@@ -98385,46 +98408,6 @@
       "updated": "2026-11-15T04:46:17.470Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 8
-    },
-    {
-      "id": "c0yysi3q",
-      "num": 6770,
-      "title": "Memo hit counts are wrong in Examples/Memory/Memoize (memo_computed_and_view_copy_examples_agree_across_execution_tiers)",
-      "body": "Reproduced by G11Speed-4 on 2026-11-12 on seed-b13 against origin/dev; not marked known-failing. memory_semantics/memo_computed_and_view_copy_examples_agree_across_execution_tiers fails on Examples/Memory/Memoize.out, under both --release and default. First diff: 'square stats: hits=0, misses=129' where the golden has 'hits=2, misses=130', and cube 'hits=0, misses=0, size=0' where the golden has 'hits=1, misses=1, size=1'. The memo does not record hits, and cube's memo never stores. Repro: $JET_SCRATCH_ROOT/lanes/G11Speed/work/gen/devred/.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The root is named. Examples/Memory/Memoize matches its golden (square hits=2 misses=130, cube hits=1 misses=1 size=1) at O0, O1 and O2, and memo_computed_and_view_copy_examples_agree_across_execution_tiers passes under default and --release.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 8f4fe0deb1 names and fixes the root: sema computed a local that calls a #Memo function at compile time, so its calls never reached the run-time store; such a local now runs at run time and name.cache() counts it. Proved by Lander on dev a2c72a353e with seed-b14: cases memo_computed_and_view_copy_examples_agree_across_execution_tiers PASS (the case runs Memoize under jet run --release and plain jet run against the same .out), golden Memoize PASS o0/o1/o2, cases memo_call_locals_run_at_run_time PASS. Outs $JET_SCRATCH_ROOT/lanes/Lander/sweep-6770c1.out, sweep-6770c1-release.out",
-          "at": "2026-11-13T04:09:20.098Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-12T10:16:09.694Z",
-      "updated": "2026-11-13T04:09:21.603Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-13T04:09:21.603Z"
     },
     {
       "id": "c04gcx43",
@@ -102677,6 +102660,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T03:24:42.385Z"
+        },
+        {
+          "n": 4,
+          "text": "If D-PRIM-ANY1 adopts E or A: the extended member test (a .Type(x) arm read over an Any subject) has a registered diagnostic, with what/why/fix and a UI snapshot, for an arm naming a type that cannot be a member (an enum case in case position, an unknown type, or a type the arm spelling cannot name), following the resolution rule in the ballot: on an enum .X is a case (E0305), on a union a member type or named case, on an Any any type in scope. Proof: jet test Compiler --profile ui --filter any_member_arm.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T04:23:01.403Z"
         }
       ],
       "refs": [],
@@ -102688,9 +102680,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T23:01:38.012Z",
-      "updated": "2026-11-16T03:24:42.385Z",
+      "updated": "2026-11-16T04:23:01.403Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c0w0b4wd",
@@ -102970,6 +102962,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c29 (2.5 takes a type table's else arm) shares its float-literal root with #6727 c9, whose text now includes f5 (a float literal as a ...Printable argument gives a wrong E0904). Fix them together."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -103262,7 +103259,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T04:01:36.942Z",
+      "updated": "2026-11-16T04:23:04.439Z",
       "updatedBy": "Main",
       "criteriaLastN": 29
     },
@@ -221062,6 +221059,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T04:23:04.439Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oe96sn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T04:23:03.474Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0j3st66",
+      "note": "#9: AnyBallot round 2: f5 adds the variadic entry form with a wrong E0904; was: A float literal entering a trait value (an argument, a list item or a binding) compiles and keeps its Float type on O0, O1 and O2, whether or not Float implements the trait: with the impl it boxes, an"
+    },
+    {
+      "at": "2026-11-16T04:23:02.415Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0c4k3fw",
+      "note": "#17 Type identity and dispatch across a loaded library: a value "
+    },
+    {
+      "at": "2026-11-16T04:23:01.403Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0reo0hk",
+      "note": "#4 If D-PRIM-ANY1 adopts E or A: the extended member test (a .T"
+    },
+    {
+      "at": "2026-11-16T04:17:52.924Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ssy5wy",
+      "note": "#24 A body loaded from precompiled Core costs at most a tenth of"
+    },
+    {
+      "at": "2026-11-16T04:17:49.929Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nqr80d",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-16T04:09:07.276Z",
       "by": "Main",
