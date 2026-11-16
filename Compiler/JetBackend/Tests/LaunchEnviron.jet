@@ -1,0 +1,68 @@
+// A launch's environment (Image/Loader.jet loader_environ) is the block
+// execve would get: the given rows NUL-terminated in order, duplicates,
+// empty values and empty strings kept, and a start for each non-empty
+// string. This process's rows (x64_process_env) are its environ block's
+// strings, in order, each decoded alone.
+use jet_backend.[
+    loader_environ,
+    loader_environ_starts,
+    loader_process_environ,
+    x64_process_env,
+]
+
+// `rows` as execve's block: each row's bytes, then a NUL.
+env_joined: fn(rows: [String]) -> [U8] {
+    block := [U8]{}
+    loop row in rows {
+        block.extend(row.bytes())
+        block.push(U8{0})
+    }
+    block
+}
+
+// The block's strings that decode as UTF-8, read one at a time.
+env_strings: fn(block: [U8]) -> [String] {
+    rows := [String]{}
+    loop start in loader_environ_starts(block) {
+        end := start
+        loop block[end] != (U8{0}) -> end += 1
+        row: String.from_bytes(block[start..<end]) ?? next
+        rows.push(row)
+    }
+    rows
+}
+
+// Asserts that `rows` lay out as execve's block, with the starts a scan of
+// it finds.
+env_assert_prepared: fn(rows: [String]) {
+    prepared: loader_environ(Val(rows)) ?? panic("given rows always lay out")
+    joined: env_joined(rows)
+    assert_eq(prepared.block, joined)
+    assert_eq(prepared.starts, loader_environ_starts(joined))
+}
+
+#Test("this process's rows are its environ block's strings, and lay out as that block") {
+    block: loader_process_environ() ?? panic("/proc/self/environ reads")
+    rows: x64_process_env()
+    assert_eq(rows, env_strings(block))
+    env_assert_prepared(rows)
+}
+
+#Test("a large environment lays out byte for byte, duplicates and empty values kept") {
+    rows := [String]{}
+    loop k in 0..<4096 {
+        rows.push("JET_LAUNCH_{k % 97}={"x".repeat(k % 211)}")
+        if k % 13 == 0 -> rows.push("JET_EMPTY=")
+        if k % 29 == 0 -> rows.push("")
+        if k % 31 == 0 -> rows.push("JET_TEXT=café 😀")
+    }
+}
+
+#Test("an empty environment lays out as an empty block") {
+    env_assert_prepared([String]{})
+    env_assert_prepared([String]{"", ""})
+}
+
+#Test("a row that holds a NUL gives execve each of its strings") {
+    env_assert_prepared([String]{"A=1", "B=2\u{0}C=3", "\u{0}", "D="})
+}

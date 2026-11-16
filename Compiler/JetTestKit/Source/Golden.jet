@@ -311,8 +311,9 @@ kit_golden_run_entry: fn(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: S
     }
     // A row that binds a fixed port runs its program in a network namespace
     // of its own, where the port is always free; a host that can't give it
-    // one skips the row.
-    if plan.host_port != 0 {
+    // one skips the row. A row whose programs reach one another keeps the
+    // host network (kit_golden_own_network).
+    if kit_golden_own_network(plan) {
         if kit_netns_required(env, scratch) == .Val(skipped) {
             return KitOutcome{verdict: skipped, run: last}
         }
@@ -367,6 +368,20 @@ kit_golden_spawned_built: fn(steps: &&[KitStep], tier: KitTier, entry: String) -
         rebuilt.push(held)
     }
     rebuilt
+}
+
+// Whether each program of `plan`'s row runs in a network namespace of its
+// own: the row binds a fixed port (`host-port:`) and runs no program
+// alongside its steps. A spawned or session program is reached by the
+// steps after it, a poll's probe say, and a namespace is one process's
+// alone, so such a row stays on the host network under the port's lock
+// (kit_steps_execute), as a case run does.
+kit_golden_own_network: fn(plan: KitPlan) -> Bool {
+    if plan.host_port == 0 -> return false
+    loop step in plan.steps {
+        if step.action == "spawn" || step.action == "session" -> return false
+    }
+    true
 }
 
 kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
@@ -437,7 +452,7 @@ kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previ
         }
         actual.argv = argv
     }
-    if plan.host_port != 0 && actual.isolate == "" -> actual.isolate = "netns"
+    if kit_golden_own_network(plan) && actual.isolate == "" -> actual.isolate = "netns"
     if index == plan.steps.len() - 1 && actual.stdin == "" && kit_golden_exists("{golden.expected}.stdin") {
         actual.stdin = "{golden.expected}.stdin"
     }

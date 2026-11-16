@@ -7651,8 +7651,11 @@ sema_comptime_module_sources: fn(program: SemaProgramTables, module_index: Int) 
 // a pass of small items, as a body pass of local values, still has its
 // closures' functions checked ahead. The result has one row per source. The
 // calling thread, which waits for the checking threads, builds the run's
-// function memory plan meanwhile when `memory_plan` has none yet, or after
-// the checks when it makes them itself.
+// function memory plan meanwhile when `memory_plan` has none yet. When it
+// makes the checks itself it leaves the plan to the run, which builds it
+// for its first function check (JetDriver jet_driver_comptime_memory_plan,
+// jet_driver_comptime_function_closure); a run whose items call no function
+// never builds it.
 sema_comptime_precheck_items: fn(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], threads: CompilerThreads, seed: Bool, memory_plan: &[SemaFunctionMemoryPlan]) -> [SemaComptimeItemCheck?] {
     checks := [SemaComptimeItemCheck?]{}
     loop _ in 0..<sources.len() -> checks.push(None)
@@ -7930,16 +7933,13 @@ sema_comptime_precheck_thread_probe: fn(environment: SemaScopeEnvironment, sourc
 // check a thread returned into `done`. The calling thread, left waiting for
 // them, builds the function memory plan if `memory_plan` has none yet, its
 // walk on as many threads as `threads` admits. When one claimer is admitted,
-// the calling thread is that claimer and builds the plan after its checks.
+// the calling thread is that claimer and builds no plan.
 sema_comptime_precheck_claimers: fn(shared_state: Shared<SemaPrecheckShared>, plan: Shared<SemaPrecheckPlan>, threads: CompilerThreads, from: Int, workers: Int, done: &[SemaPrecheckDone], memory_plan: &[SemaFunctionMemoryPlan]) {
     if workers <= 1 {
         claimed := sema_comptime_precheck_claimed(shared_state, plan)
         loop claimed.len() > 0 {
             row := claimed.pop() ?? break
             done.push(row)
-        }
-        if memory_plan.len() == 0 {
-            sema_comptime_precheck_memory_plan(shared_state, threads, memory_plan)
         }
         return
     }
@@ -12273,7 +12273,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // what the walk leaves.
     taint_reports := [Diagnostic]{}
     taint_catalog: taint_prepared.pop() ?? panic("the side checks left no taint catalog")
-    walk_inputs: sema_finalize_walk_inputs(taint_catalog, diagnostics, modules, effect_inputs, threads, taint_reports)
+    walk_inputs: sema_finalize_walk_inputs(taint_catalog, diagnostics, threads, taint_reports)
     effect_threads: compiler_threads_beside(threads, walk_inputs.workers)
     walked := SemaFinalizeWalked{found: [[Diagnostic]]{}, masked: [[Span]]{}, fixed: [[String]]{}}
     // The effect graph reads every checked body in place and stamps each
@@ -12582,29 +12582,21 @@ SEMA_CORE_JOBS_PER_THREAD: 8
 // The tag dataflow's inputs (the Rust reference's `check_fact_tags_and_states`
 // taint walk), taken from `prepared` (sema_taint_prepare of the graph): its
 // catalog, its modules heaviest source first, and the threads the walk
-// admits beside the effect pass (sema_finalize_program). The pass's
-// threaded steps admit a thread per SEMA_EFFECT_LOOKUPS_PER_THREAD of its
-// `effect_inputs`' functions (sema_effect_function_nodes), so the walk may
-// take whatever of `threads`' limit those leave, and always a quarter of it:
-// on the compiler the walk is about 1.6 s of CPU against the pass's 2.7 s
-// over 570 ms, so on a quarter it still ends inside the pass, which keeps
-// the rest, while a program whose pass needs one thread walks on all the
-// others. Its own reports move onto `reports`; the E0307 reports among
-// `existing_diagnostics` (the bundle's reports so far) settle switch
-// coverage (sema_taint_coverage_reports).
-sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], modules: [SemaGraphModuleResult], effect_inputs: [SemaEffectModuleInput], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaFinalizeWalkInputs {
+// admits, at most a quarter of `threads`' limit since it runs beside the
+// effect pass (sema_finalize_program): on the compiler the walk is
+// about 1.6 s of CPU against the pass's 2.7 s over 570 ms, so on a quarter
+// it still ends inside the pass, which keeps the rest. Its own reports move
+// onto `reports`; the E0307 reports among `existing_diagnostics` (the
+// bundle's reports so far) settle switch coverage
+// (sema_taint_coverage_reports).
+sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaFinalizeWalkInputs {
     taken: prepared.move()
     reports.extend(taken.reports.move())
     taint_weights: taken.weights.move()
     work := 0
     loop weight in taint_weights -> work += weight
-    lookups := 0
-    loop input in effect_inputs -> lookups += modules[input.module_index].functions.len() + 1
-    limit: compiler_threads_limit(threads)
-    share := limit - compiler_threads_admit(threads, effect_inputs.len(), lookups, SEMA_EFFECT_LOOKUPS_PER_THREAD, 0, 0)
-    quarter: (limit + 3) /% 4
-    if share < quarter -> share = quarter
-    workers: compiler_threads_admit(compiler_threads_capped(threads, share), taint_weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
+    quarter: compiler_threads_capped(threads, (compiler_threads_limit(threads) + 3) /% 4)
+    workers: compiler_threads_admit(quarter, taint_weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
     SemaFinalizeWalkInputs{catalog: taken.catalog.move(), coverage: sema_taint_coverage_reports(existing_diagnostics), taint_order: compiler_threads_heaviest_first(taint_weights), workers: workers}
 }
 
@@ -12764,23 +12756,19 @@ sema_finalize_walkers: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalk
 
 // One thread: walks the taint modules it claims, in claim order, with the
 // thread's own flow state, over its own copy of the catalog and the coverage
-// reports made at its first module.
+// reports, made once it has claimed a module: a thread that claims none
+// builds no state.
 sema_finalize_walk_claimed: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalkInputs, queue: SemaFinalizeCoreQueue) -> [SemaTaintWalked] {
-    state := SemaTaintFlowState{catalog: sema_taint_catalog_init(), module_identity: module_none(), bindings: [SemaTaintBindingFact]{}, diagnostics: [Diagnostic]{}, coverage_reports: [Diagnostic]{}, fixed_tags: [String]{}}
-    stated := false
     claimed := [SemaTaintWalked]{}
-    loop {
-        rank: sema_finalize_core_claim(queue)
-        if rank >= inputs.taint_order.len() -> break
-        if !stated {
-            state.catalog = inputs.catalog.copy()
-            state.coverage_reports = inputs.coverage.copy()
-            stated = true
-        }
+    rank := sema_finalize_core_claim(queue)
+    if rank >= inputs.taint_order.len() -> return claimed
+    state := SemaTaintFlowState{catalog: inputs.catalog.copy(), module_identity: module_none(), bindings: [SemaTaintBindingFact]{}, diagnostics: [Diagnostic]{}, coverage_reports: inputs.coverage.copy(), fixed_tags: [String]{}}
+    loop rank < inputs.taint_order.len() {
         module_index: inputs.taint_order[rank]
         found := [Diagnostic]{}
         sema_taint_check_module(graph, state, module_index, found)
         claimed.push(SemaTaintWalked{module_index: module_index, found: found.move(), masked: state.masked.copy(), fixed_tags: state.fixed_tags.copy()})
+        rank = sema_finalize_core_claim(queue)
     }
     claimed
 }

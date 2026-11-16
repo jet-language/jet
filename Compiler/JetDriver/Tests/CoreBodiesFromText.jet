@@ -1,5 +1,6 @@
 // Assemble with the Compiler source unit. A traced compile counts the Core
-// function bodies it checked from their text, in all and by kind (JetSema
+// function bodies it checked from their text, in all and by kind, and under
+// a per-function trace the timed ones by how each got its check (JetSema
 // CoreDemand.jet sema_core_text_counters).
 use {
     text_files: core.files
@@ -20,9 +21,11 @@ use {
     jet_pkg_model.[JET_VERSION]
 }
 
-// A trace sink that appends each counter to `path`, one line each.
+// A trace sink that appends each counter to `path`, one line each; a
+// per-function trace when `timed`.
 CoreTextTrace: struct {
     path: String
+    timed: Bool
 
     impl CompilerTraceSink {
         begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS, Time]> {}
@@ -37,7 +40,7 @@ CoreTextTrace: struct {
             }
         }
 
-        functions: fn(self) -[]> Bool Never! { false }
+        functions: fn(self) -[]> Bool Never! { self.timed }
 
         cpu_ns: fn(self) -[Time]> Int Never! { 0 }
     }
@@ -45,9 +48,9 @@ CoreTextTrace: struct {
 
 core_text_sink: fn(trace: &&CoreTextTrace) -> CompilerTraceSink Never! { trace.move() }
 
-// The counters a Check compile of `source` traces, one `name = value` line
-// each.
-core_text_counters: fn(source: String) -> [String] {
+// The counters named `prefix`… that a Check compile of `source` traces, one
+// `name = value` line each, under a per-function trace when `timed`.
+core_text_counters: fn(source: String, timed: Bool, prefix: String) -> [String] {
     path: text_files.join(text_sys.temp_dir(), "jet-core-text-{text_process.current_pid()}.trace")
     text_files.write(path, "") ?? panic("cannot start the trace: {err}")
     snapshot: JetDriverAuthorizedSourceSnapshot{
@@ -66,7 +69,7 @@ core_text_counters: fn(source: String) -> [String] {
     core_rows := jet_cli_builtin_core_rows()
     core_rows.extend(jet_driver_runtime_interface_sources())
     request := jet_cli_driver_request(snapshot, core_rows, Val(1), JetDriverCompileMode.Check)
-    request.trace_sink = Val(core_text_sink(CoreTextTrace{path: path}))
+    request.trace_sink = Val(core_text_sink(CoreTextTrace{path: path, timed: timed}))
     request.host_facts.compiler_identity = Val("jet@{JET_VERSION}#core-text")
     result: jet_driver_compile(request)
     trace: text_files.read(path) ?? panic("cannot read the trace: {err}")
@@ -76,7 +79,7 @@ core_text_counters: fn(source: String) -> [String] {
     assert(result.complete && result.internal_problem == None && !jet_driver_has_errors(result.diagnostics), "the program did not compile: {result.internal_problem:Debug} {problems:Debug}")
     lines := [String]{}
     loop line in trace.split("\n") {
-        if line.starts_with("counters.core.bodies_from_text") -> lines.push(line)
+        if line.starts_with(prefix) -> lines.push(line)
     }
     lines
 }
@@ -95,8 +98,10 @@ core_text_value: fn(lines: [String], name: String) -> Int {
 
 CORE_TEXT_KINDS: [String]{"demand", "generated", "generic", "impl", "prelude", "root", "upfront"}
 
+LCM_SOURCE: "use {{ text_math: core.math }}\n\nrun: fn() {{\n    print(text_math.lcm(4, 6))\n    print(max(1, 2))\n}}\n"
+
 #Test("a traced compile counts the Core bodies it checks from text, by kind") {
-    named: core_text_counters("use {{ text_math: core.math }}\n\nrun: fn() {{\n    print(text_math.lcm(4, 6))\n    print(max(1, 2))\n}}\n")
+    named: core_text_counters(LCM_SOURCE, false, "counters.core.bodies_from_text")
     assert(named.len() == CORE_TEXT_KINDS.len() + 1, "one total and one count per kind:\n{named.join("\n")}")
     total := 0
     loop kind in CORE_TEXT_KINDS {
@@ -106,6 +111,16 @@ CORE_TEXT_KINDS: [String]{"demand", "generated", "generic", "impl", "prelude", "
     // `lcm` and the `gcd` it calls wait for demand; `max` is a Prelude body.
     assert(core_text_value(named, "counters.core.bodies_from_text.demand") >= 2, "`lcm` and `gcd` were not checked on demand:\n{named.join("\n")}")
     assert(core_text_value(named, "counters.core.bodies_from_text.prelude") >= 1, "`max` was not counted as a Prelude body:\n{named.join("\n")}")
-    plain: core_text_counters("run: fn() {{\n    print(\"hi\")\n}}\n")
+    plain: core_text_counters("run: fn() {{\n    print(\"hi\")\n}}\n", false, "counters.core.bodies_from_text")
     assert(core_text_value(plain, "counters.core.bodies_from_text.demand") == 0, "a program that names no Core function demanded a Core body:\n{plain.join("\n")}")
+}
+
+#Test("a per-function trace counts the timed Core bodies by how each got its check") {
+    untimed: core_text_counters(LCM_SOURCE, false, "counters.core.timed.")
+    assert(untimed.len() == 0, "a trace that is not per function times no Core body:\n{untimed.join("\n")}")
+    timed: core_text_counters(LCM_SOURCE, true, "counters.core.timed.")
+    assert(timed.len() == 4, "the loaded and the checked bodies, each with its time:\n{timed.join("\n")}")
+    // This compile has no bodies file, so `lcm` and `gcd` are checked from text.
+    assert(core_text_value(timed, "counters.core.timed.load_bodies") == 0, "a compile without a bodies file loaded a Core body:\n{timed.join("\n")}")
+    assert(core_text_value(timed, "counters.core.timed.check_bodies") >= 2, "`lcm` and `gcd` were not timed:\n{timed.join("\n")}")
 }

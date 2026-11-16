@@ -1141,18 +1141,38 @@ loader_put_bytes: fn(at: Int, bytes: [U8]) -> Int {
     start
 }
 
-// The environment block `env` gives the program: its NUL-terminated
-// NAME=value strings, in order (X64Launch.env). `None` when this process's
-// environment can't be read.
-loader_environ: fn(env: [String]?) -> [U8]? {
+// An environment block: its NUL-terminated strings, in order, and where
+// each non-empty one starts (loader_environ_starts).
+LoaderEnviron: struct {
+    block: [U8]
+    starts: [Int]
+}
+
+// The environment block `env` gives the program (X64Launch.env): given
+// rows are laid out in order, each NUL-terminated, their starts noted as
+// they go; else this process's own block. A row that holds a NUL is more
+// than one string to execve, so a block with one is scanned for its starts
+// instead. `None` when this process's environment can't be read.
+loader_environ: fn(env: [String]?) -> LoaderEnviron? {
     if env == .Val(rows) {
-        block := [U8]{}
+        environ := LoaderEnviron{block: [U8]{}, starts: [Int]{}}
+        split := false
         loop row in rows {
-            block.extend(row.bytes())
-            block.push(U8{0})
+            bytes: row.bytes()
+            if bytes.len() > 0 -> environ.starts.push(environ.block.len())
+            if row.contains("\u{0}") -> split = true
+            environ.block.extend(bytes)
+            environ.block.push(U8{0})
         }
-        return Val(block)
+        if split -> environ.starts = loader_environ_starts(environ.block)
+        return Val(environ)
     }
+    block: loader_process_environ() ?? return None
+    Val(LoaderEnviron{block: block, starts: loader_environ_starts(block)})
+}
+
+// This process's environment block, its last string NUL-terminated.
+loader_process_environ: fn() -> [U8]? {
     block := loader_files.read_bytes("/proc/self/environ") ?? return None
     if block.len() > 0 && block[block.len() - 1] != (U8{0}) -> block.push(U8{0})
     Val(block)
@@ -1172,11 +1192,17 @@ loader_environ_starts: fn(block: [U8]) -> [Int] {
 
 // This process's environment as NAME=value rows, in order; an entry that
 // isn't UTF-8 is left out. For a launch that changes the environment.
+// A block that is UTF-8 throughout, the usual one, splits as one text.
 x64_process_env: fn() -> [String] {
     rows := [String]{}
-    block: loader_environ(None) ?? return rows
-    starts: loader_environ_starts(block)
-    loop start in starts {
+    block: loader_process_environ() ?? return rows
+    if String.from_bytes(block) == .Ok(text) {
+        loop row in text.split("\u{0}") {
+            if row != "" -> rows.push(row)
+        }
+        return rows
+    }
+    loop start in loader_environ_starts(block) {
         end := start
         loop block[end] != (U8{0}) -> end += 1
         row: String.from_bytes(block[start..<end]) ?? next
@@ -1462,7 +1488,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
             relaunch = at
         }
         env_end = at
-        at = loader_put_bytes(at, environ)
+        at = loader_put_bytes(at, environ.block)
         env_start = at
         loop k in 0..<launch.argv.len() {
             at = loader_put_text(at, launch.argv[launch.argv.len() - 1 - k])
@@ -1470,7 +1496,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
         }
     }
     env := [Int]{}
-    loop start in loader_environ_starts(environ) -> env.push(env_start + start)
+    loop start in environ.starts -> env.push(env_start + start)
     arg_start: at
     at -= at % 16
     words := [Int]{launch.argv.len()}
@@ -1802,10 +1828,9 @@ LoaderExecBlock: struct {
 // included) and the environment `env` (as X64Launch.env).
 loader_exec_block: fn(path: String, argv: [String], env: [String]?) -> LoaderExecBlock {
     environ: loader_environ(env) ?? return loader_exec_failed("couldn't read /proc/self/environ")
-    starts: loader_environ_starts(environ)
     texts := [String]{path}
     loop argument in argv -> texts.push(argument.copy())
-    bytes := 8 * (argv.len() + starts.len() + 2) + 16 + environ.len()
+    bytes := 8 * (argv.len() + environ.starts.len() + 2) + 16 + environ.block.len()
     loop text in texts -> bytes += text.bytes().len() + 1
     size: os_page_round(bytes)
     block: os_map(size, OS_PROT_READ + OS_PROT_WRITE)
@@ -1818,7 +1843,7 @@ loader_exec_block: fn(path: String, argv: [String], env: [String]?) -> LoaderExe
     words: block + 16
     envp: words + 8 * (argv.len() + 1)
     #Unsafe("the bytes below `at` and the two arrays lie in the fresh block mapped above, sized for every string and word") {
-        at = loader_put_bytes(at, environ)
+        at = loader_put_bytes(at, environ.block)
         env_start = at
         loop text in texts {
             at = loader_put_text(at, text)
@@ -1826,8 +1851,8 @@ loader_exec_block: fn(path: String, argv: [String], env: [String]?) -> LoaderExe
         }
         loop k in 0..<argv.len() { os_store_word(words + 8 * k, addresses[1 + k]) }
         os_store_word(words + 8 * argv.len(), 0)
-        loop (k, start) in starts { os_store_word(envp + 8 * k, env_start + start) }
-        os_store_word(envp + 8 * starts.len(), 0)
+        loop (k, start) in environ.starts { os_store_word(envp + 8 * k, env_start + start) }
+        os_store_word(envp + 8 * environ.starts.len(), 0)
     }
     LoaderExecBlock{block: block, size: size, path: addresses[0], argv: words, envp: envp, failure: ""}
 }

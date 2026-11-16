@@ -372,7 +372,12 @@ sema_core_demand_counters: fn(graph: SemaRegistrationGraph, tally: SemaCoreDeman
 // (SemaRegistrationGraph.core_lowering_roots) or a `close` method;
 // `demand`, a body a demand wave checked (graph.core_checked, which
 // sema_core_bound_counters splits by why a run keeps it); `upfront`, any
-// other.
+// other. Under a per-function trace, the bodies a demand wave timed
+// (SemaGraphModuleResult.core_check_ns) also count by how each got its
+// check, with the task CPU time it took, so a loaded body's cost stands
+// beside a check from text: `counters.core.timed.load_bodies` and
+// `load_ns` for loaded bodies, `counters.core.timed.check_bodies` and
+// `check_ns` for bodies checked from text.
 sema_core_text_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], host_hooks: SemaHostHookAccess?, trace_sink: CompilerTraceSink?) {
     if trace_sink == None {
         return
@@ -388,8 +393,13 @@ sema_core_text_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
 // and the rows of it the compile loaded, and `read` their records' bytes.
 sema_core_text_count: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], bodies: SemaCoreBodies?, loaded_rows: [Bool], read: Int, trace_sink: CompilerTraceSink?) Never! {
     sink: trace_sink ?? return
+    timed: sink.functions()
     loaded_keys: sema_core_bodies_loaded_keys(bodies, loaded_rows)
     loaded := 0
+    load_bodies := 0
+    load_ns := 0
+    check_bodies := 0
+    check_ns := 0
     prelude := 0
     generic := 0
     trait_impl := 0
@@ -400,11 +410,25 @@ sema_core_text_count: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
     loop checked in modules {
         in_prelude: sema_core_prelude_module(checked.package_identity, checked.module_identity, checked.module_name)
         if !in_prelude && !module_is_core(checked.module_identity) -> next
-        loop function in checked.functions {
+        // Each timed body's CPU time, by its position in `functions`.
+        took := [Int:Int]{}
+        if timed {
+            loop (at, row) in checked.core_check_rows -> took[row] = checked.core_check_ns[at]
+        }
+        loop (index, function) in checked.functions {
             if function.stand_in -> next
+            spent: took.get(index)
             if loaded_keys.has_key(function.key) {
                 loaded += 1
+                if spent == .Val(ns) {
+                    load_bodies += 1
+                    load_ns += ns
+                }
                 next
+            }
+            if spent == .Val(ns) {
+                check_bodies += 1
+                check_ns += ns
             }
             lowering_root := false
             if graph.core_lowering_roots == .Val(roots) {
@@ -429,6 +453,12 @@ sema_core_text_count: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
     sink.progress("counters.core.bodies_from_text.prelude", prelude, -1)
     sink.progress("counters.core.bodies_from_text.root", root, -1)
     sink.progress("counters.core.bodies_from_text.upfront", upfront, -1)
+    if timed {
+        sink.progress("counters.core.timed.load_bodies", load_bodies, -1)
+        sink.progress("counters.core.timed.load_ns", load_ns, -1)
+        sink.progress("counters.core.timed.check_bodies", check_bodies, -1)
+        sink.progress("counters.core.timed.check_ns", check_ns, -1)
+    }
 }
 
 // Consecutive demand waves in one body pass (sema_finalize_pass_open): the

@@ -909,8 +909,11 @@ one a demand wave checked, `upfront` for any other), the
 `core.bodies_loaded` counter (how many Core and Prelude function bodies it loaded
 from the Core library's check in place of their text, `core.bodies` in
 `architecture.md`), the `core.bodies_read_bytes` counter (how many bytes of
-the bodies file's records it read to load them), throttled progress
-counts, and the
+the bodies file's records it read to load them), under a per-function trace
+the `core.timed` counters (of the Core and Prelude bodies a demand wave
+checked, how many it loaded and the task CPU time they took, `load_bodies`
+and `load_ns`, and how many it checked from text and theirs,
+`check_bodies` and `check_ns`), throttled progress counts, and the
 scaling counters. `--trace=FILE` writes the same events to FILE as Chrome
 trace-event lines in the `JET_TRACE_FILE` trace format; timestamps have
 millisecond resolution. Either stream gathers events in memory and writes

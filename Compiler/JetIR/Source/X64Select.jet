@@ -312,6 +312,10 @@ IRX64FunctionResult: struct {
     log: [String]
     // The selector rows its code names (IRX64FunctionTables.uses), in order.
     uses: [IRX64Use]
+    // The data rows its code reads, apart and on its way to a stop
+    // (IRX64FunctionTables hot and cold).
+    hot: [Int]{[Int]{}}
+    cold: [Int]{[Int]{}}
 }
 
 // The layout of `slot`'s type (a scalar row: reading it copies no type tree).
@@ -4396,6 +4400,8 @@ ir_x64_select_function: fn(m: IRModule, row: Int, names: [String]) -> IRX64Funct
     tables: ir_x64_function_tables(m, row, names)
     compiled := ir_x64_select_row(m, tables, row)
     compiled.uses = tables.uses.move()
+    compiled.hot = tables.hot.move()
+    compiled.cold = tables.cold.move()
     compiled
 }
 
