@@ -29,9 +29,9 @@ CASES: ["creation", "pull", "early_close"]
 
 // Each case's producer and the loop body that drains it once.
 SHAPES: [
-    "creation": (producer: "empty: fn() -> Stream<Int> {{\n}}", body: "loop value in empty() {{\n            break\n        }}"),
-    "pull": (producer: "one: fn() -> Stream<Int> {{\n    yield 1\n}}", body: "loop value in one() {{\n            total += value\n        }}"),
-    "early_close": (producer: "many: fn() -> Stream<Int> {{\n    yield 1\n    yield 2\n}}", body: "loop value in many() {{\n            break\n        }}"),
+    "creation": {producer: "empty: fn() -> Stream<Int> {{}}", body: "loop value in empty() {{ break }}"},
+    "pull": {producer: "one: fn() -> Stream<Int> {{\n    yield 1\n}}", body: "loop value in one() -> total += value"},
+    "early_close": {producer: "many: fn() -> Stream<Int> {{\n    yield 1\n    yield 2\n}}", body: "loop value in many() {{ break }}"},
 ]
 
 // Runs argv (its arguments) with this process's standard streams and exits
