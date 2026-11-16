@@ -7,11 +7,13 @@
 # JET_RECHECK_VERIFY=1 the compile also checks the whole program again and
 # stops on any difference. The step lowers: `jet check` computes no local
 # value (a_check_computes_no_local_value_and_reports_what_a_build_reports),
-# and `--verbose` shows the run's warnings.
+# and `--verbose` shows the run's warnings. `x` reads an `if`, so it is not
+# computed ahead in the module's comptime run (JetSema
+# Comptime/LocalValues.jet): the landing's own pass checks `helper`.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_RECHECK_VERIFY=1
-write: main.jet = "helper: fn(base: Int) -> Int {\n    unused: 3\n    total := 0\n    loop i in 0..<4 -> total += i\n    total + base\n}\n\nrun: fn() {\n    x: helper(1)\n    print(\"{x}\")\n}\n"
+write: main.jet = "helper: fn(base: Int) -> Int {\n    unused: 3\n    total := 0\n    loop i in 0..<4 -> total += i\n    total + base\n}\n\nrun: fn() {\n    x: helper(if true -> 1 else -> 2)\n    print(\"{x}\")\n}\n"
 step: jet run --verbose --trace main.jet
 exit: 0
 stdout: = "7\n"
