@@ -1716,7 +1716,38 @@ CachePolicy: enum {
 // The cache policy of each reply type, by the name `__cache` was given.
 priv APP_CACHE: Shared{[String:CachePolicy]{}}
 
-// The cache policies core.web answers endpoint replies under.
+// A reply a store keeps for a `.Public` policy, as it finds it: the encoded
+// reply and the milliseconds since it was kept, by the store's clock.
+priv KeptReply: struct {
+    reply: String
+    age_ms: Int
+}
+
+// One store's kept replies, which core.db keeps in the table
+// `__jet_kept_replies` of each database file and names as the file opens
+// (`reply_cache.store`), so the servers of an App that share the file
+// share them.
+priv KeptReplies: struct {
+    // Names the store among the open ones, as CallOutbox.store does.
+    store: String
+    // The reply kept under a key while it is fresh by the store's clock:
+    // through the instant its max_age ends, and not after it; None when
+    // there is none, or the store couldn't read it.
+    find: fn(String) -[]> KeptReply? Never!
+    // Keeps a reply under a key for a max_age in milliseconds, in place of
+    // the one kept under it, and drops the stale ones; false when the store
+    // couldn't.
+    keep: fn(String, String, Int) -[]> Bool Never!
+}
+
+// The stores named for kept replies, in the order they opened.
+priv KEPT_REGISTRY: Shared{[Shared<KeptReplies>]{}}
+
+// The cache policies core.web answers endpoint replies under, and the
+// replies the servers that share the App's database files keep under them.
+// core.db names each database file as it opens (`store`). A reply is kept
+// in the first named store that takes it, the App's first store still
+// open, and found in any named store.
 priv(package) reply_cache: module {
     // The policy `.cache<V>` set for the reply type named `reply`; None when
     // none was set.
@@ -1725,6 +1756,48 @@ priv(package) reply_cache: module {
         found: held.value.get(reply) ?? return None
         Val(found.copy())
     }
+
+    // Names a store; a store named again replaces the one of its name.
+    store: fn(replies: &&KeptReplies) Never! {
+        registry := KEPT_REGISTRY.guard_edit()
+        loop index in 0..<registry.value.len() {
+            if kept_store_name(registry.value[index]) == replies.store {
+                registry.value[index] = Shared{replies.move()}
+                return
+            }
+        }
+        registry.value.push(Shared{replies.move()})
+    }
+
+    // The fresh reply a named store keeps under `key`; None when none does.
+    find: fn(key: String) -> KeptReply? Never! {
+        loop replies in kept_stores() {
+            held: replies.guard_read()
+            if held.value.find(key.copy()) == .Val(found) -> return Val(found)
+        }
+        None
+    }
+
+    // Keeps `reply` under `key` for `max_age_ms` in the first named store
+    // that takes it; false when none does.
+    keep: fn(key: String, reply: String, max_age_ms: Int) -> Bool Never! {
+        loop replies in kept_stores() {
+            held: replies.guard_read()
+            if held.value.keep(key.copy(), reply.copy(), max_age_ms) -> return true
+        }
+        false
+    }
+}
+
+// The named stores, copied out so no store runs under the registry's lock.
+priv kept_stores: fn() -> [Shared<KeptReplies>] Never! {
+    registry: KEPT_REGISTRY.guard_read()
+    registry.value.copy()
+}
+
+priv kept_store_name: fn(replies: Shared<KeptReplies>) -> String Never! {
+    held: replies.guard_read()
+    held.value.store.copy()
 }
 
 #Test("a reply type's cache policy is the last `.cache` set for it") {
@@ -1736,6 +1809,32 @@ priv(package) reply_cache: module {
     }
     _: graph.__cache<RouteTestBoard>("app.CacheTestView", CachePolicy.Private)
     assert(reply_cache.policy("app.CacheTestView") == .Val(.Private))
+}
+
+#Test("a kept reply goes to the first named store that takes it, and is found in any") {
+    refusing: KeptReplies{store: "app.Test refusing replies", find: fn(_: String) { KeptReply?{None} }, keep: fn(_: String, _: String, _: Int) { false }}
+    held: Shared{[String:String]{}}
+    kept: held.copy()
+    found: held.copy()
+    taking: KeptReplies{
+        store: "app.Test kept replies",
+        find: fn(key: String) {
+            seen: found.guard_read()
+            reply: seen.value.get(key) ?? return KeptReply?{None}
+            Val(KeptReply{reply: reply.copy(), age_ms: 0})
+        },
+        keep: fn(key: String, reply: String, _: Int) {
+            guard := kept.guard_edit()
+            guard.value[key] = reply
+            true
+        },
+    }
+    reply_cache.store(refusing)
+    reply_cache.store(taking)
+    assert(reply_cache.find("/api/board [1]") == None)
+    assert(reply_cache.keep("/api/board [1]", "{{\"ok\":false}}", 1000))
+    assert_eq((reply_cache.find("/api/board [1]") ?? panic("the reply was not kept")).reply, "{{\"ok\":false}}")
+    assert(reply_cache.find("/api/board [2]") == None)
 }
 
 // A board's state, for the route-set test: its project is a path segment and

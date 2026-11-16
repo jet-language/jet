@@ -5834,6 +5834,16 @@ is kept for being a reply, not for its value, so `false`, `0` and `""` are
 kept like any other. A failed run, a call replayed under its
 `Idempotency-Key`, or a `max_age` of zero keeps nothing.
 
+Servers of one App that share a database file share these replies. Each
+database file `db.open` opens keeps them in its table `__jet_kept_replies`,
+keyed by the method's address and its arguments, with the instants each
+was kept and stays fresh through, in Unix milliseconds by the file's
+clock. A reply is kept in the App's first file still open; a server that
+keeps no fresh reply of its own answers with one that any open file keeps,
+with its `Age`, and does not run the method. Each keep drops the stale
+rows, so the table holds only fresh replies. No cache server runs, and an
+in-memory database shares nothing.
+
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with

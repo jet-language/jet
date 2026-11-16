@@ -1454,7 +1454,9 @@ priv DB_MEMORY_OPENED: Shared{0}
 // A database file whose outbox keeps jobs is named to app.jobs as it opens,
 // so a serving server takes from it the jobs no server holds, such as those
 // a server that stopped left. Each database file is named to app.push as it
-// opens, so the devices accounts register for pushes are kept in it.
+// opens, so the devices accounts register for pushes are kept in it, and to
+// app.reply_cache, so the servers that share it share the replies a
+// `.Public` cache policy keeps.
 priv db_open: fn(path: String, failure: String) -> Store Never! {
     driver := __driver_open(path) ?? panic(failure)
     store := path.copy()
@@ -1467,6 +1469,7 @@ priv db_open: fn(path: String, failure: String) -> Store Never! {
     state: Shared{DBState{driver: driver.move(), path: path.copy(), store: store.copy(), written: [DBWritten]{}, ended: Condition.new()}}
     if jobs -> app.jobs.store(db_outbox(state, store))
     if path != ":memory:" -> app.push.store(db_push_devices(state, store))
+    if path != ":memory:" -> app.reply_cache.store(db_kept_replies(state, store))
     Store{state: state}
 }
 
@@ -1868,6 +1871,56 @@ priv db_push_forget: fn(state: Shared<DBState>, service: String, token: String) 
     __driver_execute(guard.value.driver, "DELETE FROM __jet_push_devices WHERE service = ? AND token = ?", [DBValue]{.Text(service.copy()), .Text(token.copy())}) == .Ok(_)
 }
 
+// The table of the replies a `.Public` cache policy keeps: a row for each,
+// found by its key, with the instants it was kept and the last one it is
+// fresh at, in Unix milliseconds by the store's clock.
+priv DB_KEPT_REPLIES_TABLE: "CREATE TABLE IF NOT EXISTS __jet_kept_replies (key TEXT PRIMARY KEY, reply TEXT NOT NULL, kept INTEGER NOT NULL, fresh INTEGER NOT NULL)"
+
+// The store's kept replies (app.KeptReplies), in the table
+// `__jet_kept_replies`. Each statement runs on its own, once no call's
+// transaction is open on the store, as a kept reply outlives the call that
+// made it.
+priv db_kept_replies: fn(state: Shared<DBState>, store: String) -> app.KeptReplies Never! {
+    app.KeptReplies{
+        store: store.copy(),
+        find: fn(key: String) { db_kept_find(state, key) },
+        keep: fn(key: String, reply: String, max_age_ms: Int) { db_kept_keep(state, key, reply, max_age_ms) },
+    }
+}
+
+// The reply kept under `key` while it is fresh by the store's clock, through
+// the instant its max_age ends; None when there is none, or the store
+// couldn't read it.
+priv db_kept_find: fn(state: Shared<DBState>, key: String) -> app.KeptReply? Never! {
+    guard := state.guard_edit()
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return None
+    if driver_closed(guard.value.driver) || !table_exists(guard.value.driver, "__jet_kept_replies") {
+        return None
+    }
+    now: db_job_now()
+    rows: __driver_query(guard.value.driver, "SELECT reply, kept FROM __jet_kept_replies WHERE key = ? AND fresh >= ?", [DBValue]{.Text(key.copy()), .Int(now)}) ?? return None
+    if rows.len() == 0 -> return None
+    reply: row_text(rows[0], "reply") ?? return None
+    kept: row_int(rows[0], "kept") ?? return None
+    Val(app.KeptReply{reply: reply, age_ms: now - kept})
+}
+
+// Keeps `reply` under `key` for `max_age_ms`, in place of the row kept under
+// it, and drops each row stale by now, so the table holds only fresh
+// replies; false when the store couldn't.
+priv db_kept_keep: fn(state: Shared<DBState>, key: String, reply: String, max_age_ms: Int) -> Bool Never! {
+    guard := state.guard_edit()
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return false
+    if driver_closed(guard.value.driver) -> return false
+    _: __driver_execute(guard.value.driver, DB_KEPT_REPLIES_TABLE, [DBValue]{}) ?? return false
+    _: __driver_execute(guard.value.driver, "CREATE INDEX IF NOT EXISTS __jet_kept_replies_fresh ON __jet_kept_replies (fresh)", [DBValue]{}) ?? return false
+    now: db_job_now()
+    _: __driver_execute(guard.value.driver, "DELETE FROM __jet_kept_replies WHERE fresh < ?", [DBValue]{.Int(now)}) ?? return false
+    fresh: if max_age_ms > 9223372036854775807 - now -> 9223372036854775807 else -> now + max_age_ms
+    values: [DBValue]{.Text(key.copy()), .Text(reply.copy()), .Int(now), .Int(fresh)}
+    __driver_execute(guard.value.driver, "INSERT OR REPLACE INTO __jet_kept_replies (key, reply, kept, fresh) VALUES (?, ?, ?, ?)", values) == .Ok(_)
+}
+
 #Codable
 priv CallCount: struct {
     id: Int
@@ -2069,6 +2122,42 @@ priv db_push_test_of: fn(devices: app.PushDevices, account: String) -> String {
     assert_eq(app.push.devices("acct_cy").len(), 0)
     assert(store.close())
     assert(devices.of("acct_ann") == None)
+}
+
+// How many replies the store keeps, fresh or stale.
+priv db_kept_count: fn(store: Store) -> Int {
+    guard := store.state.guard_edit()
+    found: __driver_query_one(guard.value.driver, "SELECT count(*) AS n FROM __jet_kept_replies", [DBValue]{}) ?? panic("the kept replies read")
+    if found.get("n") == .Val(.Int(n)) -> n else -> -1
+}
+
+// Keeps a reply under `key` whose max_age ended long ago.
+priv db_kept_stale: fn(store: Store, key: String) {
+    guard := store.state.guard_edit()
+    _: __driver_execute(guard.value.driver, "INSERT OR REPLACE INTO __jet_kept_replies (key, reply, kept, fresh) VALUES (?, 'stale', 0, 1)", [DBValue]{.Text(key.copy())}) ?? panic("the stale reply writes")
+}
+
+#Test("a store keeps a reply under its key while it is fresh, and drops the stale ones as it keeps another") {
+    store: open_memory()
+    replies: db_kept_replies(store.state, "db.Test kept replies")
+    assert(replies.find("/api/board [1]") == None)
+    assert(replies.keep("/api/board [1]", "{{\"ok\":false}}", 600000))
+    found: replies.find("/api/board [1]") ?? panic("the kept reply reads")
+    assert_eq(found.reply, "{{\"ok\":false}}")
+    assert(found.age_ms >= 0 && found.age_ms < 600000)
+    assert(replies.find("/api/board [2]") == None)
+    db_kept_stale(store, "/api/board [3]")
+    assert(replies.find("/api/board [3]") == None)
+    assert_eq(db_kept_count(store), 2)
+    assert(replies.keep("/api/board [1]", "{{\"ok\":true}}", 600000))
+    assert_eq(db_kept_count(store), 1)
+    assert_eq((replies.find("/api/board [1]") ?? panic("the kept reply reads")).reply, "{{\"ok\":true}}")
+    // A max_age past the end of the store's clock keeps the reply, and does not wrap.
+    assert(replies.keep("/api/board [4]", "{{\"ok\":0}}", 9223372036854775807))
+    assert(replies.find("/api/board [4]") != None)
+    assert(store.close())
+    assert(replies.find("/api/board [1]") == None)
+    assert(!replies.keep("/api/board [1]", "{{\"ok\":0}}", 600000))
 }
 
 // How many jobs the store's outbox keeps, and each one's runs and last error.

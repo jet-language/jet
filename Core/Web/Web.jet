@@ -355,7 +355,7 @@ App: struct {
     // is cached `.Public` also answers GET `path`
     // (`app_remote_get_response`).
     __remote_public: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, reply: String, at: SourceLocation{#caller}) -> App Never! {
-        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns), reply: reply, kept: Shared{[String:AppKeptReply]{}}}
+        endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: reply, kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
         table: app_table(self)
         answers: http_server.__handler(fn(request: HTTPRequest) { Ok(if request.method == "GET" -> app_remote_get_response(endpoint, request) else -> app_remote_response(endpoint, request)) })
@@ -368,7 +368,7 @@ App: struct {
     // (sema lowers each here) as `__remote_public` does, for a signed-in
     // caller only (`app_signed_in_response`).
     __remote_signed_in: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
-        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns), reply: "", kept: Shared{[String:AppKeptReply]{}}}
+        endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: "", kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
         http_server.route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_signed_in_response(endpoint, request)) }), "", at)
         self.copy()
@@ -1357,12 +1357,13 @@ priv app_mount_response: fn(handler: AppHandler, request: HTTPRequest) -[Net, FS
     }
 }
 
-// One endpoint method of a mounted service; sema builds `answer` from it.
-// `reply` names the method's reply type, for its cache policy
+// One endpoint method of a mounted service, at `path`; sema builds `answer`
+// from it. `reply` names the method's reply type, for its cache policy
 // (`app_remote_reply`); "" for a signed-in method, whose replies no one
 // keeps. `kept` holds the replies a `.Public` policy lets the server keep,
 // by the call's JSON array of arguments (`app_kept_reply`).
 priv AppRemote: struct {
+    path: String
     answer: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!
     limit: AppRemoteLimit
     reply: String
@@ -1530,8 +1531,10 @@ priv app_remote_get_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Ne
 // One call of `endpoint` (`app_remote_response`), whose JSON array of
 // arguments is `query`, or the request's body when None. Under a
 // `.Public(max_age)` policy, a call whose arguments have a fresh kept reply
-// (`app_kept_reply`) is answered with it, with its `Age`, and the method
-// does not run; a run that succeeds keeps its reply for `max_age`.
+// is answered with it, with its `Age`, and the method does not run: the
+// reply this server keeps (`app_kept_reply`), or else the one any server of
+// the App keeps in a database file they share (`calls.reply_cache`). A run
+// that succeeds keeps its reply for `max_age` in both.
 priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: String?) -[Net, FS.Read]> HTTPResponse Never! {
     if app_remote_limited(endpoint.limit, app_remote_who(request)) == .Val(wait_ns) {
         return app_limited(wait_ns)
@@ -1550,9 +1553,15 @@ priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: Strin
     tree: live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
     policy: calls.reply_cache.policy(endpoint.reply)
     now: rt.clock_mono_ns()
+    // The key a reply is kept under in the App's database files, the same on
+    // every server of the App.
+    shared: "{endpoint.path} {text}"
     if policy == .Val(.Public(_)) {
         if app_kept_reply(endpoint.kept, text, now) == .Val(hit) {
             return app_remote_reply(policy, request, hit.reply, Val(now - hit.kept_ns))
+        }
+        if calls.reply_cache.find(shared) == .Val(found) {
+            return app_remote_reply(policy, request, found.reply, Val(found.age_ms * 1000000))
         }
     }
     // The reply of the call's last run, for the server to keep.
@@ -1570,6 +1579,9 @@ priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: Strin
         held: last.guard_read()
         if held.value.len() == 1 && !app_reply_failed(held.value[0]) {
             app_keep_reply(endpoint.kept, text, held.value[0], now, max_age)
+            if max_age.ns > 0 {
+                _: calls.reply_cache.keep(shared, held.value[0], max_age.ns /% 1000000)
+            }
         }
     }
     answered
