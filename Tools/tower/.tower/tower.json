@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 108025,
+    "rev": 108050,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -109127,21 +109127,21 @@
         },
         {
           "n": 30,
-          "text": "(was #5073 c5)",
+          "text": "Core and the runtime have one internal home for byte, text and number primitives (ascii_lower, hex digits, UTF-8 validity, JSON escaping, checked arithmetic) that other Core modules import without it becoming public API; Core has 12 private ascii_lower copies on dev 72a8142651. A census flags a new same-name private helper (architecture review R3). Proof: `git grep -c -E '^ascii_lower: fn' -- Core` reports one file, and `jet test tests/guards --filter duplicate_helpers` passes. (was #5073 c5)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:23.769Z"
+          "at": "2026-11-16T01:15:33.414Z"
         },
         {
           "n": 31,
-          "text": "(was #6615 c5)",
+          "text": "Core reaches the runtime only through ordinary use of jet.runtime modules. The dispatcher_row lines in Compiler/Prelude/Core.jet, the bound CoreCallRows, the IRRoute carrier rows for those functions and their RuntimeStopExports entries are deleted, and every in-repository caller is migrated in one cutover. Goldens prove o0, o1 and o2 for one call in each Core module that called the runtime. Proof: `git grep -n dispatcher_row -- Compiler/Prelude/Core.jet` prints nothing, and `jet test Compiler --profile golden --filter runtime/one_call_per_core_module` on O0, O1 and O2. (was #6615 c5)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:43:58.784Z"
+          "at": "2026-11-16T01:15:34.348Z"
         }
       ],
       "refs": [],
@@ -109155,7 +109155,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:14:06.513Z",
-      "updated": "2026-11-16T01:15:32.137Z",
+      "updated": "2026-11-16T01:15:34.348Z",
       "updatedBy": "Main",
       "criteriaLastN": 31
     },
@@ -109261,30 +109261,30 @@
         },
         {
           "n": 10,
-          "text": "(was #3549 c3)",
+          "text": "System APIs pass their failure and effect proofs on O0, O1 and O2 through their Core/<module> Jet bodies. Proof: `jet test Compiler --profile core --filter Core/Net`, then the same for Sys, Log, Http, Term, Process and Db. (was #3549 c3)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:39:00.142Z"
+          "at": "2026-11-16T01:15:35.287Z"
         },
         {
           "n": 11,
-          "text": "(was #3549 c11)",
+          "text": "FileReader, FileWriter and FileLock are opaque source-visible values whose live state belongs to the provider, and TempDir, TempFile and FileLock cleanup stays with their provider values (D-FILES-HANDLE-ABI1=A): constructing or reading their path or state from source is refused, and alias close, replace, drop and task capture release exactly once at the final owner. Proof: `jet test Compiler --profile cases --filter files/handle_abi_` and `jet test Compiler --profile ui --filter file_handle_state_private`. (was #3549 c11)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:39:01.649Z"
+          "at": "2026-11-16T01:15:36.256Z"
         },
         {
           "n": 12,
-          "text": "(was #3549 c17)",
+          "text": "`sys.set` reports a failed set as an EnvError: Core/Sys/Sys.jet:61 declares it Never! while its leaf (`__env_set`, jet_std_env_try_set) can fail; a golden calls sys.set and handles the error. Proof: `jet test Compiler --profile golden --filter sys/env_set_error`. (was #3549 c17)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:39:03.067Z"
+          "at": "2026-11-16T01:15:37.217Z"
         }
       ],
       "refs": [],
@@ -109299,7 +109299,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:14:07.479Z",
-      "updated": "2026-11-16T00:39:03.067Z",
+      "updated": "2026-11-16T01:15:37.217Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -109423,174 +109423,174 @@
         },
         {
           "n": 12,
-          "text": "(was #3317 c1)",
+          "text": "Each row of the stable Rust iterator inventory (Docs/research/mine-for-jet-2026-09-12.md, finding iter-f005) has a Jet disposition, with positive and negative capability bounds, in one table in the Core collections spec. Proof: the table covers every inventory row. (was #3317 c1)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:36:52.866Z"
+          "at": "2026-11-16T01:15:38.237Z"
         },
         {
           "n": 13,
-          "text": "(was #3317 c4)",
+          "text": "fuse() latches the first true end: a permanently exhausted wrapper stays exhausted, and a source that can resume after an empty poll is not labelled fused (D-ITER-FUSED1=A). Proof: `jet test Compiler --profile golden --filter collections/iter_capabilities` on O0, O1 and O2. (was #3317 c4)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:36:55.024Z"
+          "at": "2026-11-16T01:15:39.198Z"
         },
         {
           "n": 14,
-          "text": "(was #3317 c5)",
+          "text": "Capability facts are carried by the existing Iterable protocol and storage representations, with no public iterator hierarchy and no mandatory dynamic allocation. Proof: `jet test Compiler --profile cases --filter iter_capabilities_allocate_nothing` on O0, O1 and O2. (was #3317 c5)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:36:57.532Z"
+          "at": "2026-11-16T01:15:40.149Z"
         },
         {
           "n": 15,
-          "text": "(was #3317 c6)",
+          "text": "size_hint, fuse and by_ref ship (D-ITER-SIZE1=A, D-ITER-FUSED1=A, D-ITER-BORROW1=A; none exists in Core on dev 168e1e9e92): golden collections/iter_capabilities gives the same output on O0, O1 and O2, and tests/ui/iter_by_ref_overlap.jet matches its snapshot. Proof: `jet test Compiler --profile golden --filter collections/iter_capabilities` and `jet test Compiler --profile ui --filter iter_by_ref_overlap`. (was #3317 c6)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:36:59.532Z"
+          "at": "2026-11-16T01:15:41.125Z"
         },
         {
           "n": 16,
-          "text": "(was #3317 c9)",
+          "text": "A failing callback stops at the triggering item and the next pull starts at the exact next item; accumulator and partial-output ownership is explicit; the source is neither replayed nor destroyed; infallible, propagating and error-as-data callbacks stay distinct types (D-ITER-FAILCONSUME1=A). Proof: `jet test Compiler --profile golden --filter collections/fail_remainder`. (was #3317 c9)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:37:02.178Z"
+          "at": "2026-11-16T01:15:42.096Z"
         },
         {
           "n": 17,
-          "text": "(was #3317 c11)",
+          "text": "size_hint tells a bound from an exact remaining length (equal bounds mean exact): filter drops exactness, map keeps it, chain checks representability, unknown, infinite and over-range sizes stay honest, and a hint never authorizes unchecked access (D-ITER-SIZE1=A). Proof: `jet test Compiler --profile golden --filter collections/size_hint`. (was #3317 c11)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:37:06.656Z"
+          "at": "2026-11-16T01:15:43.060Z"
         },
         {
           "n": 18,
-          "text": "(was #3317 c12)",
+          "text": "Mixed front and back pulls never duplicate or skip an item and meet exactly at exhaustion; reverse search reports the original index; adapters forward exact bounds; a forward-only stream is refused, never collected to fake the capability (D-ITER-BACK1=A). Proof: `jet test Compiler --profile golden --filter collections/iter_back` and `jet test Compiler --profile ui --filter next_back_one_way_source`. (was #3317 c12)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:37:08.885Z"
+          "at": "2026-11-16T01:15:44.046Z"
         },
         {
           "n": 19,
-          "text": "(was #3317 c13)",
+          "text": "A custom source's `map` runs without a second map implementation, and user sources, built-in Iter, Stream and ViewIter compose the same adapters with no hidden collection, replay or lifetime extension (D-ITER-INTEROP1=A). Proof: `jet test Compiler --profile golden --filter collections/iter_interop`. (was #3317 c13)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:37:11.130Z"
+          "at": "2026-11-16T01:15:45.067Z"
         },
         {
           "n": 20,
-          "text": "(was #3317 c15)",
+          "text": "Cardinality checks read only the documented extra item and keep the remainder; equality keeps the representative policy and short-circuits. Proof: `jet test Compiler --profile golden --filter collections/cardinality_search`. (was #3317 c15)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:37:15.610Z"
+          "at": "2026-11-16T01:15:46.107Z"
         },
         {
           "n": 21,
-          "text": "(was #3317 c19)",
+          "text": "Fully draining a provably endless normal producer is a registered error from jet check (never a stop in jet run); `take(n)` removes it; effectful infinite loops are not flagged; the message explains demand, buffering and cancellation without inserting a bound (D-ITER-ENDLESS1=A). Proof: `jet test Compiler --profile ui --filter endless_full_drain`. (was #3317 c19)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:37:22.074Z"
+          "at": "2026-11-16T01:15:47.185Z"
         },
         {
           "n": 22,
-          "text": "(was #3329 c1)",
+          "text": "FromIterator is the one destination protocol (D-ITER-COLLECT1=A): [1,2,1] into List keeps [1,2,1], into Set dedups, into Map applies last-wins, String concatenates, a tuple destination and a user `impl Bag.FromIterator` build, each with stated ownership, order, duplicate and short-circuit rules (no FromIterator exists in Core on dev 168e1e9e92). Proof: `jet test Compiler --profile golden --filter Collections/FromIter` on O0, O1 and O2. (was #3329 c1)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:37:58.309Z"
+          "at": "2026-11-16T01:15:48.149Z"
         },
         {
           "n": 23,
-          "text": "(was #3329 c2)",
+          "text": "The destination is explicit at the call: an expected `Set<Int>` type never turns `list.map(f)`, a plain filter or a yielding loop into a Set, and a yielding loop always builds List<T>. Proof: `jet test Compiler --profile ui --filter from_iter_expected_type_no_retype`. (was #3329 c2)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:00.304Z"
+          "at": "2026-11-16T01:15:49.091Z"
         },
         {
           "n": 24,
-          "text": "(was #3329 c3)",
+          "text": "One construction path handles ordinary and fallible input: a fallible source stops at the first error with the stated partial-result rule, and a failed construction leaks no resource. Proof: `jet test Compiler --profile golden --filter Collections/FromIter` shows the failing source and its close count. (was #3329 c3)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:03.283Z"
+          "at": "2026-11-16T01:15:50.271Z"
         },
         {
           "n": 25,
-          "text": "(was #3329 c6)",
+          "text": "extend grows a destination in place from any iterable with no temporary List, using Map last-wins, Set dedup and the String and byte policy, with an explicit prefix-on-failure rule (D-ITER-EXTEND1=A). Proof: `jet test Compiler --profile golden --filter collections/extend_iterable`, and the extend_lazy_vs_temp_list pair measures below 1.00. (was #3329 c6)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:05.348Z"
+          "at": "2026-11-16T01:15:51.611Z"
         },
         {
           "n": 26,
-          "text": "(was #3329 c7)",
+          "text": "partition routes each item to exactly one typed destination with one classifier call, through the destination protocol, and a classifier failure is distinct from an error branch (D-ITER-BRANCHPARTITION1=A). Proof: `jet test Compiler --profile golden --filter collections/partition_outcome`. (was #3329 c7)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:08.016Z"
+          "at": "2026-11-16T01:15:52.801Z"
         },
         {
           "n": 27,
-          "text": "(was #3329 c8)",
+          "text": "sum and product state their empty-input identities and cover custom domain values, reference items, Result and Option short-circuiting and numeric wrappers; Int overflow is the same failure as the shared list-sum kernel; there is one Sum and one Product trait; unsupported families are listed as gaps. Proof: `jet test Compiler --profile golden --filter collections/aggregate_matrix` on O0, O1 and O2. (was #3329 c8)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:10.632Z"
+          "at": "2026-11-16T01:15:54.167Z"
         },
         {
           "n": 28,
-          "text": "(was #3329 c11)",
+          "text": "Yielding loops keep item order, nested List shape, filters, multiple sources and partial-list breaks, with effects, fallibility, ownership, source mutation, stream exhaustion, cleanup and allocation timing matching the eager ordinary-loop law, on O0, O1, O2 and at compile time. Proof: `jet test Compiler --profile golden --filter Collections/FromIter` and `jet test Compiler --profile cases --filter yielding_loop_` on every tier. (was #3329 c11)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:15.245Z"
+          "at": "2026-11-16T01:15:55.442Z"
         },
         {
           "n": 29,
-          "text": "(was #3329 c12)",
+          "text": "No duplicate terminal or iterator mechanism: collect and to_list are List terminals, every other destination goes through FromIterator (Set.from, Map construction, typed collection heads), and lazy work uses the existing adapters. Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` lists no second terminal. (was #3329 c12)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:17.660Z"
+          "at": "2026-11-16T01:15:56.439Z"
         },
         {
           "n": 30,
-          "text": "(was #3329 c24)",
+          "text": "`List.group_by` covers key changes, comparer order, a missing group, duplicate and empty keys and removal of an emptied group, on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter collections/group_by`. (was #3329 c24)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:23.546Z"
+          "at": "2026-11-16T01:15:57.588Z"
         }
       ],
       "refs": [],
@@ -109605,7 +109605,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:16:57.357Z",
-      "updated": "2026-11-16T00:38:23.546Z",
+      "updated": "2026-11-16T01:15:57.588Z",
       "updatedBy": "Main",
       "criteriaLastN": 30
     },
@@ -109744,12 +109744,12 @@
         },
         {
           "n": 13,
-          "text": "(was #3236 c14)",
+          "text": "Every format keeps its exact wire categories, malformed and limit behaviour and lossless subset, and selective and streaming readers mean the same as full decoding: a fixture table for non-string keys, tags, bytes, numbers and variants (typed against DataTree) is in Docs/spec/encoding-decisions.md. Proof: `jet test Compiler --profile golden --filter serde/datatree_losslessness`. (was #3236 c14)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:34:47.208Z"
+          "at": "2026-11-16T01:15:58.563Z"
         },
         {
           "n": 14,
@@ -109773,7 +109773,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:19:44.267Z",
-      "updated": "2026-11-16T00:36:43.888Z",
+      "updated": "2026-11-16T01:15:58.563Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -224525,6 +224525,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T01:15:58.563Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0pdkpef",
+      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3236 c14)"
+    },
+    {
+      "at": "2026-11-16T01:15:57.588Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#30: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c24)"
+    },
+    {
+      "at": "2026-11-16T01:15:56.439Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#29: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c12)"
+    },
+    {
+      "at": "2026-11-16T01:15:55.442Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#28: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c11)"
+    },
+    {
+      "at": "2026-11-16T01:15:54.167Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#27: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c8)"
+    },
+    {
+      "at": "2026-11-16T01:15:52.801Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#26: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c7)"
+    },
+    {
+      "at": "2026-11-16T01:15:51.611Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#25: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c6)"
+    },
+    {
+      "at": "2026-11-16T01:15:50.271Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#24: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c3)"
+    },
+    {
+      "at": "2026-11-16T01:15:49.092Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#23: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c2)"
+    },
+    {
+      "at": "2026-11-16T01:15:48.149Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#22: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c1)"
+    },
+    {
+      "at": "2026-11-16T01:15:47.185Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#21: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3317 c19)"
+    },
+    {
+      "at": "2026-11-16T01:15:46.107Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#20: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3317 c15)"
+    },
+    {
+      "at": "2026-11-16T01:15:45.067Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#19: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3317 c13)"
+    },
+    {
+      "at": "2026-11-16T01:15:44.046Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#18: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3317 c12)"
+    },
+    {
+      "at": "2026-11-16T01:15:43.060Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#17: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3317 c11)"
+    },
+    {
+      "at": "2026-11-16T01:15:42.096Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#16: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3317 c9)"
+    },
+    {
+      "at": "2026-11-16T01:15:41.125Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#15: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3317 c6)"
+    },
+    {
+      "at": "2026-11-16T01:15:40.149Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#14: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3317 c5)"
+    },
+    {
+      "at": "2026-11-16T01:15:39.199Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3317 c4)"
+    },
+    {
+      "at": "2026-11-16T01:15:38.237Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00zrgpr",
+      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3317 c1)"
+    },
+    {
+      "at": "2026-11-16T01:15:37.217Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0zii3oj",
+      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3549 c17)"
+    },
+    {
+      "at": "2026-11-16T01:15:36.257Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0zii3oj",
+      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3549 c11)"
+    },
+    {
+      "at": "2026-11-16T01:15:35.287Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0zii3oj",
+      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3549 c3)"
+    },
+    {
+      "at": "2026-11-16T01:15:34.348Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0jjbpij",
+      "note": "#31: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6615 c5)"
+    },
+    {
+      "at": "2026-11-16T01:15:33.414Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0jjbpij",
+      "note": "#30: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5073 c5)"
+    },
     {
       "at": "2026-11-16T01:15:32.137Z",
       "by": "Main",
