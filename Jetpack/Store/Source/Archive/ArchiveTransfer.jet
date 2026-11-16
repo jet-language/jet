@@ -6,6 +6,13 @@
 // been decoded, authenticated, and re-hashed in quarantine. Every operation
 // that reads or changes the Hangar holds the `hangar` runtime lock for its
 // whole snapshot.
+use {
+    files: core.files
+    sys: core.sys
+    process: core.process
+    time: core.time
+    random: core.crypto.random
+}
 
 // Export a package closure into the canonical signed archive.
 store_export_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, include_closure: Bool, key: String?) -> (bytes: [U8], report: HangarArchiveReport) StoreError! {

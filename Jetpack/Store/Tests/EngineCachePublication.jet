@@ -1,3 +1,9 @@
+use {
+    json: core.encoding.json
+    files: core.files
+    sys: core.sys
+}
+
 // PENDING-SEAM(package-tests): no runtime/reference proof claimed.
 engine_cache_ingest: fn(verification: &StoreVerification, roots: HangarRoots, name: String, reference: String, source: String, identity: CacheIdentity, refs: [String], provenance: String) -> StoreEntry {
     result: store_ingest_tree(verification, roots, IngestRequest{name: name, version: "1", reference: reference, cache_identity: identity, references: refs, outputs: [String:String]{"out": source}, signature: "", provenance: provenance, platform_artifact_kind: ""}) ?? panic("real ingest")

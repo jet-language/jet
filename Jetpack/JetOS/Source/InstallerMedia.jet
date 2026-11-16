@@ -1,3 +1,8 @@
+use {
+    files: core.files
+    foundation_paths: core.files.path
+}
+
 // Every installer payload file is copied by jetos_copy_file_replace.
 jetos_render_installed_limine_conf: fn(system: SystemPlan, generation: JetOSGeneration) -> String Never! {
     "timeout: 1\nserial: yes\ngraphics: no\nverbose: yes\n/{jetos_release_label(false)} — {system.name} verify\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=verify jetos.host={system.name} jetos.generation={generation.name} root=LABEL=jetos-root rw\n"
