@@ -381,37 +381,28 @@ IRCompilerOwnedEnum: struct {
     variants: [String]
 }
 
-// Compiler-owned runtime enums (`IOError`, `Key`, `DataEvent`, ...)
-// are checked values with no Jet declaration. Each joins every program as one
-// row under its bare canonical key, so an enum literal, a variant pattern and
-// the backends name the same IR type as the Rust runtime does.
+// Compiler-owned runtime enums (`IOError`, `Key`, `DataEvent`, ...). Each
+// joins every program as one row under its bare canonical key, so an enum
+// literal, a variant pattern and the backends name the same IR type as the
+// Rust runtime does. A Core enum with only unit cases has no row here: its
+// CORE_ENUM_CASE_ROWS row (its Core.rows case list) stands in when no single
+// Core declaration of it is loaded. The Core-declared families still here
+// carry payloads that row can't hold, or, like WatchKind, have no Core.rows
+// case list while a record every program holds names them.
 IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
-    {name: "Overflow", variants: [String]{"Block", "DropNewest", "DropOldest"}},
-    {name: "FailurePolicy", variants: [String]{"StopFirst", "Collect", "Log", "Ignore"}},
-    {name: "HookPolicy", variants: [String]{"FirstCancelElseTransform"}},
     {name: "HookOutcome", variants: [String]{"Continue", "Cancel", "Fail"}},
     {name: "HookDecision", variants: [String]{"Continue", "Transform", "Cancel", "Fail"}},
-    {name: "DispatchState", variants: [String]{"Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded"}},
     {name: "DispatchFailure", variants: [String]{"Handler", "Panic"}},
     {name: "Ordering", variants: [String]{"Less", "Equal", "Greater"}},
     {name: "RemoveBy", variants: [String]{"Val", "Slot"}},
-    {name: "TaskStatus", variants: [String]{"Running", "Paused", "CancelRequested"}},
     {name: "TaskPauseMode", variants: [String]{"WaitPoints", "CheckLoops"}},
-    {name: "DeliveryState", variants: [String]{"Pending", "Accepted", "Delivering", "Delivered", "DeadLettered", "Cancelled"}},
     {name: "IOError", variants: [String]{"InvalidInput", "NotFound", "PermissionDenied", "TimedOut", "Cancelled", "Closed", "Protocol", "Other", "ResourceLimit", "AlreadyExists", "Unsupported"}},
     {name: "Key", variants: [String]{"Char", "Enter", "Escape", "Backspace", "Tab", "Delete", "Up", "Down", "Left", "Right", "F", "Ctrl", "Unknown"}},
     {name: "DurationUnit", variants: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}},
-    {name: "DataLoaderKind", variants: [String]{"File", "URL", "Database", "Value"}},
-    {name: "DataErrorKind", variants: [String]{"Decode", "Limit", "IO", "Empty", "InvalidArgument", "NonFinite", "Overflow", "State", "Bridge", "Unsupported", "DuplicateKey", "MissingKey", "WrongOwner", "StaleRevision", "InvalidValue"}},
-    {name: "DataFormat", variants: [String]{"CSV", "JSON", "JSONL", "Parquet", "Arrow"}},
-    {name: "DataFreshness", variants: [String]{"Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"}},
-    {name: "DataInvalidationCause", variants: [String]{"NoCause", "Loader", "Input", "ArchiveMember", "Parameters", "Credential", "Capability", "Manual"}},
     {name: "Dyn", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}},
     {name: "DataEvent", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"}},
-    {name: "XMLCanonicalMode", variants: [String]{"Inclusive11", "Exclusive10"}},
     {name: "NetDNSError", variants: [String]{"NotFound", "Failure"}},
     {name: "NetError", variants: [String]{"InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable", "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout", "Cancelled", "Unsupported", "TLS", "Protocol", "Other", "DNS"}},
-    {name: "WatchDomain", variants: [String]{"File", "Process", "Port"}},
     {name: "WatchKind", variants: [String]{"Created", "Modified", "Removed", "Error", "Exited", "Ready"}},
     {name: "WsError", variants: [String]{"InvalidURL", "InvalidHandshake", "Protocol", "Timeout", "Closed", "Cancelled", "UnsupportedTarget", "MessageTooLarge", "IO"}},
     // The closed reflection detail menus sema types fact reads with
