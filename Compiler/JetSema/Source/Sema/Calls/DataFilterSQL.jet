@@ -28,6 +28,7 @@ use jet_foundation.[
     TTypeDef,
     Type,
     UnOp,
+    owned_trait_codec_names,
 ]
 
 // The column a table keeps the stored row in; each field column's name is
@@ -114,7 +115,11 @@ sema_data_filter_fields: fn(row: Type, environment: SemaScopeEnvironment, progra
 // Whether `definition` has derived codecs, which store each field under
 // its name.
 sema_data_filter_derived: fn(definition: TTypeDef) -> Bool Never! {
-    sema_serde_has_name(definition.derives, "Codable") || (sema_serde_has_name(definition.derives, "Encode") && sema_serde_has_name(definition.derives, "Decode"))
+    if sema_serde_has_name(definition.derives, "Codable") -> return true
+    loop codec in owned_trait_codec_names() {
+        if !sema_serde_has_name(definition.derives, codec) -> return false
+    }
+    true
 }
 
 // Whether a `migration` block names `type_name` in any module: a table may
