@@ -46,14 +46,14 @@ def peak_kib(value: int) -> int:
 
 def jet_source(case: str, size: int) -> str:
     if case == "creation":
-        producer = """empty: fn() => Stream<Int> {
+        producer = """empty: fn() -> Stream<Int> {
 }"""
         body = """loop value in empty() {
             break
         }"""
         expected = expected_stdout(case, size)
     elif case == "pull":
-        producer = """one: fn() => Stream<Int> {
+        producer = """one: fn() -> Stream<Int> {
     yield 1
 }"""
         body = """loop value in one() {
@@ -61,7 +61,7 @@ def jet_source(case: str, size: int) -> str:
         }"""
         expected = expected_stdout(case, size)
     elif case == "early_close":
-        producer = """many: fn() => Stream<Int> {
+        producer = """many: fn() -> Stream<Int> {
     yield 1
     yield 2
 }"""

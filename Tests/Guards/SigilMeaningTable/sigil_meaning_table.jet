@@ -1,0 +1,323 @@
+// The sigil meaning table: every sigil the lexer reads has a row for each
+// place it stands in, and a sigil has one meaning in each place. Power and
+// exclusive-or left `^`, so `^` and `^=` are free; `&&` before a type takes
+// the value for good; the integer bits are `&`, `|`, `~` and `&~`, with `~`
+// before a value its complement. The tests check the lexer against the table:
+// each row's spelling lexes as its one token, and each token the lexer makes
+// from sigil characters has a row. A new sigil token, a second meaning in one
+// place, or a meaning for a free sigil fails here until its row changes.
+use jet_lexer.[
+    lex,
+    TOKEN_AMP,
+    TOKEN_AMP_EQ,
+    TOKEN_AMP_TILDE,
+    TOKEN_AMP_TILDE_EQ,
+    TOKEN_AND_AND,
+    TOKEN_AT,
+    TOKEN_BANG,
+    TOKEN_BLOCK_COMMENT,
+    TOKEN_CARET,
+    TOKEN_CARET_EQ,
+    TOKEN_COLON,
+    TOKEN_COLON_COLON,
+    TOKEN_COLON_EQ,
+    TOKEN_COMMA,
+    TOKEN_COMPARE,
+    TOKEN_DOLLAR,
+    TOKEN_DOT,
+    TOKEN_DOT_DOT,
+    TOKEN_DOT_DOT_DOT,
+    TOKEN_DOT_DOT_LT,
+    TOKEN_EQ,
+    TOKEN_EQ_EQ,
+    TOKEN_FENCE_CLOSE,
+    TOKEN_FENCE_OPEN,
+    TOKEN_GE,
+    TOKEN_GT,
+    TOKEN_HASH,
+    TOKEN_LBRACE,
+    TOKEN_LBRACKET,
+    TOKEN_LE,
+    TOKEN_LINE_COMMENT,
+    TOKEN_LPAREN,
+    TOKEN_LT,
+    TOKEN_LT_GT,
+    TOKEN_MINUS,
+    TOKEN_MINUS_EQ,
+    TOKEN_MINUS_MINUS,
+    TOKEN_NOT_EQ,
+    TOKEN_OR_OR,
+    TOKEN_PERCENT,
+    TOKEN_PERCENT_EQ,
+    TOKEN_PERCENT_PERCENT,
+    TOKEN_PERCENT_PERCENT_EQ,
+    TOKEN_PIPE,
+    TOKEN_PIPE_EQ,
+    TOKEN_PIPE_GT,
+    TOKEN_PLUS,
+    TOKEN_PLUS_EQ,
+    TOKEN_PLUS_PLUS,
+    TOKEN_QUESTION,
+    TOKEN_QUESTION_DOT,
+    TOKEN_QUESTION_QUESTION,
+    TOKEN_RBRACE,
+    TOKEN_RBRACKET,
+    TOKEN_RPAREN,
+    TOKEN_SEMI,
+    TOKEN_SHL,
+    TOKEN_SHL_EQ,
+    TOKEN_SHR,
+    TOKEN_SHR_EQ,
+    TOKEN_SLASH,
+    TOKEN_SLASH_EQ,
+    TOKEN_SLASH_PERCENT,
+    TOKEN_SLASH_PERCENT_EQ,
+    TOKEN_STAR,
+    TOKEN_STAR_EQ,
+    TOKEN_TILDE,
+    TOKEN_TILDE_EQ,
+    TOKEN_TILDE_PIPE,
+    TOKEN_TILDE_PIPE_EQ,
+    TOKEN_TILDE_TILDE,
+    TOKEN_UNIFIED_ARROW,
+]
+
+// Where a sigil stands: between two values (Infix), before a value or a name
+// (Prefix), after a value (Postfix), standing alone as a value (Value), in a
+// type or a signature (Type), inside an effect row `-[…]>` (Effects), in a
+// pattern (Pattern), after the name or place a statement starts with
+// (Statement), or shaping the code around it as a bracket, separator or arrow
+// (Punctuation). A Free sigil has no meaning: no rule reads it, so it is an
+// ordinary parse error.
+SigilPlace: enum {
+    Infix
+    Prefix
+    Postfix
+    Value
+    Type
+    Effects
+    Pattern
+    Statement
+    Punctuation
+    Free
+}
+
+// One meaning of a sigil: its spelling, the token kind the lexer reads it as,
+// the place the meaning holds in, and the meaning.
+SigilMeaning: struct {
+    spelling: String
+    kind: Int
+    place: SigilPlace
+    meaning: String
+}
+
+SIGIL_MEANINGS: [SigilMeaning]{
+    {spelling: "(", kind: TOKEN_LPAREN, place: .Punctuation, meaning: "opens a call's arguments, a parameter list or a group"},
+    {spelling: ")", kind: TOKEN_RPAREN, place: .Punctuation, meaning: "closes what `(` opened"},
+    {spelling: "[", kind: TOKEN_LBRACKET, place: .Punctuation, meaning: "opens a list, a list type, an index or a slice"},
+    {spelling: "]", kind: TOKEN_RBRACKET, place: .Punctuation, meaning: "closes what `[` opened"},
+    {spelling: "{{", kind: TOKEN_LBRACE, place: .Punctuation, meaning: "opens a block, a body, a table or a value's fields"},
+    {spelling: "}}", kind: TOKEN_RBRACE, place: .Punctuation, meaning: "closes what `{{` opened"},
+    {spelling: ",", kind: TOKEN_COMMA, place: .Punctuation, meaning: "separates the items of a list, a call, a parameter list or a value's fields"},
+    {spelling: ";", kind: TOKEN_SEMI, place: .Punctuation, meaning: "ends a statement; the lexer writes it at each line end, and source never does"},
+    {spelling: ".", kind: TOKEN_DOT, place: .Infix, meaning: "reads a member: a field, a method or a module's item, or several at once with `.[`"},
+    {spelling: ".", kind: TOKEN_DOT, place: .Prefix, meaning: "names an enum case where the type is known: `.Red`"},
+    {spelling: ":", kind: TOKEN_COLON, place: .Statement, meaning: "binds or declares the name before it: `limit: 100`, `area: fn(r: Float) -> Float`"},
+    {spelling: ":", kind: TOKEN_COLON, place: .Punctuation, meaning: "separates a label, a field, a key or a bound from its value: `f(x: 1)`, `<T: Ord>`"},
+    {spelling: ":=", kind: TOKEN_COLON_EQ, place: .Statement, meaning: "binds a name whose value can change later with `=`"},
+    {spelling: "=", kind: TOKEN_EQ, place: .Statement, meaning: "gives a mutable name or a place a new value"},
+    {spelling: "=", kind: TOKEN_EQ, place: .Punctuation, meaning: "after a foreign function's signature, names the symbol it binds"},
+    {spelling: "::", kind: TOKEN_COLON_COLON, place: .Free, meaning: "the retired declaration binding; a declaration is `name: value`"},
+    {spelling: "->", kind: TOKEN_UNIFIED_ARROW, place: .Punctuation, meaning: "points to a result: a function's result type, or the value of a lambda, an arm or a loop body"},
+    {spelling: "?", kind: TOKEN_QUESTION, place: .Type, meaning: "`T?` is an optional `T`: a `T` or nothing"},
+    {spelling: "?", kind: TOKEN_QUESTION, place: .Postfix, meaning: "`call()?(\"note\")` adds a note to any failure that passes through the call"},
+    {spelling: "?.", kind: TOKEN_QUESTION_DOT, place: .Infix, meaning: "reads a member only when the optional value is there"},
+    {spelling: "??", kind: TOKEN_QUESTION_QUESTION, place: .Infix, meaning: "supplies what to use when the left side is missing or failed"},
+    {spelling: "!", kind: TOKEN_BANG, place: .Prefix, meaning: "flips a Bool"},
+    {spelling: "!", kind: TOKEN_BANG, place: .Type, meaning: "`E!` names the errors a function can fail with"},
+    {spelling: "!", kind: TOKEN_BANG, place: .Effects, meaning: "denies an effect: `-[!FS]>`"},
+    {spelling: "+", kind: TOKEN_PLUS, place: .Infix, meaning: "adds two numbers"},
+    {spelling: "-", kind: TOKEN_MINUS, place: .Infix, meaning: "subtracts the right number from the left one"},
+    {spelling: "-", kind: TOKEN_MINUS, place: .Prefix, meaning: "negates a number"},
+    {spelling: "-", kind: TOKEN_MINUS, place: .Type, meaning: "with `[`, opens a signature's effect row: `-[FS]>`"},
+    {spelling: "*", kind: TOKEN_STAR, place: .Infix, meaning: "multiplies two numbers"},
+    {spelling: "*", kind: TOKEN_STAR, place: .Punctuation, meaning: "alone in a parameter list, starts the parameters callers must name"},
+    {spelling: "/", kind: TOKEN_SLASH, place: .Infix, meaning: "divides; whole numbers drop the fraction"},
+    {spelling: "/", kind: TOKEN_SLASH, place: .Punctuation, meaning: "alone in a parameter list, ends the parameters callers pass by position"},
+    {spelling: "/%", kind: TOKEN_SLASH_PERCENT, place: .Infix, meaning: "divides whole numbers, rounding down"},
+    {spelling: "%", kind: TOKEN_PERCENT, place: .Infix, meaning: "modulo: the answer takes the divisor's sign"},
+    {spelling: "%%", kind: TOKEN_PERCENT_PERCENT, place: .Infix, meaning: "remainder: the answer takes the dividend's sign"},
+    {spelling: "==", kind: TOKEN_EQ_EQ, place: .Infix, meaning: "true when the values are equal"},
+    {spelling: "!=", kind: TOKEN_NOT_EQ, place: .Infix, meaning: "true when the values differ"},
+    {spelling: "<", kind: TOKEN_LT, place: .Infix, meaning: "true when the left value is smaller"},
+    {spelling: "<", kind: TOKEN_LT, place: .Type, meaning: "opens a list of type arguments or type parameters"},
+    {spelling: ">", kind: TOKEN_GT, place: .Infix, meaning: "true when the left value is larger"},
+    {spelling: ">", kind: TOKEN_GT, place: .Type, meaning: "closes what `<` or `-[` opened: type arguments or an effect row"},
+    {spelling: "<=", kind: TOKEN_LE, place: .Infix, meaning: "true when the left value is smaller or equal"},
+    {spelling: ">=", kind: TOKEN_GE, place: .Infix, meaning: "true when the left value is larger or equal"},
+    {spelling: "<=>", kind: TOKEN_COMPARE, place: .Infix, meaning: "compares two values in one step, giving an `Ordering`"},
+    {spelling: "<<", kind: TOKEN_SHL, place: .Infix, meaning: "shifts an integer's bits left"},
+    {spelling: ">>", kind: TOKEN_SHR, place: .Infix, meaning: "shifts an integer's bits right"},
+    {spelling: ">>", kind: TOKEN_SHR, place: .Type, meaning: "closes two lists of type arguments at once"},
+    {spelling: "&&", kind: TOKEN_AND_AND, place: .Infix, meaning: "true when both conditions are; the right one runs only when the left is true"},
+    {spelling: "&&", kind: TOKEN_AND_AND, place: .Type, meaning: "`&&T` and `&&self` take the value for good"},
+    {spelling: "&&", kind: TOKEN_AND_AND, place: .Prefix, meaning: "`task &&name` moves the value into the task"},
+    {spelling: "||", kind: TOKEN_OR_OR, place: .Infix, meaning: "true when either condition is; the right one runs only when the left is false"},
+    {spelling: "&", kind: TOKEN_AMP, place: .Infix, meaning: "bitwise and of two integers"},
+    {spelling: "&", kind: TOKEN_AMP, place: .Type, meaning: "`&T` and `&self` let the function change the caller's value"},
+    {spelling: "&", kind: TOKEN_AMP, place: .Prefix, meaning: "marks a place written through: `&items.push(x)`, `edit: &values[0..2]`"},
+    {spelling: "|", kind: TOKEN_PIPE, place: .Infix, meaning: "bitwise or of two integers"},
+    {spelling: "|", kind: TOKEN_PIPE, place: .Type, meaning: "either alternative type"},
+    {spelling: "|", kind: TOKEN_PIPE, place: .Pattern, meaning: "either alternative matches"},
+    {spelling: "~", kind: TOKEN_TILDE, place: .Infix, meaning: "bitwise exclusive-or of two integers"},
+    {spelling: "~", kind: TOKEN_TILDE, place: .Prefix, meaning: "the complement of an integer: exclusive-or with all ones"},
+    {spelling: "&~", kind: TOKEN_AMP_TILDE, place: .Infix, meaning: "clears bits: `a &~ b` is `a & ~b`"},
+    {spelling: "^", kind: TOKEN_CARET, place: .Free, meaning: "neither power nor exclusive-or: power is `.pow(n)` and exclusive-or is `~`"},
+    {spelling: "^=", kind: TOKEN_CARET_EQ, place: .Free, meaning: "free as `^` is; the exclusive-or update is `~=`"},
+    {spelling: "~|", kind: TOKEN_TILDE_PIPE, place: .Free, meaning: "the retired exclusive-or; it is `~`"},
+    {spelling: "~|=", kind: TOKEN_TILDE_PIPE_EQ, place: .Free, meaning: "the retired exclusive-or update; it is `~=`"},
+    {spelling: "~~", kind: TOKEN_TILDE_TILDE, place: .Free, meaning: "the retired trait attach; a method outside its type is `Type.method: fn`"},
+    {spelling: "++", kind: TOKEN_PLUS_PLUS, place: .Free, meaning: "no increment; write `x += 1`"},
+    {spelling: "--", kind: TOKEN_MINUS_MINUS, place: .Free, meaning: "no decrement; write `x -= 1`"},
+    {spelling: "+=", kind: TOKEN_PLUS_EQ, place: .Statement, meaning: "adds in place: `x += 1` is `x = x + 1`"},
+    {spelling: "-=", kind: TOKEN_MINUS_EQ, place: .Statement, meaning: "subtracts in place: `x -= 1` is `x = x - 1`"},
+    {spelling: "*=", kind: TOKEN_STAR_EQ, place: .Statement, meaning: "multiplies in place: `x *= 2` is `x = x * 2`"},
+    {spelling: "/=", kind: TOKEN_SLASH_EQ, place: .Statement, meaning: "divides in place: `x /= 2` is `x = x / 2`"},
+    {spelling: "/%=", kind: TOKEN_SLASH_PERCENT_EQ, place: .Statement, meaning: "divides in place, rounding down: `x /%= 2` is `x = x /% 2`"},
+    {spelling: "%=", kind: TOKEN_PERCENT_EQ, place: .Statement, meaning: "takes the modulo in place: `x %= 3` is `x = x % 3`"},
+    {spelling: "%%=", kind: TOKEN_PERCENT_PERCENT_EQ, place: .Statement, meaning: "takes the remainder in place: `x %%= 3` is `x = x %% 3`"},
+    {spelling: "&=", kind: TOKEN_AMP_EQ, place: .Statement, meaning: "keeps only the bits of a mask: `x &= m` is `x = x & m`"},
+    {spelling: "|=", kind: TOKEN_PIPE_EQ, place: .Statement, meaning: "sets the bits of a mask: `x |= m` is `x = x | m`"},
+    {spelling: "~=", kind: TOKEN_TILDE_EQ, place: .Statement, meaning: "flips the bits of a mask: `x ~= m` is `x = x ~ m`"},
+    {spelling: "&~=", kind: TOKEN_AMP_TILDE_EQ, place: .Statement, meaning: "clears the bits of a mask: `x &~= m` is `x = x &~ m`"},
+    {spelling: "<<=", kind: TOKEN_SHL_EQ, place: .Statement, meaning: "shifts left in place: `x <<= 1` is `x = x << 1`"},
+    {spelling: ">>=", kind: TOKEN_SHR_EQ, place: .Statement, meaning: "shifts right in place: `x >>= 1` is `x = x >> 1`"},
+    {spelling: "..", kind: TOKEN_DOT_DOT, place: .Infix, meaning: "a range from the first value to the last, both included"},
+    {spelling: "..", kind: TOKEN_DOT_DOT, place: .Pattern, meaning: "stands for the items a list, map or field pattern leaves out: `[first, ..rest]`"},
+    {spelling: "..<", kind: TOKEN_DOT_DOT_LT, place: .Infix, meaning: "a range that stops just before the last value"},
+    {spelling: "...", kind: TOKEN_DOT_DOT_DOT, place: .Prefix, meaning: "spreads a list's items in place: `f(...xs)`, `[...a, x]`"},
+    {spelling: "...", kind: TOKEN_DOT_DOT_DOT, place: .Type, meaning: "`name: ...T` collects any number of arguments into a list"},
+    {spelling: "@", kind: TOKEN_AT, place: .Prefix, meaning: "puts a new value behind a live link and gives the link"},
+    {spelling: "@", kind: TOKEN_AT, place: .Type, meaning: "`@T` is a live link to a `T`"},
+    {spelling: "#", kind: TOKEN_HASH, place: .Prefix, meaning: "applies a marker, `#Test`, or pastes a template binding, `#{{name}}`"},
+    {spelling: "#", kind: TOKEN_HASH, place: .Type, meaning: "`[T#N]` is a list of exactly N items"},
+    {spelling: "$", kind: TOKEN_DOLLAR, place: .Prefix, meaning: "reads an environment variable in a config surface, `$HOME`; program source has none"},
+    {spelling: "<:", kind: TOKEN_FENCE_OPEN, place: .Punctuation, meaning: "opens a fence: the statement repeats once for each entry"},
+    {spelling: ":>", kind: TOKEN_FENCE_CLOSE, place: .Punctuation, meaning: "closes the fence `<:` opened"},
+    {spelling: "|>", kind: TOKEN_PIPE_GT, place: .Infix, meaning: "starts a pipe step: the expression after it runs on the value of the line above"},
+    {spelling: "<>", kind: TOKEN_LT_GT, place: .Value, meaning: "the value the expression is run with: the line above in a `|>` step, or each arm's candidate in an `if` table header"},
+}
+
+// The characters a sigil is spelled with. Letters, digits and `_` start
+// words and numbers, quotes and the backtick start text, and `\` is no
+// token, so none of them can start a sigil.
+SIGIL_CHARACTERS: "!#$%&()*+,-./:;<=>?@[]^{{|}}~"
+
+// The longest sigil, in bytes. The completeness test lexes every spelling up
+// to this length, so a longer sigil needs it raised.
+SIGIL_LONGEST: 3
+
+// The one token the lexer reads `spelling` as, or None when it reads more or
+// fewer tokens than one or reports a problem. The terminators the lexer
+// writes have no width, so they never count.
+sigil_meaning_token: fn(spelling: String) -> Int? {
+    lexed: lex(spelling.bytes())
+    if !lexed.diagnostics.is_empty() -> return None
+    found := [Int]{}
+    loop token in lexed.tokens {
+        if token.span.end > token.span.start {
+            if token.span.start != 0 || token.span.end != spelling.bytes().len() -> return None
+            found.push(token.kind)
+        }
+    }
+    if found.len() == 1 -> Val(found[0]) else -> None
+}
+
+// Every spelling of one to SIGIL_LONGEST sigil characters.
+sigil_meaning_spellings: fn() -> [String] {
+    singles := [String]{}
+    loop byte in SIGIL_CHARACTERS.bytes() -> singles.push(String.from_bytes_lossy([U8]{byte}))
+    out := [String]{}
+    shorter := [String]{""}
+    loop _ in 0..<SIGIL_LONGEST {
+        longer := [String]{}
+        loop head in shorter {
+            loop tail in singles {
+                out.push("{head}{tail}")
+                longer.push("{head}{tail}")
+            }
+        }
+        shorter = longer
+    }
+    out
+}
+
+sigil_meaning_has: fn(spelling: String, place: SigilPlace) -> Bool {
+    SIGIL_MEANINGS.any(fn(row) { row.spelling == spelling && row.place == place })
+}
+
+sigil_meaning_rows: fn(spelling: String) -> Int {
+    SIGIL_MEANINGS.filter(fn(row) { row.spelling == spelling }).len()
+}
+
+#Test("sigil_meaning_table rows lex as their tokens") {
+    failures := [String]{}
+    loop row in SIGIL_MEANINGS {
+        if row.spelling.bytes().len() > SIGIL_LONGEST {
+            failures.push("`{row.spelling}` is longer than SIGIL_LONGEST")
+        }
+        if row.meaning.is_empty() -> failures.push("`{row.spelling}` has an empty meaning")
+        if (sigil_meaning_token(row.spelling) ?? -1) != row.kind {
+            failures.push("the lexer does not read `{row.spelling}` as the one token its row names")
+        }
+    }
+    assert(failures.is_empty(), "sigil meaning rows the lexer disagrees with:\n{failures.join("\n")}")
+}
+
+#Test("sigil_meaning_table has a row for every sigil the lexer reads") {
+    failures := [String]{}
+    loop spelling in sigil_meaning_spellings() {
+        kind: sigil_meaning_token(spelling) ?? next
+        if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> next
+        if sigil_meaning_rows(spelling) == 0 {
+            failures.push("`{spelling}` lexes as token kind {kind} and has no row")
+        }
+    }
+    assert(failures.is_empty(), "sigils without a meaning row (add each to SIGIL_MEANINGS):\n{failures.join("\n")}")
+}
+
+#Test("sigil_meaning_table gives a sigil one meaning in each place") {
+    failures := [String]{}
+    loop (index, row) in SIGIL_MEANINGS {
+        loop other in SIGIL_MEANINGS[0..<index] {
+            if other.spelling == row.spelling && other.place == row.place {
+                failures.push("`{row.spelling}` has two meanings in one place")
+            }
+            if other.spelling != row.spelling && other.kind == row.kind {
+                failures.push("`{other.spelling}` and `{row.spelling}` name one token kind")
+            }
+        }
+        if row.place == .Free && sigil_meaning_rows(row.spelling) != 1 {
+            failures.push("`{row.spelling}` is free and has a meaning")
+        }
+    }
+    assert(failures.is_empty(), "sigil meaning rows that overlap:\n{failures.join("\n")}")
+}
+
+#Test("sigil_meaning_table follows the sigil rulings") {
+    assert(sigil_meaning_has("^", .Free))
+    assert(sigil_meaning_has("^=", .Free))
+    assert(sigil_meaning_has("&&", .Type))
+    assert(sigil_meaning_has("&&", .Infix))
+    assert(sigil_meaning_has("&", .Type))
+    assert(sigil_meaning_has("&", .Infix))
+    assert(sigil_meaning_has("|", .Infix))
+    assert(sigil_meaning_has("~", .Infix))
+    assert(sigil_meaning_has("~", .Prefix))
+    assert(sigil_meaning_has("&~", .Infix))
+    assert(sigil_meaning_has("~=", .Statement))
+    assert(sigil_meaning_has("&~=", .Statement))
+    assert(sigil_meaning_has("!", .Prefix))
+    assert(!sigil_meaning_has("!", .Infix))
+    assert(!sigil_meaning_has("~", .Statement))
+}
