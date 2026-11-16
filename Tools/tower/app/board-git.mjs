@@ -5,7 +5,7 @@
 // never more than one batch behind the working copy. `tower board check`
 // proves that bound; `tower board commit` closes a batch early. Boards that
 // git does not track, or a checkout on another branch, are left alone.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { relative } from 'node:path';
 
 const gitEnv = () => {
@@ -54,7 +54,19 @@ export function commitBoard(dataDir, files, config, { rev, by }) {
   const commit = runGit(root, ['-c', 'core.hooksPath=/dev/null', 'commit', '--only', '-q', '-m', message, '--', ...paths]);
   if (commit.status !== 0) return { committed: null, reason: (commit.stderr || commit.stdout).trim() };
   const sha = runGit(root, ['rev-parse', 'HEAD']).stdout.trim();
+  pushBoard(root, branch);
   return { committed: sha, branch, paths, rev };
+}
+
+// The remote never lags the board: every board commit is pushed to origin at
+// once. Hooks are off for the commit, so no post-commit hook can do it. The
+// push runs detached so the writer holding the store lock never waits on the
+// network; a repository with no origin (tests, scratch boards) skips it.
+function pushBoard(root, branch) {
+  if (runGit(root, ['remote', 'get-url', 'origin']).status !== 0) return;
+  const child = spawn('git', ['-C', root, 'push', '-q', 'origin', branch], { detached: true, stdio: 'ignore', env: gitEnv() });
+  child.on('error', () => {});
+  child.unref();
 }
 
 // How far the committed board trails the working copy, in writes.
