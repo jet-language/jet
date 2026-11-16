@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110263,
+    "rev": 110275,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26079,6 +26079,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "p216: c3 and c5 met. Held: c4 (ui E0442 fails), c6 (golden profile not clean), c14 (ui dispatch_hole_header_not_bool snapshot). The fixes are with IfHole-6-1."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "Criteria c4, c5, c6, c14, c24 and c25 rewritten to D-IFHOLE2=A (ratified 2026-11-15): the hole is spelled `<>`, a plain `subject == {` table compares one value, effectful hole headers are refused (E0950), hole tables refuse pattern/range arms and need else when they give a value, and the missing-hole diagnostic is dropped. Order of work: the A respell and its refusals first, then c3/c4/c20 in the `<>` spelling."
         },
         {
@@ -26155,11 +26160,11 @@
         {
           "n": 3,
           "text": "Joined guards preserve ordinary &&/|| precedence and short-circuiting. Bool candidates, parenthesized alternatives, and OR bypass produce the documented results without nested if statements. Proof: `jet test Compiler --profile golden --filter IfHole/GuardPrecedence` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:52:55.919Z"
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile golden --filter IfHole/GuardPrecedence PASS on O0/O1/O2 (3/3)",
+          "at": "2026-11-16T16:45:22.847Z"
         },
         {
           "n": 4,
@@ -26173,11 +26178,11 @@
         {
           "n": 5,
           "text": "Under D-IFHOLE2=A a hole table refuses pattern and range arms (E0948), and a hole table that gives a value needs `else` (registered code, UI snapshot); a plain `subject == {` table keeps range matching, payload wildcards and safe bindings, and a plain table over an enum that lists every case needs no `else`. Proof: `jet test Compiler --profile cases --filter IfHole/pattern_slots`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:52:57.856Z"
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile cases --filter IfHole/pattern_slots PASS",
+          "at": "2026-11-16T16:45:24.535Z"
         },
         {
           "n": 6,
@@ -26326,9 +26331,9 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-11T12:59:34.979Z",
-      "updated": "2026-11-16T12:52:59.751Z",
+      "updated": "2026-11-16T16:45:52.582Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-16T11:33:28.325Z",
+      "claimedAt": "2026-11-16T16:45:52.582Z",
       "goals": [
         "G6"
       ],
@@ -27305,6 +27310,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "p216: the c8 series landed. CoreErrorFamily, CompilerOwnedTypeNames, ForInReaders, NetworkHandleMethods and enum_paths pass; held on bare_core_enums_carry_their_declared_payloads, encoding_parity, corelib_parts_encoding_streams, Guards/core_declarations, core_surface_ledger x2, dns_error and the imported_secret lint. Sent to GoalsA-1-4."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "Correction: at 16:07 Main met #12 and #14 by list position instead of criterion number, overwriting their evidence. Both were already met; their original evidence (p208 and p210 proofs) is restored. The intended criteria #16, #22, #23 and #24 are now met with the p215 proofs. #26 (the key_is_the_core_term regression) is GoalsA's."
         },
         {
@@ -27569,7 +27579,7 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T16:09:02.439Z",
+      "updated": "2026-11-16T16:45:55.200Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
@@ -103967,11 +103977,11 @@
         {
           "n": 3,
           "text": "An immutable `name: value` inside a block is computed while compiling whenever it can be and quietly falls back to run time for run-time inputs, outside effects, values that cannot be stored, or a step-limit stop; hover and `jet inspect` show the reason it fell back. Proof: `jet test Compiler --profile cases --filter comptime_fallback_reason`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:42.975Z"
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile cases --filter comptime_fallback_reason PASS (3/3); ui runtime_only_called_while_building PASS",
+          "at": "2026-11-16T16:45:30.743Z"
         },
         {
           "n": 4,
@@ -104103,7 +104113,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:42.975Z",
-      "updated": "2026-11-16T16:08:03.402Z",
+      "updated": "2026-11-16T16:45:30.743Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -104297,11 +104307,11 @@
         {
           "n": 7,
           "text": "One in-repo migration rewrites every marker, effect, fact and derive declaration and reject call in one cutover; no old spelling, alias, reader, teaching diagnostic or jet fix rule remains, and the golden, UI and cases compares lose 0 rows. Proof: `jet test Compiler --profile cases --filter decl_types_no_old_words`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:44.799Z"
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile cases --filter decl_types_no_old_words PASS",
+          "at": "2026-11-16T16:45:32.314Z"
         },
         {
           "n": 8,
@@ -104352,7 +104362,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:44.799Z",
-      "updated": "2026-11-16T16:08:02.454Z",
+      "updated": "2026-11-16T16:45:32.314Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -105358,29 +105368,29 @@
         {
           "n": 9,
           "text": "syntax-decisions.md, core-library.md and the syntax registry state one yielding-loop and collection-head rule: D-COMPREHEND1=A on top of D-COMPREHENSION1, D-LOOPEVAL1 and D-ARROW-CONTROL1, with no contradiction left. Proof: `jet test Tests/Guards --filter syntax_registry` passes and `git grep -n 'D-COMPREHEND1' -- Docs/Spec` shows the rule in both docs. (was #3329 c9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:02.084Z"
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Tests/Guards PASS (syntax_registry included); git grep D-COMPREHEND1 -- Docs/Spec: syntax-decisions.md, core-library.md, spec.md",
+          "at": "2026-11-16T16:45:26.163Z"
         },
         {
           "n": 10,
           "text": "A typed collection head takes a loop and builds that collection through FromIterator: `Set<String>{loop …}` and `[String: Int]{loop … -> k: v}`; a bare loop literal stays a list (D-COMPREHEND1=A). Proof: `jet test Compiler --profile golden --filter Collections/TypedLoopHeads` passes on o0, o1 and o2. (was #3329 c22)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:14:14.021Z"
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile golden --filter Collections/TypedLoopHeads PASS o0/o1/o2 (3/3)",
+          "at": "2026-11-16T16:45:27.661Z"
         },
         {
           "n": 11,
           "text": "Items and a loop never mix in one collection literal: the mix is a registered error with what/why/fix (D-COMPREHEND1=A). Proof: `jet test Compiler --profile ui --filter collection_literal_mixes_items_and_loop`. (was #3329 c23)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:14:14.958Z"
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile ui --filter collection_literal_mixes_items_and_loop PASS",
+          "at": "2026-11-16T16:45:29.125Z"
         },
         {
           "n": 12,
@@ -105412,7 +105422,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.039Z",
-      "updated": "2026-11-16T13:44:40.449Z",
+      "updated": "2026-11-16T16:45:29.125Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -105434,6 +105444,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p216 (efb3da4f6c): tidy_errors_run_vs_check, failure_arm_cannot_arrive and Guards pass, but c2 is held. Builds now fail on tidy errors, which broke golden Examples/Apps/UI/Surface.jet and Tests/Run/Net/ConsumingMethodDropsSelf.jet on o1/o2 (UnusedLocalBinding) and about 8 cases. Sent to IfHole-6-1."
+        },
         {
           "at": "2026-11-16",
           "by": "Main",
@@ -105512,7 +105527,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.937Z",
-      "updated": "2026-11-16T13:07:05.428Z",
+      "updated": "2026-11-16T16:45:49.928Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -106524,11 +106539,11 @@
         {
           "n": 14,
           "text": "Closing a live connection ends that account's presence on the screens it held: the runtime hub hands a leave signal back to Core (ws_hub_leave), so app.presence never counts a closed session. Proof: `jet test Compiler --profile cases --filter WebApp/presence_ends_when_the_connection_closes`, on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:21.748Z"
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile cases --filter WebApp/presence_ends_when_the_connection_closes PASS",
+          "at": "2026-11-16T16:45:33.926Z"
         }
       ],
       "refs": [],
@@ -106543,7 +106558,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-16T13:21:06.041Z",
+      "updated": "2026-11-16T16:45:33.926Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -220816,6 +220831,90 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T16:45:56.580Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0jx2ihu",
+      "note": "p216 landed, p217 running"
+    },
+    {
+      "at": "2026-11-16T16:45:55.200Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T16:45:52.583Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0p39lw2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T16:45:49.929Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gbe4aj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T16:45:33.926Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00cqn1l",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-16T16:45:32.314Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0255wk0",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-16T16:45:30.743Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07ywjvi",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T16:45:29.125Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01gyy9b",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-16T16:45:27.661Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01gyy9b",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-16T16:45:26.163Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01gyy9b",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-16T16:45:24.535Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0p39lw2",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-16T16:45:22.847Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0p39lw2",
+      "note": "#3"
+    },
+    {
       "at": "2026-11-16T16:09:22.819Z",
       "by": "Main",
       "action": "briefing.post",
@@ -225778,6 +225877,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0jx2ihu",
+      "title": "p216 landed, p217 running",
+      "body": "# p216 landed; p217 running\n\n**p216 landed** (dev efb3da4f6c, master 09fd548590) with 23 SUBs. The census was clean in every phase.\n\n**Suite:** 204 failures, 32 of them new and 3 fixed. Each new failure went back to its owner as one list:\n- IfHole: builds now fail on tidy errors, so unused bindings break O1/O2 builds of two examples. It also gets the hole-table snapshots.\n- GoalsA: Core-facts reads (payloads, encoding streams, the surface ledger, the DNS error, the secret lint) and the comptime policy case.\n- DeclTypes: the derive fixture and the marker snapshot. Its fix SUB is already queued for p218.\n\n**Met:** #3067 c3 c5, #6857 c9 c10 c11, #6847 c3, #6849 c7, #6868 c14.\n\n**Held:** #6858 c2 (tidy regressions), #3067 c4 c6 c14, #3147 c8, #6849 c3, #6847 c6, #6979 c2.\n\n**p217 is running** with 16 SUBs:\n- the p215 regression fixes;\n- the formatter-corpus cleanup;\n- DeclTypes' notice list and offline queue;\n- Speed-3-3's server HTML (#6812 b), page metadata (#6811 c1, merged with DeclTypes' Core.rows edit) and five p215 root fixes;\n- GoalsA's arrow-first signature sweep (#6857 c1 c2).\n",
+      "by": "Main",
+      "created": "2026-11-16T16:45:56.580Z",
+      "sections": []
+    },
     {
       "id": "briefing0r4qfmg",
       "title": "Cycle p215 landed: criteria met, 24 new failures sent back, p216 staged",
