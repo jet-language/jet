@@ -1,0 +1,73 @@
+# `jet new service|route|job|migration` in an app package writes the files
+# its explicit inputs name (a name, a route address, a migration's SQL), and
+# `--preview` prints each file with its text, then the receipt, and writes
+# nothing.
+env: NO_COLOR=1
+write: shop/package.jet = "name: \"shop\"\nversion: \"0.1.0\"\n"
+step: jet new service OrderBoard --preview
+cwd: {work}/shop
+exit: 0
+stdout: ~ "== Services/OrderBoard.jet\n// The OrderBoard service." # the preview names the file, then its text
+stdout: ~ "    #App.Public status: fn(self) -> String Never!" # the generated method
+stdout: ~ "== .jet/generated/service-order_board.receipt\njet new receipt 1\nkind: service\nname: order_board\nversion: 0\nstate: generated\nfile: " # then the receipt it would record
+file: shop/Services/OrderBoard.jet absent
+file: shop/.jet/generated/service-order_board.receipt absent
+step: jet new service order-board
+cwd: {work}/shop
+exit: 0
+stdout: = ""
+stderr: ~ "created Services/OrderBoard.jet\nrecorded .jet/generated/service-order_board.receipt\nundo: jet new service order-board --remove\n" # the files, the receipt and the undo command
+file: shop/Services/OrderBoard.jet ~ "use app\n\nOrderBoard: struct" # `order-board` names the type OrderBoard
+file: shop/Services/OrderBoard.jet ~ "\"Order board is up\"" # the status text names the service
+file: shop/.jet/generated/service-order_board.receipt ~ "state: generated\nfile: " # the receipt lists the file
+file: shop/.jet/generated/service-order_board.receipt ~ " Services/OrderBoard.jet\n" # by its package path
+step: jet new job SendDigest
+cwd: {work}/shop
+exit: 0
+stderr: ~ "created Jobs/SendDigest.jet" # a job is one file under Jobs/
+file: shop/Jobs/SendDigest.jet ~ "    #App.SignedIn enqueue_send_digest: fn(self, id: Int) -> Int Never!" # the call that queues the job
+file: shop/Jobs/SendDigest.jet ~ "app.enqueue(fn()" # queued through app.enqueue
+file: shop/Jobs/SendDigest.jet ~ "self.send_digest(id)" # as one call of the job method
+file: shop/Jobs/SendDigest.jet ~ "    #App.Job send_digest: fn(self, id: Int) -> Int Never!" # the job method itself
+step: jet new route --path /orders/:id
+cwd: {work}/shop
+exit: 0
+stderr: ~ "created Routes/Orders/[Id].jet" # each static part is a folder, a capture a [Name] part
+stderr: ~ "undo: jet new route --path /orders/:id --remove" # a route's undo names its address
+stderr: ~ "next: serve the page with `.routes(from: \"Routes\")` on the app" # no root file serves Routes/ yet
+file: shop/Routes/Orders/[Id].jet ~ "// The page at `/orders/:id`" # the page names its address
+file: shop/Routes/Orders/[Id].jet ~ "page: fn() -> WebPage" # one page per file
+step: jet new route OrderItems
+cwd: {work}/shop
+exit: 0
+stderr: ~ "created Routes/OrderItems.jet" # a route named without --path is at /order-items
+file: shop/Routes/OrderItems.jet ~ "// The page at `/order-items`" # the address its name gives
+step: jet new route --path /Orders
+cwd: {work}/shop
+exit: 2
+stderr: ~ "`/Orders` spells the part `orders` as `Orders`" # file routing answers only the canonical spelling
+step: jet new migration AddIndex --up 'CREATE INDEX orders_by_user ON orders (user_id)'
+cwd: {work}/shop
+exit: 0
+stderr: ~ "created Migrations/001_add_index.jet" # the first migration is version 1
+file: shop/Migrations/001_add_index.jet ~ "migrate_001_add_index: fn(scope: db.DBScope) -[DB, Time.Wait]> Int db.DBError!" # one migrate function named by version and name
+file: shop/Migrations/001_add_index.jet ~ "db.migrate(scope, \"001_add_index\"" # keyed by its version and name
+file: shop/Migrations/001_add_index.jet ~ "CREATE INDEX orders_by_user ON orders (user_id)" # the SQL as written
+file: shop/.jet/generated/migration-add_index.receipt ~ "version: 1\n" # the receipt records the version
+step: jet new migration AddColumn --up 'ALTER TABLE orders ADD COLUMN note TEXT'
+cwd: {work}/shop
+exit: 0
+stderr: ~ "created Migrations/002_add_column.jet" # the next migration is one past every earlier one
+step: jet new migration Bare
+cwd: {work}/shop
+exit: 2
+stderr: ~ "`jet new migration` needs its forward SQL in `--up`" # a migration's SQL is an explicit input
+step: jet new service OrderBoard
+cwd: {work}/shop
+exit: 1
+stderr: ~ "`jet new service OrderBoard` already generated Services/OrderBoard.jet" # a receipt in force refuses a second run
+step: jet new service Status --json
+cwd: {work}/shop
+exit: 0
+stdout: ~ "\"files\":[\"Services/Status.jet\"]" # the JSON status names the files
+stdout: ~ "\"receipt\":\".jet/generated/service-status.receipt\"" # and the receipt

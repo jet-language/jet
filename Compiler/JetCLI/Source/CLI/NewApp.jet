@@ -1,0 +1,521 @@
+// `jet new service|route|job|migration`: the generators of an app package.
+// Each writes its files from explicit inputs (a name, a route address, a
+// migration's forward SQL) into the package around the working directory,
+// formatted as `jet fmt` writes them, and records them in a receipt under
+// `.jet/generated/` with each file's SHA-256. `--preview` prints every file
+// and its contents and writes nothing; `--remove` deletes exactly the files
+// the receipt lists, and refuses, removing nothing, when one was edited
+// since. A migration keeps its version: generated again after a removal, it
+// reuses the number its receipt recorded.
+use {
+    cli_files: core.files
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
+    jet_foundation.[JET_CLI_FLAGS, app_route_file_address, sema_casing_acronym_name, sema_casing_pascal_words, sema_casing_split_words, sha256_hex]
+}
+
+// Whether `name` is the kind of an app generator, not a project name.
+jet_cli_new_app_kind: fn(name: String) -> Bool Never! {
+    name == "service" || name == "route" || name == "job" || name == "migration"
+}
+
+// Whether the generators read `flag`; every other flag the registry scopes
+// to `jet new` (JET_CLI_FLAGS) is another scaffold's.
+jet_cli_new_app_reads: fn(flag: String) -> Bool Never! {
+    flag == "--preview" || flag == "--remove" || flag == "--path" || flag == "--route" || flag == "--up"
+}
+
+JET_CLI_NEW_APP_RECEIPT_HEAD: "jet new receipt 1"
+
+// One generator run, decided from the command line alone.
+JetCLINewApp: struct {
+    kind: String
+    // The name as written; a route without one names itself by its address.
+    name: String
+    // The words of the name, lower-case (`OrderBoard` -> order, board).
+    words: [String]
+    // A route's address (`/orders/:id`), else "".
+    address: String
+    // A migration's forward SQL as the body of a Jet string literal, else "".
+    sql: String
+    preview: Bool
+    remove: Bool
+    quiet: Bool
+    json: Bool
+    color: Bool
+}
+
+// One generated file: its package-relative path and its text.
+JetCLINewAppFile: struct {
+    path: String
+    text: String
+}
+
+// A route address read as file routing reads files: the page file that
+// answers it, its receipt key and page title, or why the address can't be
+// one file's (`problem`, "" when it can).
+JetCLINewAppRoute: struct {
+    file: String
+    key: String
+    title: String
+    problem: String
+}
+
+// One file a receipt lists, with the SHA-256 of the text it was written with.
+JetCLINewAppEntry: struct {
+    hash: String
+    path: String
+}
+
+JetCLINewAppReceipt: struct {
+    state: String
+    version: Int
+    files: [JetCLINewAppEntry]
+}
+
+jet_cli_new_app_usage: fn(kind: String) -> String Never! {
+    if kind == {
+        "route" -> "jet new route [<Name>] [--path /orders/:id] [--preview|--remove]"
+        "migration" -> "jet new migration <Name> --up <SQL> [--preview|--remove]"
+        else -> "jet new {kind} <Name> [--preview|--remove]"
+    }
+}
+
+jet_cli_new_app_usage_fail: fn(kind: String, what: String, color: Bool) -> JetCLIPlan Never! {
+    jet_cli_fail("E2104", what, jet_cli_why("E2104"), "write it as `{jet_cli_new_app_usage(kind)}`", color, JET_DRIVER_EXIT_USAGE)
+}
+
+// Whether `flag` is written, alone or as `flag=value`.
+jet_cli_new_app_has_flag: fn(jet_argv: [String], flag: String) -> Bool Never! {
+    loop argument in jet_argv {
+        if argument == flag || argument.starts_with("{flag}=") -> return true
+    }
+    false
+}
+
+// The value of `flag` or its alias; "" when neither is written.
+jet_cli_new_app_value: fn(jet_argv: [String], flag: String, alias: String) -> String Never! {
+    if jet_cli_option_value(jet_argv, flag) == .Val(value) -> return value
+    jet_cli_option_value(jet_argv, alias) ?? ""
+}
+
+// Why `name` can't name generated code, or None: a name starts with an ASCII
+// letter and holds only ASCII letters, digits, `_` and `-`.
+jet_cli_new_app_name_problem: fn(name: String) -> String? Never! {
+    bytes: name.bytes()
+    if bytes.len() == 0 -> return Val("the name is empty")
+    loop (index, byte) in bytes {
+        code: Int{byte}
+        letter: (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+        if index == 0 && !letter -> return Val("`{name}` doesn't start with a letter")
+        if !letter && !(code >= 48 && code <= 57) && code != 95 && code != 45 {
+            return Val("`{name}` holds a character other than ASCII letters, digits, `_` and `-`")
+        }
+    }
+    None
+}
+
+// The lower-case words of a checked name, split as Jet splits names into
+// words (`OrderItems`, `order_items` and `order-items` are order, items).
+jet_cli_new_app_words: fn(name: String) -> [String] Never! {
+    words := [String]{}
+    loop piece in name.split("-") {
+        loop word in sema_casing_split_words(piece) -> words.push(word.to_ascii_lower())
+    }
+    words
+}
+
+// The words as one PascalCase file or folder name (`OrderItems`).
+jet_cli_new_app_pascal: fn(words: [String]) -> String Never! {
+    sema_casing_pascal_words(words.join("_"))
+}
+
+// The words as a type name, acronyms in caps (`HTTPClient`).
+jet_cli_new_app_type: fn(words: [String]) -> String Never! {
+    sema_casing_acronym_name(jet_cli_new_app_pascal(words))
+}
+
+// The words as a sentence for people (`Order items`).
+jet_cli_new_app_display: fn(words: [String]) -> String Never! {
+    if words.len() == 0 -> return ""
+    rest := ""
+    loop index in 1..<words.len() -> rest = "{rest} {words[index]}"
+    "{sema_casing_pascal_words(words[0])}{rest}"
+}
+
+jet_cli_new_app_route_problem: fn(problem: String) -> JetCLINewAppRoute Never! {
+    JetCLINewAppRoute{file: "", key: "", title: "", problem: problem}
+}
+
+// The page file under `Routes/` that file routing serves at `address`: each
+// static part is a PascalCase folder or file name, each `:name` capture a
+// `[Name]` part, and `/` is `Routes/Index.jet`. Only a canonical address,
+// lower-case words joined by `-` and snake_case captures, has a file, and the
+// file is checked against file routing's own address rule.
+jet_cli_new_app_route: fn(address: String) -> JetCLINewAppRoute Never! {
+    if !address.starts_with("/") {
+        return jet_cli_new_app_route_problem("`{address}` isn't a route address, which starts with `/`")
+    }
+    parts := [String]{}
+    title := "Home"
+    if address != "/" {
+        segments: address.slice(1, address.len()).split("/").to_list()
+        loop (index, segment) in segments {
+            capture: segment.starts_with(":")
+            text: if capture -> segment.slice(1, segment.len()) else -> segment
+            if jet_cli_new_app_name_problem(text) != None {
+                return jet_cli_new_app_route_problem("`{address}` has the part `{segment}`, and each part is a word name or a `:name` capture")
+            }
+            words: jet_cli_new_app_words(text)
+            canonical: if capture -> ":{words.join("_")}" else -> words.join("-")
+            if canonical != segment {
+                return jet_cli_new_app_route_problem("`{address}` spells the part `{canonical}` as `{segment}`, and file routing answers only its canonical spelling")
+            }
+            if index == segments.len() - 1 && !capture && (canonical == "index" || canonical == "page") {
+                return jet_cli_new_app_route_problem("`{address}` ends in `{canonical}`, and a page file named `{canonical}` answers its folder's address")
+            }
+            pascal: jet_cli_new_app_pascal(words)
+            parts.push(if capture -> "[{pascal}]" else -> pascal)
+            if !capture -> title = jet_cli_new_app_display(words)
+        }
+    }
+    relative: if parts.len() == 0 -> "Index.jet" else -> "{parts.join("/")}.jet"
+    answered: app_route_file_address(relative)
+    if answered.bad_part != None || answered.path != address {
+        return jet_cli_new_app_route_problem("`{address}` has no page file of its own: file routing serves `Routes/{relative}` at `{answered.path}`")
+    }
+    key: if parts.len() == 0 -> "index" else -> parts.join("-").to_ascii_lower()
+    JetCLINewAppRoute{file: "Routes/{relative}", key: key, title: title, problem: ""}
+}
+
+// The body of a Jet string literal holding `sql`, or None when the SQL holds
+// a control character other than a newline or a tab.
+jet_cli_new_app_sql_literal: fn(sql: String) -> String? Never! {
+    loop byte in sql.bytes() {
+        code: Int{byte}
+        if (code < 32 && code != 10 && code != 9) || code == 127 -> return None
+    }
+    Val(jet_cli_doctest_quote(sql).replace("\n", "\\n").replace("\t", "\\t"))
+}
+
+// `jet new service|route|job|migration …` (args[1] is the kind): the inputs
+// checked and decided here, every file read and write left to
+// jet_cli_new_app_run.
+jet_cli_new_app_plan: fn(kind: String, jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -> JetCLIPlan Never! {
+    loop spec in JET_CLI_FLAGS {
+        if jet_cli_new_app_reads(spec.long) || !(jet_cli_flag_commands(spec.help) ?? [String]{}).contains("new") {
+            next
+        }
+        if jet_cli_new_app_has_flag(jet_argv, spec.long) {
+            return jet_cli_new_app_usage_fail(kind, "`{spec.long}` doesn't apply to `jet new {kind}`", color)
+        }
+    }
+    names: jet_cli_tail(args, 2)
+    if names.len() > 1 {
+        return jet_cli_new_app_usage_fail(kind, "`jet new {kind}` takes one name, and got {names.len()}: {names.join(", ")}", color)
+    }
+    name: if names.len() == 1 -> names[0] else -> ""
+    address := jet_cli_new_app_value(jet_argv, "--path", "--route")
+    path_written: jet_cli_new_app_has_flag(jet_argv, "--path") || jet_cli_new_app_has_flag(jet_argv, "--route")
+    if {
+        kind == "route" && address == "" && name == "" -> return jet_cli_new_app_usage_fail(kind, "`jet new route` needs a name or a `--path`", color)
+        kind != "route" && path_written -> return jet_cli_new_app_usage_fail(kind, "`--path` names a route, not a {kind}", color)
+        kind != "route" && name == "" -> return jet_cli_new_app_usage_fail(kind, "`jet new {kind}` needs a name", color)
+        else -> {}
+    }
+    if name != "" {
+        if jet_cli_new_app_name_problem(name) == .Val(problem) {
+            return jet_cli_fail("E2104", "`{name}` can't name a {kind}: {problem}", jet_cli_why("E2104"), "name it with letters, digits, `_` or `-`, starting with a letter: `jet new {kind} OrderBoard`", color, JET_DRIVER_EXIT_USAGE)
+        }
+    }
+    words: jet_cli_new_app_words(name)
+    if kind == "route" && address == "" -> address = "/{words.join("-")}"
+    if kind == "job" && JET_CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(words.join("_")) {
+        return jet_cli_fail("E2104", "`{name}` can't name a job: its method `{words.join("_")}` would be a Jet keyword", jet_cli_why("E2104"), "choose another name, such as `Run{jet_cli_new_app_pascal(words)}`", color, JET_DRIVER_EXIT_USAGE)
+    }
+    remove: jet_argv.contains("--remove")
+    sql := ""
+    has_sql: jet_cli_new_app_has_flag(jet_argv, "--up") || jet_cli_new_app_has_flag(jet_argv, "--sql")
+    if {
+        kind == "migration" && !remove -> {
+            written: jet_cli_new_app_value(jet_argv, "--up", "--sql")
+            if written.trim() == "" {
+                return jet_cli_new_app_usage_fail(kind, "`jet new migration` needs its forward SQL in `--up`", color)
+            }
+            sql = jet_cli_new_app_sql_literal(written) ?? return jet_cli_fail("E2104", "the `--up` SQL holds a control character", jet_cli_why("E2104"), "write the SQL with spaces, tabs and newlines only", color, JET_DRIVER_EXIT_USAGE)
+        }
+        has_sql -> {
+            what: if kind == "migration" -> "`--up` doesn't apply to `jet new migration --remove`" else -> "`--up` is a migration's SQL, not a {kind}'s"
+            return jet_cli_new_app_usage_fail(kind, what, color)
+        }
+        else -> {}
+    }
+    if kind == "route" {
+        route: jet_cli_new_app_route(address)
+        if route.problem != "" {
+            return jet_cli_fail("E2104", route.problem, jet_cli_why("E2104"), "write the address in lower-case words joined by `-`, with `:name` captures: `--path /order-items/:item_id`", color, JET_DRIVER_EXIT_USAGE)
+        }
+    }
+    request: JetCLINewApp{kind: kind, name: name, words: words, address: address, sql: sql, preview: jet_argv.contains("--preview"), remove: remove, quiet: quiet, json: json, color: color}
+    JetCLIPlan.NewApp{request: request}
+}
+
+// The receipt key a request records under: a route's page file, else the
+// snake_case name.
+jet_cli_new_app_key: fn(request: JetCLINewApp) -> String Never! {
+    if request.kind == "route" -> return jet_cli_new_app_route(request.address).key
+    request.words.join("_")
+}
+
+// The files a request generates at migration `version` (0 for every other
+// kind), before formatting.
+jet_cli_new_app_sources: fn(request: JetCLINewApp, version: Int) -> [JetCLINewAppFile] Never! {
+    snake: request.words.join("_")
+    type_name: jet_cli_new_app_type(request.words)
+    display: jet_cli_new_app_display(request.words)
+    if request.kind == {
+        "service" -> {
+            text: "// The {type_name} service. Each `#App` method is a call the app's screens\n// make: `#App.Public` from any caller, `#App.SignedIn` from a signed-in one.\nuse app\n\n{type_name}: struct {{\n    // Any caller reads whether the service is up.\n    #App.Public status: fn(self) -> String Never! {{ \"{display} is up\" }}\n}}\n"
+            return [JetCLINewAppFile]{JetCLINewAppFile{path: "Services/{type_name}.jet", text: text}}
+        }
+        "job" -> {
+            text: "// The {type_name} job. `enqueue_{snake}` puts a call to `{snake}` on the\n// app's durable queue, and only the server runs it.\nuse app\n\n{type_name}: struct {{\n    // A signed-in caller queues the job for item `id`.\n    #App.SignedIn enqueue_{snake}: fn(self, id: Int) -> Int Never! {{\n        app.enqueue(fn() {{ self.{snake}(id) }})\n        id\n    }}\n\n    // The job itself.\n    #App.Job {snake}: fn(self, id: Int) -> Int Never! {{ id }}\n}}\n"
+            return [JetCLINewAppFile]{JetCLINewAppFile{path: "Jobs/{type_name}.jet", text: text}}
+        }
+        "route" -> {
+            route: jet_cli_new_app_route(request.address)
+            title: if request.name != "" -> display else -> route.title
+            text: "// The page at `{request.address}`, which the app serves through\n// `.routes(from: \"Routes\")`.\nuse web: core.web\n\npage: fn() -> WebPage {{ web.page(\"{title}\", \"<h1>{title}</h1>\") }}\n"
+            return [JetCLINewAppFile]{JetCLINewAppFile{path: route.file, text: text}}
+        }
+        else -> {}
+    }
+    migration: "{jet_cli_zero_pad(version, 3)}_{snake}"
+    text: "// Migration {migration}: `db.migrate` runs its steps once on a database and\n// records them under the key `{migration}`.\nuse db: core.db\n\nmigrate_{migration}: fn(scope: db.DBScope) -[DB, Time.Wait]> Int db.DBError! {{\n    db.migrate(scope, \"{migration}\", [db.SQL]{{SQL{{\"{request.sql}\"}}}})\n}}\n"
+    [JetCLINewAppFile]{JetCLINewAppFile{path: "Migrations/{migration}.jet", text: text}}
+}
+
+jet_cli_new_app_receipt_text: fn(request: JetCLINewApp, key: String, version: Int, state: String, entries: [JetCLINewAppEntry]) -> String Never! {
+    text := "{JET_CLI_NEW_APP_RECEIPT_HEAD}\nkind: {request.kind}\nname: {key}\nversion: {version}\nstate: {state}\n"
+    loop entry in entries -> text = "{text}file: {entry.hash} {entry.path}\n"
+    text
+}
+
+// A receipt's text read back, or None when it isn't one `jet new` wrote: a
+// listed path is package-relative and never leaves the package.
+jet_cli_new_app_parse_receipt: fn(text: String) -> JetCLINewAppReceipt? Never! {
+    lines: text.split("\n").to_list()
+    if lines.len() == 0 || lines[0] != JET_CLI_NEW_APP_RECEIPT_HEAD -> return None
+    receipt := JetCLINewAppReceipt{state: "", version: 0, files: [JetCLINewAppEntry]{}}
+    loop line in lines {
+        if line.starts_with("state: ") -> receipt.state = line.slice(7, line.len())
+        if line.starts_with("version: ") {
+            receipt.version = Int.parse(line.slice(9, line.len())) ?? return None
+        }
+        if line.starts_with("file: ") {
+            rest: line.slice(6, line.len())
+            space: rest.find(" ")
+            if space <= 0 -> return None
+            path: rest.slice(space + 1, rest.len())
+            if path == "" || path.starts_with("/") || path.contains("..") -> return None
+            receipt.files.push(JetCLINewAppEntry{hash: rest.slice(0, space), path: path})
+        }
+    }
+    if receipt.state != "generated" && receipt.state != "removed" -> return None
+    Val(receipt)
+}
+
+// The receipt at `path`, which exists; a refusal when it can't be read or
+// isn't a `jet new` receipt.
+jet_cli_new_app_read_receipt: fn(path: String, relative: String) -[FS]> JetCLINewAppReceipt JetCLIReadError! {
+    text: cli_files.read(path) ?? return Err(jet_cli_read_error("couldn't read `{relative}`: {err}"))
+    receipt: jet_cli_new_app_parse_receipt(text) ?? return Err(jet_cli_read_error("`{relative}` isn't a receipt `jet new` wrote"))
+    Ok(receipt)
+}
+
+// The leading decimal digits of `name` as a number (`004_add_index.jet` is
+// 4), or 0.
+jet_cli_new_app_leading_number: fn(name: String) -> Int Never! {
+    digits := 0
+    loop byte in name.bytes() {
+        code: Int{byte}
+        if code < 48 || code > 57 -> break
+        digits += 1
+    }
+    if digits == 0 -> return 0
+    Int.parse(name.slice(0, digits)) ?? 0
+}
+
+// The next migration version: one past every version in `Migrations/` and in
+// every migration receipt, removed ones too, so no number is used twice.
+jet_cli_new_app_next_version: fn(root: String) -[FS]> Int JetCLIReadError! {
+    highest := 0
+    if cli_files.is_dir("{root}/Migrations") {
+        names: cli_files.listdir("{root}/Migrations") ?? return Err(jet_cli_read_error("couldn't list `Migrations/`: {err}"))
+        loop name in names {
+            number: jet_cli_new_app_leading_number(name)
+            if number > highest -> highest = number
+        }
+    }
+    if cli_files.is_dir("{root}/.jet/generated") {
+        names: cli_files.listdir("{root}/.jet/generated") ?? return Err(jet_cli_read_error("couldn't list `.jet/generated/`: {err}"))
+        loop name in names {
+            if !name.starts_with("migration-") || !name.ends_with(".receipt") -> next
+            receipt: jet_cli_new_app_read_receipt("{root}/.jet/generated/{name}", ".jet/generated/{name}") ?? return Err(err)
+            if receipt.version > highest -> highest = receipt.version
+        }
+    }
+    Ok(highest + 1)
+}
+
+// Whether a `.jet` file at the package root serves `Routes/` by file routing.
+jet_cli_new_app_serves_routes: fn(root: String) -[FS]> Bool Never! {
+    names: cli_files.listdir(root) ?? return false
+    loop name in names {
+        if !name.ends_with(".jet") -> next
+        text: cli_files.read("{root}/{name}") ?? next
+        if text.contains(".routes(from: \"Routes\")") -> return true
+    }
+    false
+}
+
+jet_cli_new_app_output: fn(request: JetCLINewApp, stdout: String, stderr: String, fields: [JetCLIStatusField]) -> JetDriverVerbOutput Never! {
+    if request.json {
+        status: jet_cli_status_render("new", true, [JetCLIStatusField]{jet_cli_status_field("new", jet_cli_status_object(fields))})
+        return JetDriverVerbOutput{stdout: "{status}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    if request.quiet && !request.preview {
+        return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// The words a request was written with, for the undo and refusal lines.
+jet_cli_new_app_command: fn(request: JetCLINewApp) -> String Never! {
+    if request.kind == "route" -> return "jet new route --path {request.address}"
+    "jet new {request.kind} {request.name}"
+}
+
+// `jet new service|route|job|migration` in the package around the working
+// directory: generate, preview or remove (module comment). Beyond the files
+// and the working directory, its effects are the formatter's.
+jet_cli_new_app_run: fn(request: JetCLINewApp) -[Env, Exec, Exec.Args, FFI.Asm, FS, IO, Net, Time]> JetDriverVerbOutput Never! {
+    color: request.color
+    fix_io: "correct the named problem, then run the command again"
+    cwd: cli_files.cwd() ?? return jet_cli_new_failed("E2105", "couldn't read the working directory: {err}", fix_io, color)
+    here: cli_files.realpath(cwd) ?? cwd
+    root: jet_cli_manifest_root(here) ?? return jet_cli_new_failed("E2105", "`jet new {request.kind}` writes into an app package, and no `package.jet` is at or above `{here}`", "run it inside the app package, or create one with `jet new <name> --template web`", color)
+    key: jet_cli_new_app_key(request)
+    receipt_relative: ".jet/generated/{request.kind}-{key}.receipt"
+    receipt_path: "{root}/{receipt_relative}"
+    // No receipt reads as one with no state.
+    previous := JetCLINewAppReceipt{state: "", version: 0, files: [JetCLINewAppEntry]{}}
+    if cli_files.exists(receipt_path) {
+        previous = jet_cli_new_app_read_receipt(receipt_path, receipt_relative) ?? return jet_cli_new_failed("E2105", err.message, "restore the receipt, or remove it with the files it lists by hand", color)
+    }
+    command: jet_cli_new_app_command(request)
+    if request.remove {
+        if previous.state == "" {
+            return jet_cli_new_failed("E2105", "no receipt records `{command}`, so there is nothing it generated to remove", "check the kind and name: `{receipt_relative}` doesn't exist", color)
+        }
+        return jet_cli_new_app_remove(request, root, key, receipt_relative, previous)
+    }
+    if previous.state == "generated" {
+        listed: loop entry in previous.files -> entry.path
+        return jet_cli_new_failed("E2105", "`{command}` already generated {listed.join(", ")}", "remove them first with `{command} --remove`, or choose another name", color)
+    }
+    // A removed receipt keeps the version its migration was generated at.
+    version := previous.version
+    if request.kind == "migration" && version == 0 {
+        version = jet_cli_new_app_next_version(root) ?? return jet_cli_new_failed("E2105", err.message, fix_io, color)
+    }
+    files := [JetCLINewAppFile]{}
+    loop source in jet_cli_new_app_sources(request, version) {
+        formatted: jet_cli_fmt_format_source(source.text, source.path, false, false, false, color) ?? return jet_cli_ice("the `jet new {request.kind}` template for `{source.path}` does not format")
+        if formatted.report != None || formatted.diagnostics.len() > 0 {
+            return jet_cli_ice("the `jet new {request.kind}` template for `{source.path}` does not format")
+        }
+        if cli_files.exists("{root}/{source.path}") {
+            return jet_cli_new_failed("E2105", "`{source.path}` already exists, and `jet new` never overwrites a file", "choose another name, or move the file away", color)
+        }
+        files.push(JetCLINewAppFile{path: source.path, text: formatted.text})
+    }
+    entries: loop file in files -> JetCLINewAppEntry{hash: sha256_hex(file.text), path: file.path}
+    receipt_text: jet_cli_new_app_receipt_text(request, key, version, "generated", entries)
+    paths: loop file in files -> file.path
+    fields := [JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(request.kind)),
+        jet_cli_status_field("files", jet_cli_status_texts(paths)),
+        jet_cli_status_field("receipt", jet_cli_status_text(receipt_relative)),
+        jet_cli_status_field("preview", jet_cli_status_bool(request.preview)),
+    }
+    if request.kind == "migration" {
+        fields.push(jet_cli_status_field("version", jet_cli_status_int(version)))
+    }
+    if request.preview {
+        shown := ""
+        contents := [JetCLIStatusValue]{}
+        loop file in files {
+            shown = "{shown}== {file.path}\n{file.text}"
+            contents.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(file.path)), jet_cli_status_field("text", jet_cli_status_text(file.text))}))
+        }
+        shown = "{shown}== {receipt_relative}\n{receipt_text}"
+        fields.push(jet_cli_status_field("contents", jet_cli_status_array(contents)))
+        return jet_cli_new_app_output(request, shown, "", fields)
+    }
+    loop file in files {
+        path: "{root}/{file.path}"
+        cli_files.create_dir_all(jet_cli_parent(path) ?? root) ?? return jet_cli_new_failed("E2105", "couldn't create the folder of `{file.path}`: {err}", fix_io, color)
+        cli_files.write(path, file.text) ?? return jet_cli_new_failed("E2105", "couldn't write `{file.path}`: {err}", fix_io, color)
+    }
+    cli_files.create_dir_all("{root}/.jet/generated") ?? return jet_cli_new_failed("E2105", "couldn't create `.jet/generated/`: {err}", fix_io, color)
+    cli_files.write(receipt_path, receipt_text) ?? return jet_cli_new_failed("E2105", "couldn't write `{receipt_relative}`: {err}", fix_io, color)
+    status := ""
+    loop file in files -> status = "{status}created {file.path}\n"
+    status = "{status}recorded {receipt_relative}\nundo: {command} --remove\n"
+    if request.kind == "route" && !jet_cli_new_app_serves_routes(root) {
+        status = "{status}next: serve the page with `.routes(from: \"Routes\")` on the app\n"
+    }
+    jet_cli_new_app_output(request, "", status, fields)
+}
+
+// `--remove`: every listed file still there must hold the text it was
+// written with; then each is deleted and the receipt kept as `removed`, with
+// its version. A listed file already gone is skipped.
+jet_cli_new_app_remove: fn(request: JetCLINewApp, root: String, key: String, receipt_relative: String, receipt: JetCLINewAppReceipt) -[FS]> JetDriverVerbOutput Never! {
+    color: request.color
+    fix_io: "correct the named problem, then run the command again"
+    command: jet_cli_new_app_command(request)
+    if receipt.state != "generated" {
+        return jet_cli_new_failed("E2105", "`{command}` was already removed", "generate it again with `{command}`", color)
+    }
+    present := [String]{}
+    loop entry in receipt.files {
+        path: "{root}/{entry.path}"
+        if !cli_files.exists(path) -> next
+        text: cli_files.read(path) ?? return jet_cli_new_failed("E2105", "couldn't read `{entry.path}`, so nothing was removed: {err}", fix_io, color)
+        if sha256_hex(text) != entry.hash {
+            return jet_cli_new_failed("E2105", "`{entry.path}` changed since `{command}` wrote it, so nothing was removed", "remove the edited file by hand, or restore its generated text and run `{command} --remove` again", color)
+        }
+        present.push(entry.path)
+    }
+    fields: [JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(request.kind)),
+        jet_cli_status_field("removed", jet_cli_status_texts(present)),
+        jet_cli_status_field("receipt", jet_cli_status_text(receipt_relative)),
+        jet_cli_status_field("preview", jet_cli_status_bool(request.preview)),
+    }
+    if request.preview {
+        shown := ""
+        loop path in present -> shown = "{shown}would remove {path}\n"
+        return jet_cli_new_app_output(request, shown, "", fields)
+    }
+    loop path in present {
+        cli_files.remove("{root}/{path}") ?? return jet_cli_new_failed("E2105", "couldn't remove `{path}`: {err}", fix_io, color)
+    }
+    kept: jet_cli_new_app_receipt_text(request, key, receipt.version, "removed", receipt.files)
+    cli_files.write("{root}/{receipt_relative}", kept) ?? return jet_cli_new_failed("E2105", "couldn't write `{receipt_relative}`: {err}", fix_io, color)
+    status := ""
+    loop path in present -> status = "{status}removed {path}\n"
+    status = "{status}recorded {receipt_relative} as removed\n"
+    jet_cli_new_app_output(request, "", status, fields)
+}

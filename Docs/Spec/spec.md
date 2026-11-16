@@ -5625,11 +5625,15 @@ or the print-only entry plus the commented command homes
 `build.jet`/`dev.jet`/`test.jet` beside it, `run.jet` being the `jet run`
 home itself (D-NEW-TEMPLATE1); an unknown
 name is E2104. `--annotated` includes commented example dependencies.
-The same command family also provides `jet new service|route|job|migration` for
-backend source scaffolds; those subcommands have their own `--path`, `--route`,
-`--model`, SQL, risk, lock, and preview/apply options. The `new` command
-implementation is in [`Front.jet`](../../Compiler/JetCLI/Source/CLI/Front.jet);
-the backend scaffold subcommands are not yet ported and report that.
+The same command family also provides `jet new service|route|job|migration`,
+the app package's generators: each writes its files from explicit inputs (a
+name, a route `--path`, a migration's `--up` SQL), never overwrites a file,
+records the files and their hashes in a receipt under `.jet/generated/`, and
+takes `--preview` (print the files, write nothing) and `--remove` (delete
+exactly the receipt's files, refused when one was edited since; a migration
+generated again keeps its number). The `new` command implementation is in
+[`Front.jet`](../../Compiler/JetCLI/Source/CLI/Front.jet), the generators in
+[`NewApp.jet`](../../Compiler/JetCLI/Source/CLI/NewApp.jet).
 (D-CLI-RECIPE1, D-ILE1, D-CLI-BARE1, D-VERDICT-678-1)
 
 Inside a package, bare `jet run`, `jet dev`, `jet check`, `jet build`, and
