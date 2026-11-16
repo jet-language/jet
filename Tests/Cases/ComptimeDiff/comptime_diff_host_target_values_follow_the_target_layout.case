@@ -1,0 +1,19 @@
+# Compile-time code computes for the selected target, not for the compiler's
+# host. Hosted, the `#run` value of `sys.usize_max()` is the 64-bit maximum the
+# program computes at run time. Checked for `board.sensor_v1` and for `web`,
+# both 32-bit, the same value is the 32-bit maximum, so the narrow program's
+# check passes; checked hosted, the same program measures 64-bit pointers and
+# stops with E3010.
+fixture: ComptimeDiffHostTargetValuesFollowTheTargetLayout.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "64 18446744073709551615 18446744073709551615\n"
+step: jet check --target=board.sensor_v1 narrow.jet
+exit: 0
+step: jet check --target=web narrow.jet
+exit: 0
+step: jet check narrow.jet
+exit: 1
+stderr: ~ "compile-time code measured 64-bit pointers for a 32-bit target" # the hosted check measures the host's width

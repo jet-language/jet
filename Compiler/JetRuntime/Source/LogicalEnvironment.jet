@@ -131,8 +131,10 @@ logical_environment_startup: fn() {
 }
 
 // The cell this thread reads and writes: the active World's own cell, else
-// the seeded process default.
+// the seeded process default. Compile-time code has no environment of the
+// program's to read or change (comptime_serve_refuse).
 logical_environment_current: fn() -> I64 {
+    comptime_serve_refuse(COMPTIME_REFUSED_ENVIRONMENT)
     world: world_current()
     if (world != I64{0}) { return world_environment(world) }
     jet_rt_logical_env_seed()

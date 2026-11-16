@@ -1,0 +1,9 @@
+use files: core.files
+
+// The build would record what a child process prints; the compile-time child
+// admits file calls only, so the launch is refused before the process starts.
+build: fn(b: Build) -[FS, IO, Exec, Time.Wait]> {
+    #Impure("record what a child process prints") { files.write("build-echo.txt", echoed()) }
+    app: b.add_executable("app", ["app.jet"], [])
+    b.default(app)
+}

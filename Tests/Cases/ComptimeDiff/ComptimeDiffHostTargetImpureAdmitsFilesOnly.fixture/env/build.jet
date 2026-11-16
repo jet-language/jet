@@ -1,0 +1,9 @@
+use files: core.files
+
+// The build would record the home directory it sees; the compile-time child
+// has none of the compiler's environment, so the read is refused.
+build: fn(b: Build) -[FS, IO, Env]> {
+    #Impure("record the home directory the build sees") { files.write("build-home.txt", home()) }
+    app: b.add_executable("app", ["app.jet"], [])
+    b.default(app)
+}

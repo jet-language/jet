@@ -1,0 +1,8 @@
+use files: core.files
+
+// The build reads the note through the program's helper and writes it back.
+build: fn(b: Build) -[FS, IO]> {
+    #Impure("record the note the build reads") { files.write("build-note.txt", note()) }
+    app: b.add_executable("app", ["app.jet"], [])
+    b.default(app)
+}

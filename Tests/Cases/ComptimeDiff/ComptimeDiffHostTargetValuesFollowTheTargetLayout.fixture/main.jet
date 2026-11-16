@@ -1,0 +1,8 @@
+use sys: core.sys
+
+// The widest unsigned size, computed while building and again at run time.
+WIDEST: #run sys.usize_max()
+
+POINTER_BITS: #run { if WIDEST > (U64{0xffffffff}) -> 64 else -> 32 }
+
+run: fn() { print("{POINTER_BITS} {WIDEST} {sys.usize_max()}") }

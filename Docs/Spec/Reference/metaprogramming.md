@@ -243,12 +243,10 @@ gate and the command-line grant:
 use fs: core.files
 
 run: fn() {
-    #run {
-        #Impure("read an explicitly approved ambient input") {
-            @CONFIG: fs.read("config.txt")
-        }
+    #Impure("read an explicitly approved ambient input") {
+        config: #run fs.read("config.txt")
+        print(config.trim())
     }
-    print(@CONFIG)
 }
 ```
 
@@ -258,7 +256,14 @@ not exercise a Tier 2 compile-time effect and does not by itself require
 source gate and `--gate impure=allow` (E3410, E3411). With both, the call runs
 natively in the compile-time child, as the same call runs in the program: the
 child admits the file system calls of the `#Impure` block and of the functions
-it calls, and every other host effect stays refused. The block's authority is
+it calls, and every other host effect stays refused. The read happens once,
+while building: the program keeps the text it read and never opens the file
+again. The child starts with none of the compiler's environment, so reading or
+changing the environment is refused (E3401) rather than answering None, and
+launching a process is refused (E3401) before the process starts
+([`comptime_diff_host_target_impure_admits_files_only`](../../../Tests/Cases/ComptimeDiff/comptime_diff_host_target_impure_admits_files_only.case);
+[`comptime_diff_host_target_a_baked_read_outlives_its_input`](../../../Tests/Cases/ComptimeDiff/comptime_diff_host_target_a_baked_read_outlives_its_input.case)
+builds this program). The block's authority is
 checked first, so an effect the package or the row denies is E0749 at build
 and at run alike. The `#Impure` marker is a
 gate, not a blanket host permission. Keep declarations, grants, and resulting
@@ -266,6 +271,14 @@ inputs in the package and lock records rather than relying on ambient process
 state. The executable policy is defined at the compiler boundary; the
 source-facing effect names are registered through
 the [syntax registry](../../../Compiler/JetFoundation/Data/Syntax/).
+
+Compile-time code computes for the selected target, not for the compiler's
+host: `sys.usize_max()` in a `#run` value is 2^32 - 1 for `board.sensor_v1`
+and `web` and 2^64 - 1 for a hosted 64-bit target, and a call the target
+can't make, such as `files.write` on a no-OS board, is E3301 at check, before
+any compile-time code runs
+([`comptime_diff_host_target_values_follow_the_target_layout`](../../../Tests/Cases/ComptimeDiff/comptime_diff_host_target_values_follow_the_target_layout.case),
+[`comptime_diff_host_target_an_os_call_is_refused_before_it_runs`](../../../Tests/Cases/ComptimeDiff/comptime_diff_host_target_an_os_call_is_refused_before_it_runs.case)).
 
 ## Build entries and typed generation
 

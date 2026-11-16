@@ -60,6 +60,7 @@ process_execution_keep_refused: fn(spec: I64, err: I64) -> Bool {
 }
 
 process_execution_launch: fn(spec: I64, collect: Bool, err: I64) -> I64 {
+    comptime_serve_refuse(COMPTIME_REFUSED_PROCESS)
     jet_rt_world_reject_uncontrolled(I64{0})
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if process_execution_keep_refused(spec, err) -> return I64{0}
