@@ -36,21 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Match the function value&#39;s call labels and parameter zones to the expected function type.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0771</code>: <code>Tests/UI/fn_type_zone_call.stderr</code>.</p>
-<pre class="diag">Error [jet.LabelOnlyPassedByPosition]: `force` is a label-only parameter of `action`
-  --&gt; Tests/UI/fn_type_zone_call.jet:3:69
+<p>First UI snapshot mentioning <code>E0771</code>: <code>Tests/UI/LanguageFeatures/function_value_arguments_preserve_public_callable_contracts.stderr</code>.</p>
+<pre class="diag">Error [jet.FunctionValueLabelMismatch]: This needs fn(*, force: Bool) -&gt; Int, but the function value is fn(Bool) -&gt; Int
+  --&gt; Tests/UI/LanguageFeatures/function_value_arguments_preserve_public_callable_contracts.jet:3:85
     |
-  3 | apply: fn(action: fn(*, force: Bool) -&gt; Int) -&gt; Int { return action(true) }
-    |                                                                     ^^^^
- Why: The `*` in the declaration requires the label, so the call says what the value means
- Fix: Write `force: …` for this argument
-More: jet-lang.dev/e/E0769
-
-Error [jet.FunctionValueLabelMismatch]: This needs fn(*, force: Bool) -&gt; Int, but the function value is fn(Bool) -&gt; Int
-  --&gt; Tests/UI/fn_type_zone_call.jet:5:22
-    |
-  5 | run: fn() { _: apply(save) }
-    |                      ^^^^
+  3 | invoke: fn(callback: fn(fn(*, force: Bool) -&gt; Int) -&gt; Int) -&gt; Int { return callback(plain) }
+    |                                                                                     ^^^^^
  Why: Public labels and parameter zones are part of a function&#39;s callable type
  Fix: Use `fn(*, force: Bool) -&gt; Int` here
 More: jet-lang.dev/e/E0771

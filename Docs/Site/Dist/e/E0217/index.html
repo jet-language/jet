@@ -36,12 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0217</code>: <code>Tests/UI/cell_guard_capture.stderr</code>.</p>
-<pre class="diag">Error [jet.CellGuardEscapes]: Cell guard `guard` cannot be captured by a lambda
-  --&gt; Tests/UI/cell_guard_capture.jet:3:12
+<p>First UI snapshot mentioning <code>E0217</code>: <code>Tests/UI/LocalCellTiers/local_cell_guard_storage_boundary_reports_once_per_site.stderr</code>.</p>
+<pre class="diag">Error [jet.CellGuardEscapes]: A Cell guard cannot be stored in struct field `guard`
+  --&gt; Tests/UI/LocalCellTiers/local_cell_guard_storage_boundary_reports_once_per_site.jet:2:5
     |
-  3 |     return fn() { guard.get() }
-    |            ^^^^^^^^^^^^^^^^^^^^
+  2 |     guard: CellReadGuard&lt;Int&gt;
+    |     ^^^^^
  Why: A Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends
  Fix: Keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections
 More: jet-lang.dev/e/E0217

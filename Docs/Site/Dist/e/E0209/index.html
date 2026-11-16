@@ -36,14 +36,18 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Pass a copy with `.copy()`, reorder so the call is the name&#39;s last use, or write `x.move()` where a value with cleanup is handed over.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0209</code>: <code>Tests/UI/card_2387_core_field_policy_probe.stderr</code>.</p>
-<pre class="diag">Error [jet.MoveWithoutMarker]: Implicit clone of `value`
-  --&gt; Tests/UI/card_2387_core_field_policy_probe.jet:4:21
+<p>First UI snapshot mentioning <code>E0209</code>: <code>Tests/UI/Hardening/user_struct_named_noclone_is_still_cloneable.stderr</code>.</p>
+<pre class="diag">Error [jet.MoveWithoutMarker]: `eat` takes `v`, but `v` is used again later
+  --&gt; Tests/UI/Hardening/user_struct_named_noclone_is_still_cloneable.jet:9:9
     |
-  4 |     node: JSON.Text(value)
-    |                     ^^^^^
- Why: `Text` stores its own copy of this value
- Fix: Write `value.copy()` to copy explicitly
+  9 |     eat(v)
+    |         ^
+  --&gt; Tests/UI/Hardening/user_struct_named_noclone_is_still_cloneable.jet:10:13
+    |
+ 10 |     print(v.n)
+    |             ^ `v` is used again here
+ Why: `eat` takes ownership of this argument, and a call never copies on its own, so `v` has no value after this call
+ Fix: Write `v.copy()` to pass a copy and keep `v`, or reorder so this call is the last use of `v`
 More: jet-lang.dev/e/E0209
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
