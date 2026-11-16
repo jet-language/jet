@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110337,
+    "rev": 110339,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27296,7 +27296,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m20-enum-language-reflection",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nImplement ratified D-ENUM-CASEMETA1=A inside the existing reflection model: typed `TypeInfo.cases` descriptors and the runtime active-case projection `value.case()`. Type-only metadata stays erased and payload values stay typed. No enum-only library, visitor or runtime registry.\n\n## Current state\n- Enum TypeInfo is built by `sema_comptime_reflection_enum_type_info` (`Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:1395-1449`). It puts variants in the generic `fields` slot as `FieldInfo` rows (`sema_comptime_reflection_enum_variant_info`, :1129-1155) whose `ty` is a display string (`\"Unit\"`, the payload type name, or `\"{a: Int}\"`, :1118-1127). There is no `cases` field or `CaseInfo` row, and no canonical wire name.\n- Typed accessors are limited to `has_marker/implements/has_method` (`Compiler/JetSema/Source/Sema/Calls/Reflection.jet:132-155`). Codegen and eval mirror that list (`Compiler/JetCodegen/Source/Codegen/ReflectionMethods.jet:19-22`, `Compiler/JetEval/Source/ReflectionMethods.jet:11-15`). There is no `case()` projection anywhere in Compiler/ or `Core/reflect`.\n- Criterion 1 (owner ratification) is met. The scope extension (2026-09-21) asks for a typed descriptor for every type family or a precise refusal, with no fabricated empty catalogs.\n\n## Changes\n1. `Reflection.jet`: add `CaseInfo` rows under a `cases` field. Each row carries identity, source name, canonical wire name (serde markers), index or discriminant, group, ordered payload shape (`Unit`, tuple or named) with typed payload `TypeInfo` references, and markers in source-versus-expanded order. Rows are derived from `EnumDef.variants/groups/payloads`. Stop emitting variants as `FieldInfo`. Non-enum types return a registered refusal for `cases`, not an empty list. Generic enums describe the instantiated arguments.\n2. `Calls/Reflection.jet`: type `TypeInfo.cases`, the `CaseInfo` accessors and `value.case()`.\n3. `ReflectionMethods.jet` in codegen and eval: `value.case()` returns the active case identity plus typed payload fields through one Prelude helper. It does complete-or-refuse capture, refuses shared or noncopyable graphs, and follows copy rules. A program that never reflects emits no case table and allocates nothing.\n4. Layout and ABI facts (discriminant width, payload offsets) come from `Compiler/JetFoundation/Source/Target/Layout.jet` for the selected target.\n5. Archived crates (`jet-foundation/Reflection.rs`, `jet-comptime/Reflect.rs`, `core_types.rs`, `jet-codegen/TIR`) are not edited.\n\n## Proof\n- `jet test Compiler --profile golden reflection/enum_cases`: a new example covers unit, named-payload and tuple cases plus one generic enum. It prints `cases` and `value.case()` identically on O0, O1 and O2.\n- `jet test Compiler --profile ui reflect_cases_non_enum` covers the refusal.\n- Generated Rust for a non-reflecting enum program contains no case table (criterion 12).\n- The example uses the current ratified reflection spelling. #3662 migrates it if D-META-ROOT3=A retires `T.reflect()`.\n\n## Batch\n`batch-jetc-sema`: the descriptor model and typing are sema. The runtime projection is a thin codegen/eval consumer.\n\n## Dependencies\n#3520 (the closed D-METAREFLECT1 metadata path, building). The runtime proof runs on the self-hosted compiler, so #218 is needed.",
       "checkSteps": "1. Owner ratifies whether general case descriptors are public and where they live; a full example includes unit, named-payload and tuple-like cases.\n2. Descriptors carry identity, source/canonical wire names, payload fields/types and markers without constructing arbitrary payload values.\n3. Use D-METAREFLECT1’s one closed metadata path; non-enums, generics, ordering and visibility have explicit behavior.\n4. Runtime inspection exposes only the active case and typed payload fields; ordinary enum use needs no reflection allocation or pre-stringified values.\n\nRebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\nExtend tests/reflect.rs and the existing enum reflection witnesses. Add a golden type-catalog example covering every AST Type family and enum case shape. Exercise declared and instantiated types, same-layout distinct nominals, field visibility, target layout and generic identity. Compare selected target facts to the target dossier, not host sizeof.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.",
@@ -27307,6 +27307,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All 17 criteria met (c27 on the p223 batch compiler, dev a8b53c68d8, commit 2e95600ee5). The blocked-by link to #6845 covers #6845 c11 (the MetaSuite manifest), which no #3147 criterion needs. Closed by Main."
+        },
         {
           "at": "2026-11-16",
           "by": "Main",
@@ -27424,8 +27429,9 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Tower decision D-ENUM-CASEMETA1 is explicitly ratified with outcome A on 2026-09-12. The decision payload is the owner-approved location/publicness policy for general case descriptors; this records the gate only and does not claim the remaining executable case-shape proof.",
-          "at": "2026-09-22T16:28:15.020Z"
+          "evidence": "Tower decision D-ENUM-CASEMETA1 ratified with outcome A on 2026-09-12 (owner gate; the executable case-shape proof is met by the card's later criteria).",
+          "at": "2026-11-16T19:34:44.546Z",
+          "closure": "decision"
         },
         {
           "n": 6,
@@ -27598,13 +27604,14 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T19:34:02.702Z",
+      "updated": "2026-11-16T19:34:46.963Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 27
+      "criteriaLastN": 27,
+      "completedAt": "2026-11-16T19:34:46.963Z"
     },
     {
       "id": "c04lnbtj",
@@ -220967,6 +220974,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T19:34:46.963Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T19:34:44.546Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w7t4qu",
+      "note": "#1"
+    },
     {
       "at": "2026-11-16T19:34:29.174Z",
       "by": "Main",
