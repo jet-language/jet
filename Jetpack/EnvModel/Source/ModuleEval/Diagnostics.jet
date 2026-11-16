@@ -1,4 +1,4 @@
-// Module-evaluation diagnostics (E0966-E0977, E1266-E1267, E1269, E3402)
+// Module-evaluation diagnostics (E0966-E0977, E1266-E1267, E1269)
 // plus the §6 merge-conflict wrapper. Each constructor carries its pinned
 // what/why/fix copy (I4); the registry row owns the protocol metadata.
 use {
@@ -20,12 +20,6 @@ impl ComptimeEvalError -> EnvModelEvalError { return EnvModelEvalError{diagnosti
 // Rust `Diagnostic::error(code, what, why, fix, span)`.
 envmodel_error: fn(code: String, what: String, why: String, fix: String, span: Span?) -> EnvModelEvalError Never! {
     EnvModelEvalError{diagnostic: diagnostic_from_registry(code, span, what, why, fix)}
-}
-
-// E3402: ambient I/O or network access attempted during a sandboxed package
-// build or module-value evaluation.
-envmodel_e3402: fn(call_name: String, span: Span?) -> Diagnostic Never! {
-    diagnostic_from_registry("E3402", span, "`{call_name}` is not allowed during a sandboxed package build", "package builds run with ambient I/O and network access disabled", "compute this value at compile time or pass it in as a parameter")
 }
 
 // E1242: a fleet or vmtest host references a system that no contribution

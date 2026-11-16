@@ -12912,28 +12912,21 @@ ImpureCallInPureContext: struct {
     }
 }
 
-AmbientIoInPackageBuild: struct {
-    call: String
-
+RetiredAmbientIoInPackageBuild: struct {
     impl Diagnostic {
         code: "E3402"
-        safety_class: .Soundness
-        safety_reason: "Package builds run without ambient I/O, so the call would reach outside the sandbox."
-        expert_path: "none: declared build inputs"
-        meaning: "Package build attempted ambient I/O or network (names the call)"
-        detail: true
+        status: .Retired
+        no_fix: None
 
         what: fn(self) -> String {
-            "`{self.call}` is not allowed during a sandboxed package build."
+            "*Retired* (was: package build attempted ambient I/O; the compiler computes every module value now and refuses ambient I/O with E0643)"
         }
 
         why: fn(self) -> String {
-            "Package builds run with ambient I/O and network access disabled."
+            "Jet no longer reports this code; its row stays so an older reference to it still explains"
         }
 
-        fix: fn(self) -> String {
-            "Compute this value at compile time or pass it in as a parameter."
-        }
+        fix: fn(self) -> String { "Follow the guidance for E0643" }
     }
 }
 

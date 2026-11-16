@@ -1,30 +1,22 @@
 // The jetpack side of the first-party compiler service (JetFoundation
-// CompilerService.jet): jetpack links only the front end, so a config value
-// that needs the comptime stage, or a project entry that needs the checker,
-// is answered by the sibling `jet` through `jet __jetpack <op>` (one
-// evaluator, one checker; I8). Jetpack-only: inside `jet` the environment
-// model's `comptime_evaluate` is the in-process one (JetCli ConfigEval.jet).
+// CompilerService.jet): jetpack links only the front end, so a source's
+// module values, or a project entry that needs the checker, are answered by
+// the sibling `jet` through `jet __jetpack <op>` (one evaluator, one checker;
+// I8).
 use {
     jetpack_foundation.[BINARY_NAME]
     jet_foundation.[
         ComptimeEvalError,
         CtValue,
-        Expr,
-        Func,
         Item,
-        JET_COMPILER_SERVICE_COMPTIME_EVALUATE,
         JET_COMPILER_SERVICE_MODULE_VALUES,
         JET_COMPILER_SERVICE_VERB,
         JetModuleValuesOutcome,
-        compiler_service_comptime_outcome,
         compiler_service_comptime_request,
         compiler_service_module_values_outcome,
         foundation_parse_protocol_json,
-        jet_config_eval_error,
-        jet_config_eval_placed,
-        jet_config_plain_literal,
     ]
-    jet_parser.[jet_config_module_values_program, jet_config_program]
+    jet_parser.[jet_config_module_values_program]
     sys: core.sys
     files: core.files
     process: core.process
@@ -72,22 +64,6 @@ envmodel_compiler_service: fn(op: String, request: String) -[FS, Env, Exec, Time
     }
     response: foundation_parse_protocol_json(receipt.output) ?? return Err(CompilerServiceError{detail: "`{jet} {JET_COMPILER_SERVICE_VERB} {op}` answered with a response that is not protocol JSON"})
     Ok(response)
-}
-
-// Evaluate `expr` (spelled in `source`) with `funcs` callable and `globals`
-// readable: a plain literal is already its value; every other expression is
-// the config-value program the sibling compiler evaluates (JetCli
-// `jet_config_evaluate_program`), and its refusal is placed on `expr`.
-comptime_evaluate: fn(expr: Expr, source: String, funcs: [String:Func], base_dir: String, globals: [String:CtValue]) -[FS, Env, Exec, Time.Wait]> CtValue ComptimeEvalError! {
-    if jet_config_plain_literal(expr) == .Val(value) -> return Ok(value)
-    program: jet_config_program(expr, source, funcs, globals) ?? return Err(err)
-    // copy: the request owns its base directory; `base_dir` is a read parameter the caller keeps.
-    response: envmodel_compiler_service(JET_COMPILER_SERVICE_COMPTIME_EVALUATE, compiler_service_comptime_request(program, base_dir.copy())) ?? return Err(jet_config_eval_error(expr, "this config value could not be evaluated: {err.detail}"))
-    outcome: compiler_service_comptime_outcome(response) ?? return Err(jet_config_eval_error(expr, "this config value could not be evaluated: the compiler's answer is not a config value"))
-    if outcome == {
-        .Value(value) -> Ok(value)
-        .Refused(diagnostic) -> Err(jet_config_eval_placed(expr, diagnostic))
-    }
 }
 
 // The typed records of the environment surface, as Jet declarations

@@ -1,6 +1,7 @@
-// The env-namespace evaluation core: parse a source to a `Program`, evaluate
-// every enabled `Item.Module`, run each `env.*` field through comptime (or
-// the text-level Pkg-sugar parser for `packages:`), and merge the resulting
+// The env-namespace evaluation core: parse a source to a `Program`, have the
+// compiler compute its module values and every value its enabled modules
+// write (or read `packages:` through the text-level Pkg-sugar parser),
+// evaluate every enabled `Item.Module`, and merge the resulting
 // contributions through the §6 engine.
 use {
     envmodel_module_sys: core.sys
@@ -9,7 +10,6 @@ use {
         DIAGNOSTIC_ERROR,
         Diagnostic,
         Expr,
-        Func,
         HostEntry,
         Item,
         ModuleDecl,
@@ -39,10 +39,9 @@ use {
 }
 
 // Parse `src` and evaluate every enabled module it declares. `base_dir`
-// resolves `embed_file` inside contribution expressions, same as ordinary
-// comptime evaluation. Module values run through the Compiler's comptime
-// path, whose driver makes dynamic host calls, so the evaluation chain
-// declares no effect row.
+// resolves `embed_file` inside the values the compiler computes. The
+// compiler is asked through the compiler service, which makes dynamic host
+// calls, so the evaluation chain declares no effect row.
 envmodel_evaluate_source: fn(src: String, base_dir: String) -> [EvaluatedModule] EnvModelEvalError! {
     program: envmodel_parse_program(src)
     Ok(envmodel_evaluate_modules(program.items, src, base_dir))
@@ -132,7 +131,7 @@ envmodel_environment_globals: fn(reads: [EnvironmentRead]) -[Env]> [String:CtVal
 
 // Evaluate every enabled `Item.Module` in `items` (already parsed).
 envmodel_evaluate_modules: fn(items: [Item], src: String, base_dir: String) -> [EvaluatedModule] EnvModelEvalError! {
-    scope := ModuleEvalScope{base_dir: base_dir, source: src, funcs: envmodel_collect_funcs(items), values: [Int:CtValue]{}}
+    scope := ModuleEvalScope{base_dir: base_dir, source: src, values: [Int:CtValue]{}}
     reads: envmodel_environment_reads(src)
     computed: envmodel_collect_comptime_globals(items, scope, envmodel_environment_globals(reads))
     globals: computed.globals
@@ -149,17 +148,6 @@ envmodel_evaluate_modules: fn(items: [Item], src: String, base_dir: String) -> [
         }
     }
     Ok(out)
-}
-
-envmodel_collect_funcs: fn(items: [Item]) -> [String:Func] Never! {
-    funcs := [String:Func]{}
-    loop item in items {
-        if item == {
-            .Func(function) -> funcs[function.name] = function
-            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-        }
-    }
-    funcs
 }
 
 // The module values and the environment fields' values, computed once.

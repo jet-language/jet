@@ -1,7 +1,6 @@
-// The jetpack side of `jet __jetpack comptime-evaluate`: the request carries
-// exactly the config-value program `jet` evaluates in-process, a refusal is
-// placed on the config expression as the in-process evaluator places it, and
-// a plain literal never reaches the compiler.
+// The compiler service's config-value request: it carries exactly the
+// config-value program `jet` evaluates in-process, and a refusal is placed on
+// the config expression as the in-process evaluator places it.
 use {
     jet_foundation.[
         CtValue,
@@ -19,7 +18,7 @@ use {
         jet_config_eval_placed,
     ]
     jet_parser.[jet_config_program, parse_source]
-    jet_env_model.[comptime_evaluate, envmodel_find_jet_binary]
+    jet_env_model.[envmodel_find_jet_binary]
     jetpack_foundation.[BINARY_NAME]
     files: core.files
 }
@@ -102,15 +101,6 @@ envmodel_service_test_constant: fn(source: String) -> (expr: Expr, funcs: [Strin
             assert_eq(placed.diagnostic.fix, refusal.fix)
         }
         .Val(_) | .None -> panic("the refusal reads back")
-    }
-}
-
-#Test("compiler service is not asked for a plain literal") {
-    cases: [(source: String, expected: CtValue)]{(source: "VALUE: 42\n", expected: CtValue.Int{value: 42}), (source: "VALUE: \"text\"\n", expected: CtValue.Str{value: "text"}), (source: "VALUE: (true)\n", expected: CtValue.Bool{value: true})}
-    loop row in cases {
-        fixture: envmodel_service_test_constant(row.source)
-        value: comptime_evaluate(fixture.expr, row.source, fixture.funcs, "/nonexistent", [String:CtValue]{}) ?? panic("a literal is its own value: {err.diagnostic.what}")
-        assert(value == row.expected)
     }
 }
 
